@@ -1,0 +1,248 @@
+<Window x:Class="DesktopZones.Views.ZoneWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:l="clr-namespace:DesktopZones.Services"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ResizeMode="CanResize"
+        Topmost="False"
+        ShowInTaskbar="False"
+        SnapsToDevicePixels="True"
+        UseLayoutRounding="True"
+        PreviewMouseLeftButtonDown="Window_PreviewMouseLeftButtonDown"
+        PreviewMouseRightButtonDown="Window_PreviewMouseRightButtonDown">
+
+    <Grid>
+        <!-- FULL ZONE -->
+        <Border x:Name="MainContent" Visibility="Visible" ClipToBounds="True" CornerRadius="8">
+            <Grid>
+                <!-- Fill layer + bg image -->
+                <Rectangle x:Name="FillRect" Fill="#08000000"
+                           RadiusX="8" RadiusY="8" IsHitTestVisible="False"/>
+                <Border x:Name="BgImageBorder" ClipToBounds="True" IsHitTestVisible="False"
+                        HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+                    <Image x:Name="BgImage" Stretch="UniformToFill"
+                           RenderOptions.BitmapScalingMode="HighQuality"
+                           Opacity="0" IsHitTestVisible="False"/>
+                </Border>
+
+                <Border x:Name="ZoneBorder"
+                        BorderBrush="#30FFFFFF"
+                        BorderThickness="1.5"
+                        CornerRadius="8"
+                        Background="Transparent">
+                    <Border.ContextMenu>
+                        <ContextMenu>
+                            <MenuItem x:Name="CtxImport" Header="Import Files..." Click="ImportFiles_Click"/>
+                            <MenuItem x:Name="CtxImportFolder" Header="Import Folder..." Click="ImportFolder_Click"/>
+                            <Separator/>
+                            <MenuItem x:Name="CtxNew" Header="New">
+                                <MenuItem x:Name="CtxNewFolder" Header="New Folder..." Click="NewFolder_Click"/>
+                                <Separator/>
+                                <MenuItem x:Name="CtxNewTxt" Header="Text Document (.txt)" Click="NewTxt_Click"/>
+                                <MenuItem x:Name="CtxNewDocx" Header="Word Document (.docx)" Click="NewDocx_Click"/>
+                                <MenuItem x:Name="CtxNewPptx" Header="PowerPoint (.pptx)" Click="NewPptx_Click"/>
+                                <MenuItem x:Name="CtxNewXlsx" Header="Excel Workbook (.xlsx)" Click="NewXlsx_Click"/>
+                            </MenuItem>
+                            <Separator/>
+                            <MenuItem x:Name="CtxDisbandAll" Header="Disband All" Click="DisbandAll_Click" Visibility="Collapsed"/>
+                            <MenuItem x:Name="CtxDisbandThis" Header="Disband This" Click="DisbandThis_Click" Visibility="Collapsed"/>
+                            <Separator x:Name="CtxMergeSep" Visibility="Collapsed"/>
+                            <MenuItem x:Name="CtxEdit" Header="Edit Zone" Click="EditZone_Click"/>
+                            <MenuItem x:Name="CtxHide" Header="Hide Zone" Click="HideZone_Click"/>
+                            <Separator/>
+                            <MenuItem x:Name="CtxDelete" Header="Delete Zone" Foreground="#FF6666" Click="DeleteZone_Click"/>
+                        </ContextMenu>
+                    </Border.ContextMenu>
+
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- Title bar — drag-to-move -->
+                        <Border x:Name="TitleBarBg" Grid.Row="0" Height="24"
+                                Background="#10FFFFFF"
+                                CornerRadius="8,8,0,0"
+                                Cursor="SizeAll"
+                                MouseLeftButtonDown="TitleBar_Drag">
+                            <Grid>
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,0,0">
+                                    <TextBlock x:Name="TitleIconChar" Text="" FontSize="12"
+                                               Foreground="#A0FFFFFF" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                                    <TextBox x:Name="ZoneTitleText" Text="New Zone"
+                                             FontSize="11" Foreground="#A0FFFFFF"
+                                             Background="Transparent" BorderThickness="0"
+                                             CaretBrush="#A0FFFFFF"
+                                             VerticalAlignment="Center"
+                                             MaxWidth="160"
+                                             LostFocus="ZoneTitle_LostFocus"
+                                             KeyDown="ZoneTitle_KeyDown"/>
+                                </StackPanel>
+                                <StackPanel x:Name="ControlPoint"
+                                            Orientation="Horizontal"
+                                            HorizontalAlignment="Right"
+                                            Margin="0,0,4,0" Opacity="0.4">
+                                    <Border x:Name="ImportBtn" Width="18" Height="16"
+                                            CornerRadius="3" Background="#30FFFFFF"
+                                            Cursor="Hand" Margin="0,0,3,0"
+                                            MouseLeftButtonDown="ImportBtn_Click"
+                                            MouseEnter="Ctrl_Enter" MouseLeave="Ctrl_Leave"
+                                            ToolTip="Import">
+                                    <Border.ContextMenu>
+                                        <ContextMenu>
+                                            <MenuItem x:Name="CtxImportFiles" Header="Import Files..." Click="ImportFiles_Click"/>
+                                            <MenuItem x:Name="CtxImportFolder2" Header="Import Folder..." Click="ImportFolder_Click"/>
+                                            <Separator/>
+                                            <MenuItem x:Name="CtxNew2" Header="New">
+                                                <MenuItem x:Name="CtxNewFolder2" Header="New Folder..." Click="NewFolder_Click"/>
+                                                <Separator/>
+                                                <MenuItem x:Name="CtxNewTxt2" Header="Text Document (.txt)" Click="NewTxt_Click"/>
+                                                <MenuItem x:Name="CtxNewDocx2" Header="Word Document (.docx)" Click="NewDocx_Click"/>
+                                                <MenuItem x:Name="CtxNewPptx2" Header="PowerPoint (.pptx)" Click="NewPptx_Click"/>
+                                                <MenuItem x:Name="CtxNewXlsx2" Header="Excel Workbook (.xlsx)" Click="NewXlsx_Click"/>
+                                            </MenuItem>
+                                        </ContextMenu>
+                                    </Border.ContextMenu>
+                                        <TextBlock Text="+" FontSize="11" FontWeight="Bold"
+                                                   Foreground="#80FFFFFF"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <Border x:Name="EditBtn" Width="18" Height="16"
+                                            CornerRadius="3" Background="#30FFFFFF"
+                                            Cursor="Hand" Margin="0,0,3,0"
+                                            MouseLeftButtonDown="EditButton_Click"
+                                            MouseEnter="Ctrl_Enter" MouseLeave="Ctrl_Leave"
+                                            ToolTip="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Zone.Edit]}">
+                                        <TextBlock x:Name="EditBtnText" Text="⚙" FontSize="9"
+                                                   Foreground="#80FFFFFF"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <Border x:Name="HideBtn" Width="18" Height="16"
+                                            CornerRadius="3" Background="#30FFFFFF"
+                                            Cursor="Hand"
+                                            MouseLeftButtonDown="HideButton_Click"
+                                            MouseEnter="Ctrl_Enter" MouseLeave="Ctrl_Leave"
+                                            ToolTip="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Zone.Hide]}">
+                                        <TextBlock Text="─" FontSize="10" Foreground="#80FFFFFF"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                   Margin="0,-2,0,0"/>
+                                    </Border>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <!-- Sub-zone tabs (visible only when merged) -->
+                        <Border x:Name="SubZoneTabsRow" Grid.Row="1" Height="24"
+                                Background="#08FFFFFF" Visibility="Collapsed">
+                            <StackPanel x:Name="SubZoneTabs" Orientation="Horizontal"
+                                        Margin="4,0,0,0"/>
+                        </Border>
+
+                        <!-- Items (scrollable) -->
+                        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Hidden"
+                                      HorizontalScrollBarVisibility="Hidden" Background="Transparent">
+                        <ItemsControl ItemsSource="{Binding Items}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <Canvas x:Name="ItemCanvas"
+                                            AllowDrop="True" Background="Transparent"
+                                            DragEnter="Canvas_DragEnter" DragLeave="Canvas_DragLeave"
+                                            Drop="Canvas_Drop" DragOver="Canvas_DragOver"/>
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemContainerStyle>
+                                <Style TargetType="ContentPresenter">
+                                    <Setter Property="Canvas.Left" Value="{Binding X}"/>
+                                    <Setter Property="Canvas.Top" Value="{Binding Y}"/>
+                                </Style>
+                            </ItemsControl.ItemContainerStyle>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Width="72" Height="88"
+                                          Background="Transparent"
+                                          MouseLeftButtonDown="Item_MouseDown"
+                                          MouseMove="Item_MouseMove"
+                                          MouseLeftButtonUp="Item_MouseUp"
+                                          Cursor="Hand">
+                                        <Grid.ContextMenu>
+                                            <ContextMenu>
+                                                <MenuItem Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.Open]}" Click="ItemOpen_Click"/>
+                                                <MenuItem Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.OpenLocation]}" Click="ItemOpenLocation_Click"/>
+                                                <MenuItem Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.Rename]}" Click="ItemRename_Click"/>
+                                                <Separator/>
+                                                <MenuItem Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.Delete]}" Click="ItemDelete_Click" Foreground="#FF6666"/>
+                                            </ContextMenu>
+                                        </Grid.ContextMenu>
+                                        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Background="Transparent">
+                                            <Image Source="{Binding Icon}" Width="{Binding IconSize}" Height="{Binding IconSize}"
+                                                   Stretch="Uniform"
+                                                   RenderOptions.BitmapScalingMode="HighQuality"
+                                                   HorizontalAlignment="Center"/>
+                                            <TextBlock Text="{Binding Name}" FontSize="11"
+                                                       Foreground="#E0FFFFFF" TextAlignment="Center"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       MaxWidth="68" Margin="0,2,0,0"
+                                                       HorizontalAlignment="Center">
+                                                <TextBlock.Effect>
+                                                    <DropShadowEffect BlurRadius="2" ShadowDepth="0"
+                                                                      Color="#AA000000" Opacity="0.8"/>
+                                                </TextBlock.Effect>
+                                            </TextBlock>
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        </ScrollViewer>
+
+                        <!-- Bottom bar (no move — only visual) -->
+                        <Border Grid.Row="3" Height="8"
+                                Background="#08FFFFFF"
+                                CornerRadius="0,0,8,8"/>
+                    </Grid>
+                </Border>
+
+                <!-- Four corner resize grips -->
+                <Border x:Name="GripTL" Width="12" Height="12"
+                        HorizontalAlignment="Left" VerticalAlignment="Top"
+                        Cursor="SizeNWSE" Background="Transparent"
+                        MouseLeftButtonDown="ResizeGrip_Down"/>
+                <Border x:Name="GripTR" Width="12" Height="12"
+                        HorizontalAlignment="Right" VerticalAlignment="Top"
+                        Cursor="SizeNESW" Background="Transparent"
+                        MouseLeftButtonDown="ResizeGrip_Down"/>
+                <Border x:Name="GripBL" Width="12" Height="12"
+                        HorizontalAlignment="Left" VerticalAlignment="Bottom"
+                        Cursor="SizeNESW" Background="Transparent"
+                        MouseLeftButtonDown="ResizeGrip_Down"/>
+                <Border x:Name="GripBR" Width="12" Height="12"
+                        HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                        Cursor="SizeNWSE" Background="Transparent"
+                        MouseLeftButtonDown="ResizeGrip_Down"/>
+            </Grid>
+        </Border>
+
+        <!-- Restore button (draggable with long press) -->
+        <Border x:Name="RestoreButton"
+                Visibility="Collapsed"
+                Width="36" Height="36"
+                CornerRadius="18"
+                Background="#DD1A1A2E"
+                BorderBrush="#60FFFFFF"
+                BorderThickness="1"
+                Cursor="Hand"
+                MouseLeftButtonDown="Restore_MouseDown"
+                MouseMove="Restore_MouseMove"
+                MouseLeftButtonUp="Restore_MouseUp"
+                MouseEnter="Restore_Enter" MouseLeave="Restore_Leave">
+            <TextBlock x:Name="RestoreIconChar" Text="⊞"
+                       FontSize="18" Foreground="#C0FFFFFF"
+                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Border>
+    </Grid>
+</Window>

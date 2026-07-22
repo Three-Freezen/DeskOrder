@@ -1,0 +1,39 @@
+<Window x:Class="DesktopZones.Views.RenameDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Rename" Width="320" Height="140"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent">
+    <Border Background="#F01A1A2E" CornerRadius="10"
+            BorderBrush="#30FFFFFF" BorderThickness="1">
+        <Grid Margin="16">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <TextBlock x:Name="TitleLabel" Text="Rename" FontSize="13" FontWeight="SemiBold"
+                       Foreground="#E8E8F0" Margin="0,4,0,10"/>
+            <TextBox x:Name="NameInput" Grid.Row="1"
+                     Background="#1E1E36" Foreground="#E8E8F0"
+                     BorderBrush="#404060" BorderThickness="1"
+                     Padding="8,6" FontSize="13"
+                     KeyDown="NameInput_KeyDown"/>
+            <StackPanel Grid.Row="2" Orientation="Horizontal"
+                        HorizontalAlignment="Right" Margin="0,12,0,0">
+                <Button x:Name="CancelBtn" Content="Cancel"
+                        Background="Transparent" Foreground="#8888A0"
+                        BorderBrush="#404060" BorderThickness="1"
+                        Padding="14,6" Cursor="Hand" Click="Cancel_Click">
+                    <Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="4"/></Style></Button.Resources>
+                </Button>
+                <Button x:Name="OkBtn" Content="OK"
+                        Background="#6C63FF" Foreground="White"
+                        BorderThickness="0" Padding="14,6" Margin="8,0,0,0"
+                        Cursor="Hand" Click="Ok_Click">
+                    <Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="4"/></Style></Button.Resources>
+                </Button>
+            </StackPanel>
+        </Grid>
+    </Border>
+</Window>

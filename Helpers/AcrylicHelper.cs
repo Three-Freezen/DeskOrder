@@ -1,0 +1,555 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Runtime.InteropServices;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Interop;
+using System.Windows.Media;
+
+namespace DesktopZones.Helpers;
+
+/// <summary>
+/// Enables frosted-glass / acrylic blur behind WPF layered windows.
+/// Uses DwmEnableBlurBehindWindow + SetWindowCompositionAttribute.
+/// Liquid Glass system inspired by ZenDesktop: 3 sliders (blur, tint, luminosity) + color presets.
+/// </summary>
+public static class AcrylicHelper
+{
+    // ── DWM Blur Behind (works with layered/transparent windows) ──
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DWM_BLURBEHIND
+    {
+        public uint dwFlags;
+        public bool fEnable;
+        public IntPtr hRgnBlur;
+        public bool fTransitionOnMaximized;
+    }
+
+    [DllImport("dwmapi.dll", PreserveSig = false)]
+    private static extern void DwmEnableBlurBehindWindow(IntPtr hwnd, ref DWM_BLURBEHIND blurBehind);
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmIsCompositionEnabled(out bool enabled);
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmGetColorizationColor(out int colorization, out bool opaqueBlend);
+
+    private const uint DWM_BB_ENABLE = 0x00000001;
+
+    // ── Win10+ composition attribute (stronger blur) ──
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct AccentPolicy
+    {
+        public int AccentState;
+        public int AccentFlags;
+        public int GradientColor;
+        public int AnimationId;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WindowCompositionAttributeData
+    {
+        public int Attribute;
+        public IntPtr Data;
+        public int SizeOfData;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern int SetWindowCompositionAttribute(IntPtr hwnd, ref WindowCompositionAttributeData data);
+
+    // AccentState values
+    private const int ACCENT_DISABLED = 0;
+    private const int ACCENT_ENABLE_ACRYLICBLURBEHIND = 4;
+
+    // ── Color presets ──
+
+    public static readonly IReadOnlyList<string> ColorPresetNames = new[]
+    {
+        "Default", "Accent", "GlassWhite", "MistGrey", "DeepBlack",
+        "OceanBlue", "AuroraCyan", "RosePink", "BordeauxRed", "ForestGreen",
+        "RoyalPurple", "SunsetOrange", "ChampagneGold", "MorandiSage"
+    };
+
+    public static readonly IReadOnlyDictionary<string, string> ColorPresetNamesCN = new Dictionary<string, string>
+    {
+        ["Default"] = "默认",
+        ["Accent"] = "跟随系统",
+        ["GlassWhite"] = "玻璃白",
+        ["MistGrey"] = "薄雾灰",
+        ["DeepBlack"] = "深邃黑",
+        ["OceanBlue"] = "海洋蓝",
+        ["AuroraCyan"] = "极光青",
+        ["RosePink"] = "玫瑰粉",
+        ["BordeauxRed"] = "波尔多红",
+        ["ForestGreen"] = "森林绿",
+        ["RoyalPurple"] = "皇家紫",
+        ["SunsetOrange"] = "日落橙",
+        ["ChampagneGold"] = "香槟金",
+        ["MorandiSage"] = "莫兰迪灰绿"
+    };
+
+    /// <summary>
+    /// Resolve a color mode name to an ARGB tint color (0xAARRGGBB).
+    /// The caller will apply tintOpacity (alpha) and tintLuminosity (brightness).
+    /// </summary>
+    private static uint ResolveBaseColorARGB(string colorMode)
+    {
+        return colorMode switch
+        {
+            "Default" => 0x00000000,      // Transparent / use system default
+            "Accent" => GetSystemAccentARGB(),
+            "GlassWhite" => 0xFF_FF_FF_FF, // full white base, alpha applied later
+            "MistGrey" => 0xFF_C0_C0_C0,
+            "DeepBlack" => 0xFF_10_10_10,
+            "OceanBlue" => 0xFF_11_85_FF,
+            "AuroraCyan" => 0xFF_00_D4_D4,
+            "RosePink" => 0xFF_FF_69_B4,
+            "BordeauxRed" => 0xFF_8B_00_00,
+            "ForestGreen" => 0xFF_22_8B_22,
+            "RoyalPurple" => 0xFF_6A_0D_AD,
+            "SunsetOrange" => 0xFF_FF_8C_00,
+            "ChampagneGold" => 0xFF_DA_A5_20,
+            "MorandiSage" => 0xFF_87_A9_6B,
+            _ => 0x00000000
+        };
+    }
+
+    private static uint GetSystemAccentARGB()
+    {
+        try
+        {
+            int colorization;
+            bool opaque;
+            int hr = DwmGetColorizationColor(out colorization, out opaque);
+            if (hr == 0)
+            {
+                // colorization is 0xAARRGGBB
+                return (uint)colorization;
+            }
+        }
+        catch { }
+        // Fallback: purple accent
+        return 0xFF_7C_3A_ED;
+    }
+
+    /// <summary>
+    /// Convert an ARGB color (0xAARRGGBB) to ABGR format (0xAABBGGRR) used by AccentPolicy.GradientColor.
+    /// </summary>
+    private static int ArgbToAbgr(uint argb)
+    {
+        uint a = (argb >> 24) & 0xFF;
+        uint r = (argb >> 16) & 0xFF;
+        uint g = (argb >> 8) & 0xFF;
+        uint b = argb & 0xFF;
+        return (int)((a << 24) | (b << 16) | (g << 8) | r);
+    }
+
+    private static readonly Dictionary<(string, int, int), int> _tintCache = new();
+
+    /// <summary>
+    /// Build the GradientColor (ABGR format) from color mode + tint opacity + tint luminosity.
+    /// </summary>
+    public static int ResolveGlassTintColor(string colorMode, int tintOpacity, int tintLuminosity)
+    {
+        var key = (colorMode, tintOpacity, tintLuminosity);
+        if (_tintCache.TryGetValue(key, out var cached)) return cached;
+
+        uint argb = ResolveBaseColorARGB(colorMode);
+
+        if (colorMode == "Default" || argb == 0)
+            return 0; // transparent — no tint
+
+        // Extract RGB components
+        uint r = (argb >> 16) & 0xFF;
+        uint g = (argb >> 8) & 0xFF;
+        uint b = argb & 0xFF;
+
+        // Apply luminosity: 0-150% multiplier (100 = original)
+        double lum = Math.Clamp(tintLuminosity, 0, 150) / 100.0;
+        r = (uint)Math.Min(255, r * lum);
+        g = (uint)Math.Min(255, g * lum);
+        b = (uint)Math.Min(255, b * lum);
+
+        // Apply tint opacity: 0-100% → alpha byte 0-255
+        double opacity = Math.Clamp(tintOpacity, 0, 100) / 100.0;
+        uint alpha = (uint)(opacity * 255);
+
+        uint finalArgb = (alpha << 24) | (r << 16) | (g << 8) | b;
+        int result = ArgbToAbgr(finalArgb);
+        _tintCache[key] = result;
+        return result;
+    }
+
+    /// <summary>
+    /// Enable liquid glass blur behind a WPF window using ZenDesktop-style parameters.
+    /// Uses ACCENT_ENABLE_ACRYLICBLURBEHIND (4) when blurAmount > 0.
+    /// </summary>
+    /// <param name="blurAmount">Blur radius 0-60. 0 = disable.</param>
+    /// <param name="tintOpacity">Tint alpha 0-100%.</param>
+    /// <param name="tintLuminosity">Color brightness 0-150%.</param>
+    /// <param name="colorMode">Color preset name (Default, Accent, GlassWhite, etc.).</param>
+    public static void EnableBlur(Window window, int blurAmount, int tintOpacity, int tintLuminosity, string colorMode)
+    {
+        var hwnd = new WindowInteropHelper(window).Handle;
+        if (hwnd == IntPtr.Zero) return;
+
+        // Check DWM is on
+        bool dwmOn = true;
+        try { DwmIsCompositionEnabled(out dwmOn); } catch { }
+        if (!dwmOn) return;
+
+        if (blurAmount <= 0)
+        {
+            DisableBlur(window);
+            return;
+        }
+
+        // Calculate gradient color from color mode + tint settings
+        int gradientColor = ResolveGlassTintColor(colorMode, tintOpacity, tintLuminosity);
+
+        // AccentFlags encodes blur radius: bits 8-15 carry the radius, bits 0-7 carry style flags
+        int accentFlags = (Math.Clamp(blurAmount, 1, 60) << 8) | 0x100;
+
+        // Primary: DWM Blur Behind (works with AllowsTransparency)
+        try
+        {
+            var bb = new DWM_BLURBEHIND
+            {
+                dwFlags = DWM_BB_ENABLE,
+                fEnable = true,
+                hRgnBlur = IntPtr.Zero
+            };
+            DwmEnableBlurBehindWindow(hwnd, ref bb);
+        }
+        catch { /* fallback */ }
+
+        // Secondary: Win10+ acrylic accent for stronger / varied effect
+        var accentPtr2 = IntPtr.Zero;
+        try
+        {
+            var accent = new AccentPolicy
+            {
+                AccentState = ACCENT_ENABLE_ACRYLICBLURBEHIND,
+                AccentFlags = accentFlags,
+                GradientColor = gradientColor,
+                AnimationId = 0
+            };
+            accentPtr2 = Marshal.AllocHGlobal(Marshal.SizeOf(accent));
+            Marshal.StructureToPtr(accent, accentPtr2, false);
+            var data = new WindowCompositionAttributeData
+            {
+                Attribute = 19, // WCA_ACCENT_POLICY
+                SizeOfData = Marshal.SizeOf(accent),
+                Data = accentPtr2
+            };
+            SetWindowCompositionAttribute(hwnd, ref data);
+        }
+        catch { /* optional enhancement */ }
+        finally
+        {
+            if (accentPtr2 != IntPtr.Zero) Marshal.FreeHGlobal(accentPtr2);
+        }
+    }
+
+    /// <summary>Disable blur on a window.</summary>
+    public static void DisableBlur(Window window)
+    {
+        var hwnd = new WindowInteropHelper(window).Handle;
+        if (hwnd == IntPtr.Zero) return;
+
+        try
+        {
+            var bb = new DWM_BLURBEHIND
+            {
+                dwFlags = DWM_BB_ENABLE,
+                fEnable = false
+            };
+            DwmEnableBlurBehindWindow(hwnd, ref bb);
+        }
+        catch { }
+
+        var accentPtr = IntPtr.Zero;
+        try
+        {
+            var accent = new AccentPolicy
+            {
+                AccentState = ACCENT_DISABLED,
+                AccentFlags = 0,
+                GradientColor = 0,
+                AnimationId = 0
+            };
+            accentPtr = Marshal.AllocHGlobal(Marshal.SizeOf(accent));
+            Marshal.StructureToPtr(accent, accentPtr, false);
+            var data = new WindowCompositionAttributeData
+            {
+                Attribute = 19,
+                SizeOfData = Marshal.SizeOf(accent),
+                Data = accentPtr
+            };
+            SetWindowCompositionAttribute(hwnd, ref data);
+        }
+        catch { }
+        finally
+        {
+            if (accentPtr != IntPtr.Zero) Marshal.FreeHGlobal(accentPtr);
+        }
+    }
+
+    /// <summary>
+    /// Create a chromatic dispersion border brush inspired by ZenDesktop's Apple Liquid Glass.
+    /// Diagonal prismatic gradient: red → orange → green → blue → purple.
+    /// </summary>
+    public static LinearGradientBrush CreateChromaticBorder()
+    {
+        var brush = new LinearGradientBrush
+        {
+            StartPoint = new Point(0, 0),
+            EndPoint = new Point(1, 1),
+            SpreadMethod = GradientSpreadMethod.Repeat
+        };
+        brush.GradientStops.Add(new GradientStop(Color.FromArgb(0x60, 0xFF, 0x44, 0x44), 0.0));  // red
+        brush.GradientStops.Add(new GradientStop(Color.FromArgb(0x50, 0xFF, 0x88, 0x00), 0.2));  // orange
+        brush.GradientStops.Add(new GradientStop(Color.FromArgb(0x50, 0x44, 0xCC, 0x44), 0.4));  // green
+        brush.GradientStops.Add(new GradientStop(Color.FromArgb(0x55, 0x44, 0x88, 0xFF), 0.6));  // blue
+        brush.GradientStops.Add(new GradientStop(Color.FromArgb(0x60, 0xAA, 0x44, 0xFF), 0.8));  // purple
+        brush.GradientStops.Add(new GradientStop(Color.FromArgb(0x50, 0xFF, 0x44, 0x88), 1.0));  // pink-red
+        return brush;
+    }
+
+    // ── Liquid Glass Settings Dialog ──
+
+    /// <summary>
+    /// Show a liquid glass settings popup dialog. Returns true if saved, false if cancelled.
+    /// Modifies the ref parameters on save.
+    /// </summary>
+    public static bool ShowLiquidGlassDialog(Window owner, string title,
+        ref int blurAmount, ref int tintOpacity, ref int tintLuminosity, ref string colorMode,
+        bool isChinese)
+    {
+        // Copy ref params to locals for lambda capture
+        int localBlur = blurAmount;
+        int localTintOpacity = tintOpacity;
+        int localTintLuminosity = tintLuminosity;
+        string localColorMode = colorMode;
+
+        var dlg = new Window
+        {
+            Title = isChinese ? $"💧 {title}" : $"💧 {title}",
+            Width = 440, Height = 520,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Owner = owner,
+            ResizeMode = ResizeMode.NoResize,
+            WindowStyle = WindowStyle.ToolWindow,
+            Background = new SolidColorBrush(Color.FromRgb(0x10, 0x11, 0x1A))
+        };
+
+        var grid = new Grid { Margin = new Thickness(20) };
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // title
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // blur slider
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // opacity slider
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // luminosity slider
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // color preset
+        grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // buttons
+
+        var t1 = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0));
+        var t2 = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0xA0));
+        var accent = new SolidColorBrush(Color.FromRgb(0x7C, 0x3A, 0xED));
+        var ibg = new SolidColorBrush(Color.FromArgb(0x0A, 0xFF, 0xFF, 0xFF));
+        var ibd = new SolidColorBrush(Color.FromArgb(0x15, 0xFF, 0xFF, 0xFF));
+        var muted = new SolidColorBrush(Color.FromRgb(0x1E, 0x1E, 0x36));
+
+        int row = 0;
+
+        // Title
+        var titleTb = new TextBlock
+        {
+            Text = isChinese ? "液态玻璃设置" : "Liquid Glass Settings",
+            FontSize = 16, FontWeight = FontWeights.SemiBold,
+            Foreground = t1, Margin = new Thickness(0, 0, 0, 16)
+        };
+        Grid.SetRow(titleTb, row++);
+        grid.Children.Add(titleTb);
+
+        // Blur Amount slider (0-60)
+        var blurSaved = localBlur;
+        var blurLabelRow = BuildSliderRow(isChinese ? "模糊半径" : "Blur Radius", 0, 60, localBlur,
+            t1, t2, (v, lbl) => { localBlur = (int)v; lbl.Text = $"{(int)v}"; });
+        Grid.SetRow(blurLabelRow, row++);
+        grid.Children.Add(blurLabelRow);
+
+        // Tint Opacity slider (0-100%)
+        var opacitySaved = localTintOpacity;
+        var opacityLabelRow = BuildSliderRow(isChinese ? "着色不透明度" : "Tint Opacity", 0, 100, localTintOpacity,
+            t1, t2, (v, lbl) => { localTintOpacity = (int)v; lbl.Text = $"{localTintOpacity}%"; });
+        Grid.SetRow(opacityLabelRow, row++);
+        grid.Children.Add(opacityLabelRow);
+
+        // Tint Luminosity slider (0-150%)
+        var luminositySaved = localTintLuminosity;
+        var luminosityLabelRow = BuildSliderRow(isChinese ? "着色亮度" : "Tint Luminosity", 0, 150, localTintLuminosity,
+            t1, t2, (v, lbl) => { localTintLuminosity = (int)v; lbl.Text = $"{localTintLuminosity}%"; });
+        Grid.SetRow(luminosityLabelRow, row++);
+        grid.Children.Add(luminosityLabelRow);
+
+        // Color preset dropdown
+        var colorRow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Margin = new Thickness(0, 12, 0, 0)
+        };
+        colorRow.Children.Add(new TextBlock
+        {
+            Text = isChinese ? "颜色预设:" : "Color Preset:",
+            Foreground = t2, FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center,
+            Width = 100
+        });
+        var presetCombo = ComboBoxHelper.Create(width: 220, fontSize: 12,
+            margin: new Thickness(8, 0, 0, 0));
+        presetCombo.Foreground = System.Windows.Media.Brushes.White;
+        int selectedIdx = 0;
+        for (int i = 0; i < ColorPresetNames.Count; i++)
+        {
+            string displayName = isChinese && ColorPresetNamesCN.TryGetValue(ColorPresetNames[i], out var cnName)
+                ? $"{ColorPresetNames[i]} ({cnName})"
+                : ColorPresetNames[i];
+            presetCombo.Items.Add(displayName);
+            if (ColorPresetNames[i] == colorMode) selectedIdx = i;
+        }
+        presetCombo.SelectedIndex = selectedIdx;
+        colorRow.Children.Add(presetCombo);
+        Grid.SetRow(colorRow, row++);
+        grid.Children.Add(colorRow);
+
+        // Hint text
+        var hintTb = new TextBlock
+        {
+            Text = isChinese
+                ? "模糊半径=0 关闭效果 | 亮度100%=原始色彩 | 预设决定基础色调"
+                : "Blur=0 disables | Luminosity 100%=original | Preset selects base tint",
+            FontSize = 9,
+            Foreground = new SolidColorBrush(Color.FromRgb(0x60, 0x60, 0x80)),
+            Margin = new Thickness(0, 4, 0, 0),
+            TextWrapping = TextWrapping.Wrap
+        };
+        Grid.SetRow(hintTb, row++);
+        grid.Children.Add(hintTb);
+
+        // Buttons
+        var btnRow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(0, 16, 0, 0)
+        };
+        var cancelBtn = new Button
+        {
+            Content = isChinese ? "取消" : "Cancel",
+            Width = 80, Height = 32,
+            Background = ibg, Foreground = t2,
+            BorderBrush = ibd, BorderThickness = new Thickness(1),
+            FontSize = 12, Cursor = System.Windows.Input.Cursors.Hand,
+            Margin = new Thickness(0, 0, 8, 0)
+        };
+        var saveBtn = new Button
+        {
+            Content = isChinese ? "保存" : "Save",
+            Width = 80, Height = 32,
+            Background = accent, Foreground = System.Windows.Media.Brushes.White,
+            BorderThickness = new Thickness(0),
+            FontSize = 12, Cursor = System.Windows.Input.Cursors.Hand,
+            FontWeight = FontWeights.SemiBold
+        };
+
+        bool saved = false;
+        saveBtn.Click += (_, _) =>
+        {
+            localColorMode = ColorPresetNames[presetCombo.SelectedIndex];
+            saved = true;
+            dlg.Close();
+        };
+        cancelBtn.Click += (_, _) =>
+        {
+            // Restore original values
+            localBlur = blurSaved;
+            localTintOpacity = opacitySaved;
+            localTintLuminosity = luminositySaved;
+            dlg.Close();
+        };
+
+        btnRow.Children.Add(cancelBtn);
+        btnRow.Children.Add(saveBtn);
+        Grid.SetRow(btnRow, row++);
+        grid.Children.Add(btnRow);
+
+        dlg.Content = grid;
+        dlg.ShowDialog();
+
+        // Copy locals back to ref params
+        blurAmount = localBlur;
+        tintOpacity = localTintOpacity;
+        tintLuminosity = localTintLuminosity;
+        colorMode = localColorMode;
+
+        return saved;
+    }
+
+    private static Grid BuildSliderRow(string labelText, double min, double max, double value,
+        Brush t1, Brush t2, Action<double, TextBlock> onChanged)
+    {
+        var grid = new Grid { Margin = new Thickness(0, 8, 0, 0) };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(100) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(48) });
+
+        var label = new TextBlock
+        {
+            Text = labelText + ":",
+            Foreground = t2, FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        Grid.SetColumn(label, 0);
+        grid.Children.Add(label);
+
+        var slider = new Slider
+        {
+            Minimum = min, Maximum = max, Value = value,
+            TickFrequency = 5,
+            Background = System.Windows.Media.Brushes.Transparent,
+            Cursor = System.Windows.Input.Cursors.Hand,
+            Margin = new Thickness(8, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        Grid.SetColumn(slider, 1);
+        grid.Children.Add(slider);
+
+        var valueLabel = new TextBlock
+        {
+            Text = max <= 60 ? $"{(int)value}" : $"{(int)value}%",
+            Foreground = t1, FontSize = 12,
+            TextAlignment = TextAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(8, 0, 0, 0)
+        };
+        Grid.SetColumn(valueLabel, 2);
+        grid.Children.Add(valueLabel);
+
+        slider.ValueChanged += (s, _) => onChanged(slider.Value, valueLabel);
+
+        return grid;
+    }
+
+    /// <summary>Backward-compat stub: calls the new liquid glass EnableBlur with sensible defaults.</summary>
+    [Obsolete("Use EnableBlur(window, blurAmount, tintOpacity, tintLuminosity, colorMode) instead.")]
+    public static void EnableBlur(Window window, int __unused) { }
+
+    /// <summary>Backward-compat stub.</summary>
+    public static void EnableAcrylicFromHex(Window window, string argbHex)
+    {
+        EnableBlur(window, 18, 50, 100, "Default");
+    }
+}

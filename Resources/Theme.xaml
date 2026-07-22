@@ -1,0 +1,164 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- Color Palette                                -->
+    <!-- ═══════════════════════════════════════════ -->
+    <SolidColorBrush x:Key="BgPrimary" Color="#F01A1A2E"/>
+    <SolidColorBrush x:Key="BgSecondary" Color="#252540"/>
+    <SolidColorBrush x:Key="BgCard" Color="#2A2A3E"/>
+    <SolidColorBrush x:Key="AccentPurple" Color="#6C63FF"/>
+    <SolidColorBrush x:Key="AccentGreen" Color="#4CAF50"/>
+    <SolidColorBrush x:Key="AccentRed" Color="#FF5252"/>
+    <SolidColorBrush x:Key="TextPrimary" Color="#E8E8F0"/>
+    <SolidColorBrush x:Key="TextSecondary" Color="#8888A0"/>
+    <SolidColorBrush x:Key="BorderSubtle" Color="#30FFFFFF"/>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- Dark ComboBox Template                       -->
+    <!-- ═══════════════════════════════════════════ -->
+    <ControlTemplate x:Key="DarkComboTemplate" TargetType="ComboBox">
+        <Grid>
+            <ToggleButton x:Name="Toggle" Focusable="false"
+                          IsChecked="{Binding Path=IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                          ClickMode="Press">
+                <ToggleButton.Template>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border Background="#E610111A" CornerRadius="4"
+                                BorderBrush="#30FFFFFF" BorderThickness="1">
+                            <Grid>
+                                <TextBlock Text="▼" FontSize="8"
+                                           Foreground="#8080A0"
+                                           HorizontalAlignment="Right"
+                                           VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            </Grid>
+                        </Border>
+                    </ControlTemplate>
+                </ToggleButton.Template>
+            </ToggleButton>
+            <ContentPresenter x:Name="ContentSite" Margin="8,4,24,4"
+                              Content="{TemplateBinding SelectionBoxItem}"
+                              ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                              VerticalAlignment="Center" HorizontalAlignment="Left"
+                              IsHitTestVisible="False"/>
+            <Popup x:Name="Popup" Placement="Bottom"
+                   IsOpen="{TemplateBinding IsDropDownOpen}"
+                   AllowsTransparency="True" Focusable="False"
+                   PopupAnimation="Slide">
+                <Border Background="#E610111A" BorderBrush="#40FFFFFF"
+                        BorderThickness="1" CornerRadius="4"
+                        MaxHeight="{TemplateBinding MaxDropDownHeight}"
+                        MinWidth="{TemplateBinding ActualWidth}">
+                    <ScrollViewer>
+                        <ItemsPresenter/>
+                    </ScrollViewer>
+                </Border>
+            </Popup>
+        </Grid>
+    </ControlTemplate>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- Control Styles                               -->
+    <!-- ═══════════════════════════════════════════ -->
+
+    <!-- Primary button (purple accent) -->
+    <Style x:Key="PrimaryButton" TargetType="Button">
+        <Setter Property="Background" Value="#6C63FF"/>
+        <Setter Property="Foreground" Value="White"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="Padding" Value="16,8"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border Background="{TemplateBinding Background}"
+                            CornerRadius="6" Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Secondary button (subtle) -->
+    <Style x:Key="SecondaryButton" TargetType="Button">
+        <Setter Property="Background" Value="#30FFFFFF"/>
+        <Setter Property="Foreground" Value="#E8E8F0"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="Padding" Value="12,6"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border Background="{TemplateBinding Background}"
+                            CornerRadius="4" Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Dark TextBox -->
+    <Style x:Key="DarkTextBox" TargetType="TextBox">
+        <Setter Property="Background" Value="#1AFFFFFF"/>
+        <Setter Property="Foreground" Value="#E0E0F0"/>
+        <Setter Property="BorderBrush" Value="#30FFFFFF"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CaretBrush" Value="#E0E0F0"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="Padding" Value="8,4"/>
+    </Style>
+
+    <!-- Dark CheckBox -->
+    <Style x:Key="DarkCheckBox" TargetType="CheckBox">
+        <Setter Property="Foreground" Value="#8888A0"/>
+        <Setter Property="FontSize" Value="11"/>
+    </Style>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- Dark ComboBox Style (reusable)               -->
+    <!-- ═══════════════════════════════════════════ -->
+    <Style x:Key="DarkComboStyle" TargetType="ComboBox">
+        <Setter Property="Template" Value="{StaticResource DarkComboTemplate}"/>
+        <Setter Property="Background" Value="#1AFFFFFF"/>
+        <Setter Property="Foreground" Value="#E0E0F0"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="FontSize" Value="12"/>
+    </Style>
+
+    <Style x:Key="DarkComboItemStyle" TargetType="ComboBoxItem">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Foreground" Value="#E0E0F0"/>
+        <Setter Property="Padding" Value="8,4,8,4"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ComboBoxItem">
+                    <Border x:Name="Bd" Background="Transparent"
+                            Padding="4,2" CornerRadius="3" Margin="2,1,2,1">
+                        <ContentPresenter/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <MultiTrigger>
+                            <MultiTrigger.Conditions>
+                                <Condition Property="IsMouseOver" Value="True"/>
+                                <Condition Property="IsSelected" Value="False"/>
+                            </MultiTrigger.Conditions>
+                            <Setter TargetName="Bd" Property="Background" Value="#306C63FF"/>
+                        </MultiTrigger>
+                        <MultiTrigger>
+                            <MultiTrigger.Conditions>
+                                <Condition Property="IsMouseOver" Value="True"/>
+                                <Condition Property="IsSelected" Value="True"/>
+                            </MultiTrigger.Conditions>
+                            <Setter TargetName="Bd" Property="Background" Value="#506C63FF"/>
+                        </MultiTrigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+</ResourceDictionary>

@@ -1,0 +1,262 @@
+<Window x:Class="DesktopZones.Views.StickyNoteWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ResizeMode="CanResize"
+        Topmost="False"
+        ShowInTaskbar="False"
+        SnapsToDevicePixels="True">
+    <Grid>
+        <!-- Main content wrapper -->
+        <Border x:Name="MainContent" Visibility="Visible" ClipToBounds="True" CornerRadius="10">
+            <Grid>
+                <Border x:Name="NoteBorder" CornerRadius="10"
+                        BorderBrush="#40FFFFFF" BorderThickness="1">
+            <Border.ContextMenu>
+                <ContextMenu>
+                    <MenuItem x:Name="CtxToggleRestore" Header="Disable Restore" Click="ToggleRestore_Click"/>
+                    <Separator/>
+                    <MenuItem x:Name="CtxDelete" Header="Delete Note" Click="Delete_Click" Foreground="#FF6666"/>
+                </ContextMenu>
+            </Border.ContextMenu>
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <!-- Background image -->
+                <Border x:Name="NoteBgBorder" Grid.RowSpan="3" ClipToBounds="True" IsHitTestVisible="False"
+                        HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+                    <Image x:Name="NoteBgImage" Stretch="UniformToFill"
+                           RenderOptions.BitmapScalingMode="HighQuality"
+                           Opacity="0" IsHitTestVisible="False"/>
+                </Border>
+
+                <!-- Title bar -->
+                <Border Grid.Row="0" Height="28" CornerRadius="10,10,0,0"
+                        Cursor="SizeAll" MouseLeftButtonDown="TitleBar_Drag"
+                        Background="#20000000">
+                    <Grid>
+                        <TextBox x:Name="TitleBox" Text="Note"
+                                 FontSize="12" Foreground="#E0E0E0"
+                                 Background="Transparent" BorderThickness="0"
+                                 CaretBrush="#E0E0E0"
+                                 VerticalAlignment="Center" Margin="10,0,0,0"
+                                 MaxWidth="180"
+                                 LostFocus="TitleBox_LostFocus"
+                                 KeyDown="TitleBox_KeyDown"/>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,4,0">
+                            <Button x:Name="PinBtn" Content="📌" Width="20" Height="20"
+                                    FontSize="10"
+                                    Background="Transparent" BorderThickness="0"
+                                    Cursor="Hand" Click="PinBtn_Click" Margin="3,0,0,0"
+                                    Foreground="#80FFFFFF"/>
+                            <Button x:Name="HideBtn" Content="─" Width="20" Height="20"
+                                    FontSize="11" Foreground="#80FFFFFF"
+                                    Background="Transparent" BorderThickness="0"
+                                    Cursor="Hand" Click="HideBtn_Click" Margin="3,0,0,0"/>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <!-- Formatting toolbar -->
+                <Border Grid.Row="1" Background="#10000000" Padding="4,2">
+                    <StackPanel Orientation="Horizontal">
+                        <!-- Font Size -->
+                        <ComboBox x:Name="FontSizeCombo" Width="50" Height="22"
+                                   FontSize="11" Foreground="#E0E0E0"
+                                   Background="#1E1E36" BorderBrush="#30FFFFFF"
+                                   BorderThickness="1" Padding="2,0"
+                                   SelectedIndex="2"
+                                   SelectionChanged="FontSizeCombo_SelectionChanged">
+                            <ComboBoxItem Content="10" Tag="10" Background="#1E1E36" Foreground="#E0E0E0"/>
+                            <ComboBoxItem Content="12" Tag="12" Background="#1E1E36" Foreground="#E0E0E0"/>
+                            <ComboBoxItem Content="14" Tag="14" Background="#1E1E36" Foreground="#E0E0E0"/>
+                            <ComboBoxItem Content="16" Tag="16" Background="#1E1E36" Foreground="#E0E0E0"/>
+                            <ComboBoxItem Content="18" Tag="18" Background="#1E1E36" Foreground="#E0E0E0"/>
+                            <ComboBoxItem Content="20" Tag="20" Background="#1E1E36" Foreground="#E0E0E0"/>
+                            <ComboBoxItem Content="24" Tag="24" Background="#1E1E36" Foreground="#E0E0E0"/>
+                            <ComboBoxItem Content="28" Tag="28" Background="#1E1E36" Foreground="#E0E0E0"/>
+                            <ComboBoxItem Content="32" Tag="32" Background="#1E1E36" Foreground="#E0E0E0"/>
+                            <ComboBoxItem Content="36" Tag="36" Background="#1E1E36" Foreground="#E0E0E0"/>
+                            <ComboBoxItem Content="48" Tag="48" Background="#1E1E36" Foreground="#E0E0E0"/>
+                        </ComboBox>
+
+                        <Rectangle Width="1" Fill="#20FFFFFF" Margin="4,2"/>
+
+                        <!-- Bold -->
+                        <Button x:Name="BoldBtn" Content="B" Width="24" Height="24"
+                                FontSize="12" FontWeight="Bold"
+                                Foreground="#E0E0E0"
+                                Background="Transparent" BorderThickness="0"
+                                Cursor="Hand" Click="BoldBtn_Click">
+                            <Button.Resources>
+                                <Style TargetType="Border">
+                                    <Setter Property="CornerRadius" Value="4"/>
+                                </Style>
+                            </Button.Resources>
+                        </Button>
+
+                        <!-- Italic -->
+                        <Button x:Name="ItalicBtn" Content="I" Width="24" Height="24"
+                                FontSize="12" FontStyle="Italic"
+                                Foreground="#E0E0E0"
+                                Background="Transparent" BorderThickness="0"
+                                Cursor="Hand" Click="ItalicBtn_Click">
+                            <Button.Resources>
+                                <Style TargetType="Border">
+                                    <Setter Property="CornerRadius" Value="4"/>
+                                </Style>
+                            </Button.Resources>
+                        </Button>
+
+                        <!-- Underline -->
+                        <Button x:Name="UnderlineBtn" Content="U" Width="24" Height="24"
+                                FontSize="12"
+                                Foreground="#E0E0E0"
+                                Background="Transparent" BorderThickness="0"
+                                Cursor="Hand" Click="UnderlineBtn_Click">
+                            <Button.Resources>
+                                <Style TargetType="Border">
+                                    <Setter Property="CornerRadius" Value="4"/>
+                                </Style>
+                            </Button.Resources>
+                            <Button.ContentTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="U" FontSize="12"
+                                               TextDecorations="Underline"
+                                               Foreground="#E0E0E0"/>
+                                </DataTemplate>
+                            </Button.ContentTemplate>
+                        </Button>
+
+                        <Rectangle Width="1" Fill="#20FFFFFF" Margin="4,2"/>
+
+                        <!-- Font Color -->
+                        <Button x:Name="FontColorBtn" Content="A" Width="24" Height="24"
+                                FontSize="12" FontWeight="Bold"
+                                Foreground="#E0E0E0"
+                                Background="Transparent" BorderThickness="0"
+                                Cursor="Hand" Click="FontColorBtn_Click">
+                            <Button.Resources>
+                                <Style TargetType="Border">
+                                    <Setter Property="CornerRadius" Value="4"/>
+                                </Style>
+                            </Button.Resources>
+                        </Button>
+                        <Popup x:Name="FontColorPopup" StaysOpen="False"
+                               PlacementTarget="{Binding ElementName=FontColorBtn}"
+                               Placement="Bottom" AllowsTransparency="True">
+                            <Border Background="#F01A1A2E" CornerRadius="8"
+                                    BorderBrush="#30FFFFFF" BorderThickness="1"
+                                    Padding="8">
+                                <StackPanel>
+                                    <TextBlock Text="Text Color" FontSize="10"
+                                               Foreground="#8888A0" Margin="0,0,0,6"/>
+                                    <WrapPanel x:Name="ColorPresetsPanel" Width="200">
+                                        <Border x:Name="PresetWhite" Width="24" Height="24" CornerRadius="12"
+                                                Margin="0,0,4,4" Cursor="Hand" Tag="#FFFFFF"
+                                                Background="White" BorderBrush="#30FFFFFF" BorderThickness="1"
+                                                MouseLeftButtonDown="ColorPreset_Click"/>
+                                        <Border x:Name="PresetGray" Width="24" Height="24" CornerRadius="12"
+                                                Margin="0,0,4,4" Cursor="Hand" Tag="#888888"
+                                                Background="#888888" BorderBrush="#30FFFFFF" BorderThickness="1"
+                                                MouseLeftButtonDown="ColorPreset_Click"/>
+                                        <Border x:Name="PresetGold" Width="24" Height="24" CornerRadius="12"
+                                                Margin="0,0,4,4" Cursor="Hand" Tag="#FFD700"
+                                                Background="#FFD700" BorderBrush="#30FFFFFF" BorderThickness="1"
+                                                MouseLeftButtonDown="ColorPreset_Click"/>
+                                        <Border x:Name="PresetOrange" Width="24" Height="24" CornerRadius="12"
+                                                Margin="0,0,4,4" Cursor="Hand" Tag="#FF8C00"
+                                                Background="#FF8C00" BorderBrush="#30FFFFFF" BorderThickness="1"
+                                                MouseLeftButtonDown="ColorPreset_Click"/>
+                                        <Border x:Name="PresetRed" Width="24" Height="24" CornerRadius="12"
+                                                Margin="0,0,4,4" Cursor="Hand" Tag="#FF4444"
+                                                Background="#FF4444" BorderBrush="#30FFFFFF" BorderThickness="1"
+                                                MouseLeftButtonDown="ColorPreset_Click"/>
+                                        <Border x:Name="PresetGreen" Width="24" Height="24" CornerRadius="12"
+                                                Margin="0,0,4,4" Cursor="Hand" Tag="#50FA7B"
+                                                Background="#50FA7B" BorderBrush="#30FFFFFF" BorderThickness="1"
+                                                MouseLeftButtonDown="ColorPreset_Click"/>
+                                        <Border x:Name="PresetPurple" Width="24" Height="24" CornerRadius="12"
+                                                Margin="0,0,4,4" Cursor="Hand" Tag="#6C63FF"
+                                                Background="#6C63FF" BorderBrush="#30FFFFFF" BorderThickness="1"
+                                                MouseLeftButtonDown="ColorPreset_Click"/>
+                                        <Border x:Name="PresetLavender" Width="24" Height="24" CornerRadius="12"
+                                                Margin="0,0,4,4" Cursor="Hand" Tag="#BD93F9"
+                                                Background="#BD93F9" BorderBrush="#30FFFFFF" BorderThickness="1"
+                                                MouseLeftButtonDown="ColorPreset_Click"/>
+                                        <Border x:Name="PresetDark" Width="24" Height="24" CornerRadius="12"
+                                                Margin="0,0,4,4" Cursor="Hand" Tag="#333333"
+                                                Background="#333333" BorderBrush="#30FFFFFF" BorderThickness="1"
+                                                MouseLeftButtonDown="ColorPreset_Click"/>
+                                        <!-- Custom -->
+                                        <Button x:Name="ColorCustomBtn" Content="..." Width="24" Height="24"
+                                                FontSize="9" Foreground="#8888A0"
+                                                Background="#1E1E36" BorderBrush="#404060"
+                                                BorderThickness="1" Cursor="Hand"
+                                                Click="ColorCustomBtn_Click">
+                                            <Button.Resources>
+                                                <Style TargetType="Border">
+                                                    <Setter Property="CornerRadius" Value="12"/>
+                                                </Style>
+                                            </Button.Resources>
+                                        </Button>
+                                    </WrapPanel>
+                                </StackPanel>
+                            </Border>
+                        </Popup>
+                    </StackPanel>
+                </Border>
+
+                <!-- Content area (RichTextBox for per-character formatting) -->
+                <RichTextBox x:Name="ContentBox" Grid.Row="2"
+                             FontSize="14" Foreground="#E0E0E0"
+                             Background="Transparent" BorderThickness="0"
+                             CaretBrush="#E0E0E0"
+                             VerticalScrollBarVisibility="Hidden"
+                             Margin="8,4,8,8" MinHeight="100"
+                             AcceptsTab="True"
+                             SelectionChanged="ContentBox_SelectionChanged"/>
+            </Grid>
+        </Border>
+
+                <!-- Four corner resize grips -->
+                <Border Width="12" Height="12" HorizontalAlignment="Left" VerticalAlignment="Top"
+                        Cursor="SizeNWSE" Background="Transparent"
+                        MouseLeftButtonDown="ResizeGrip_Down" Tag="TL"/>
+                <Border Width="12" Height="12" HorizontalAlignment="Right" VerticalAlignment="Top"
+                        Cursor="SizeNESW" Background="Transparent"
+                        MouseLeftButtonDown="ResizeGrip_Down" Tag="TR"/>
+                <Border Width="12" Height="12" HorizontalAlignment="Left" VerticalAlignment="Bottom"
+                        Cursor="SizeNESW" Background="Transparent"
+                        MouseLeftButtonDown="ResizeGrip_Down" Tag="BL"/>
+                <Border Width="12" Height="12" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                        Cursor="SizeNWSE" Background="Transparent"
+                        MouseLeftButtonDown="ResizeGrip_Down" Tag="BR"/>
+            </Grid>
+        </Border>
+
+        <!-- Restore button (minimized state) -->
+        <Border x:Name="RestoreButton"
+                Visibility="Collapsed"
+                Width="36" Height="36"
+                CornerRadius="18"
+                Background="#DD1A1A2E"
+                BorderBrush="#60FFFFFF"
+                BorderThickness="1"
+                Cursor="Hand"
+                MouseLeftButtonDown="Restore_MouseDown"
+                MouseMove="Restore_MouseMove"
+                MouseLeftButtonUp="Restore_MouseUp"
+                MouseEnter="Restore_Enter" MouseLeave="Restore_Leave">
+            <TextBlock x:Name="RestoreIconChar" Text="📝"
+                       FontSize="18" Foreground="#C0FFFFFF"
+                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Border>
+    </Grid>
+</Window>
