@@ -14,6 +14,8 @@ public class NotesService
     public ObservableCollection<StickyNote> Notes { get; } = new();
     public event Action? NotesChanged;
 
+    public AppConfig GetConfig() => _appConfig!;
+
     public NotesService(ConfigService configService)
     {
         _configService = configService;
@@ -68,6 +70,7 @@ public class NotesService
         _appConfig.PanelHotkeyModifiers = latestConfig.PanelHotkeyModifiers;
         _appConfig.PanelHotkeyKey = latestConfig.PanelHotkeyKey;
         _appConfig.PanelCustomHotkeys = latestConfig.PanelCustomHotkeys;
+        _appConfig.PanelUseGlobalAppearance = latestConfig.PanelUseGlobalAppearance;
         try { _configService.Save(_appConfig); } catch { }
     }
 }

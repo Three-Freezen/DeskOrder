@@ -1037,6 +1037,7 @@ public partial class ManagementWindow : Window
             note.BorderThickness = dlg.ParsedBorderThickness;
             note.BorderColor = dlg.ParsedBorderColor;
             note.FillColor = dlg.ParsedFillColor;
+            note.UseGlobalAppearance = dlg.ParsedUseGlobalAppearance;
             note.GlassBlurAmount = dlg.ParsedGlassBlur;
             note.GlassTintOpacity = dlg.ParsedGlassTintOpacity;
             note.GlassTintLuminosity = dlg.ParsedGlassLuminosity;
@@ -1065,6 +1066,7 @@ public partial class ManagementWindow : Window
             clock.BorderThickness = dlg.ParsedBorderThickness;
             clock.BorderColor = dlg.ParsedBorderColor;
             clock.FillColor = dlg.ParsedFillColor;
+            clock.UseGlobalAppearance = dlg.ParsedUseGlobalAppearance;
             clock.GlassBlurAmount = dlg.ParsedGlassBlur;
             clock.GlassTintOpacity = dlg.ParsedGlassTintOpacity;
             clock.GlassTintLuminosity = dlg.ParsedGlassLuminosity;
@@ -1095,6 +1097,7 @@ public partial class ManagementWindow : Window
             cal.BorderThickness = dlg.ParsedBorderThickness;
             cal.BorderColor = dlg.ParsedBorderColor;
             cal.FillColor = dlg.ParsedFillColor;
+            cal.UseGlobalAppearance = dlg.ParsedUseGlobalAppearance;
             cal.GlassBlurAmount = dlg.ParsedGlassBlur;
             cal.GlassTintOpacity = dlg.ParsedGlassTintOpacity;
             cal.GlassTintLuminosity = dlg.ParsedGlassLuminosity;
@@ -2744,6 +2747,7 @@ public partial class ManagementWindow : Window
                 config.GlobalBorderThickness = dlg.ParsedBorderThickness;
                 config.GlobalBorderColor = dlg.ParsedBorderColor;
                 config.GlobalFillColor = dlg.ParsedFillColor;
+                config.PanelUseGlobalAppearance = dlg.ParsedUseGlobalAppearance;
                 config.GlassBlurAmount = dlg.ParsedGlassBlur;
                 config.GlassTintOpacity = dlg.ParsedGlassTintOpacity;
                 config.GlassTintLuminosity = dlg.ParsedGlassLuminosity;

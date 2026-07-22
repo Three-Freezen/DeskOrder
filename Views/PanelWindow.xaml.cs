@@ -157,6 +157,7 @@ public partial class PanelWindow : Window
             config.GlobalBorderThickness = dlg.ParsedBorderThickness;
             config.GlobalBorderColor = dlg.ParsedBorderColor;
             config.GlobalFillColor = dlg.ParsedFillColor;
+            config.PanelUseGlobalAppearance = dlg.ParsedUseGlobalAppearance;
             config.GlassBlurAmount = dlg.ParsedGlassBlur;
             config.GlassTintOpacity = dlg.ParsedGlassTintOpacity;
             config.GlassTintLuminosity = dlg.ParsedGlassLuminosity;
@@ -210,45 +211,41 @@ public partial class PanelWindow : Window
     public void ApplyAcrylic()
     {
         var config = _zoneManager.GetConfig();
+        string fillColorStr = config.PanelUseGlobalAppearance ? config.GlobalFillColor : config.GlobalFillColor;
+
         if (config.EnableLiquidGlass || config.GlassBlurAmount > 0)
         {
             AcrylicHelper.EnableBlur(this, config.GlassBlurAmount, config.GlassTintOpacity, config.GlassTintLuminosity, config.GlassColorMode);
-            try
-            {
-                var tint = (Color)ColorConverter.ConvertFromString(config.GlobalFillColor)!;
-                FillRect.Fill = new SolidColorBrush(tint);
-                FillRect.Opacity = 0.15;
-            }
-            catch { FillRect.Fill = new SolidColorBrush(Color.FromArgb(0x08, 0x00, 0x00, 0x00)); }
-
-            // Liquid glass chromatic border
-            PanelBorder.BorderBrush = AcrylicHelper.CreateChromaticBorder();
         }
         else
         {
             AcrylicHelper.DisableBlur(this);
-            try
-            {
-                FillRect.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(config.GlobalFillColor)!);
-                FillRect.Opacity = 1.0;
-            }
-            catch { }
-            try
-            {
-                PanelBorder.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(config.GlobalBorderColor)!);
-            }
-            catch { }
         }
     }
 
     public void ApplyStyle()
     {
         var config = _zoneManager.GetConfig();
+        string fillColorStr = config.PanelUseGlobalAppearance ? config.GlobalFillColor : config.GlobalFillColor;
+        string borderColorStr = config.GlobalBorderColor;
+        double borderThickness = config.GlobalBorderThickness;
+
+        // Fill
         try
         {
-            PanelBorder.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(config.GlobalBorderColor)!);
+            var fill = (Color)ColorConverter.ConvertFromString(fillColorStr)!;
+            FillRect.Fill = new SolidColorBrush(fill);
+            FillRect.Opacity = 1.0; // Brush alpha from FillColor controls transparency
         }
         catch { }
+
+        // Border
+        try
+        {
+            PanelBorder.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(borderColorStr)!);
+        }
+        catch { }
+        PanelBorder.BorderThickness = new Thickness(borderThickness);
     }
 
     public void ApplyBackgroundImage()
@@ -409,6 +406,7 @@ public partial class PanelWindow : Window
         };
 
         card.MouseLeftButtonDown += Item_Click;
+        card.MouseRightButtonDown += Item_RightClick;
         card.MouseEnter += Item_Enter;
         card.MouseLeave += Item_Leave;
         card.ContextMenu = CreateItemContextMenu(item, zone);
@@ -520,28 +518,6 @@ public partial class PanelWindow : Window
         };
         menu.Items.Add(deleteItem);
 
-        menu.Items.Add(new Separator());
-
-        // New submenu
-        var newMenu = new MenuItem { Header = "New" };
-        var newFolder = new MenuItem { Header = _loc["Panel.NewFolder"] };
-        newFolder.Click += (_, _) => CreateNewFolder(zone);
-        newMenu.Items.Add(newFolder);
-        newMenu.Items.Add(new Separator());
-        var newTxt = new MenuItem { Header = _loc["Panel.NewTxt"] };
-        newTxt.Click += (_, _) => CreateNewFile(".txt", "Text Document|*.txt|All Files|*.*", zone);
-        newMenu.Items.Add(newTxt);
-        var newDocx = new MenuItem { Header = _loc["Panel.NewDocx"] };
-        newDocx.Click += (_, _) => CreateNewFile(".docx", "Word Document|*.docx|All Files|*.*", zone);
-        newMenu.Items.Add(newDocx);
-        var newPptx = new MenuItem { Header = _loc["Panel.NewPptx"] };
-        newPptx.Click += (_, _) => CreateNewFile(".pptx", "PowerPoint|*.pptx|All Files|*.*", zone);
-        newMenu.Items.Add(newPptx);
-        var newXlsx = new MenuItem { Header = _loc["Panel.NewXlsx"] };
-        newXlsx.Click += (_, _) => CreateNewFile(".xlsx", "Excel Worksheet|*.xlsx|All Files|*.*", zone);
-        newMenu.Items.Add(newXlsx);
-        menu.Items.Add(newMenu);
-
         return menu;
     }
 
@@ -553,12 +529,15 @@ public partial class PanelWindow : Window
             {
                 try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = item.TargetPath, UseShellExecute = true }); } catch { }
                 e.Handled = true;
-                return;
             }
         }
-        if (s is Border b2 && b2.Tag is ValueTuple<ZoneItem, Zone> tuple)
+    }
+
+    void Item_RightClick(object s, MouseButtonEventArgs e)
+    {
+        if (s is Border b && b.ContextMenu != null)
         {
-            b2.ContextMenu.IsOpen = true;
+            b.ContextMenu.IsOpen = true;
             e.Handled = true;
         }
     }

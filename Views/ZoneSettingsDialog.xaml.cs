@@ -94,6 +94,9 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
     private bool _enableRestoreButton = true;
     public bool EnableRestoreButton { get => _enableRestoreButton; set { _enableRestoreButton = value; OnPropertyChanged(); } }
 
+    private bool _useGlobalAppearance = true;
+    public bool UseGlobalAppearance { get => _useGlobalAppearance; set { _useGlobalAppearance = value; OnPropertyChanged(); } }
+
     private Action<Services.Language>? _langChanged;
 
     public ZoneSettingsDialog(Zone zone, ZoneManager zoneManager)
@@ -118,6 +121,7 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
         _quickBarMode = zone.QuickBarMode;
         _enableRestoreButton = zone.EnableRestoreButton;
         IconColorValue = string.IsNullOrEmpty(zone.IconColor) ? "#FFFFFF" : zone.IconColor;
+        _useGlobalAppearance = _zoneManager.GetConfig().UseGlobalAppearance;
 
         TextColorValue = string.IsNullOrEmpty(zone.TitleTextColor) ? "#A0FFFFFF" : zone.TitleTextColor;
 
@@ -151,6 +155,7 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
         LabelIcon.Text = _loc["Settings.Icon"]; LabelWidth.Text = _loc["Settings.Width"];
         LabelHeight.Text = _loc["Settings.Height"]; LabelGridSize.Text = _loc["Settings.GridSize"];
         LabelSnapToGrid.Text = _loc["Settings.SnapToGrid"];
+        LabelUseGlobal.Text = cn ? "使用全局外观" : "Use Global Appearance";
         LabelBorderThickness.Text = _loc["Settings.BorderThickness"];
         LabelBorderColor.Text = _loc["Settings.BorderColor"]; LabelFillColor.Text = _loc["Settings.FillColor"];
         LabelOpacity.Text = cn ? "填充透明度" : "Fill Opacity";
@@ -277,6 +282,15 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
     }
 
     void CancelButton_Click(object s, RoutedEventArgs e) { DialogResult = false; Close(); }
+
+    void UseGlobal_Changed(object s, RoutedEventArgs e)
+    {
+        // Save toggle to config immediately so ApplyStyle picks it up
+        var config = _zoneManager.GetConfig();
+        config.UseGlobalAppearance = UseGlobalAppearance;
+        _zoneManager.SaveConfig();
+    }
+
     void IconPreset_Click(object s, RoutedEventArgs e) { if (s is Button b && b.Tag is string ic) IconCharText = ic; }
     void BrowseBgImage_Click(object s, RoutedEventArgs e) { var d = new Microsoft.Win32.OpenFileDialog { Title = _loc["Settings.BrowseBg"], Filter = "Images|*.jpg;*.jpeg;*.png;*.bmp;*.gif|All|*.*" }; if (d.ShowDialog() == true) BgImagePath = d.FileName; }
     void ClearBgImage_Click(object s, RoutedEventArgs e) => BgImagePath = "";

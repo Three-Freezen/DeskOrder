@@ -92,6 +92,14 @@
 
             <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Hidden">
                 <StackPanel>
+                    <!-- ══ Common: Use Global Appearance ══ -->
+                    <CheckBox x:Name="UseGlobalAppearanceBox" Margin="0,4,0,8"
+                              Foreground="{StaticResource T1}" FontSize="13"
+                              IsChecked="{Binding UseGlobalAppearance}"
+                              Checked="UseGlobal_Changed" Unchecked="UseGlobal_Changed">
+                        <TextBlock x:Name="LabelUseGlobal" Text="使用全局外观"/>
+                    </CheckBox>
+
                     <!-- ══ Common: Border Thickness ══ -->
                     <TextBlock x:Name="LabelBorderThickness" Style="{StaticResource DLb}"/>
                     <TextBox x:Name="BorderThicknessBox" Style="{StaticResource DTb}" Text="{Binding BorderThicknessText, UpdateSourceTrigger=PropertyChanged}"/>

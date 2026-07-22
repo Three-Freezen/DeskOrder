@@ -16,6 +16,8 @@ public class WidgetService
     public event Action? ClocksChanged;
     public event Action? CalendarsChanged;
 
+    public AppConfig GetConfig() => _appConfig!;
+
     public WidgetService(ConfigService configService)
     {
         _configService = configService;
@@ -97,6 +99,7 @@ public class WidgetService
         _appConfig.PanelHotkeyModifiers = latestConfig.PanelHotkeyModifiers;
         _appConfig.PanelHotkeyKey = latestConfig.PanelHotkeyKey;
         _appConfig.PanelCustomHotkeys = latestConfig.PanelCustomHotkeys;
+        _appConfig.PanelUseGlobalAppearance = latestConfig.PanelUseGlobalAppearance;
         try { _configService.Save(_appConfig); } catch { }
     }
 }

@@ -29,6 +29,7 @@ public class StickyNote
     public int GlassTintLuminosity { get; set; } = 100;
     public string GlassColorMode { get; set; } = "Default";
     public bool EnableLiquidGlass { get; set; } = false;
+    public bool UseGlobalAppearance { get; set; } = true;
     // ── Title bar / button appearance ──
     public string TitleBarFillColor { get; set; } = "#10FFFFFF";
     public double TitleBarOpacity { get; set; } = 6;
@@ -59,7 +60,7 @@ public class StickyNote
         FillColor = FillColor, BorderThickness = BorderThickness,
         GlassBlurAmount = GlassBlurAmount, GlassTintOpacity = GlassTintOpacity,
         GlassTintLuminosity = GlassTintLuminosity, GlassColorMode = GlassColorMode,
-        EnableLiquidGlass = EnableLiquidGlass,
+        EnableLiquidGlass = EnableLiquidGlass, UseGlobalAppearance = UseGlobalAppearance,
         TitleBarFillColor = TitleBarFillColor, TitleBarOpacity = TitleBarOpacity,
         ControlOpacity = ControlOpacity,
         BackgroundImagePath = BackgroundImagePath, BgImageStretch = BgImageStretch,
@@ -103,6 +104,7 @@ public class DesktopClock
     public int GlassTintLuminosity { get; set; } = 100;
     public string GlassColorMode { get; set; } = "Default";
     public bool EnableLiquidGlass { get; set; } = false;
+    public bool UseGlobalAppearance { get; set; } = true;
     // ── Mode-independent fill ──
     public string AnalogFillColor { get; set; } = "#08000000";
     public string DigitalFillColor { get; set; } = "#08000000";
@@ -133,7 +135,7 @@ public class DesktopClock
         FillColor = FillColor, BorderThickness = BorderThickness,
         GlassBlurAmount = GlassBlurAmount, GlassTintOpacity = GlassTintOpacity,
         GlassTintLuminosity = GlassTintLuminosity, GlassColorMode = GlassColorMode,
-        EnableLiquidGlass = EnableLiquidGlass,
+        EnableLiquidGlass = EnableLiquidGlass, UseGlobalAppearance = UseGlobalAppearance,
         AnalogFillColor = AnalogFillColor, DigitalFillColor = DigitalFillColor,
         BackgroundImagePath = BackgroundImagePath,
         BgImageStretch = BgImageStretch,
@@ -164,11 +166,18 @@ public class CalendarNote
     public bool IsCompleted { get; set; } = false;
     public DateTime CreatedAt { get; set; } = DateTime.Now;
 
+    // ── Reminder ──
+    public bool ReminderEnabled { get; set; } = false;
+    public DateTime? ReminderTime { get; set; } = null;
+    public bool ReminderFired { get; set; } = false;
+
     public CalendarNote Clone() => new()
     {
         Id = Id, Date = Date, Content = Content,
         Priority = Priority, IsCompleted = IsCompleted,
-        CreatedAt = CreatedAt
+        CreatedAt = CreatedAt,
+        ReminderEnabled = ReminderEnabled, ReminderTime = ReminderTime,
+        ReminderFired = ReminderFired
     };
 }
 
@@ -196,6 +205,7 @@ public class DesktopCalendar
     public int GlassTintLuminosity { get; set; } = 100;
     public string GlassColorMode { get; set; } = "Default";
     public bool EnableLiquidGlass { get; set; } = false;
+    public bool UseGlobalAppearance { get; set; } = true;
     // ── Background image ──
     public string BackgroundImagePath { get; set; } = "";
     public string BgImageStretch { get; set; } = "UniformToFill";
@@ -227,7 +237,7 @@ public class DesktopCalendar
         FillColor = FillColor, BorderThickness = BorderThickness,
         GlassBlurAmount = GlassBlurAmount, GlassTintOpacity = GlassTintOpacity,
         GlassTintLuminosity = GlassTintLuminosity, GlassColorMode = GlassColorMode,
-        EnableLiquidGlass = EnableLiquidGlass,
+        EnableLiquidGlass = EnableLiquidGlass, UseGlobalAppearance = UseGlobalAppearance,
         BackgroundImagePath = BackgroundImagePath, BgImageStretch = BgImageStretch,
         BackgroundImageOpacity = BackgroundImageOpacity, BgImageZoom = BgImageZoom,
         BgImageOffsetX = BgImageOffsetX, BgImageOffsetY = BgImageOffsetY,

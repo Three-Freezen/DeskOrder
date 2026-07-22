@@ -89,25 +89,24 @@ public partial class CalendarWidget : Window
 
     void ApplyAcrylic()
     {
+        var config = _widgetService.GetConfig();
+        string fillColorStr = _calendar.UseGlobalAppearance ? config.GlobalFillColor : _calendar.FillColor;
+        string borderColorStr = _calendar.UseGlobalAppearance ? config.GlobalBorderColor : _calendar.BorderColor;
+        double borderThickness = _calendar.UseGlobalAppearance ? config.GlobalBorderThickness : _calendar.BorderThickness;
+
         if (_calendar.EnableAcrylic)
         {
             AcrylicHelper.EnableBlur(this, _calendar.GlassBlurAmount, _calendar.GlassTintOpacity,
                 _calendar.GlassTintLuminosity, _calendar.GlassColorMode);
             try
             {
-                var fillColor = (Color)ColorConverter.ConvertFromString(_calendar.FillColor)!;
-                byte bgAlpha = (byte)(_calendar.GlassBlurAmount > 0 ? 0x06 : 0x0F);
-                CalendarBorder.Background = new SolidColorBrush(Color.FromArgb(bgAlpha, fillColor.R, fillColor.G, fillColor.B));
+                // Use fillColor directly — its ARGB alpha controls transparency
+                var fillColor = (Color)ColorConverter.ConvertFromString(fillColorStr)!;
+                CalendarBorder.Background = new SolidColorBrush(fillColor);
             }
             catch
             {
-                CalendarBorder.Background = new SolidColorBrush(Color.FromArgb(0x06, 0x15, 0x15, 0x30));
-            }
-            // Liquid Glass: chromatic dispersion border
-            if (_calendar.EnableLiquidGlass)
-            {
-                CalendarBorder.BorderBrush = AcrylicHelper.CreateChromaticBorder();
-                CalendarBorder.BorderThickness = new Thickness(Math.Max(1.0, _calendar.BorderThickness));
+                CalendarBorder.Background = new SolidColorBrush(Color.FromArgb(0x08, 0x15, 0x15, 0x30));
             }
         }
         else
@@ -116,7 +115,7 @@ public partial class CalendarWidget : Window
             try
             {
                 CalendarBorder.Background = new SolidColorBrush(
-                    (Color)ColorConverter.ConvertFromString(_calendar.FillColor)!);
+                    (Color)ColorConverter.ConvertFromString(fillColorStr)!);
             }
             catch { }
         }
@@ -178,10 +177,7 @@ public partial class CalendarWidget : Window
 
     void ApplyStyle()
     {
-        // Liquid Glass: border handled by ApplyAcrylic (chromatic dispersion)
-        if (_calendar.EnableAcrylic && _calendar.EnableLiquidGlass)
-            return;
-
+        // Always apply user's border color (overrides chromatic border from LiquidGlass if needed)
         try
         {
             CalendarBorder.BorderBrush = new SolidColorBrush(
@@ -285,13 +281,33 @@ public partial class CalendarWidget : Window
     {
         var selectedDate = _vm.SelectedDate;
         if (string.IsNullOrEmpty(selectedDate)) return;
-        var cn = _loc.CurrentLanguage == Services.Language.Chinese;
+        ShowNoteDialog(selectedDate, null);
+    }
 
-        // Dark themed input dialog (matching ZoneSettingsDialog style)
+    void NoteItem_Click(object s, MouseButtonEventArgs e)
+    {
+        if (e.ClickCount == 2 && s is FrameworkElement fe && fe.DataContext is CalendarNoteViewModel nvm)
+        {
+            ShowNoteDialog(nvm.Date, nvm);
+        }
+    }
+
+    void ShowNoteDialog(string dateKey, CalendarNoteViewModel? existingNote)
+    {
+        var cn = _loc.CurrentLanguage == Services.Language.Chinese;
+        bool isEdit = existingNote != null;
+        var title = isEdit ? (cn ? "编辑备注" : "Edit Note") : _loc["Calendar.AddNote"];
+        var existingPriority = existingNote?.Priority ?? NotePriority.None;
+        var existingContent = existingNote?.Content ?? "";
+        var existingReminder = existingNote != null &&
+            _calendar.Notes.TryGetValue(existingNote.Date, out var notes) &&
+            notes.FirstOrDefault(n => n.Id == existingNote.Id) is { ReminderEnabled: true, ReminderTime: not null } realNote
+            ? realNote.ReminderTime : null;
+
         var noteWindow = new Window
         {
-            Title = _loc["Calendar.AddNote"],
-            Width = 320, Height = 220,
+            Title = title,
+            Width = 320, Height = 280,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Owner = this,
             ResizeMode = ResizeMode.NoResize,
@@ -309,24 +325,27 @@ public partial class CalendarWidget : Window
         };
         outerBorder.Effect = new DropShadowEffect { BlurRadius = 24, ShadowDepth = 0, Color = Color.FromArgb(0xAA, 0x00, 0x00, 0x00), Opacity = 0.6 };
 
-        var grid = new Grid { Margin = new Thickness(0) };
-        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var grid = new Grid();
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });    // 0: title
+        grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // 1: content
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });    // 2: priority
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });    // 3: reminder
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });    // 4: buttons
 
         // Title
         grid.Children.Add(new TextBlock
         {
-            Text = _loc["Calendar.AddNote"],
+            Text = title,
             FontSize = 14, FontWeight = FontWeights.SemiBold,
             Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0)),
             Margin = new Thickness(0, 0, 0, 8)
         });
         Grid.SetRow(grid.Children[^1], 0);
 
+        // Content textbox
         var textBox = new TextBox
         {
+            Text = existingContent,
             TextWrapping = TextWrapping.Wrap,
             AcceptsReturn = true,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
@@ -339,6 +358,7 @@ public partial class CalendarWidget : Window
         Grid.SetRow(textBox, 1);
         grid.Children.Add(textBox);
 
+        // Priority
         var priorityPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
         Grid.SetRow(priorityPanel, 2);
         var cmb = ComboBoxHelper.Create(width: 120);
@@ -346,7 +366,13 @@ public partial class CalendarWidget : Window
         cmb.Items.Add(cn ? "低" : "Low");
         cmb.Items.Add(cn ? "中" : "Normal");
         cmb.Items.Add(cn ? "高" : "High");
-        cmb.SelectedIndex = 0;
+        cmb.SelectedIndex = existingPriority switch
+        {
+            NotePriority.Low => 1,
+            NotePriority.Normal => 2,
+            NotePriority.High => 3,
+            _ => 0
+        };
         priorityPanel.Children.Add(new TextBlock
         {
             Text = cn ? "优先级:" : "Priority:",
@@ -357,13 +383,86 @@ public partial class CalendarWidget : Window
         priorityPanel.Children.Add(cmb);
         grid.Children.Add(priorityPanel);
 
+        // Reminder row
+        var reminderPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 0) };
+        Grid.SetRow(reminderPanel, 3);
+        var reminderCheck = new CheckBox
+        {
+            Content = cn ? "提醒" : "Reminder",
+            Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0xA0)),
+            FontSize = 11,
+            IsChecked = existingReminder.HasValue,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 6, 0)
+        };
+        var dateHint = "yyyy-MM-dd";
+        var timeHint = "HH:mm";
+        var reminderDateBox = new TextBox
+        {
+            Width = 85, Height = 24, FontSize = 11,
+            Text = existingReminder.HasValue
+                ? FuzzyDateTimeParser.FormatDate(existingReminder.Value)
+                : dateHint,
+            IsEnabled = existingReminder.HasValue,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            Background = new SolidColorBrush(Color.FromArgb(0x0A, 0xFF, 0xFF, 0xFF)),
+            Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0)),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(0x15, 0xFF, 0xFF, 0xFF)),
+            BorderThickness = new Thickness(1)
+        };
+        var reminderTimeBox = new TextBox
+        {
+            Width = 50, Height = 24, FontSize = 11,
+            Text = existingReminder.HasValue
+                ? FuzzyDateTimeParser.FormatTime(existingReminder.Value.TimeOfDay)
+                : timeHint,
+            IsEnabled = existingReminder.HasValue,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(4, 0, 0, 0),
+            Background = new SolidColorBrush(Color.FromArgb(0x0A, 0xFF, 0xFF, 0xFF)),
+            Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0)),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(0x15, 0xFF, 0xFF, 0xFF)),
+            BorderThickness = new Thickness(1)
+        };
+
+        // Watermark behavior for date box
+        var hintBrush = new SolidColorBrush(Color.FromRgb(0x60, 0x60, 0x80));
+        var textBrush = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0));
+        reminderDateBox.Foreground = hintBrush;
+        reminderDateBox.GotFocus += (_, _) =>
+        {
+            if (reminderDateBox.Text == dateHint) { reminderDateBox.Text = ""; reminderDateBox.Foreground = textBrush; }
+        };
+        reminderDateBox.LostFocus += (_, _) =>
+        {
+            if (string.IsNullOrWhiteSpace(reminderDateBox.Text)) { reminderDateBox.Text = dateHint; reminderDateBox.Foreground = hintBrush; }
+        };
+
+        // Watermark behavior for time box
+        reminderTimeBox.Foreground = hintBrush;
+        reminderTimeBox.GotFocus += (_, _) =>
+        {
+            if (reminderTimeBox.Text == timeHint) { reminderTimeBox.Text = ""; reminderTimeBox.Foreground = textBrush; }
+        };
+        reminderTimeBox.LostFocus += (_, _) =>
+        {
+            if (string.IsNullOrWhiteSpace(reminderTimeBox.Text)) { reminderTimeBox.Text = timeHint; reminderTimeBox.Foreground = hintBrush; }
+        };
+        reminderCheck.Checked += (_, _) => { reminderDateBox.IsEnabled = true; reminderTimeBox.IsEnabled = true; };
+        reminderCheck.Unchecked += (_, _) => { reminderDateBox.IsEnabled = false; reminderTimeBox.IsEnabled = false; };
+        reminderPanel.Children.Add(reminderCheck);
+        reminderPanel.Children.Add(reminderDateBox);
+        reminderPanel.Children.Add(reminderTimeBox);
+        grid.Children.Add(reminderPanel);
+
+        // Buttons
         var btnPanel = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             HorizontalAlignment = HorizontalAlignment.Right,
             Margin = new Thickness(0, 12, 0, 0)
         };
-        Grid.SetRow(btnPanel, 3);
+        Grid.SetRow(btnPanel, 4);
         var cancelBtn = new Button
         {
             Content = _loc["Settings.Cancel"], Width = 70, Height = 30,
@@ -387,32 +486,55 @@ public partial class CalendarWidget : Window
 
         outerBorder.Child = grid;
         noteWindow.Content = outerBorder;
+
         okBtn.Click += (_, _) =>
         {
-            if (!string.IsNullOrWhiteSpace(textBox.Text))
+            if (string.IsNullOrWhiteSpace(textBox.Text)) return;
+            var priority = cmb.SelectedIndex switch
             {
-                var priority = cmb.SelectedIndex switch
+                1 => NotePriority.Low,
+                2 => NotePriority.Normal,
+                3 => NotePriority.High,
+                _ => NotePriority.None
+            };
+            bool reminderEnabled = reminderCheck.IsChecked == true;
+            DateTime? reminderTime = null;
+            string? parsedDate = null;
+            if (reminderEnabled)
+            {
+                var dateVal = FuzzyDateTimeParser.ParseDate(reminderDateBox.Text);
+                var tsVal = FuzzyDateTimeParser.ParseTime(reminderTimeBox.Text);
+                if (dateVal.HasValue)
                 {
-                    1 => NotePriority.Low,
-                    2 => NotePriority.Normal,
-                    3 => NotePriority.High,
-                    _ => NotePriority.None
-                };
-                _vm.AddNote(selectedDate, textBox.Text.Trim(), priority);
-                _vm.RebuildCells();
-                _widgetService.UpdateCalendar(_calendar);
+                    reminderTime = dateVal.Value + (tsVal ?? TimeSpan.FromHours(9));
+                    parsedDate = FuzzyDateTimeParser.FormatDate(dateVal.Value);
+                }
             }
+
+            if (isEdit)
+            {
+                // If reminder date changed, use that as the new note date
+                string? newDate = parsedDate;
+                _vm.UpdateNote(existingNote!, textBox.Text.Trim(), priority, reminderEnabled, reminderTime, newDate);
+            }
+            else
+            {
+                _vm.AddNote(dateKey, textBox.Text.Trim(), priority, reminderEnabled, reminderTime);
+            }
+            _vm.RebuildCells();
+            _widgetService.UpdateCalendar(_calendar);
             noteWindow.Close();
         };
         cancelBtn.Click += (_, _) => noteWindow.Close();
         noteWindow.ShowDialog();
     }
 
-    void NoteCheckChanged(object s, RoutedEventArgs e)
+    void NoteCheck_Click(object s, MouseButtonEventArgs e)
     {
-        if (s is CheckBox cb && cb.Tag is CalendarNoteViewModel nvm)
+        if (s is Border b && b.DataContext is CalendarNoteViewModel nvm)
         {
             _vm.ToggleNoteComplete(nvm);
+            _vm.RebuildCells(); // Recalculate dot indicators
             _widgetService.UpdateCalendar(_calendar);
         }
     }

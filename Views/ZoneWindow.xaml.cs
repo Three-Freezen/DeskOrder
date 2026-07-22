@@ -118,7 +118,10 @@ public partial class ZoneWindow : Window
     {
         NativeMethods.PinToDesktop(this); NativeMethods.SetToolWindow(this);
         NativeMethods.SetRoundedCorners(this, (int)_zone.CornerRadius);
-        ApplyAcrylic();
+        // Re-apply acrylic now that HWND is valid (constructor called ApplyStyle before HWND existed)
+        var config = _mgr.GetConfig();
+        string fillColor = config.UseGlobalAppearance ? config.GlobalFillColor : _zone.FillColor;
+        ApplyAcrylic(fillColor);
         var hwnd = new WindowInteropHelper(this).Handle;
         int ex = NativeMethods.GetWindowLong(hwnd, NativeMethods.GWL_EXSTYLE);
         NativeMethods.SetWindowLong(hwnd, NativeMethods.GWL_EXSTYLE, ex & ~NativeMethods.WS_EX_APPWINDOW);
@@ -288,14 +291,33 @@ public partial class ZoneWindow : Window
     void RearrangeAll()
     {
         if (!_zone.AutoArrange) return;
+
+        // Determine which zone's items to rearrange and which grid size to use
+        List<Models.ZoneItem> items;
+        int gridSize;
+
+        if (_zone.MergedSubZoneIds.Count > 0 && _vm.SelectedSubZoneId.HasValue && _vm.SelectedSubZoneId.Value != _zone.Id)
+        {
+            // Merged mode with a sub-zone tab selected
+            var subZone = _mgr.Zones.FirstOrDefault(z => z.Id == _vm.SelectedSubZoneId.Value);
+            if (subZone == null) return;
+            items = subZone.Items;
+            gridSize = subZone.GridSize;
+        }
+        else
+        {
+            items = _zone.Items;
+            gridSize = _zone.GridSize;
+        }
+
         double x = 10, y = 10;
-        foreach (var item in _zone.Items.OrderBy(i => i.Y).ThenBy(i => i.X))
+        foreach (var item in items.OrderBy(i => i.Y).ThenBy(i => i.X))
         {
             item.X = x; item.Y = y;
-            x += 80;
-            if (x > _zone.Width - 80) { x = 10; y += 90; }
+            x += gridSize;
+            if (x > _zone.Width - gridSize) { x = 10; y += gridSize + 10; }
         }
-        _vm.RefreshItems();
+        _vm.RefreshMergedItems();
     }
 
     // ── Right-click zone ──
@@ -505,6 +527,7 @@ public partial class ZoneWindow : Window
         string borderColor = useGlobal ? config.GlobalBorderColor : _zone.BorderColor;
         string fillColor = useGlobal ? config.GlobalFillColor : _zone.FillColor;
         double borderThickness = useGlobal ? config.GlobalBorderThickness : _zone.BorderThickness;
+
         string titleBarFillColor = _zone.TitleBarFillColor;
         double controlOpacity = _zone.ControlOpacity;
         int cornerRadius = _zone.CornerRadius;
@@ -618,8 +641,8 @@ public partial class ZoneWindow : Window
             }
         }
 
-        // Acrylic (applied first, then we override border/fill on top)
-        ApplyAcrylic();
+        // Acrylic: pass resolved fillColor so it uses the correct value (not stale config)
+        ApplyAcrylic(fillColor);
 
         // Border: always apply user's border color and thickness (AFTER acrylic to ensure they're not overridden)
         try { ZoneBorder.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(borderColor)!); } catch { }
@@ -698,7 +721,7 @@ public partial class ZoneWindow : Window
         RestoreIconChar.Text = icon;
         TitleIconChar.Text = string.IsNullOrEmpty(_zone.IconChar) ? icon : _zone.IconChar;
     }
-    void OnSize(object s, SizeChangedEventArgs e) { if (!IsLoaded || MainContent.Visibility != Visibility.Visible) return; _zone.Width = Width; _zone.Height = Height; ScheduleSave(); if (_zone.MergedSubZoneIds.Count > 0) _vm.RefreshMergedItems(); else RearrangeAll(); UpdateCanvasSize(); NativeMethods.UpdateRoundedCorners(this, (int)_zone.CornerRadius); }
+    void OnSize(object s, SizeChangedEventArgs e) { if (!IsLoaded || MainContent.Visibility != Visibility.Visible) return; _zone.Width = Width; _zone.Height = Height; ScheduleSave(); RearrangeAll(); UpdateCanvasSize(); NativeMethods.UpdateRoundedCorners(this, (int)_zone.CornerRadius); }
 
     void ScheduleSave() { _savePending = true; _saveDebounce.Stop(); _saveDebounce.Start(); }
 
@@ -713,19 +736,17 @@ public partial class ZoneWindow : Window
     }
 
     // ── Acrylic / frosted glass ──
-    void ApplyAcrylic()
+    void ApplyAcrylic(string? fillColorOverride = null)
     {
         if (_zone.EnableAcrylic)
         {
             AcrylicHelper.EnableBlur(this, _zone.GlassBlurAmount, _zone.GlassTintOpacity, _zone.GlassTintLuminosity, _zone.GlassColorMode);
             try
             {
-                var config = _mgr.GetConfig();
-                string fillColor = config.UseGlobalAppearance ? config.GlobalFillColor : _zone.FillColor;
+                string fillColor = fillColorOverride ?? _zone.FillColor;
                 var tint = (Color)ColorConverter.ConvertFromString(fillColor)!;
                 FillRect.Fill = new SolidColorBrush(tint);
-                FillRect.Opacity = 0.15;
-                // Use user's title bar color instead of fixed transparent color
+                FillRect.Opacity = 1.0; // Brush alpha from FillColor controls transparency
                 if (TitleBarBg != null && !string.IsNullOrEmpty(_zone.TitleBarFillColor))
                 {
                     try
@@ -737,7 +758,6 @@ public partial class ZoneWindow : Window
                         TitleBarBg.Background = new SolidColorBrush(Color.FromArgb(0x10, 0xFF, 0xFF, 0xFF));
                     }
                 }
-                // Border is now handled by ApplyStyle() - no need to set it here
             }
             catch
             {
@@ -747,11 +767,9 @@ public partial class ZoneWindow : Window
         else
         {
             AcrylicHelper.DisableBlur(this);
-            // Restore normal fill
             try
             {
-                var config = _mgr.GetConfig();
-                string fillColor = config.UseGlobalAppearance ? config.GlobalFillColor : _zone.FillColor;
+                string fillColor = fillColorOverride ?? _zone.FillColor;
                 FillRect.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(fillColor)!);
                 FillRect.Opacity = 1.0;
                 TitleBarBg.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(_zone.TitleBarFillColor)!);
@@ -927,6 +945,7 @@ public partial class ZoneWindow : Window
         if (s is not Border tab || tab.Tag is not Guid zoneId) return;
         _vm.SelectedSubZoneId = zoneId;
         ApplyStyle(); // Apply style based on selected sub-zone
+        RearrangeAll(); // Rearrange items for the newly selected sub-zone
         UpdateCanvasSize();
         RebuildSubZoneTabs(); // refresh tab highlights
     }

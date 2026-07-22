@@ -198,23 +198,53 @@
                             <ItemsControl ItemsSource="{Binding SelectedNotes}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <StackPanel Orientation="Horizontal" Margin="0,1">
-                                            <CheckBox IsChecked="{Binding IsCompleted}"
-                                                      Width="16" Height="16"
-                                                      VerticalAlignment="Center"
-                                                      Checked="NoteCheckChanged"
-                                                      Unchecked="NoteCheckChanged"
-                                                      Tag="{Binding}"/>
-                                            <TextBlock Text="{Binding Content}"
+                                        <Grid Margin="0,1" ColumnDefinitions="Auto,*,Auto"
+                                              MouseLeftButtonDown="NoteItem_Click"
+                                              Background="Transparent" Cursor="Hand">
+                                            <!-- Checkbox -->
+                                            <Border Grid.Column="0" Width="14" Height="14" CornerRadius="3"
+                                                    BorderBrush="#50FFFFFF" BorderThickness="1"
+                                                    Background="Transparent" Cursor="Hand"
+                                                    VerticalAlignment="Center" Margin="1,0"
+                                                    MouseLeftButtonDown="NoteCheck_Click">
+                                                <Border.Style>
+                                                    <Style TargetType="Border">
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsCompleted}" Value="True">
+                                                                <Setter Property="Background" Value="#306C63FF"/>
+                                                                <Setter Property="BorderBrush" Value="#806C63FF"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Border.Style>
+                                                <TextBlock Text="✓" FontSize="10"
+                                                           Foreground="#6C63FF"
+                                                           HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsCompleted}" Value="False">
+                                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+                                            </Border>
+                                            <!-- Content with ellipsis -->
+                                            <TextBlock Grid.Column="1"
+                                                       Text="{Binding Content}"
                                                        FontSize="11" Foreground="#D0D0E0"
-                                                       VerticalAlignment="Center" Margin="4,0,4,0"/>
-                                            <Button Content="X" Width="16" Height="16"
+                                                       VerticalAlignment="Center" Margin="4,0,4,0"
+                                                       TextTrimming="CharacterEllipsis" MaxWidth="160"/>
+                                            <!-- Delete button -->
+                                            <Button Grid.Column="2" Content="X" Width="16" Height="16"
                                                     FontSize="9" Foreground="#80666688"
                                                     Background="Transparent" BorderThickness="0"
                                                     Cursor="Hand"
                                                     Click="DeleteNote_Click"
                                                     Tag="{Binding}"/>
-                                        </StackPanel>
+                                        </Grid>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>

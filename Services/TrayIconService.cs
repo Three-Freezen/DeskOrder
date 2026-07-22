@@ -112,6 +112,25 @@ public class TrayIconService : IDisposable
         Shell_NotifyIcon(NIM_MODIFY, ref nid);
     }
 
+    private const int NIF_INFO = 0x00000010;
+    private const int NIIF_INFO = 0x00000001;
+
+    public void ShowBalloonTip(string title, string message, int timeoutMs = 5000)
+    {
+        var nid = new NOTIFYICONDATA
+        {
+            cbSize = Marshal.SizeOf(typeof(NOTIFYICONDATA)),
+            hWnd = _hWnd,
+            uID = 1,
+            uFlags = NIF_INFO,
+            szInfoTitle = title.Length > 63 ? title[..63] : title,
+            szInfo = message.Length > 255 ? message[..255] : message,
+            dwInfoFlags = NIIF_INFO,
+            uVersion = 3
+        };
+        Shell_NotifyIcon(NIM_MODIFY, ref nid);
+    }
+
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
         if (msg == WM_TRAYICON)

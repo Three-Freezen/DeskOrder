@@ -16,6 +16,7 @@ public partial class App : System.Windows.Application
     private ConfigService? _configService;
     private NotesService? _notesService;
     private WidgetService? _widgetService;
+    private ReminderService? _reminderService;
     private ManagementWindow? _managementWindow;
     private readonly LocalizationService _loc = LocalizationService.Instance;
 
@@ -101,6 +102,14 @@ public partial class App : System.Windows.Application
         // Register panel hotkey
         if (config.PanelHotkeyEnabled && _mainHwnd != IntPtr.Zero)
             NativeMethods.RegisterHotKey(_mainHwnd, HOTKEY_ID_PANEL, (uint)config.PanelHotkeyModifiers, (uint)config.PanelHotkeyKey);
+
+        // Initialize reminder service
+        if (_trayIcon != null)
+        {
+            _reminderService = new ReminderService(_trayIcon, _widgetService!, _configService!);
+            _reminderService.CheckMissedReminders();
+            _reminderService.Start();
+        }
 
         foreach (var note in _notesService.Notes)
             if (note.IsVisible) OpenNoteWindow(note);
@@ -460,6 +469,7 @@ public partial class App : System.Windows.Application
                 NativeMethods.UnregisterHotKey(_mainHwnd, id);
             NativeMethods.UnregisterHotKey(_mainHwnd, HOTKEY_ID_PANEL);
         }
+        _reminderService?.Dispose();
         _zoneManager?.Shutdown();
         _trayIcon?.Dispose();
         Current.Shutdown();
@@ -473,6 +483,7 @@ public partial class App : System.Windows.Application
                 NativeMethods.UnregisterHotKey(_mainHwnd, id);
             NativeMethods.UnregisterHotKey(_mainHwnd, HOTKEY_ID_PANEL);
         }
+        _reminderService?.Dispose();
         _zoneManager?.Shutdown();
         _trayIcon?.Dispose();
     }

@@ -28,6 +28,8 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
     public string FillColorValue { get => _fillColor; set { _fillColor = value; UpdateHighlights(); OnPropertyChanged(); } }
     private double _fillOpacityPercent = 8;
     public double FillOpacityPercent { get => _fillOpacityPercent; set { _fillOpacityPercent = value; OnPropertyChanged(); } }
+    private bool _useGlobalAppearance = true;
+    public bool UseGlobalAppearance { get => _useGlobalAppearance; set { _useGlobalAppearance = value; OnPropertyChanged(); } }
 
     // Glass settings
     private int _glassBlurAmount = 18;
@@ -65,6 +67,7 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
     public double ParsedBgOffsetY => _bgOffsetY;
     public double ParsedBgZoom => _bgZoom;
     public double ParsedBgOpacity => _bgOpacity;
+    public bool ParsedUseGlobalAppearance => _useGlobalAppearance;
     // Digital background image
     private string _digitalBgImagePath = "";
     private double _digitalBgOffsetX = 0;
@@ -155,6 +158,7 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
     /// <summary>Load settings from a clock model.</summary>
     public void LoadFromClock(DesktopClock clock)
     {
+        UseGlobalAppearance = clock.UseGlobalAppearance;
         BorderThicknessText = clock.BorderThickness.ToString("F1");
         BorderColorValue = clock.BorderColor;
         _fillColor = clock.FillColor;
@@ -204,6 +208,7 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
     /// <summary>Load settings from a calendar model.</summary>
     public void LoadFromCalendar(DesktopCalendar cal)
     {
+        UseGlobalAppearance = cal.UseGlobalAppearance;
         BorderThicknessText = cal.BorderThickness.ToString("F1");
         BorderColorValue = cal.BorderColor;
         _fillColor = cal.FillColor;
@@ -238,6 +243,7 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
     /// <summary>Load settings from a sticky note model.</summary>
     public void LoadFromNote(StickyNote note)
     {
+        UseGlobalAppearance = note.UseGlobalAppearance;
         BorderThicknessText = note.BorderThickness.ToString("F1");
         BorderColorValue = note.BorderColor;
         _fillColor = note.FillColor;
@@ -284,6 +290,7 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
     /// <summary>Load settings from global config (panel).</summary>
     public void LoadFromConfig(AppConfig config)
     {
+        UseGlobalAppearance = config.PanelUseGlobalAppearance;
         BorderThicknessText = config.GlobalBorderThickness.ToString("F1");
         BorderColorValue = config.GlobalBorderColor;
         _fillColor = config.GlobalFillColor;
@@ -330,6 +337,7 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         };
 
         // Common
+        LabelUseGlobal.Text = cn ? "使用全局外观" : "Use Global Appearance";
         LabelBorderThickness.Text = cn ? "边框粗细" : "Border Thickness";
         LabelBorderColor.Text = cn ? "边框颜色" : "Border Color";
         LabelFillColor.Text = cn ? "填充颜色" : "Fill Color";
@@ -659,6 +667,12 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
     }
 
     void CancelButton_Click(object s, RoutedEventArgs e) { DialogResult = false; Close(); }
+
+    void UseGlobal_Changed(object s, RoutedEventArgs e)
+    {
+        // Value is stored in _useGlobalAppearance and read via ParsedUseGlobalAppearance
+        // Caller (ManagementWindow/PanelWindow) saves it on Apply
+    }
 
     string UpdateFillFromOpacity()
     {

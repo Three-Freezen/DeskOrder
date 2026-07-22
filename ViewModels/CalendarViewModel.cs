@@ -64,12 +64,14 @@ public class CalendarViewModel : INotifyPropertyChanged
             var date = new DateTime(DisplayYear, DisplayMonth, Math.Clamp(dayNum, 1, daysInMonth));
             string dateKey = date.ToString("yyyy-MM-dd");
             bool isToday = inMonth && date == today;
-            bool hasNotes = inMonth && _calendar.Notes.TryGetValue(dateKey, out var notes) && notes.Count > 0;
-            int notePriority = 0; // highest priority among notes
-            if (hasNotes)
+            bool hasNotes = false;
+            int notePriority = 0;
+            if (inMonth && _calendar.Notes.TryGetValue(dateKey, out var notes) && notes.Count > 0)
             {
-                var ns = _calendar.Notes[dateKey];
-                notePriority = ns.Where(n => !n.IsCompleted).Select(n => (int)n.Priority).DefaultIfEmpty(0).Max();
+                // Only count incomplete notes for the dot indicator
+                var incomplete = notes.Where(n => !n.IsCompleted).ToList();
+                hasNotes = incomplete.Count > 0;
+                notePriority = incomplete.Select(n => (int)n.Priority).DefaultIfEmpty(0).Max();
             }
 
             Cells.Add(new CalendarCell
@@ -96,13 +98,68 @@ public class CalendarViewModel : INotifyPropertyChanged
         }
     }
 
-    public void AddNote(string dateKey, string content, NotePriority priority = NotePriority.None)
+    public void AddNote(string dateKey, string content, NotePriority priority = NotePriority.None,
+        bool reminderEnabled = false, DateTime? reminderTime = null)
     {
         if (!_calendar.Notes.ContainsKey(dateKey))
             _calendar.Notes[dateKey] = new List<CalendarNote>();
-        var note = new CalendarNote { Date = dateKey, Content = content, Priority = priority, CreatedAt = DateTime.Now };
+        var note = new CalendarNote
+        {
+            Date = dateKey, Content = content, Priority = priority,
+            CreatedAt = DateTime.Now,
+            ReminderEnabled = reminderEnabled && reminderTime.HasValue,
+            ReminderTime = reminderEnabled ? reminderTime : null,
+            ReminderFired = false
+        };
         _calendar.Notes[dateKey].Add(note);
         SelectedNotes.Add(new CalendarNoteViewModel(note));
+    }
+
+    public void UpdateNote(CalendarNoteViewModel noteVm, string content, NotePriority priority,
+        bool reminderEnabled, DateTime? reminderTime, string? newDate = null)
+    {
+        // Find the note in the old date's list
+        CalendarNote? item = null;
+        string oldDate = noteVm.Date;
+
+        if (_calendar.Notes.TryGetValue(oldDate, out var oldNotes))
+        {
+            item = oldNotes.FirstOrDefault(n => n.Id == noteVm.Id);
+        }
+
+        if (item == null) return;
+
+        // Move to new date if changed
+        string targetDate = newDate ?? oldDate;
+        if (targetDate != oldDate)
+        {
+            oldNotes!.Remove(item);
+            if (oldNotes.Count == 0) _calendar.Notes.Remove(oldDate);
+
+            item.Date = targetDate;
+            if (!_calendar.Notes.ContainsKey(targetDate))
+                _calendar.Notes[targetDate] = new List<CalendarNote>();
+            _calendar.Notes[targetDate].Add(item);
+
+            // Update ViewModel reference
+            noteVm.Date = targetDate;
+        }
+
+        // Update fields
+        item.Content = content;
+        item.Priority = priority;
+        item.ReminderEnabled = reminderEnabled && reminderTime.HasValue;
+        item.ReminderTime = reminderEnabled ? reminderTime : null;
+        if (item.ReminderEnabled) item.ReminderFired = false;
+
+        noteVm.Content = content;
+        noteVm.Priority = priority;
+
+        // Rebuild SelectedNotes if the selected date changed
+        if (targetDate != oldDate && _selectedDate == oldDate)
+        {
+            SelectDate(targetDate);
+        }
     }
 
     public void DeleteNote(CalendarNoteViewModel noteVm)
@@ -117,12 +174,12 @@ public class CalendarViewModel : INotifyPropertyChanged
 
     public void ToggleNoteComplete(CalendarNoteViewModel noteVm)
     {
+        noteVm.IsCompleted = !noteVm.IsCompleted;
         if (_calendar.Notes.TryGetValue(noteVm.Date, out var notes))
         {
             var item = notes.FirstOrDefault(n => n.Id == noteVm.Id);
-            if (item != null) item.IsCompleted = !item.IsCompleted;
+            if (item != null) item.IsCompleted = noteVm.IsCompleted;
         }
-        noteVm.IsCompleted = !noteVm.IsCompleted;
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -148,7 +205,7 @@ public class CalendarNoteViewModel : INotifyPropertyChanged
 {
     private CalendarNote _note;
     public Guid Id => _note.Id;
-    public string Date => _note.Date;
+    public string Date { get => _note.Date; set { _note.Date = value; OnPropertyChanged(); } }
     public string Content { get => _note.Content; set { _note.Content = value; OnPropertyChanged(); } }
     public NotePriority Priority { get => _note.Priority; set { _note.Priority = value; OnPropertyChanged(); } }
 

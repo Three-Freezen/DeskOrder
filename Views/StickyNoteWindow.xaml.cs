@@ -196,15 +196,20 @@ public partial class StickyNoteWindow : Window
 
     void ApplyAcrylic()
     {
+        var config = _notesService.GetConfig();
+        string fillColorStr = _note.UseGlobalAppearance ? config.GlobalFillColor : _note.FillColor;
+        string borderColorStr = _note.UseGlobalAppearance ? config.GlobalBorderColor : _note.BorderColor;
+        double borderThickness = _note.UseGlobalAppearance ? config.GlobalBorderThickness : _note.BorderThickness;
+
         if (_note.EnableAcrylic)
         {
             AcrylicHelper.EnableBlur(this, _note.GlassBlurAmount, _note.GlassTintOpacity,
                 _note.GlassTintLuminosity, _note.GlassColorMode);
             try
             {
-                var fillColor = (Color)ColorConverter.ConvertFromString(_note.FillColor)!;
-                byte bgAlpha = (byte)(_note.GlassBlurAmount > 0 ? 0x06 : 0x0F);
-                NoteBorder.Background = new SolidColorBrush(Color.FromArgb(bgAlpha, fillColor.R, fillColor.G, fillColor.B));
+                // Use fillColor directly — its ARGB alpha controls transparency
+                var fillColor = (Color)ColorConverter.ConvertFromString(fillColorStr)!;
+                NoteBorder.Background = new SolidColorBrush(fillColor);
             }
             catch { }
         }
@@ -212,7 +217,7 @@ public partial class StickyNoteWindow : Window
         {
             try
             {
-                var fillColor = (Color)ColorConverter.ConvertFromString(_note.FillColor)!;
+                var fillColor = (Color)ColorConverter.ConvertFromString(fillColorStr)!;
                 NoteBorder.Background = new SolidColorBrush(fillColor);
             }
             catch { }

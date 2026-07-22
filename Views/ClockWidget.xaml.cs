@@ -253,26 +253,29 @@ public partial class ClockWidget : Window
 
     void ApplyAcrylic()
     {
+        var config = _widgetService.GetConfig();
+        string fillColorStr = _clock.UseGlobalAppearance ? config.GlobalFillColor : _clock.FillColor;
+        string borderColorStr = _clock.UseGlobalAppearance ? config.GlobalBorderColor : _clock.BorderColor;
+        double borderThickness = _clock.UseGlobalAppearance ? config.GlobalBorderThickness : _clock.BorderThickness;
+
         if (_clock.EnableAcrylic)
         {
             AcrylicHelper.EnableBlur(this, _clock.GlassBlurAmount, _clock.GlassTintOpacity,
                 _clock.GlassTintLuminosity, _clock.GlassColorMode);
             try
             {
-                var fillColor = (Color)ColorConverter.ConvertFromString(_clock.FillColor)!;
-                // Subtle background — DWM blur + tint handles the glass effect
-                byte bgAlpha = (byte)(_clock.GlassBlurAmount > 0 ? 0x04 : 0x08);
-                ClockBorder.Background = new SolidColorBrush(Color.FromArgb(bgAlpha, fillColor.R, fillColor.G, fillColor.B));
+                // Use fillColor directly — its ARGB alpha controls transparency
+                var fillColor = (Color)ColorConverter.ConvertFromString(fillColorStr)!;
+                ClockBorder.Background = new SolidColorBrush(fillColor);
             }
             catch
             {
-                ClockBorder.Background = new SolidColorBrush(Color.FromArgb(0x04, 0x00, 0x00, 0x00));
+                ClockBorder.Background = new SolidColorBrush(Color.FromArgb(0x08, 0x00, 0x00, 0x00));
             }
-            // Liquid Glass: chromatic dispersion border
             if (_clock.EnableLiquidGlass)
             {
                 ClockBorder.BorderBrush = AcrylicHelper.CreateChromaticBorder();
-                ClockBorder.BorderThickness = new Thickness(Math.Max(1.0, _clock.BorderThickness));
+                ClockBorder.BorderThickness = new Thickness(Math.Max(1.0, borderThickness));
             }
         }
         else
@@ -281,7 +284,7 @@ public partial class ClockWidget : Window
             try
             {
                 ClockBorder.Background = new SolidColorBrush(
-                    (Color)ColorConverter.ConvertFromString(_clock.FillColor)!);
+                    (Color)ColorConverter.ConvertFromString(fillColorStr)!);
             }
             catch { }
         }
@@ -291,10 +294,7 @@ public partial class ClockWidget : Window
 
     void ApplyStyle()
     {
-        // Liquid Glass: border handled by ApplyAcrylic (chromatic dispersion)
-        if (_clock.EnableAcrylic && _clock.EnableLiquidGlass)
-            return;
-
+        // Always apply user's border color (overrides chromatic border from LiquidGlass if needed)
         try
         {
             ClockBorder.BorderBrush = new SolidColorBrush(

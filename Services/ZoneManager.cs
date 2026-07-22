@@ -290,6 +290,7 @@ public class ZoneManager
         _config.PanelHotkeyKey = latestConfig.PanelHotkeyKey;
         _config.PanelCustomHotkeys = latestConfig.PanelCustomHotkeys;
         _config.PanelBackgroundImagePath = latestConfig.PanelBackgroundImagePath;
+        _config.PanelUseGlobalAppearance = latestConfig.PanelUseGlobalAppearance;
         // PanelBgImageStretch: always UniformToFill
         _config.PanelBackgroundImageOpacity = latestConfig.PanelBackgroundImageOpacity;
         _config.PanelBgImageZoom = latestConfig.PanelBgImageZoom;

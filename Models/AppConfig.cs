@@ -31,6 +31,7 @@ public class AppConfig
     public string GlassColorMode { get; set; } = "Default"; // color preset name
 
     // ── Panel ──
+    public bool PanelUseGlobalAppearance { get; set; } = true;
     public bool PanelEnabled { get; set; } = false;
     public double PanelX { get; set; }
     public double PanelY { get; set; }
