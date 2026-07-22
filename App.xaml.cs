@@ -38,7 +38,7 @@ public partial class App : System.Windows.Application
         DispatcherUnhandledException += (s, args) =>
         {
             MessageBox.Show($"Unhandled error:\n{args.Exception.Message}\n\n{args.Exception.StackTrace}",
-                "DesktopZones Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                "DeskOrder Error", MessageBoxButton.OK, MessageBoxImage.Error);
             args.Handled = true;
         };
 
@@ -269,7 +269,7 @@ public partial class App : System.Windows.Application
         }
         catch (Exception ex)
         {
-            System.Windows.MessageBox.Show($"Failed to create note:\n{ex.Message}", "DesktopZones");
+            System.Windows.MessageBox.Show($"Failed to create note:\n{ex.Message}", "DeskOrder");
         }
     }
 
@@ -284,7 +284,7 @@ public partial class App : System.Windows.Application
         }
         catch (Exception ex)
         {
-            System.Windows.MessageBox.Show($"Failed to create clock:\n{ex.Message}", "DesktopZones");
+            System.Windows.MessageBox.Show($"Failed to create clock:\n{ex.Message}", "DeskOrder");
         }
     }
 
@@ -299,7 +299,7 @@ public partial class App : System.Windows.Application
         }
         catch (Exception ex)
         {
-            System.Windows.MessageBox.Show($"Failed to create calendar:\n{ex.Message}", "DesktopZones");
+            System.Windows.MessageBox.Show($"Failed to create calendar:\n{ex.Message}", "DeskOrder");
         }
     }
 

@@ -98,6 +98,7 @@ public partial class ClockWidget : Window
     void OnSizeChanged(object s, SizeChangedEventArgs e)
     {
         if (MainContent.Visibility != Visibility.Visible) return;
+        _clock.Width = Width; _clock.Height = Height;
         NativeMethods.UpdateRoundedCorners(this, 10);
     }
 
@@ -346,6 +347,7 @@ public partial class ClockWidget : Window
             ResizeMode = ResizeMode.NoResize;
             foreach (var grip in FindResizeGrips(this))
                 grip.Visibility = Visibility.Collapsed;
+            PreviewMouseLeftButtonDown -= AnalogDrag;
             PreviewMouseLeftButtonDown += AnalogDrag;
             ApplyBackgroundImage();
         }
@@ -503,14 +505,15 @@ public partial class ClockWidget : Window
         Left = _clock.X; Top = _clock.Y;
         MainContent.Visibility = Visibility.Visible; RestoreButton.Visibility = Visibility.Collapsed;
         MinWidth = 140; MinHeight = 80;
-        Width = 320; Height = 140;
+        Width = _clock.Width > 140 ? _clock.Width : 320;
+        Height = _clock.Height > 80 ? _clock.Height : 140;
         _clock.IsVisible = true; NativeMethods.PinToDesktop(this);
         NativeMethods.SetRoundedCorners(this, 10);
     }
 
     public void HideClock()
     {
-        _clock.X = Left; _clock.Y = Top;
+        _clock.X = Left; _clock.Y = Top; _clock.Width = Width; _clock.Height = Height;
         // Always disable blur and clean up state before hiding
         AcrylicHelper.DisableBlur(this);
         MainContent.Visibility = Visibility.Collapsed;

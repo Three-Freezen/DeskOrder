@@ -83,7 +83,7 @@ namespace DesktopZones.Views {
                 return;
             }
             _contentLoaded = true;
-            System.Uri resourceLocater = new System.Uri("/DesktopZones;component/views/renamedialog.xaml", System.UriKind.Relative);
+            System.Uri resourceLocater = new System.Uri("/DeskOrder;component/views/renamedialog.xaml", System.UriKind.Relative);
             
             #line 1 "..\..\..\..\Views\RenameDialog.xaml"
             System.Windows.Application.LoadComponent(this, resourceLocater);

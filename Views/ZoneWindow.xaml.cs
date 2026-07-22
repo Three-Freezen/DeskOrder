@@ -58,6 +58,8 @@ public partial class ZoneWindow : Window
     private Point _ds, _is;
     private ZoneItemViewModel? _dv;
     private FrameworkElement? _de;
+    private readonly System.Windows.Threading.DispatcherTimer _saveDebounce = new() { Interval = TimeSpan.FromMilliseconds(500) };
+    private bool _savePending;
 
     public ZoneWindow(Zone zone, ZoneManager mgr, ShellIconService icons)
     {
@@ -74,8 +76,9 @@ public partial class ZoneWindow : Window
         ApplyLoc();
         _vm.Items.CollectionChanged += (_, _) => UpdateCanvasSize();
         Loaded += OnLoad;
-        LocationChanged += (_, _) => { _zone.X = Left; _zone.Y = Top; _mgr.SaveConfig(); };
+        LocationChanged += (_, _) => { _zone.X = Left; _zone.Y = Top; ScheduleSave(); };
         SizeChanged += OnSize;
+        _saveDebounce.Tick += (_, _) => { _saveDebounce.Stop(); if (_savePending) { _savePending = false; _mgr.SaveConfig(); } };
         _langChanged = _ => ApplyLoc();
         _loc.LanguageChanged += _langChanged;
         if (!_zone.IsVisible) ApplyHidden();
@@ -695,7 +698,9 @@ public partial class ZoneWindow : Window
         RestoreIconChar.Text = icon;
         TitleIconChar.Text = string.IsNullOrEmpty(_zone.IconChar) ? icon : _zone.IconChar;
     }
-    void OnSize(object s, SizeChangedEventArgs e) { if (!IsLoaded || MainContent.Visibility != Visibility.Visible) return; _zone.Width = Width; _zone.Height = Height; _mgr.SaveConfig(); if (_zone.MergedSubZoneIds.Count > 0) _vm.RefreshMergedItems(); else RearrangeAll(); UpdateCanvasSize(); NativeMethods.UpdateRoundedCorners(this, (int)_zone.CornerRadius); }
+    void OnSize(object s, SizeChangedEventArgs e) { if (!IsLoaded || MainContent.Visibility != Visibility.Visible) return; _zone.Width = Width; _zone.Height = Height; ScheduleSave(); if (_zone.MergedSubZoneIds.Count > 0) _vm.RefreshMergedItems(); else RearrangeAll(); UpdateCanvasSize(); NativeMethods.UpdateRoundedCorners(this, (int)_zone.CornerRadius); }
+
+    void ScheduleSave() { _savePending = true; _saveDebounce.Stop(); _saveDebounce.Start(); }
 
     void UpdateCanvasSize()
     {

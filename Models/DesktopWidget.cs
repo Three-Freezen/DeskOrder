@@ -81,6 +81,8 @@ public class DesktopClock
     public Guid Id { get; set; } = Guid.NewGuid();
     public double X { get; set; } = 300;
     public double Y { get; set; } = 100;
+    public double Width { get; set; } = 320;
+    public double Height { get; set; } = 140;
     public bool IsVisible { get; set; } = true;
     public bool ShowSeconds { get; set; } = true;
     public bool ShowDate { get; set; } = true;
@@ -122,7 +124,7 @@ public class DesktopClock
 
     public DesktopClock Clone() => new()
     {
-        Id = Id, X = X, Y = Y, IsVisible = IsVisible,
+        Id = Id, X = X, Y = Y, Width = Width, Height = Height, IsVisible = IsVisible,
         ShowSeconds = ShowSeconds, ShowDate = ShowDate,
         Use24Hour = Use24Hour, TextColor = TextColor,
         FontSize = FontSize, FontFamily = FontFamily,
@@ -175,6 +177,8 @@ public class DesktopCalendar
     public Guid Id { get; set; } = Guid.NewGuid();
     public double X { get; set; } = 400;
     public double Y { get; set; } = 100;
+    public double Width { get; set; } = 320;
+    public double Height { get; set; } = 440;
     public bool IsVisible { get; set; } = true;
     public bool ShowWeekNumbers { get; set; } = false;
     public bool StartOnMonday { get; set; } = true;
@@ -215,7 +219,7 @@ public class DesktopCalendar
 
     public DesktopCalendar Clone() => new()
     {
-        Id = Id, X = X, Y = Y, IsVisible = IsVisible,
+        Id = Id, X = X, Y = Y, Width = Width, Height = Height, IsVisible = IsVisible,
         ShowWeekNumbers = ShowWeekNumbers, StartOnMonday = StartOnMonday,
         TextColor = TextColor, TodayColor = TodayColor,
         FontSize = FontSize, Opacity = Opacity,

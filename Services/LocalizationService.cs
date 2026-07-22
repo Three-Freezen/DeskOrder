@@ -14,8 +14,8 @@ public class LocalizationService : INotifyPropertyChanged
 
     private readonly Dictionary<string, Dictionary<Language, string>> _strings = new()
     {
-        ["App.Title"] = new() { [Language.Chinese] = "DesktopZones", [Language.English] = "DesktopZones" },
-        ["App.TrayTooltip"] = new() { [Language.Chinese] = "DesktopZones - 桌面分区管理", [Language.English] = "DesktopZones - Desktop Zone Manager" },
+        ["App.Title"] = new() { [Language.Chinese] = "DeskOrder", [Language.English] = "DeskOrder" },
+        ["App.TrayTooltip"] = new() { [Language.Chinese] = "DeskOrder - 秩序桌面", [Language.English] = "DeskOrder - Desktop Order" },
 
         ["Tray.ShowAll"] = new() { [Language.Chinese] = "显示所有分区", [Language.English] = "Show All Zones" },
         ["Tray.HideAll"] = new() { [Language.Chinese] = "隐藏所有分区", [Language.English] = "Hide All Zones" },
@@ -44,7 +44,7 @@ public class LocalizationService : INotifyPropertyChanged
         ["Item.Delete"] = new() { [Language.Chinese] = "删除", [Language.English] = "Delete" },
         ["Item.FailedToOpen"] = new() { [Language.Chinese] = "无法打开", [Language.English] = "Failed to open" },
 
-        ["Manage.Title"] = new() { [Language.Chinese] = "DesktopZones - 管理分区", [Language.English] = "DesktopZones - Manage Zones" },
+        ["Manage.Title"] = new() { [Language.Chinese] = "DeskOrder - 管理分区", [Language.English] = "DeskOrder - Manage Zones" },
         ["Manage.EmptyHint"] = new() { [Language.Chinese] = "还没有分区。点击「+ 新建分区」开始使用。", [Language.English] = "No zones created yet. Click '+ New Zone' to get started." },
         ["Manage.Items"] = new() { [Language.Chinese] = "项目", [Language.English] = "Items" },
         ["Manage.StartWithWindows"] = new() { [Language.Chinese] = "开机启动", [Language.English] = "Start with Windows" },

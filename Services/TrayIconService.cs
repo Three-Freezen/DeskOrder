@@ -68,7 +68,7 @@ public class TrayIconService : IDisposable
     public event Action? ManageZones;
     public event Action? Exit;
 
-    public TrayIconService(Icon icon, string tooltip = "DesktopZones")
+    public TrayIconService(Icon icon, string tooltip = "DeskOrder")
     {
         _icon = icon;
 

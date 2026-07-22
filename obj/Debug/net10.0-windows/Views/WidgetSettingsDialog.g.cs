@@ -635,7 +635,7 @@ namespace DesktopZones.Views {
                 return;
             }
             _contentLoaded = true;
-            System.Uri resourceLocater = new System.Uri("/DesktopZones;component/views/widgetsettingsdialog.xaml", System.UriKind.Relative);
+            System.Uri resourceLocater = new System.Uri("/DeskOrder;component/views/widgetsettingsdialog.xaml", System.UriKind.Relative);
             
             #line 1 "..\..\..\..\Views\WidgetSettingsDialog.xaml"
             System.Windows.Application.LoadComponent(this, resourceLocater);

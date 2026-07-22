@@ -27,7 +27,6 @@ public partial class StickyNoteWindow : Window
     private readonly StickyNoteViewModel _vm;
     private readonly LocalizationService _loc = LocalizationService.Instance;
     private bool _initializing = true;
-    private bool _restoreDragging;
     private Point _restoreDown;
     public Action? OnStateChanged { get; set; }
 
@@ -54,7 +53,7 @@ public partial class StickyNoteWindow : Window
         if (note.PinnedTop) Topmost = true;
 
         LocationChanged += (_, _) => { _note.X = Left; _note.Y = Top; };
-        SizeChanged += (_, _) => { _note.Width = Width; _note.Height = Height; if (MainContent.Visibility == Visibility.Visible) NativeMethods.UpdateRoundedCorners(this, 10); };
+        SizeChanged += (_, _) => { if (MainContent.Visibility == Visibility.Visible) { _note.Width = Width; _note.Height = Height; NativeMethods.UpdateRoundedCorners(this, 10); } };
 
         Loaded += OnLoad;
         Activated += (_, _) => { Topmost = true; };
@@ -118,6 +117,7 @@ public partial class StickyNoteWindow : Window
         Width = _note.Width; Height = _note.Height;
         _note.IsVisible = true; NativeMethods.PinToDesktop(this);
         NativeMethods.SetRoundedCorners(this, 10);
+        _notesService.UpdateNote(_note);
         OnStateChanged?.Invoke();
     }
 
@@ -166,7 +166,6 @@ public partial class StickyNoteWindow : Window
 
     void Restore_MouseDown(object s, MouseButtonEventArgs e)
     {
-        _restoreDragging = false;
         _restoreDown = e.GetPosition(this);
         RestoreButton.CaptureMouse();
         e.Handled = true;
@@ -178,7 +177,6 @@ public partial class StickyNoteWindow : Window
         var d = e.GetPosition(this) - _restoreDown;
         if (Math.Abs(d.X) > 3 || Math.Abs(d.Y) > 3)
         {
-            _restoreDragging = true;
             RestoreButton.ReleaseMouseCapture();
             try { DragMove(); } catch { }
             _note.X = Left; _note.Y = Top;
@@ -188,7 +186,7 @@ public partial class StickyNoteWindow : Window
     void Restore_MouseUp(object s, MouseButtonEventArgs e)
     {
         RestoreButton.ReleaseMouseCapture();
-        if (!_restoreDragging) { ShowNote(); _notesService.UpdateNote(_note); }
+        ShowNote();
     }
 
     void Restore_Enter(object s, MouseEventArgs e) { RestoreButton.Background = new SolidColorBrush(Color.FromArgb(0xFF, 0x2A, 0x2A, 0x4E)); }

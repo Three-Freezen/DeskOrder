@@ -95,7 +95,7 @@ public class ManagementViewModel : INotifyPropertyChanged
     {
         var startupPath = System.IO.Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.Startup),
-            "DesktopZones.lnk");
+            "DeskOrder.lnk");
 
         if (_startWithWindows)
         {
@@ -125,7 +125,7 @@ public class ManagementViewModel : INotifyPropertyChanged
             dynamic? shortcut = shell.CreateShortcut(shortcutPath);
             shortcut.TargetPath = exePath;
             shortcut.WorkingDirectory = System.IO.Path.GetDirectoryName(exePath);
-            shortcut.Description = "DesktopZones";
+            shortcut.Description = "DeskOrder - 秩序桌面";
             shortcut.Save();
         }
         catch

@@ -962,7 +962,7 @@ public partial class ManagementWindow : Window
         btns.Children.Add(appBtn);
 
         // Toggle switch (matching zone/clock/calendar style)
-        bool noteVisible = _openNoteWindows.TryGetValue(note.Id, out var noteWin) && noteWin.IsVisible;
+        bool noteVisible = _openNoteWindows.TryGetValue(note.Id, out var noteWin) && noteWin is StickyNoteWindow snw && snw.MainContent.Visibility == Visibility.Visible;
         var noteToggleBorder = new Border
         {
             Width = 40, Height = 20, CornerRadius = new CornerRadius(10),
@@ -1831,7 +1831,8 @@ public partial class ManagementWindow : Window
 
         dot.BeginAnimation(MarginProperty, slideAnim);
         dot.Background.BeginAnimation(SolidColorBrush.ColorProperty, colorAnim);
-        dot.HorizontalAlignment = targetAlign;
+        // Defer HorizontalAlignment change to after animation completes to avoid jump
+        slideAnim.Completed += (_, _) => dot.HorizontalAlignment = targetAlign;
     }
 
     // ── 3-state sync ──
@@ -3257,7 +3258,7 @@ public partial class ManagementWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"Failed to create note:\n{ex.Message}", "DesktopZones", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show($"Failed to create note:\n{ex.Message}", "DeskOrder", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -3275,7 +3276,7 @@ public partial class ManagementWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"Failed to create clock:\n{ex.Message}", "DesktopZones", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show($"Failed to create clock:\n{ex.Message}", "DeskOrder", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -3293,7 +3294,7 @@ public partial class ManagementWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"Failed to create calendar:\n{ex.Message}", "DesktopZones", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show($"Failed to create calendar:\n{ex.Message}", "DeskOrder", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -3317,11 +3318,14 @@ public partial class ManagementWindow : Window
         _openNoteWindows[note.Id] = window;
         window.Show();
         window.Activate();
-        // After window is fully rendered, sync toggle with animation
+        // Sync toggle dot after window is fully rendered
         Dispatcher.BeginInvoke(new Action(() =>
         {
             if (_noteToggleDots.TryGetValue(note.Id, out var dot))
-                AnimateToggleDot(dot, true);
+            {
+                bool isActive = window.MainContent.Visibility == Visibility.Visible;
+                AnimateToggleDot(dot, isActive);
+            }
             else
                 RefreshNotesList();
         }), System.Windows.Threading.DispatcherPriority.ContextIdle);

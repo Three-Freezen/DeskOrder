@@ -81,6 +81,7 @@ public partial class CalendarWidget : Window
     void OnSizeChanged(object s, SizeChangedEventArgs e)
     {
         if (MainContent.Visibility != Visibility.Visible) return;
+        _calendar.Width = Width; _calendar.Height = Height;
         NativeMethods.UpdateRoundedCorners(this, 10);
     }
 
@@ -444,14 +445,15 @@ public partial class CalendarWidget : Window
         Left = _calendar.X; Top = _calendar.Y;
         MainContent.Visibility = Visibility.Visible; RestoreButton.Visibility = Visibility.Collapsed;
         MinWidth = 260; MinHeight = 340;
-        Width = 320; Height = 440;
+        Width = _calendar.Width > 260 ? _calendar.Width : 320;
+        Height = _calendar.Height > 340 ? _calendar.Height : 440;
         _calendar.IsVisible = true; NativeMethods.PinToDesktop(this);
         NativeMethods.SetRoundedCorners(this, 10);
     }
 
     public void HideCalendar()
     {
-        _calendar.X = Left; _calendar.Y = Top;
+        _calendar.X = Left; _calendar.Y = Top; _calendar.Width = Width; _calendar.Height = Height;
         // Always disable blur and clean up state before hiding
         AcrylicHelper.DisableBlur(this);
         MainContent.Visibility = Visibility.Collapsed;

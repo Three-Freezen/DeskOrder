@@ -6,6 +6,11 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <AssemblyName>DeskOrder</AssemblyName>
+    <Product>DeskOrder - 秩序桌面</Product>
+    <Description>桌面分区管理工具，将混乱的桌面整理为有序的工作区域</Description>
+    <Company>Three-Freeze</Company>
+    <Authors>Three-Freeze</Authors>
   </PropertyGroup>
 
   <ItemGroup>
