@@ -21,7 +21,7 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
 
     // Common settings
     private string _borderThicknessText = "1.0";
-    public string BorderThicknessText { get => _borderThicknessText; set { _borderThicknessText = value; OnPropertyChanged(); } }
+    public string BorderThicknessText { get => _borderThicknessText; set { _borderThicknessText = value; OnPropertyChanged(); PushToWidget(); } }
 
     // Widget dimensions (sticky note / calendar only)
     private string _widgetWidth = "260";
@@ -863,6 +863,13 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
             case WidgetSettingsTarget.Clock when _clockModel != null:
                 _clockModel.FillColor = fillColor; _clockModel.BorderColor = BorderColorValue;
                 _clockModel.BorderThickness = bt; _clockModel.UseGlobalAppearance = UseGlobalAppearance;
+                // When UseGlobalAppearance=true, ApplyAcrylic reads GlobalBorderThickness/GlobalFillColor
+                if (UseGlobalAppearance && Application.Current is App cApp && cApp.ManagementWindow?.WidgetService is { } wSvc)
+                {
+                    var wCfg = wSvc.GetConfig();
+                    wCfg.GlobalBorderThickness = bt;
+                    wCfg.GlobalFillColor = fillColor;
+                }
                 _clockModel.EnableRestoreButton = _enableRestoreButton;
                 _clockModel.EnableLiquidGlass = _liquidGlass; _clockModel.GlassBlurAmount = _glassBlurAmount;
                 _clockModel.GlassTintOpacity = _glassTintOpacity; _clockModel.GlassTintLuminosity = _glassTintLuminosity;
@@ -881,6 +888,13 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
             case WidgetSettingsTarget.Calendar when _calModel != null:
                 _calModel.FillColor = fillColor; _calModel.BorderColor = BorderColorValue;
                 _calModel.BorderThickness = bt; _calModel.UseGlobalAppearance = UseGlobalAppearance;
+                // When UseGlobalAppearance=true, ApplyAcrylic reads GlobalBorderThickness/GlobalFillColor
+                if (UseGlobalAppearance && Application.Current is App calApp && calApp.ManagementWindow?.WidgetService is { } wSvc2)
+                {
+                    var wCfg2 = wSvc2.GetConfig();
+                    wCfg2.GlobalBorderThickness = bt;
+                    wCfg2.GlobalFillColor = fillColor;
+                }
                 _calModel.EnableRestoreButton = _enableRestoreButton;
                 _calModel.EnableLiquidGlass = _liquidGlass; _calModel.GlassBlurAmount = _glassBlurAmount;
                 _calModel.GlassTintOpacity = _glassTintOpacity; _calModel.GlassTintLuminosity = _glassTintLuminosity;
@@ -980,6 +994,12 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
             case WidgetSettingsTarget.Clock when _clockModel != null:
                 _clockModel.FillColor = _snapFillColor; _clockModel.BorderColor = _snapBorderColor;
                 _clockModel.BorderThickness = _snapBorderThickness; _clockModel.UseGlobalAppearance = _snapUseGlobal;
+                if (_snapUseGlobal && Application.Current is App cAppC && cAppC.ManagementWindow?.WidgetService is { } wSvcC)
+                {
+                    var wCfgC = wSvcC.GetConfig();
+                    wCfgC.GlobalBorderThickness = _snapBorderThickness;
+                    wCfgC.GlobalFillColor = _snapFillColor;
+                }
                 _clockModel.EnableRestoreButton = _snapEnableRestore;
                 _clockModel.EnableLiquidGlass = _snapLiquidGlass; _clockModel.GlassBlurAmount = _snapGlassBlur;
                 _clockModel.GlassTintOpacity = _snapGlassTintOpacity; _clockModel.GlassTintLuminosity = _snapGlassTintLuminosity;
@@ -997,6 +1017,12 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
             case WidgetSettingsTarget.Calendar when _calModel != null:
                 _calModel.FillColor = _snapFillColor; _calModel.BorderColor = _snapBorderColor;
                 _calModel.BorderThickness = _snapBorderThickness; _calModel.UseGlobalAppearance = _snapUseGlobal;
+                if (_snapUseGlobal && Application.Current is App calAppC && calAppC.ManagementWindow?.WidgetService is { } wSvcCal)
+                {
+                    var wCfgCal = wSvcCal.GetConfig();
+                    wCfgCal.GlobalBorderThickness = _snapBorderThickness;
+                    wCfgCal.GlobalFillColor = _snapFillColor;
+                }
                 _calModel.EnableRestoreButton = _snapEnableRestore;
                 _calModel.EnableLiquidGlass = _snapLiquidGlass; _calModel.GlassBlurAmount = _snapGlassBlur;
                 _calModel.GlassTintOpacity = _snapGlassTintOpacity; _calModel.GlassTintLuminosity = _snapGlassTintLuminosity;

@@ -32,6 +32,7 @@ public partial class App : System.Windows.Application
     public Window? PanelWindow => _panelWindow;
     public ClockWidget? GetClockWindow(Guid id) => _clockWindows.TryGetValue(id, out var w) && w is ClockWidget cw ? cw : null;
     public CalendarWidget? GetCalendarWindow(Guid id) => _calendarWindows.TryGetValue(id, out var w) && w is CalendarWidget cal ? cal : null;
+    public ManagementWindow? ManagementWindow => _managementWindow;
 
     // ── Global hotkey ──
     private const int WM_HOTKEY = 0x0312;
