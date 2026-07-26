@@ -339,7 +339,7 @@ public partial class PanelWindow : Window
                     {
                         foreach (var item in zone.Items.ToList())
                         {
-                            if (hasSearch && !item.Name.Contains(search, StringComparison.OrdinalIgnoreCase))
+                            if (hasSearch && !FuzzySearchHelper.MatchFuzzy(item.Name, search))
                                 continue;
                             var card = CreateItemCard(item, zone, isGrid: true);
                             wrapPanel.Children.Add(card);
@@ -354,7 +354,7 @@ public partial class PanelWindow : Window
                     {
                         foreach (var item in zone.Items.ToList())
                         {
-                            if (hasSearch && !item.Name.Contains(search, StringComparison.OrdinalIgnoreCase))
+                            if (hasSearch && !FuzzySearchHelper.MatchFuzzy(item.Name, search))
                                 continue;
                             var card = CreateItemCard(item, zone, isGrid: false);
                             ContentStack.Children.Add(card);

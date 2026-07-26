@@ -195,7 +195,7 @@ public static class NativeMethods
         helper.EnsureHandle();
         int exStyle = GetWindowLong(helper.Handle, GWL_EXSTYLE);
         SetWindowLong(helper.Handle, GWL_EXSTYLE,
-            exStyle | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE);
+            exStyle | WS_EX_TOOLWINDOW);
     }
 
     /// <summary>Remove WS_THICKFRAME to prevent OS-interactive edge resize (keep corner grips via SendMessage).</summary>

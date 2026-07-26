@@ -27,6 +27,7 @@ public partial class StickyNoteWindow : Window
     private readonly StickyNoteViewModel _vm;
     private readonly LocalizationService _loc = LocalizationService.Instance;
     private bool _initializing = true;
+    private bool _pendingUnderline;
     private Point _restoreDown;
     public Action? OnStateChanged { get; set; }
 
@@ -78,12 +79,11 @@ public partial class StickyNoteWindow : Window
     {
         if (string.IsNullOrEmpty(content))
         {
-            ContentBox.Document = new FlowDocument(new Paragraph(new Run("") { Foreground = new SolidColorBrush(Color.FromRgb(0xE0, 0xE0, 0xE0)) }));
+            ContentBox.Document = new FlowDocument(new Paragraph(new Run("")));
             return;
         }
-        // Simple format: plain text with line breaks preserved
         var doc = new FlowDocument { LineHeight = double.NaN };
-        var para = new Paragraph { Foreground = new SolidColorBrush(Color.FromRgb(0xE0, 0xE0, 0xE0)) };
+        var para = new Paragraph();
         para.Inlines.Add(new Run(content));
         doc.Blocks.Add(para);
         ContentBox.Document = doc;
@@ -427,7 +427,11 @@ public partial class StickyNoteWindow : Window
         {
             if (double.TryParse(tag, out var fs))
             {
-                ApplyToSelection(TextElement.FontSizeProperty, fs);
+                var sel = ContentBox.Selection;
+                if (sel != null && !sel.IsEmpty)
+                    sel.ApplyPropertyValue(TextElement.FontSizeProperty, fs);
+                else
+                    ContentBox.FontSize = fs;
             }
         }
     }
@@ -474,13 +478,17 @@ public partial class StickyNoteWindow : Window
         var sel = ContentBox.Selection;
         if (sel == null || sel.IsEmpty)
         {
-            // Can't easily toggle underline on empty selection for new text in RichTextBox
+            _pendingUnderline = !_pendingUnderline;
+            if (_pendingUnderline)
+                ContentBox.Selection.ApplyPropertyValue(Inline.TextDecorationsProperty, TextDecorations.Underline);
+            UpdateFormatButtons();
             return;
         }
         var currentDeco = sel.GetPropertyValue(Inline.TextDecorationsProperty);
         var newDeco = (currentDeco is TextDecorationCollection td && td.Count > 0)
             ? null : TextDecorations.Underline;
         sel.ApplyPropertyValue(Inline.TextDecorationsProperty, newDeco);
+        _pendingUnderline = newDeco != null;
         UpdateFormatButtons();
     }
 
@@ -496,8 +504,13 @@ public partial class StickyNoteWindow : Window
             try
             {
                 var color = (Color)ColorConverter.ConvertFromString(colorHex);
-                ApplyToSelection(Inline.ForegroundProperty, new SolidColorBrush(color));
-                FontColorBtn.Foreground = new SolidColorBrush(color);
+                var brush = new SolidColorBrush(color);
+                var sel = ContentBox.Selection;
+                if (sel != null && !sel.IsEmpty)
+                    sel.ApplyPropertyValue(Inline.ForegroundProperty, brush);
+                else
+                    ContentBox.Foreground = brush;
+                FontColorBtn.Foreground = brush;
             }
             catch { }
         }
@@ -514,7 +527,11 @@ public partial class StickyNoteWindow : Window
             {
                 var color = (Color)ColorConverter.ConvertFromString("#" + dlg.SelectedColor);
                 var brush = new SolidColorBrush(color);
-                ApplyToSelection(Inline.ForegroundProperty, brush);
+                var sel = ContentBox.Selection;
+                if (sel != null && !sel.IsEmpty)
+                    sel.ApplyPropertyValue(Inline.ForegroundProperty, brush);
+                else
+                    ContentBox.Foreground = brush;
                 FontColorBtn.Foreground = brush;
             }
             catch { }
@@ -534,6 +551,39 @@ public partial class StickyNoteWindow : Window
     {
         if (_initializing) return;
         UpdateFormatButtons();
+    }
+
+    void ContentBox_TextInput(object s, TextCompositionEventArgs e)
+    {
+        // Apply underline at caret BEFORE text is inserted — new text inherits it
+        if (_pendingUnderline && ContentBox.Selection != null && ContentBox.Selection.IsEmpty)
+        {
+            ContentBox.Selection.ApplyPropertyValue(Inline.TextDecorationsProperty, TextDecorations.Underline);
+        }
+    }
+
+    void ContentBox_TextChanged(object s, TextChangedEventArgs e)
+    {
+        if (_initializing || !_pendingUnderline) return;
+        // Handle paste: apply underline to pasted ranges
+        foreach (var change in e.Changes)
+        {
+            if (change.AddedLength > 0)
+            {
+                try
+                {
+                    var start = ContentBox.Document.ContentStart;
+                    for (int i = 0; i < change.Offset; i++)
+                        start = start.GetNextInsertionPosition(LogicalDirection.Forward);
+                    var end = start;
+                    for (int i = 0; i < change.AddedLength; i++)
+                        end = end.GetNextInsertionPosition(LogicalDirection.Forward);
+                    if (start != null && end != null)
+                        new TextRange(start, end).ApplyPropertyValue(Inline.TextDecorationsProperty, TextDecorations.Underline);
+                }
+                catch { }
+            }
+        }
     }
 
     void UpdateFormatButtons()
@@ -576,7 +626,8 @@ public partial class StickyNoteWindow : Window
         }
         else
         {
-            UnderlineBtn.Background = Brushes.Transparent;
+            UnderlineBtn.Background = _pendingUnderline
+                ? new SolidColorBrush(Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF)) : Brushes.Transparent;
         }
 
         // Font size combo

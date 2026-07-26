@@ -497,7 +497,12 @@ public partial class ZoneWindow : Window
         _mgr.SaveConfig();
         e.Handled = true;
     }
-    void EditButton_Click(object s, MouseButtonEventArgs e) { _vm.IsEditing = !_vm.IsEditing; EditBtnText.Text = _vm.IsEditing ? "✓" : "⚙"; e.Handled = true; }
+    void EditButton_Click(object s, MouseButtonEventArgs e)
+    {
+        var dlg = new ZoneSettingsDialog(_zone, _mgr) { Owner = this };
+        dlg.ShowDialog();
+        e.Handled = true;
+    }
 
     // ── File drops (WPF) ──
 

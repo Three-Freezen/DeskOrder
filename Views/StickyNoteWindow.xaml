@@ -237,7 +237,9 @@
                              VerticalScrollBarVisibility="Hidden"
                              Margin="8,4,8,8" MinHeight="100"
                              AcceptsTab="True"
-                             SelectionChanged="ContentBox_SelectionChanged"/>
+                             SelectionChanged="ContentBox_SelectionChanged"
+                             TextChanged="ContentBox_TextChanged"
+                             PreviewTextInput="ContentBox_TextInput"/>
             </Grid>
         </Border>
 
