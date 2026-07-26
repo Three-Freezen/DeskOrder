@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyDescriptionAttribute("桌面分区管理工具，将混乱的桌面整理为有序的工作区域")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+24f18fd6c1a494f39ef9b6d2992f2a5097b90d18")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+645fb1461253bb890b83e11bb227f50e1902d5e2")]
 [assembly: System.Reflection.AssemblyProductAttribute("DeskOrder - 秩序桌面")]
 [assembly: System.Reflection.AssemblyTitleAttribute("DeskOrder")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

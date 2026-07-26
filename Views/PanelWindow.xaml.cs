@@ -151,7 +151,7 @@ public partial class PanelWindow : Window
     {
         var config = _zoneManager.GetConfig();
         var dlg = new WidgetSettingsDialog(WidgetSettingsTarget.Panel) { Owner = this };
-        dlg.LoadFromConfig(config);
+        dlg.LoadFromConfig(config, _zoneManager);
         if (dlg.ShowDialog() == true && dlg.DialogResultOk)
         {
             config.PanelWidth = dlg.ParsedWidth;

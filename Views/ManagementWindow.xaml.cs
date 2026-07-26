@@ -2919,9 +2919,11 @@ public partial class ManagementWindow : Window
 
             var cn = _loc.CurrentLanguage == Services.Language.Chinese;
             var win = new PanelWindow(_zoneManager, _configService);
+            ((App)System.Windows.Application.Current)._panelWindow = win;
             win.Closed += (_, _) =>
             {
                 _panelWindow = null;
+                ((App)System.Windows.Application.Current)._panelWindow = null;
                 Dispatcher.BeginInvoke(new Action(() => RefreshPanelCard()));
             };
             win.Show();
