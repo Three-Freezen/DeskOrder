@@ -22,11 +22,11 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
     public Zone ResultZone { get; private set; }
 
     private string _zoneName = "";
-    public string ZoneName { get => _zoneName; set { _zoneName = value; OnPropertyChanged(); } }
+    public string ZoneName { get => _zoneName; set { _zoneName = value; OnPropertyChanged(); PushToZone(); } }
     private string _zoneWidth = "400";
-    public string ZoneWidth { get => _zoneWidth; set { _zoneWidth = value; OnPropertyChanged(); } }
+    public string ZoneWidth { get => _zoneWidth; set { _zoneWidth = value; OnPropertyChanged(); PushToZone(); } }
     private string _zoneHeight = "300";
-    public string ZoneHeight { get => _zoneHeight; set { _zoneHeight = value; OnPropertyChanged(); } }
+    public string ZoneHeight { get => _zoneHeight; set { _zoneHeight = value; OnPropertyChanged(); PushToZone(); } }
     private string _gridSize = "80";
     public string GridSize
     {
@@ -35,13 +35,13 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
         {
             _gridSize = value;
             OnPropertyChanged();
-            // (no-op: placeholder for future grid-size sync)
+            PushToZone();
         }
     }
     private bool _snapToGrid = true;
-    public bool SnapToGrid { get => _snapToGrid; set { _snapToGrid = value; OnPropertyChanged(); } }
+    public bool SnapToGrid { get => _snapToGrid; set { _snapToGrid = value; OnPropertyChanged(); PushToZone(); } }
     private string _borderThicknessText = "1.5";
-    public string BorderThicknessText { get => _borderThicknessText; set { _borderThicknessText = value; OnPropertyChanged(); } }
+    public string BorderThicknessText { get => _borderThicknessText; set { _borderThicknessText = value; OnPropertyChanged(); PushToZone(); } }
 
     private string _borderColor = "#30FFFFFF";
     public string BorderColorValue { get => _borderColor; set { _borderColor = value; UpdateHighlights(); OnPropertyChanged(); PushToZone(); } }
@@ -53,7 +53,7 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
     private bool _isLoading = true;
     public string BgImagePath { get => _bgImagePath; set { _bgImagePath = value; if (!string.IsNullOrEmpty(value) && !_isLoading) _fillColor = "#01000000"; if (CropBtn != null) CropBtn.IsEnabled = !string.IsNullOrEmpty(value) && File.Exists(value); OnPropertyChanged(); } }
     private string _iconCharText = "";
-    public string IconCharText { get => _iconCharText; set { _iconCharText = value; IconPreview.Text = string.IsNullOrEmpty(value) ? "⊞" : value[..Math.Min(value.Length, 2)]; OnPropertyChanged(); } }
+    public string IconCharText { get => _iconCharText; set { _iconCharText = value; IconPreview.Text = string.IsNullOrEmpty(value) ? "⊞" : value[..Math.Min(value.Length, 2)]; OnPropertyChanged(); PushToZone(); } }
     private string _iconColor = "#FFFFFF";
     public string IconColorValue { get => _iconColor; set { _iconColor = value; UpdateHighlights(); OnPropertyChanged(); PushToZone(); } }
     private string _textColor = "#A0FFFFFF";
