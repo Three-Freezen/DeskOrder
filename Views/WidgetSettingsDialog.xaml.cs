@@ -832,7 +832,7 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
                 _noteModel.GlassColorMode = _glassColorMode;
                 if (w >= 100) _noteModel.Width = w; if (h >= 100) _noteModel.Height = h;
                 // Refresh the note window via App._noteWindows
-                if (Application.Current is App app && app._noteWindows.TryGetValue(_noteModel.Id, out var noteWin) && noteWin is StickyNoteWindow snw)
+                if (Application.Current is App noteApp && noteApp._noteWindows.TryGetValue(_noteModel.Id, out var noteWin) && noteWin is StickyNoteWindow snw)
                     snw.RefreshAppearance();
                 break;
 
@@ -846,17 +846,13 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
                 _panelConfig.EnableLiquidGlass = _liquidGlass; _panelConfig.GlassBlurAmount = _glassBlurAmount;
                 _panelConfig.GlassTintOpacity = _glassTintOpacity; _panelConfig.GlassTintLuminosity = _glassTintLuminosity;
                 _panelConfig.GlassColorMode = _glassColorMode;
-                // Also update GlobalFillColor when UseGlobalAppearance is true,
-                // because PanelWindow.ApplyAcrylic() reads GlobalFillColor in that case
                 if (UseGlobalAppearance)
                 {
                     _panelConfig.GlobalFillColor = fillColor;
                 }
                 if (w >= 100) _panelConfig.PanelWidth = w; if (h >= 100) _panelConfig.PanelHeight = h;
-                // NOTE: Do NOT call SaveConfig() here — it reloads from disk and overwrites in-memory changes.
-                // Save is done in ApplyButton_Click after validation.
-                // Refresh panel window
-                if (Application.Current.MainWindow is PanelWindow panelWin)
+                // Refresh panel window via App lookup (same pattern as notes)
+                if (Application.Current is App panelApp && panelApp.PanelWindow is PanelWindow panelWin)
                 {
                     panelWin.ApplyAcrylic();
                     panelWin.ApplyStyle();
@@ -877,9 +873,9 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
                 _clockModel.DigitalBackgroundImagePath = _digitalBgImagePath;
                 _clockModel.DigitalBgImageOffsetX = _digitalBgOffsetX; _clockModel.DigitalBgImageOffsetY = _digitalBgOffsetY;
                 _clockModel.DigitalBgImageZoom = _digitalBgZoom; _clockModel.DigitalBackgroundImageOpacity = _digitalBgOpacity;
-                // Find clock window directly and refresh (avoids Save() which reloads from disk)
-                if (Application.Current.MainWindow is ManagementWindow mgmtWin)
-                    mgmtWin.GetClockWindow(_clockModel.Id)?.RefreshAppearance();
+                // Refresh clock window via App lookup (same pattern as notes)
+                if (Application.Current is App app2)
+                    app2.GetClockWindow(_clockModel.Id)?.RefreshAppearance();
                 break;
 
             case WidgetSettingsTarget.Calendar when _calModel != null:
@@ -892,9 +888,9 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
                 _calModel.BackgroundImagePath = _bgImagePath; _calModel.BgImageOffsetX = _bgOffsetX;
                 _calModel.BgImageOffsetY = _bgOffsetY; _calModel.BgImageZoom = _bgZoom;
                 _calModel.BackgroundImageOpacity = _bgOpacity;
-                // Find calendar window directly and refresh (avoids Save() which reloads from disk)
-                if (Application.Current.MainWindow is ManagementWindow mgmtWin2)
-                    mgmtWin2.GetCalendarWindow(_calModel.Id)?.RefreshAppearance();
+                // Refresh calendar window via App lookup (same pattern as notes)
+                if (Application.Current is App app3)
+                    app3.GetCalendarWindow(_calModel.Id)?.RefreshAppearance();
                 break;
         }
     }
@@ -966,7 +962,6 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
                 _panelConfig.EnableLiquidGlass = _snapLiquidGlass; _panelConfig.GlassBlurAmount = _snapGlassBlur;
                 _panelConfig.GlassTintOpacity = _snapGlassTintOpacity; _panelConfig.GlassTintLuminosity = _snapGlassTintLuminosity;
                 _panelConfig.GlassColorMode = _snapGlassColorMode;
-                // Also restore GlobalFillColor when UseGlobalAppearance is true
                 if (_snapUseGlobal)
                 {
                     _panelConfig.GlobalFillColor = _snapFillColor;
@@ -974,11 +969,11 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
                 if (double.TryParse(_snapWidgetWidth, out var pw)) _panelConfig.PanelWidth = pw;
                 if (double.TryParse(_snapWidgetHeight, out var ph)) _panelConfig.PanelHeight = ph;
                 _panelZoneManager?.SaveConfig();
-                if (Application.Current.MainWindow is PanelWindow panelWin)
+                if (Application.Current is App appC1 && appC1.PanelWindow is PanelWindow panelWinC)
                 {
-                    panelWin.ApplyAcrylic();
-                    panelWin.ApplyStyle();
-                    panelWin.ApplyBackgroundImage();
+                    panelWinC.ApplyAcrylic();
+                    panelWinC.ApplyStyle();
+                    panelWinC.ApplyBackgroundImage();
                 }
                 break;
 
@@ -995,8 +990,8 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
                 _clockModel.DigitalBackgroundImagePath = _snapDigitalBgImagePath;
                 _clockModel.DigitalBgImageOffsetX = _snapDigitalBgOffsetX; _clockModel.DigitalBgImageOffsetY = _snapDigitalBgOffsetY;
                 _clockModel.DigitalBgImageZoom = _snapDigitalBgZoom; _clockModel.DigitalBackgroundImageOpacity = _snapDigitalBgOpacity;
-                if (Application.Current.MainWindow is ManagementWindow mgmtWin)
-                { mgmtWin.GetClockWindow(_clockModel.Id)?.RefreshAppearance(); mgmtWin.RefreshAll(); }
+                if (Application.Current is App appC2)
+                    appC2.GetClockWindow(_clockModel.Id)?.RefreshAppearance();
                 break;
 
             case WidgetSettingsTarget.Calendar when _calModel != null:
@@ -1009,8 +1004,8 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
                 _calModel.BackgroundImagePath = _snapBgImagePath; _calModel.BgImageOffsetX = _snapBgOffsetX;
                 _calModel.BgImageOffsetY = _snapBgOffsetY; _calModel.BgImageZoom = _snapBgZoom;
                 _calModel.BackgroundImageOpacity = _snapBgOpacity;
-                if (Application.Current.MainWindow is ManagementWindow mgmtWin2)
-                { mgmtWin2.GetCalendarWindow(_calModel.Id)?.RefreshAppearance(); mgmtWin2.RefreshAll(); }
+                if (Application.Current is App appC3)
+                    appC3.GetCalendarWindow(_calModel.Id)?.RefreshAppearance();
                 break;
         }
 

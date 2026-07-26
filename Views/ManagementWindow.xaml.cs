@@ -31,8 +31,6 @@ public partial class ManagementWindow : Window
 
     private bool IsNoteWindowOpen(Guid id) => ((App)System.Windows.Application.Current).IsNoteWindowOpen(id);
     private Window? GetNoteWindow(Guid id) => ((App)System.Windows.Application.Current)._noteWindows.TryGetValue(id, out var w) ? w : null;
-    public ClockWidget? GetClockWindow(Guid id) => _openClockWindows.TryGetValue(id, out var w) && w is ClockWidget cw ? cw : null;
-    public CalendarWidget? GetCalendarWindow(Guid id) => _openCalendarWindows.TryGetValue(id, out var w) && w is CalendarWidget cal ? cal : null;
     // Track toggle dots for animation
     private readonly Dictionary<Guid, Border> _noteToggleDots = new();
     private readonly Dictionary<Guid, Border> _clockToggleDots = new();
@@ -109,9 +107,11 @@ public partial class ManagementWindow : Window
                 if (config.PanelEnabled && _panelWindow == null)
                 {
                     _panelWindow = new PanelWindow(_zoneManager, _configService);
+                    ((App)System.Windows.Application.Current)._panelWindow = _panelWindow;
                     _panelWindow.Closed += (__, _) =>
                     {
                         _panelWindow = null;
+                        ((App)System.Windows.Application.Current)._panelWindow = null;
                         if (NewPanelBtn != null) NewPanelBtn.ToolTip = _loc["Manage.NewPanel"];
                     };
                     _panelWindow.Show();
@@ -3354,9 +3354,11 @@ public partial class ManagementWindow : Window
             }
 
             _panelWindow = new PanelWindow(_zoneManager, _configService);
+            ((App)System.Windows.Application.Current)._panelWindow = _panelWindow;
             _panelWindow.Closed += (_, _) =>
             {
                 _panelWindow = null;
+                ((App)System.Windows.Application.Current)._panelWindow = null;
                 Dispatcher.BeginInvoke(new Action(() => RefreshPanelCard()));
             };
             _panelWindow.Show();
@@ -3439,9 +3441,11 @@ public partial class ManagementWindow : Window
         window.Closed += (_, _) =>
         {
             _openClockWindows.Remove(clock.Id);
+            ((App)System.Windows.Application.Current)._clockWindows.Remove(clock.Id);
             Dispatcher.BeginInvoke(new Action(() => RefreshClocksList()), System.Windows.Threading.DispatcherPriority.Loaded);
         };
         _openClockWindows[clock.Id] = window;
+        ((App)System.Windows.Application.Current)._clockWindows[clock.Id] = window;
         window.Show();
         window.Activate();
         Dispatcher.BeginInvoke(new Action(() =>
@@ -3460,9 +3464,11 @@ public partial class ManagementWindow : Window
         window.Closed += (_, _) =>
         {
             _openCalendarWindows.Remove(cal.Id);
+            ((App)System.Windows.Application.Current)._calendarWindows.Remove(cal.Id);
             Dispatcher.BeginInvoke(new Action(() => RefreshCalendarsList()), System.Windows.Threading.DispatcherPriority.Loaded);
         };
         _openCalendarWindows[cal.Id] = window;
+        ((App)System.Windows.Application.Current)._calendarWindows[cal.Id] = window;
         window.Show();
         window.Activate();
         Dispatcher.BeginInvoke(new Action(() =>

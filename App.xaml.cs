@@ -22,8 +22,16 @@ public partial class App : System.Windows.Application
     private readonly LocalizationService _loc = LocalizationService.Instance;
     private static Mutex? _mutex;
 
-    // Track open widget windows (notes only — clocks/calendars managed by ManagementWindow)
+    // Track open widget windows
     internal readonly Dictionary<Guid, Window> _noteWindows = new();
+    internal readonly Dictionary<Guid, Window> _clockWindows = new();
+    internal readonly Dictionary<Guid, Window> _calendarWindows = new();
+    internal Window? _panelWindow;
+
+    // Public accessors for live preview lookup
+    public Window? PanelWindow => _panelWindow;
+    public ClockWidget? GetClockWindow(Guid id) => _clockWindows.TryGetValue(id, out var w) && w is ClockWidget cw ? cw : null;
+    public CalendarWidget? GetCalendarWindow(Guid id) => _calendarWindows.TryGetValue(id, out var w) && w is CalendarWidget cal ? cal : null;
 
     // ── Global hotkey ──
     private const int WM_HOTKEY = 0x0312;
