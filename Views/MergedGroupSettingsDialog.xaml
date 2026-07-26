@@ -104,7 +104,7 @@
                     <!-- 2. Zone Name Color -->
                     <TextBlock x:Name="LabelTextColor" Style="{StaticResource DLb}"/>
                     <StackPanel x:Name="TextColorPresets" Orientation="Horizontal" Margin="0,2,0,0">
-                        <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#00000000" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="TextColorPreset_Click" ToolTip="Transparent"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFFFFF" Offset="0"/><GradientStop Color="#CCCCCC" Offset="0.5"/><GradientStop Color="#FFFFFF" Offset="1"/></LinearGradientBrush></Border.Background></Border>
+                        <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#01000000" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="TextColorPreset_Click" ToolTip="Transparent"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFFFFF" Offset="0"/><GradientStop Color="#CCCCCC" Offset="0.5"/><GradientStop Color="#FFFFFF" Offset="1"/></LinearGradientBrush></Border.Background></Border>
                         <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#A0000000" BorderBrush="#80FFFFFF" BorderThickness="1" MouseLeftButtonDown="TextColorPreset_Click"><Border.Background><SolidColorBrush Color="#000000"/></Border.Background></Border>
                         <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#A0FFFFFF" BorderBrush="#80FFFFFF" BorderThickness="1" MouseLeftButtonDown="TextColorPreset_Click"><Border.Background><SolidColorBrush Color="#FFFFFF"/></Border.Background></Border>
                         <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#A0808080" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="TextColorPreset_Click"><Border.Background><SolidColorBrush Color="#808080"/></Border.Background></Border>
@@ -153,7 +153,7 @@
                     <!-- 4. Icon Color -->
                     <TextBlock x:Name="LabelIconColor" Style="{StaticResource DLb}"/>
                     <StackPanel x:Name="IconColorPresets" Orientation="Horizontal" Margin="0,2,0,0">
-                        <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#00000000" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="IconColorPreset_Click" ToolTip="Transparent"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFFFFF" Offset="0"/><GradientStop Color="#CCCCCC" Offset="0.5"/><GradientStop Color="#FFFFFF" Offset="1"/></LinearGradientBrush></Border.Background></Border>
+                        <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#01000000" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="IconColorPreset_Click" ToolTip="Transparent"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFFFFF" Offset="0"/><GradientStop Color="#CCCCCC" Offset="0.5"/><GradientStop Color="#FFFFFF" Offset="1"/></LinearGradientBrush></Border.Background></Border>
                         <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#000000" Background="#000000" BorderBrush="#80FFFFFF" BorderThickness="1" MouseLeftButtonDown="IconColorPreset_Click"/>
                         <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#FFFFFF" Background="#FFFFFF" BorderBrush="#80FFFFFF" BorderThickness="1" MouseLeftButtonDown="IconColorPreset_Click"/>
                         <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#808080" Background="#808080" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="IconColorPreset_Click"/>
@@ -167,6 +167,13 @@
                         <Button x:Name="IconColorCustomBtn" Content="..." Width="32" Height="28" Background="{StaticResource IBg}" Foreground="{StaticResource T2}" BorderBrush="{StaticResource IBd}" BorderThickness="1" Cursor="Hand" FontSize="10" Click="IconColorCustom_Click"><Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="6"/></Style></Button.Resources></Button>
                     </StackPanel>
 
+                    <!-- 4b. Dimensions -->
+                    <Grid Margin="0,8,0,0">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0"><TextBlock x:Name="LabelWidth" Style="{StaticResource DLb}"/><TextBox x:Name="WidthBox" Style="{StaticResource DTb}"/></StackPanel>
+                        <StackPanel Grid.Column="2"><TextBlock x:Name="LabelHeight" Style="{StaticResource DLb}"/><TextBox x:Name="HeightBox" Style="{StaticResource DTb}"/></StackPanel>
+                    </Grid>
+
                     <!-- 5. Border Thickness -->
                     <TextBlock x:Name="LabelBorderThickness" Style="{StaticResource DLb}"/>
                     <TextBox x:Name="BorderThicknessBox" Style="{StaticResource DTb}"/>
@@ -174,7 +181,7 @@
                     <!-- 6. Border Color -->
                     <TextBlock x:Name="LabelBorderColor" Style="{StaticResource DLb}"/>
                     <StackPanel x:Name="BorderColorPresets" Orientation="Horizontal" Margin="0,2,0,0">
-                        <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#00000000" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="BorderColorPreset_Click" ToolTip="Transparent"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFFFFF" Offset="0"/><GradientStop Color="#CCCCCC" Offset="0.5"/><GradientStop Color="#FFFFFF" Offset="1"/></LinearGradientBrush></Border.Background></Border>
+                        <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#01000000" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="BorderColorPreset_Click" ToolTip="Transparent"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFFFFF" Offset="0"/><GradientStop Color="#CCCCCC" Offset="0.5"/><GradientStop Color="#FFFFFF" Offset="1"/></LinearGradientBrush></Border.Background></Border>
                         <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#60000000" BorderBrush="#80FFFFFF" BorderThickness="1" MouseLeftButtonDown="BorderColorPreset_Click"><Border.Background><SolidColorBrush Color="#000000"/></Border.Background></Border>
                         <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#60FFFFFF" BorderBrush="#80FFFFFF" BorderThickness="1" MouseLeftButtonDown="BorderColorPreset_Click"><Border.Background><SolidColorBrush Color="#FFFFFF"/></Border.Background></Border>
                         <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#60808080" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="BorderColorPreset_Click"><Border.Background><SolidColorBrush Color="#808080"/></Border.Background></Border>
@@ -191,7 +198,7 @@
                     <!-- 7. Title Bar Fill -->
                     <TextBlock x:Name="LabelTitleBar" Style="{StaticResource DLb}"/>
                     <StackPanel x:Name="TitleBarPresets" Orientation="Horizontal" Margin="0,2,0,0">
-                        <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#00000000" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="TitleBarColorPreset_Click" ToolTip="Transparent"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFFFFF" Offset="0"/><GradientStop Color="#CCCCCC" Offset="0.5"/><GradientStop Color="#FFFFFF" Offset="1"/></LinearGradientBrush></Border.Background></Border>
+                        <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#01000000" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="TitleBarColorPreset_Click" ToolTip="Transparent"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFFFFF" Offset="0"/><GradientStop Color="#CCCCCC" Offset="0.5"/><GradientStop Color="#FFFFFF" Offset="1"/></LinearGradientBrush></Border.Background></Border>
                         <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#60000000" BorderBrush="#80FFFFFF" BorderThickness="1" MouseLeftButtonDown="TitleBarColorPreset_Click"><Border.Background><SolidColorBrush Color="#000000"/></Border.Background></Border>
                         <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#60FFFFFF" BorderBrush="#80FFFFFF" BorderThickness="1" MouseLeftButtonDown="TitleBarColorPreset_Click"><Border.Background><SolidColorBrush Color="#FFFFFF"/></Border.Background></Border>
                         <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#60808080" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="TitleBarColorPreset_Click"><Border.Background><SolidColorBrush Color="#808080"/></Border.Background></Border>
@@ -224,7 +231,7 @@
                     <!-- 8. Fill Color -->
                     <TextBlock x:Name="LabelFillColor" Style="{StaticResource DLb}"/>
                     <StackPanel x:Name="FillColorPresets" Orientation="Horizontal" Margin="0,2,0,0">
-                        <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#00000000" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="FillColorPreset_Click" ToolTip="Transparent"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFFFFF" Offset="0"/><GradientStop Color="#CCCCCC" Offset="0.5"/><GradientStop Color="#FFFFFF" Offset="1"/></LinearGradientBrush></Border.Background></Border>
+                        <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#01000000" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="FillColorPreset_Click" ToolTip="Transparent"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFFFFF" Offset="0"/><GradientStop Color="#CCCCCC" Offset="0.5"/><GradientStop Color="#FFFFFF" Offset="1"/></LinearGradientBrush></Border.Background></Border>
                         <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#60000000" BorderBrush="#80FFFFFF" BorderThickness="1" MouseLeftButtonDown="FillColorPreset_Click"><Border.Background><SolidColorBrush Color="#000000"/></Border.Background></Border>
                         <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#60FFFFFF" BorderBrush="#80FFFFFF" BorderThickness="1" MouseLeftButtonDown="FillColorPreset_Click"><Border.Background><SolidColorBrush Color="#FFFFFF"/></Border.Background></Border>
                         <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#60808080" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="FillColorPreset_Click"><Border.Background><SolidColorBrush Color="#808080"/></Border.Background></Border>
@@ -261,6 +268,7 @@
                                        Foreground="{StaticResource T1}" Margin="0,0,0,6"/>
                             <TextBlock x:Name="LabelGlassIntensity" Style="{StaticResource DLb}" Margin="0,0,0,4"/>
                             <StackPanel x:Name="GlassIntensityPanel">
+                                <CheckBox x:Name="LiquidGlassToggle" Foreground="{StaticResource T1}" FontSize="13" Margin="0,0,0,4"/>
                                 <Button x:Name="LiquidGlassSettingsBtn" Width="200" Height="34" FontSize="12" FontWeight="SemiBold"
                                         Cursor="Hand" Margin="0,0,0,4"
                                         Background="#7C3AED" Foreground="White"

@@ -192,7 +192,7 @@ public class ZoneViewModel : INotifyPropertyChanged
 
     public static double SnapToGrid(double value, int gridSize)
     {
-        return Math.Round(value / gridSize) * gridSize;
+        return Math.Round((value - 10) / gridSize) * gridSize + 10;
     }
 
     private void DeleteItem(ZoneItemViewModel? itemVm)

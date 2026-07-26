@@ -34,6 +34,7 @@ public class StickyNote
     public string TitleBarFillColor { get; set; } = "#10FFFFFF";
     public double TitleBarOpacity { get; set; } = 6;
     public double ControlOpacity { get; set; } = 40;
+    public string TitleTextColor { get; set; } = "#E0E0E0";
     // ── Background image ──
     public string BackgroundImagePath { get; set; } = "";
     public string BgImageStretch { get; set; } = "UniformToFill";
@@ -62,7 +63,7 @@ public class StickyNote
         GlassTintLuminosity = GlassTintLuminosity, GlassColorMode = GlassColorMode,
         EnableLiquidGlass = EnableLiquidGlass, UseGlobalAppearance = UseGlobalAppearance,
         TitleBarFillColor = TitleBarFillColor, TitleBarOpacity = TitleBarOpacity,
-        ControlOpacity = ControlOpacity,
+        ControlOpacity = ControlOpacity, TitleTextColor = TitleTextColor,
         BackgroundImagePath = BackgroundImagePath, BgImageStretch = BgImageStretch,
         BackgroundImageOpacity = BackgroundImageOpacity, BgImageZoom = BgImageZoom,
         BgImageOffsetX = BgImageOffsetX, BgImageOffsetY = BgImageOffsetY,

@@ -37,7 +37,7 @@
                 </Border>
 
                 <!-- Title bar -->
-                <Border Grid.Row="0" Height="28" CornerRadius="10,10,0,0"
+                <Border x:Name="TitleBarBorder" Grid.Row="0" Height="28" CornerRadius="10,10,0,0"
                         Cursor="SizeAll" MouseLeftButtonDown="TitleBar_Drag"
                         Background="#20000000">
                     <Grid>
@@ -159,7 +159,7 @@
                                                Foreground="#8888A0" Margin="0,0,0,6"/>
                                     <WrapPanel x:Name="ColorPresetsPanel" Width="200">
                                         <Border x:Name="PresetTransparent" Width="24" Height="24" CornerRadius="12"
-                                                Margin="0,0,4,4" Cursor="Hand" Tag="#00000000"
+                                                Margin="0,0,4,4" Cursor="Hand" Tag="#01000000"
                                                 BorderBrush="#30FFFFFF" BorderThickness="1"
                                                 MouseLeftButtonDown="ColorPreset_Click" ToolTip="Transparent">
                                             <Border.Background>

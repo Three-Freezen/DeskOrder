@@ -49,7 +49,7 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
     public string TitleBarFillValue { get => _titleBarFill; set { _titleBarFill = value; _titleBarOpacityPercent = ParseOpacity(value); UpdateHighlights(); OnPropertyChanged(); OnPropertyChanged(nameof(TitleBarOpacityPercent)); } }
     private string _bgImagePath = "";
     private bool _isLoading = true;
-    public string BgImagePath { get => _bgImagePath; set { _bgImagePath = value; if (!string.IsNullOrEmpty(value) && !_isLoading) _fillColor = "#00000000"; if (CropBtn != null) CropBtn.IsEnabled = !string.IsNullOrEmpty(value) && File.Exists(value); OnPropertyChanged(); } }
+    public string BgImagePath { get => _bgImagePath; set { _bgImagePath = value; if (!string.IsNullOrEmpty(value) && !_isLoading) _fillColor = "#01000000"; if (CropBtn != null) CropBtn.IsEnabled = !string.IsNullOrEmpty(value) && File.Exists(value); OnPropertyChanged(); } }
     private string _iconCharText = "";
     public string IconCharText { get => _iconCharText; set { _iconCharText = value; IconPreview.Text = string.IsNullOrEmpty(value) ? "⊞" : value[..Math.Min(value.Length, 2)]; OnPropertyChanged(); } }
     private string _iconColor = "#FFFFFF";
@@ -195,13 +195,13 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
     static void HP(Panel p, string s) { foreach (var c in p.Children) { if (c is Border b && b.Tag is string t) b.BorderThickness = new Thickness(t == s ? 3 : 1); } }
 
     void BorderColorPreset_Click(object s, MouseButtonEventArgs e) { if (s is Border b && b.Tag is string c) BorderColorValue = c; }
-    void FillColorPreset_Click(object s, MouseButtonEventArgs e) { if (s is Border b && b.Tag is string c) { _fillColor = c; _fillOpacityPercent = ParseOpacity(c); UpdateHighlights(); OnPropertyChanged(nameof(FillColorValue)); OnPropertyChanged(nameof(FillOpacityPercent)); } }
+    void FillColorPreset_Click(object s, MouseButtonEventArgs e) { if (s is Border b && b.Tag is string c) FillColorValue = c; }
     void TitleBarColorPreset_Click(object s, MouseButtonEventArgs e) { if (s is Border b && b.Tag is string c) TitleBarFillValue = c; }
     void IconColorPreset_Click(object s, MouseButtonEventArgs e) { if (s is Border b && b.Tag is string c) IconColorValue = c; }
     void TextColorPreset_Click(object s, MouseButtonEventArgs e) { if (s is Border b && b.Tag is string c) TextColorValue = c; }
 
     void BorderCustom_Click(object s, RoutedEventArgs e) { var d = new ColorPickerDialog(BorderColorValue.Length >= 9 ? BorderColorValue[3..] : "FFFFFF") { Owner = this }; if (d.ShowDialog() == true) BorderColorValue = (BorderColorValue.Length >= 3 ? BorderColorValue[..3] : "#40") + d.SelectedColor; }
-    void FillCustom_Click(object s, RoutedEventArgs e) { var d = new ColorPickerDialog(FillColorValue.Length >= 9 ? FillColorValue[3..] : "000000") { Owner = this }; if (d.ShowDialog() == true) { var alpha = FillColorValue.Length >= 3 ? FillColorValue[..3] : "#08"; _fillColor = alpha + d.SelectedColor; UpdateHighlights(); OnPropertyChanged(nameof(FillColorValue)); } }
+    void FillCustom_Click(object s, RoutedEventArgs e) { var d = new ColorPickerDialog(FillColorValue.Length >= 9 ? FillColorValue[3..] : "000000") { Owner = this }; if (d.ShowDialog() == true) { var alpha = FillColorValue.Length >= 3 ? FillColorValue[..3] : "#08"; FillColorValue = alpha + d.SelectedColor; } }
     void TitleCustom_Click(object s, RoutedEventArgs e) { var d = new ColorPickerDialog(TitleBarFillValue.Length >= 9 ? TitleBarFillValue[3..] : "FFFFFF") { Owner = this }; if (d.ShowDialog() == true) TitleBarFillValue = (TitleBarFillValue.Length >= 3 ? TitleBarFillValue[..3] : "#10") + d.SelectedColor; }
     void IconColorCustom_Click(object s, RoutedEventArgs e) { var d = new ColorPickerDialog(IconColorValue.Length >= 7 ? IconColorValue[1..] : "FFFFFF") { Owner = this }; if (d.ShowDialog() == true) IconColorValue = "#" + d.SelectedColor; }
     void TextColorCustom_Click(object s, RoutedEventArgs e) { var d = new ColorPickerDialog(TextColorValue.Length >= 9 ? TextColorValue[3..] : TextColorValue.Length >= 7 ? TextColorValue[1..] : "FFFFFF") { Owner = this }; if (d.ShowDialog() == true) TextColorValue = (TextColorValue.Length >= 3 ? TextColorValue[..3] : "#A0") + d.SelectedColor; }
@@ -227,6 +227,12 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
         }
     }
 
+    void LiquidGlass_Changed(object s, RoutedEventArgs e)
+    {
+        UpdateLiquidButton();
+        UpdateGlassSection();
+    }
+
     void UpdateLiquidButton()
     {
         if (LiquidGlassSettingsBtn == null) return;
@@ -245,11 +251,38 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
         if (GlassIntensityPanel != null) GlassIntensityPanel.Visibility = Visibility.Visible;
         if (LabelGlassIntensity != null) LabelGlassIntensity.Visibility = Visibility.Visible;
         if (GlassSectionTitle != null) GlassSectionTitle.Text = _loc.CurrentLanguage == Services.Language.Chinese ? "玻璃效果" : "Glass Effect";
+        if (LabelLiquidGlassToggle != null) LabelLiquidGlassToggle.Text = _loc.CurrentLanguage == Services.Language.Chinese ? "启用液态玻璃" : "Enable Liquid Glass";
     }
 
     void UpdateFillFromOpacity() { _fillColor = $"#{(int)(_fillOpacityPercent / 100 * 255):X2}{(_fillColor.Length > 3 ? _fillColor[3..] : "000000")}"; }
     void UpdateTitleBarFromOpacity() { _titleBarFill = $"#{(int)(_titleBarOpacityPercent / 100 * 255):X2}{(_titleBarFill.Length > 3 ? _titleBarFill[3..] : "FFFFFF")}"; }
     static double ParseOpacity(string a) { if (a.Length >= 3 && a[0] == '#') try { return int.Parse(a[1..3], System.Globalization.NumberStyles.HexNumber) / 255.0 * 100; } catch { } return 8; }
+
+    /// <summary>
+    /// Re-read zone properties into dialog local state so subsequent edits stay in sync after Apply.
+    /// </summary>
+    void SyncFromZone(Zone zone)
+    {
+        ZoneName = zone.Name; ZoneWidth = zone.Width.ToString("F0"); ZoneHeight = zone.Height.ToString("F0");
+        GridSize = zone.GridSize.ToString(); SnapToGrid = zone.SnapToGrid;
+        BorderThicknessText = zone.BorderThickness.ToString("F1");
+        BorderColorValue = zone.BorderColor; FillColorValue = zone.FillColor;
+        TitleBarFillValue = zone.TitleBarFillColor; BgImagePath = zone.BackgroundImagePath;
+        IconCharText = zone.IconChar; CtrlOpacity = zone.ControlOpacity;
+        BgImageOpacityPercent = zone.BackgroundImageOpacity; AutoArrange = zone.AutoArrange;
+        _bgOffsetX = zone.BgImageOffsetX; _bgOffsetY = zone.BgImageOffsetY; _bgZoomVal = zone.BgImageZoom;
+        AcrylicEnabled = zone.EnableAcrylic;
+        _glassBlurAmount = zone.GlassBlurAmount;
+        _glassTintOpacity = zone.GlassTintOpacity;
+        _glassTintLuminosity = zone.GlassTintLuminosity;
+        _glassColorMode = zone.GlassColorMode;
+        _liquidGlass = zone.EnableLiquidGlass;
+        _quickBarMode = zone.QuickBarMode;
+        _enableRestoreButton = zone.EnableRestoreButton;
+        IconColorValue = string.IsNullOrEmpty(zone.IconColor) ? "#FFFFFF" : zone.IconColor;
+        TextColorValue = string.IsNullOrEmpty(zone.TitleTextColor) ? "#A0FFFFFF" : zone.TitleTextColor;
+        UpdateGlassSection();
+    }
 
     void ApplyButton_Click(object s, RoutedEventArgs e)
     {
@@ -280,17 +313,21 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
         _editingZone.QuickBarMode = _quickBarMode;
         _editingZone.EnableRestoreButton = EnableRestoreButton;
         ResultZone = _editingZone; _zoneManager.UpdateZone(_editingZone);
-        // Apply button: settings applied, dialog stays open (Cancel to close)
+
+        // Save UseGlobalAppearance to config (deferred from checkbox toggle)
+        var config = _zoneManager.GetConfig();
+        config.UseGlobalAppearance = UseGlobalAppearance;
+        _zoneManager.SaveConfig();
+
+        // Refresh dialog state from the applied zone so subsequent edits stay in sync
+        SyncFromZone(_editingZone);
     }
 
     void CancelButton_Click(object s, RoutedEventArgs e) { DialogResult = false; Close(); }
 
     void UseGlobal_Changed(object s, RoutedEventArgs e)
     {
-        // Save toggle to config immediately so ApplyStyle picks it up
-        var config = _zoneManager.GetConfig();
-        config.UseGlobalAppearance = UseGlobalAppearance;
-        _zoneManager.SaveConfig();
+        // Defer save to Apply — don't modify config on toggle
     }
 
     void IconPreset_Click(object s, RoutedEventArgs e) { if (s is Button b && b.Tag is string ic) IconCharText = ic; }

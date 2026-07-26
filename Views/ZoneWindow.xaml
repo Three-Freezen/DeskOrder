@@ -11,7 +11,11 @@
         SnapsToDevicePixels="True"
         UseLayoutRounding="True"
         PreviewMouseLeftButtonDown="Window_PreviewMouseLeftButtonDown"
-        PreviewMouseRightButtonDown="Window_PreviewMouseRightButtonDown">
+        PreviewMouseRightButtonDown="Window_PreviewMouseRightButtonDown"
+        AllowDrop="True"
+        DragEnter="Window_DragEnter"
+        DragOver="Window_DragOver"
+        Drop="Window_Drop">
 
     <Grid>
         <!-- FULL ZONE -->
@@ -168,6 +172,8 @@
                                           MouseLeftButtonDown="Item_MouseDown"
                                           MouseMove="Item_MouseMove"
                                           MouseLeftButtonUp="Item_MouseUp"
+                                          MouseEnter="Item_Enter"
+                                          MouseLeave="Item_Leave"
                                           Cursor="Hand">
                                         <Grid.ContextMenu>
                                             <ContextMenu>

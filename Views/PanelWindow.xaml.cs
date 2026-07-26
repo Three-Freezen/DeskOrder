@@ -154,14 +154,19 @@ public partial class PanelWindow : Window
         dlg.LoadFromConfig(config);
         if (dlg.ShowDialog() == true && dlg.DialogResultOk)
         {
+            config.PanelWidth = dlg.ParsedWidth;
+            config.PanelHeight = dlg.ParsedHeight;
             config.GlobalBorderThickness = dlg.ParsedBorderThickness;
             config.GlobalBorderColor = dlg.ParsedBorderColor;
-            config.GlobalFillColor = dlg.ParsedFillColor;
+            config.PanelFillColor = dlg.ParsedFillColor;
             config.PanelUseGlobalAppearance = dlg.ParsedUseGlobalAppearance;
             config.GlassBlurAmount = dlg.ParsedGlassBlur;
             config.GlassTintOpacity = dlg.ParsedGlassTintOpacity;
             config.GlassTintLuminosity = dlg.ParsedGlassLuminosity;
             config.GlassColorMode = dlg.ParsedGlassColorMode;
+            config.EnableLiquidGlass = dlg.ParsedLiquidGlass;
+            config.PanelTitleBarFillColor = dlg.ParsedTitleBarFill;
+            config.PanelControlOpacity = dlg.ParsedButtonOpacity;
 
             // Panel background image
             config.PanelBackgroundImagePath = dlg.ParsedBgImagePath;
@@ -211,7 +216,7 @@ public partial class PanelWindow : Window
     public void ApplyAcrylic()
     {
         var config = _zoneManager.GetConfig();
-        string fillColorStr = config.PanelUseGlobalAppearance ? config.GlobalFillColor : config.GlobalFillColor;
+        string fillColorStr = config.PanelFillColor;
 
         if (config.EnableLiquidGlass || config.GlassBlurAmount > 0)
         {
@@ -226,7 +231,7 @@ public partial class PanelWindow : Window
     public void ApplyStyle()
     {
         var config = _zoneManager.GetConfig();
-        string fillColorStr = config.PanelUseGlobalAppearance ? config.GlobalFillColor : config.GlobalFillColor;
+        string fillColorStr = config.PanelFillColor;
         string borderColorStr = config.GlobalBorderColor;
         double borderThickness = config.GlobalBorderThickness;
 
@@ -246,6 +251,14 @@ public partial class PanelWindow : Window
         }
         catch { }
         PanelBorder.BorderThickness = new Thickness(borderThickness);
+
+        // Title bar fill
+        try
+        {
+            var tbColor = (Color)ColorConverter.ConvertFromString(config.PanelTitleBarFillColor);
+            TopBar.Background = new SolidColorBrush(tbColor);
+        }
+        catch { }
     }
 
     public void ApplyBackgroundImage()
@@ -628,9 +641,9 @@ public partial class PanelWindow : Window
         }
     }
 
-    void AddItemToZone(Zone zone, string name, string path, ItemType type)
+    void AddItemToZone(Zone zone, string name, string path, ItemType type, double x = 10, double y = 10)
     {
-        var item = new ZoneItem(name, path, type, 10, 10);
+        var item = new ZoneItem(name, path, type, x, y);
         zone.Items.Add(item);
         _zoneManager.SaveConfig();
         _zoneManager.NotifyChanged();
@@ -958,7 +971,7 @@ public partial class PanelWindow : Window
                     ".exe" => ItemType.Application,
                     _ => ItemType.Shortcut
                 };
-            AddItemToZone(zone, name, f, type);
+            AddItemToZone(zone, name, f, type, sx, sy);
             sx += 80;
             if (sx > zone.Width - 80) { sx = 10; sy += 90; }
         }
@@ -974,6 +987,35 @@ public partial class PanelWindow : Window
         double sx = maxX + 80, sy = maxY;
         if (sx > zone.Width - 80) { sx = 10; sy = maxY + 90; }
         return (sx, sy);
+    }
+
+    // ── Drag-drop from Explorer ──
+
+    void Panel_DragEnter(object s, DragEventArgs e)
+    {
+        if (e.Data.GetDataPresent(DataFormats.FileDrop))
+        {
+            e.Effects = DragDropEffects.Link;
+            e.Handled = true;
+        }
+    }
+
+    void Panel_DragOver(object s, DragEventArgs e)
+    {
+        if (e.Data.GetDataPresent(DataFormats.FileDrop))
+        {
+            e.Effects = DragDropEffects.Link;
+            e.Handled = true;
+        }
+    }
+
+    void Panel_Drop(object s, DragEventArgs e)
+    {
+        if (e.Data.GetData(DataFormats.FileDrop) is not string[] { Length: > 0 } fs) return;
+        var targetZone = GetTargetZone();
+        if (targetZone == null) return;
+        ImportFilesToZone(targetZone, fs);
+        e.Handled = true;
     }
 
     // ── Hide ──

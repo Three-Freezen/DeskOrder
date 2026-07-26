@@ -82,6 +82,7 @@ public partial class ZoneWindow : Window
         _saveDebounce.Tick += (_, _) => { _saveDebounce.Stop(); if (_savePending) { _savePending = false; _mgr.SaveConfig(); } };
         _langChanged = _ => ApplyLoc();
         _loc.LanguageChanged += _langChanged;
+        _mgr.ZonesChanged += OnZonesChanged;
         if (!_zone.IsVisible) ApplyHidden();
         RebuildSubZoneTabs();
         if (_zone.MergedSubZoneIds.Count > 0) _vm.SelectedSubZoneId = _zone.Id;
@@ -136,10 +137,10 @@ public partial class ZoneWindow : Window
     { if (m == WM_DROPFILES) { DoDrop(w); hd = true; } return IntPtr.Zero; }
 
     void DoDrop(IntPtr drop)
-    { try { DragQueryPoint(drop, out var p); var wp = PointFromScreen(new Point(p.x, p.y)); uint n = DragQueryFile(drop, 0xFFFFFFFF, null, 0); for (uint i = 0; i < n; i++) { var sb = new System.Text.StringBuilder(260); DragQueryFile(drop, i, sb, 260); if (!string.IsNullOrEmpty(sb.ToString())) { Add(sb.ToString(), wp.X, wp.Y); wp.X += 12; wp.Y += 12; } } UpdateCanvasSize(); } finally { DragFinish(drop); } }
+    { try { uint n = DragQueryFile(drop, 0xFFFFFFFF, null, 0); var (sx, sy) = FindFreeSpot(); for (uint i = 0; i < n; i++) { var sb = new System.Text.StringBuilder(260); DragQueryFile(drop, i, sb, 260); if (!string.IsNullOrEmpty(sb.ToString())) { Add(sb.ToString(), sx, sy); sx += 80; if (sx > _zone.Width - 80) { sx = 10; sy += 90; } } } UpdateCanvasSize(); } finally { DragFinish(drop); } }
 
     void Add(string path, double x, double y)
-    { var t = Dir(path) ? ItemType.Folder : Path.GetExtension(path).ToLowerInvariant() switch { ".lnk" => ItemType.Shortcut, ".exe" => ItemType.Application, _ => ItemType.Shortcut }; var nm = Path.GetFileNameWithoutExtension(path); var cx = Math.Max(0, Math.Min(x, Math.Max(0, _zone.Width - 72))); var cy = Math.Max(0, Math.Min(y - 40, Math.Max(0, _zone.Height - 88))); _vm.AddItem(new ZoneItem(nm, path, t, cx, cy)); }
+    { var t = Dir(path) ? ItemType.Folder : Path.GetExtension(path).ToLowerInvariant() switch { ".lnk" => ItemType.Shortcut, ".exe" => ItemType.Application, _ => ItemType.Shortcut }; var nm = Path.GetFileNameWithoutExtension(path); var cx = Math.Max(0, Math.Min(Snap(x), Math.Max(0, _zone.Width - 72))); var cy = Math.Max(0, Math.Min(Snap(y - 40), Math.Max(0, _zone.Height - 88))); _vm.AddItem(new ZoneItem(nm, path, t, cx, cy)); }
     static bool Dir(string p) => Directory.Exists(p);
     double Clamp(double v, double max) => Math.Max(0, Math.Min(Snap(v), max));
     double Snap(double v) => _zone.SnapToGrid ? ZoneViewModel.SnapToGrid(v, _zone.GridSize) : v;
@@ -203,11 +204,21 @@ public partial class ZoneWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        _mgr.ZonesChanged -= OnZonesChanged;
         if (_src != null) { _src.RemoveHook(WndProc); _src = null; }
         if (_langChanged != null) { _loc.LanguageChanged -= _langChanged; _langChanged = null; }
         var h = new WindowInteropHelper(this).Handle;
         if (h != IntPtr.Zero) DragAcceptFiles(h, false);
         base.OnClosed(e);
+    }
+
+    void OnZonesChanged()
+    {
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            _vm.RefreshItems();
+            UpdateCanvasSize();
+        }), System.Windows.Threading.DispatcherPriority.Normal);
     }
 
     // ── Drag: DIRECT handler on title bar ──
@@ -278,14 +289,13 @@ public partial class ZoneWindow : Window
     (double, double) FindFreeSpot()
     {
         if (_zone.Items.Count == 0) return (10, 10);
-        // Find the rightmost+lowest item position
+        int gs = _zone.GridSize;
         double maxY = 0;
         foreach (var i in _zone.Items) { if (i.Y > maxY) maxY = i.Y; }
-        // Find items in the last row (within 10px of maxY)
         double maxX = 0;
         foreach (var i in _zone.Items) { if (Math.Abs(i.Y - maxY) < 10 && i.X > maxX) maxX = i.X; }
-        double sx = maxX + 80, sy = maxY;
-        if (sx > _zone.Width - 80) { sx = 10; sy = maxY + 90; }
+        double sx = maxX + gs, sy = maxY;
+        if (sx > _zone.Width - gs) { sx = 10; sy = maxY + gs; }
         return (sx, sy);
     }
 
@@ -314,9 +324,10 @@ public partial class ZoneWindow : Window
         double x = 10, y = 10;
         foreach (var item in items.OrderBy(i => i.Y).ThenBy(i => i.X))
         {
-            item.X = x; item.Y = y;
+            item.X = ZoneViewModel.SnapToGrid(x, gridSize);
+            item.Y = ZoneViewModel.SnapToGrid(y, gridSize);
             x += gridSize;
-            if (x > _zone.Width - gridSize) { x = 10; y += gridSize + 10; }
+            if (x > _zone.Width - gridSize) { x = 10; y += gridSize; }
         }
         _vm.RefreshMergedItems();
     }
@@ -493,7 +504,13 @@ public partial class ZoneWindow : Window
     void Canvas_DragEnter(object s, DragEventArgs e) { if (e.Data.GetDataPresent(DataFormats.FileDrop)) { _fileOver = true; e.Effects = DragDropEffects.Link; e.Handled = true; } }
     void Canvas_DragLeave(object s, DragEventArgs e) => _fileOver = false;
     void Canvas_DragOver(object s, DragEventArgs e) { if (_fileOver) { e.Effects = DragDropEffects.Link; e.Handled = true; } }
-    void Canvas_Drop(object s, DragEventArgs e) { _fileOver = false; if (e.Data.GetData(DataFormats.FileDrop) is not string[] { Length: > 0 } fs) return; if (s is not Canvas cv) return; var p = e.GetPosition(cv); foreach (var f in fs) { Add(f, p.X, p.Y); p.X += 12; p.Y += 12; } e.Handled = true; }
+    void Canvas_Drop(object s, DragEventArgs e) { _fileOver = false; if (e.Data.GetData(DataFormats.FileDrop) is not string[] { Length: > 0 } fs) return; var (sx, sy) = FindFreeSpot(); foreach (var f in fs) { Add(f, sx, sy); sx += 80; if (sx > _zone.Width - 80) { sx = 10; sy += 90; } } e.Handled = true; }
+
+    // ── Window-level drag-drop (fallback for transparent windows) ──
+
+    void Window_DragEnter(object s, DragEventArgs e) { if (e.Data.GetDataPresent(DataFormats.FileDrop)) { e.Effects = DragDropEffects.Link; e.Handled = true; } }
+    void Window_DragOver(object s, DragEventArgs e) { if (e.Data.GetDataPresent(DataFormats.FileDrop)) { e.Effects = DragDropEffects.Link; e.Handled = true; } }
+    void Window_Drop(object s, DragEventArgs e) { if (e.Data.GetData(DataFormats.FileDrop) is not string[] { Length: > 0 } fs) return; var (sx, sy) = FindFreeSpot(); foreach (var f in fs) { Add(f, sx, sy); sx += 80; if (sx > _zone.Width - 80) { sx = 10; sy += 90; } } UpdateCanvasSize(); e.Handled = true; }
 
     // ── Item drag ──
 
@@ -503,6 +520,18 @@ public partial class ZoneWindow : Window
     { if (_dv == null || _de == null) return; var d = e.GetPosition(this) - _ds; if (!_dragging) { if (Math.Abs(d.X) < SystemParameters.MinimumHorizontalDragDistance && Math.Abs(d.Y) < SystemParameters.MinimumVerticalDragDistance) return; _dragging = true; _de.Opacity = 0.7; } _dv.X = Math.Max(0, Math.Min(_is.X + d.X, _zone.Width - 72)); _dv.Y = Math.Max(0, Math.Min(_is.Y + d.Y, _zone.Height - 88)); }
     void Item_MouseUp(object s, MouseButtonEventArgs e)
     { if (_dv == null) return; if (_de != null) { _de.ReleaseMouseCapture(); _de.Opacity = 1.0; } if (_dragging) { _vm.MoveItem(_dv.Id, _dv.X, _dv.Y, _zone.SnapToGrid); _vm.RefreshItems(); } _dv = null; _de = null; _dragging = false; }
+
+    void Item_Enter(object s, MouseEventArgs e)
+    {
+        if (s is Grid g)
+            g.Background = new SolidColorBrush(Color.FromArgb(0x18, 0xFF, 0xFF, 0xFF));
+    }
+
+    void Item_Leave(object s, MouseEventArgs e)
+    {
+        if (s is Grid g)
+            g.Background = Brushes.Transparent;
+    }
 
     // ── Context menu ──
 
@@ -753,12 +782,13 @@ public partial class ZoneWindow : Window
     // ── Acrylic / frosted glass ──
     void ApplyAcrylic(string? fillColorOverride = null)
     {
+        string fillColor = fillColorOverride ?? _zone.FillColor;
+
         if (_zone.EnableAcrylic)
         {
             AcrylicHelper.EnableBlur(this, _zone.GlassBlurAmount, _zone.GlassTintOpacity, _zone.GlassTintLuminosity, _zone.GlassColorMode);
             try
             {
-                string fillColor = fillColorOverride ?? _zone.FillColor;
                 var tint = (Color)ColorConverter.ConvertFromString(fillColor)!;
                 FillRect.Fill = new SolidColorBrush(tint);
                 FillRect.Opacity = 1.0; // Brush alpha from FillColor controls transparency
@@ -784,7 +814,6 @@ public partial class ZoneWindow : Window
             AcrylicHelper.DisableBlur(this);
             try
             {
-                string fillColor = fillColorOverride ?? _zone.FillColor;
                 FillRect.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(fillColor)!);
                 FillRect.Opacity = 1.0;
                 TitleBarBg.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(_zone.TitleBarFillColor)!);

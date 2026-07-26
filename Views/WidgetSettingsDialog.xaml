@@ -92,6 +92,34 @@
 
             <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Hidden">
                 <StackPanel>
+                    <!-- ══ Widget Dimensions (sticky note / panel only) ══ -->
+                    <StackPanel x:Name="WidgetDimensionSection" Visibility="Collapsed" Margin="0,0,0,4">
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0"><TextBlock x:Name="LabelWidth" Style="{StaticResource DLb}"/><TextBox x:Name="WidthBox" Style="{StaticResource DTb}" Text="{Binding WidgetWidth, UpdateSourceTrigger=PropertyChanged}"/></StackPanel>
+                            <StackPanel Grid.Column="2"><TextBlock x:Name="LabelHeight" Style="{StaticResource DLb}"/><TextBox x:Name="HeightBox" Style="{StaticResource DTb}" Text="{Binding WidgetHeight, UpdateSourceTrigger=PropertyChanged}"/></StackPanel>
+                        </Grid>
+                    </StackPanel>
+
+                    <!-- ══ Title Text Color (sticky note only) ══ -->
+                    <StackPanel x:Name="TitleTextColorSection" Visibility="Collapsed">
+                        <TextBlock x:Name="LabelTitleTextColor" Style="{StaticResource DLb}"/>
+                        <StackPanel x:Name="TitleTextColorPresets" Orientation="Horizontal" Margin="0,2,0,0">
+                            <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#E0E0E0" Background="#E0E0E0" BorderBrush="#80FFFFFF" BorderThickness="1" MouseLeftButtonDown="TitleTextColorPreset_Click"/>
+                            <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#FFFFFF" Background="#FFFFFF" BorderBrush="#80FFFFFF" BorderThickness="1" MouseLeftButtonDown="TitleTextColorPreset_Click"/>
+                            <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#000000" Background="#000000" BorderBrush="#80FFFFFF" BorderThickness="1" MouseLeftButtonDown="TitleTextColorPreset_Click"/>
+                            <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#808080" Background="#808080" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="TitleTextColorPreset_Click"/>
+                            <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#FF0000" Background="#FF0000" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="TitleTextColorPreset_Click"/>
+                            <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#FF7D00" Background="#FF7D00" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="TitleTextColorPreset_Click"/>
+                            <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#FFFF00" Background="#FFFF00" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="TitleTextColorPreset_Click"/>
+                            <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#00FF00" Background="#00FF00" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="TitleTextColorPreset_Click"/>
+                            <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#0000FF" Background="#0000FF" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="TitleTextColorPreset_Click"/>
+                            <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#00FFFF" Background="#00FFFF" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="TitleTextColorPreset_Click"/>
+                            <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#FF00FF" Background="#FF00FF" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="TitleTextColorPreset_Click"/>
+                            <Button x:Name="TitleTextColorCustomBtn" Content="..." Width="32" Height="28" Background="{StaticResource IBg}" Foreground="{StaticResource T2}" BorderBrush="{StaticResource IBd}" BorderThickness="1" Cursor="Hand" FontSize="10" Click="TitleTextColorCustom_Click"><Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="6"/></Style></Button.Resources></Button>
+                        </StackPanel>
+                    </StackPanel>
+
                     <!-- ══ Common: Use Global Appearance ══ -->
                     <CheckBox x:Name="UseGlobalAppearanceBox" Margin="0,4,0,8"
                               Foreground="{StaticResource T1}" FontSize="13"
@@ -107,7 +135,7 @@
                     <!-- ══ Common: Border Color ══ -->
                     <TextBlock x:Name="LabelBorderColor" Style="{StaticResource DLb}"/>
                     <StackPanel x:Name="BorderColorPresets" Orientation="Horizontal" Margin="0,2,0,0">
-                        <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#00000000" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="BorderColorPreset_Click" ToolTip="Transparent"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFFFFF" Offset="0"/><GradientStop Color="#CCCCCC" Offset="0.5"/><GradientStop Color="#FFFFFF" Offset="1"/></LinearGradientBrush></Border.Background></Border>
+                        <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#01000000" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="BorderColorPreset_Click" ToolTip="Transparent"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFFFFF" Offset="0"/><GradientStop Color="#CCCCCC" Offset="0.5"/><GradientStop Color="#FFFFFF" Offset="1"/></LinearGradientBrush></Border.Background></Border>
                         <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#60000000" BorderBrush="#80FFFFFF" BorderThickness="1" MouseLeftButtonDown="BorderColorPreset_Click"><Border.Background><SolidColorBrush Color="#000000"/></Border.Background></Border>
                         <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#60FFFFFF" BorderBrush="#80FFFFFF" BorderThickness="1" MouseLeftButtonDown="BorderColorPreset_Click"><Border.Background><SolidColorBrush Color="#FFFFFF"/></Border.Background></Border>
                         <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#60808080" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="BorderColorPreset_Click"><Border.Background><SolidColorBrush Color="#808080"/></Border.Background></Border>
@@ -124,7 +152,7 @@
                     <!-- ══ Common: Fill Color ══ -->
                     <TextBlock x:Name="LabelFillColor" Style="{StaticResource DLb}"/>
                     <StackPanel x:Name="FillColorPresets" Orientation="Horizontal" Margin="0,2,0,0">
-                        <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#00000000" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="FillColorPreset_Click" ToolTip="Transparent"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFFFFF" Offset="0"/><GradientStop Color="#CCCCCC" Offset="0.5"/><GradientStop Color="#FFFFFF" Offset="1"/></LinearGradientBrush></Border.Background></Border>
+                        <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#01000000" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="FillColorPreset_Click" ToolTip="Transparent"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFFFFF" Offset="0"/><GradientStop Color="#CCCCCC" Offset="0.5"/><GradientStop Color="#FFFFFF" Offset="1"/></LinearGradientBrush></Border.Background></Border>
                         <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#60000000" BorderBrush="#80FFFFFF" BorderThickness="1" MouseLeftButtonDown="FillColorPreset_Click"><Border.Background><SolidColorBrush Color="#000000"/></Border.Background></Border>
                         <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#60FFFFFF" BorderBrush="#80FFFFFF" BorderThickness="1" MouseLeftButtonDown="FillColorPreset_Click"><Border.Background><SolidColorBrush Color="#FFFFFF"/></Border.Background></Border>
                         <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#60808080" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="FillColorPreset_Click"><Border.Background><SolidColorBrush Color="#808080"/></Border.Background></Border>
@@ -160,9 +188,10 @@
                                        FontSize="12" FontWeight="SemiBold"
                                        Foreground="{StaticResource T1}" Margin="0,0,0,6"/>
 
-                            <!-- Liquid Glass settings button -->
+                            <!-- Liquid Glass toggle + settings -->
                             <TextBlock x:Name="LabelGlassIntensity" Style="{StaticResource DLb}" Margin="0,0,0,4"/>
                             <StackPanel x:Name="GlassIntensityPanel">
+                                <CheckBox x:Name="LiquidGlassToggle" Foreground="{StaticResource T1}" FontSize="13" Margin="0,0,0,4"/>
                                 <Button x:Name="LiquidGlassSettingsBtn" Content="💧 液态玻璃设置"
                                         Width="200" Height="34" FontSize="12" FontWeight="SemiBold"
                                         Cursor="Hand" Margin="0,0,0,4"
@@ -183,7 +212,7 @@
                     <StackPanel x:Name="TitleBarSection" Visibility="Collapsed">
                         <TextBlock x:Name="LabelTitleBar" Style="{StaticResource DLb}"/>
                         <StackPanel x:Name="TitleBarPresets" Orientation="Horizontal" Margin="0,2,0,0">
-                            <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#00000000" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="TitleBarPreset_Click" ToolTip="Transparent"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFFFFF" Offset="0"/><GradientStop Color="#CCCCCC" Offset="0.5"/><GradientStop Color="#FFFFFF" Offset="1"/></LinearGradientBrush></Border.Background></Border>
+                            <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#01000000" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="TitleBarPreset_Click" ToolTip="Transparent"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFFFFF" Offset="0"/><GradientStop Color="#CCCCCC" Offset="0.5"/><GradientStop Color="#FFFFFF" Offset="1"/></LinearGradientBrush></Border.Background></Border>
                             <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#60000000" BorderBrush="#80FFFFFF" BorderThickness="1" MouseLeftButtonDown="TitleBarPreset_Click"><Border.Background><SolidColorBrush Color="#000000"/></Border.Background></Border>
                             <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#60FFFFFF" BorderBrush="#80FFFFFF" BorderThickness="1" MouseLeftButtonDown="TitleBarPreset_Click"><Border.Background><SolidColorBrush Color="#FFFFFF"/></Border.Background></Border>
                             <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#60808080" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="TitleBarPreset_Click"><Border.Background><SolidColorBrush Color="#808080"/></Border.Background></Border>

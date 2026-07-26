@@ -22,6 +22,12 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
     // Common settings
     private string _borderThicknessText = "1.0";
     public string BorderThicknessText { get => _borderThicknessText; set { _borderThicknessText = value; OnPropertyChanged(); } }
+
+    // Widget dimensions (sticky note / calendar only)
+    private string _widgetWidth = "260";
+    public string WidgetWidth { get => _widgetWidth; set { _widgetWidth = value; OnPropertyChanged(); } }
+    private string _widgetHeight = "200";
+    public string WidgetHeight { get => _widgetHeight; set { _widgetHeight = value; OnPropertyChanged(); } }
     private string _borderColor = "#40FFFFFF";
     public string BorderColorValue { get => _borderColor; set { _borderColor = value; UpdateHighlights(); OnPropertyChanged(); } }
     private string _fillColor = "#08000000";
@@ -36,11 +42,15 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
     private int _glassTintOpacity = 50;
     private int _glassTintLuminosity = 100;
     private string _glassColorMode = "Default";
+    private bool _liquidGlass = true;
+    public bool LiquidGlassEnabled { get => _liquidGlass; set { _liquidGlass = value; OnPropertyChanged(); } }
 
     // Title bar (sticky note only)
     private string _titleBarFill = "#10FFFFFF";
     private double _titleBarOpacity = 6;
     private double _buttonOpacity = 40;
+    private string _titleTextColor = "#E0E0E0";
+    public string TitleTextColorValue { get => _titleTextColor; set { _titleTextColor = value; OnPropertyChanged(); } }
 
     // Background image (clock only)
     private string _bgImagePath = "";
@@ -59,8 +69,14 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
     public int ParsedGlassTintOpacity => _glassTintOpacity;
     public int ParsedGlassLuminosity => _glassTintLuminosity;
     public string ParsedGlassColorMode => _glassColorMode;
-    public string ParsedTitleBarFill => _titleBarFill;
+    public bool ParsedLiquidGlass => _liquidGlass;
+    public double ParsedWidth => double.TryParse(WidgetWidth, out var v) ? v : 260;
+    public double ParsedHeight => double.TryParse(WidgetHeight, out var v) ? v : 200;
+    public string ParsedTitleBarFill => _target == WidgetSettingsTarget.Panel
+        ? $"#{(int)(_titleBarOpacity / 100 * 255):X2}{(_titleBarFill.Length > 3 ? _titleBarFill[3..] : "FFFFFF")}"
+        : _titleBarFill;
     public double ParsedTitleBarOpacity => _titleBarOpacity;
+    public string ParsedTitleTextColor => _titleTextColor;
     public double ParsedButtonOpacity => _buttonOpacity;
     public string ParsedBgImagePath => _bgImagePath;
     public double ParsedBgOffsetX => _bgOffsetX;
@@ -103,6 +119,8 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         // Show/hide sections based on target
         if (target == WidgetSettingsTarget.StickyNote)
         {
+            WidgetDimensionSection.Visibility = Visibility.Visible;
+            TitleTextColorSection.Visibility = Visibility.Visible;
             TitleBarSection.Visibility = Visibility.Visible;
             BgImageSection.Visibility = Visibility.Visible;
             TitleOpacitySlider.ValueChanged += (_, _) => { TitleOpacityLabel.Text = $"{(int)TitleOpacitySlider.Value}%"; };
@@ -121,7 +139,11 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         }
         if (target == WidgetSettingsTarget.Panel)
         {
+            WidgetDimensionSection.Visibility = Visibility.Visible;
+            TitleBarSection.Visibility = Visibility.Visible;
             BgImageSection.Visibility = Visibility.Visible;
+            TitleOpacitySlider.ValueChanged += (_, _) => { TitleOpacityLabel.Text = $"{(int)TitleOpacitySlider.Value}%"; };
+            ButtonOpacitySlider.ValueChanged += (_, _) => { ButtonOpacityLabel.Text = $"{(int)ButtonOpacitySlider.Value}%"; };
         }
 
         // Wire up slider labels
@@ -131,6 +153,11 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         _langChanged = _ => ApplyLoc();
         _loc.LanguageChanged += _langChanged;
         UpdateLiquidButton();
+
+        // Wire up liquid glass toggle
+        LiquidGlassToggle.Checked += (_, _) => { _liquidGlass = true; UpdateLiquidButton(); };
+        LiquidGlassToggle.Unchecked += (_, _) => { _liquidGlass = false; UpdateLiquidButton(); };
+        LiquidGlassToggle.IsChecked = _liquidGlass;
     }
 
     protected override void OnClosed(EventArgs e)
@@ -153,6 +180,9 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         _glassTintOpacity = zone.GlassTintOpacity;
         _glassTintLuminosity = zone.GlassTintLuminosity;
         _glassColorMode = zone.GlassColorMode;
+        _liquidGlass = zone.EnableLiquidGlass;
+        LiquidGlassToggle.IsChecked = _liquidGlass;
+        UpdateHighlights();
     }
 
     /// <summary>Load settings from a clock model.</summary>
@@ -169,6 +199,8 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         _glassTintOpacity = clock.GlassTintOpacity;
         _glassTintLuminosity = clock.GlassTintLuminosity;
         _glassColorMode = clock.GlassColorMode;
+        _liquidGlass = clock.EnableLiquidGlass;
+        LiquidGlassToggle.IsChecked = _liquidGlass;
 
         // Enable restore button
         _enableRestoreButton = clock.EnableRestoreButton;
@@ -203,6 +235,7 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         DigitalZoomLabel.Text = $"{_digitalBgZoom:F1}x";
         DigitalBgOpacitySlider.Value = _digitalBgOpacity;
         DigitalBgOpacityLabel.Text = $"{(int)_digitalBgOpacity}%";
+        UpdateHighlights();
     }
 
     /// <summary>Load settings from a calendar model.</summary>
@@ -219,6 +252,8 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         _glassTintOpacity = cal.GlassTintOpacity;
         _glassTintLuminosity = cal.GlassTintLuminosity;
         _glassColorMode = cal.GlassColorMode;
+        _liquidGlass = cal.EnableLiquidGlass;
+        LiquidGlassToggle.IsChecked = _liquidGlass;
 
         // Enable restore button
         _enableRestoreButton = cal.EnableRestoreButton;
@@ -238,12 +273,15 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         ZoomLabel.Text = $"{_bgZoom:F1}x";
         BgOpacitySlider.Value = _bgOpacity;
         BgOpacityLabel.Text = $"{(int)_bgOpacity}%";
+        UpdateHighlights();
     }
 
     /// <summary>Load settings from a sticky note model.</summary>
     public void LoadFromNote(StickyNote note)
     {
         UseGlobalAppearance = note.UseGlobalAppearance;
+        WidgetWidth = note.Width.ToString("F0");
+        WidgetHeight = note.Height.ToString("F0");
         BorderThicknessText = note.BorderThickness.ToString("F1");
         BorderColorValue = note.BorderColor;
         _fillColor = note.FillColor;
@@ -254,10 +292,13 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         _glassTintOpacity = note.GlassTintOpacity;
         _glassTintLuminosity = note.GlassTintLuminosity;
         _glassColorMode = note.GlassColorMode;
+        _liquidGlass = note.EnableLiquidGlass;
+        LiquidGlassToggle.IsChecked = _liquidGlass;
 
         _titleBarFill = note.TitleBarFillColor;
         _titleBarOpacity = note.TitleBarOpacity;
         _buttonOpacity = note.ControlOpacity;
+        _titleTextColor = string.IsNullOrEmpty(note.TitleTextColor) ? "#E0E0E0" : note.TitleTextColor;
         TitleOpacitySlider.Value = _titleBarOpacity;
         TitleOpacityLabel.Text = $"{(int)_titleBarOpacity}%";
         ButtonOpacitySlider.Value = _buttonOpacity;
@@ -285,22 +326,36 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         ZoomLabel.Text = $"{_bgZoom:F1}x";
         BgOpacitySlider.Value = _bgOpacity;
         BgOpacityLabel.Text = $"{(int)_bgOpacity}%";
+        UpdateHighlights();
     }
 
     /// <summary>Load settings from global config (panel).</summary>
     public void LoadFromConfig(AppConfig config)
     {
         UseGlobalAppearance = config.PanelUseGlobalAppearance;
+        WidgetWidth = config.PanelWidth.ToString("F0");
+        WidgetHeight = config.PanelHeight.ToString("F0");
         BorderThicknessText = config.GlobalBorderThickness.ToString("F1");
         BorderColorValue = config.GlobalBorderColor;
-        _fillColor = config.GlobalFillColor;
-        _fillOpacityPercent = ParseOpacity(config.GlobalFillColor);
+        _fillColor = config.PanelFillColor;
+        _fillOpacityPercent = ParseOpacity(config.PanelFillColor);
         FillOpacitySlider.Value = _fillOpacityPercent;
         FillOpacityLabel.Text = $"{(int)_fillOpacityPercent}%";
         _glassBlurAmount = config.GlassBlurAmount;
         _glassTintOpacity = config.GlassTintOpacity;
         _glassTintLuminosity = config.GlassTintLuminosity;
         _glassColorMode = config.GlassColorMode;
+        _liquidGlass = config.EnableLiquidGlass;
+        LiquidGlassToggle.IsChecked = _liquidGlass;
+
+        // Panel title bar
+        _titleBarFill = config.PanelTitleBarFillColor;
+        _titleBarOpacity = ParseOpacity(config.PanelTitleBarFillColor);
+        _buttonOpacity = config.PanelControlOpacity;
+        TitleOpacitySlider.Value = _titleBarOpacity;
+        TitleOpacityLabel.Text = $"{(int)_titleBarOpacity}%";
+        ButtonOpacitySlider.Value = _buttonOpacity;
+        ButtonOpacityLabel.Text = $"{(int)_buttonOpacity}%";
 
         // Panel dimensions
         _panelWidth = config.PanelWidth > 200 ? config.PanelWidth : 800;
@@ -320,6 +375,7 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         ZoomLabel.Text = $"{_bgZoom:F1}x";
         BgOpacitySlider.Value = _bgOpacity;
         BgOpacityLabel.Text = $"{(int)_bgOpacity}%";
+        UpdateHighlights();
     }
 
     void SetColorModeCombo(string mode) { _glassColorMode = mode; }
@@ -338,6 +394,8 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
 
         // Common
         LabelUseGlobal.Text = cn ? "使用全局外观" : "Use Global Appearance";
+        LabelWidth.Text = _loc["Settings.Width"];
+        LabelHeight.Text = _loc["Settings.Height"];
         LabelBorderThickness.Text = cn ? "边框粗细" : "Border Thickness";
         LabelBorderColor.Text = cn ? "边框颜色" : "Border Color";
         LabelFillColor.Text = cn ? "填充颜色" : "Fill Color";
@@ -351,12 +409,14 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         GlassSectionTitle.Text = cn ? "玻璃效果" : "Glass Effect";
         LiquidGlassSettingsBtn.Content = cn ? "💧 液态玻璃设置" : "💧 Liquid Glass Settings";
         LabelGlassIntensity.Text = cn ? "液态玻璃" : "Liquid Glass";
+        LiquidGlassToggle.Content = cn ? "启用液态玻璃" : "Enable Liquid Glass";
 
         // Enable restore button
         LabelEnableRestoreButton.Text = cn ? "启用恢复按钮" : "Enable Restore Button";
 
         // Title bar (sticky note)
         LabelTitleBar.Text = cn ? "标题栏填充" : "Title Bar Fill";
+        LabelTitleTextColor.Text = cn ? "便签名称颜色" : "Title Text Color";
         LabelTitleOpacity.Text = cn ? "标题栏透明度" : "Title Bar Opacity";
         LabelButtonOpacity.Text = cn ? "按钮透明度" : "Button Opacity";
 
@@ -397,6 +457,7 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         HP(BorderColorPresets, BorderColorValue);
         HP(FillColorPresets, FillColorValue);
         HP(TitleBarPresets, _titleBarFill);
+        HP(TitleTextColorPresets, TitleTextColorValue);
     }
 
     static void HP(Panel p, string s)
@@ -410,11 +471,13 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
     }
 
     void BorderColorPreset_Click(object s, MouseButtonEventArgs e) { if (s is Border b && b.Tag is string c) BorderColorValue = c; }
-    void FillColorPreset_Click(object s, MouseButtonEventArgs e) { if (s is Border b && b.Tag is string c) { _fillColor = c; _fillOpacityPercent = ParseOpacity(c); FillOpacitySlider.Value = _fillOpacityPercent; UpdateHighlights(); OnPropertyChanged(nameof(FillColorValue)); } }
+    void FillColorPreset_Click(object s, MouseButtonEventArgs e) { if (s is Border b && b.Tag is string c) { _fillColor = c; _fillOpacityPercent = ParseOpacity(c); FillOpacitySlider.Value = _fillOpacityPercent; FillOpacityLabel.Text = $"{(int)_fillOpacityPercent}%"; UpdateHighlights(); OnPropertyChanged(nameof(FillColorValue)); OnPropertyChanged(nameof(FillOpacityPercent)); } }
     void TitleBarPreset_Click(object s, MouseButtonEventArgs e) { if (s is Border b && b.Tag is string c) { _titleBarFill = c; UpdateHighlights(); } }
+    void TitleTextColorPreset_Click(object s, MouseButtonEventArgs e) { if (s is Border b && b.Tag is string c) { TitleTextColorValue = c; UpdateHighlights(); } }
+    void TitleTextColorCustom_Click(object s, RoutedEventArgs e) { var d = new ColorPickerDialog(TitleTextColorValue.Length >= 7 ? TitleTextColorValue[1..] : "E0E0E0") { Owner = this }; if (d.ShowDialog() == true) TitleTextColorValue = "#" + d.SelectedColor; }
 
     void BorderCustom_Click(object s, RoutedEventArgs e) { var d = new ColorPickerDialog(BorderColorValue.Length >= 9 ? BorderColorValue[3..] : "FFFFFF") { Owner = this }; if (d.ShowDialog() == true) BorderColorValue = (BorderColorValue.Length >= 3 ? BorderColorValue[..3] : "#40") + d.SelectedColor; }
-    void FillCustom_Click(object s, RoutedEventArgs e) { var d = new ColorPickerDialog(FillColorValue.Length >= 9 ? FillColorValue[3..] : "000000") { Owner = this }; if (d.ShowDialog() == true) { var alpha = FillColorValue.Length >= 3 ? FillColorValue[..3] : "#08"; _fillColor = alpha + d.SelectedColor; UpdateHighlights(); OnPropertyChanged(nameof(FillColorValue)); } }
+    void FillCustom_Click(object s, RoutedEventArgs e) { var d = new ColorPickerDialog(FillColorValue.Length >= 9 ? FillColorValue[3..] : "000000") { Owner = this }; if (d.ShowDialog() == true) { var alpha = FillColorValue.Length >= 3 ? FillColorValue[..3] : "#08"; _fillColor = alpha + d.SelectedColor; _fillOpacityPercent = ParseOpacity(_fillColor); FillOpacitySlider.Value = _fillOpacityPercent; FillOpacityLabel.Text = $"{(int)_fillOpacityPercent}%"; UpdateHighlights(); OnPropertyChanged(nameof(FillColorValue)); OnPropertyChanged(nameof(FillOpacityPercent)); } }
 
     void FillOpacity_Changed(object s, RoutedPropertyChangedEventArgs<double> e)
     {
@@ -450,9 +513,12 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
     {
         if (LiquidGlassSettingsBtn == null) return;
         var accent = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#7C3AED");
-        LiquidGlassSettingsBtn.Background = new SolidColorBrush(accent);
+        var muted = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#1E1E36");
+        LiquidGlassSettingsBtn.Background = new SolidColorBrush(_liquidGlass ? accent : muted);
         LiquidGlassSettingsBtn.Foreground = System.Windows.Media.Brushes.White;
-        LiquidGlassSettingsBtn.BorderBrush = new SolidColorBrush(System.Windows.Media.Color.FromArgb(0x80, 0x7C, 0x3A, 0xED));
+        LiquidGlassSettingsBtn.BorderBrush = new SolidColorBrush(_liquidGlass
+            ? System.Windows.Media.Color.FromArgb(0x80, 0x7C, 0x3A, 0xED)
+            : (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#404060"));
     }
 
     void BrowseBgImage_Click(object s, RoutedEventArgs e)
@@ -501,9 +567,9 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
                 cropShape = "Rectangle";
                 break;
             case WidgetSettingsTarget.StickyNote:
-                // Sticky note: use actual dimensions with rectangular crop
-                targetWidth = _noteWidth;
-                targetHeight = _noteHeight;
+                // Sticky note: use user-entered dimensions with rectangular crop
+                targetWidth = ParsedWidth;
+                targetHeight = ParsedHeight;
                 cropShape = "Rectangle";
                 break;
             case WidgetSettingsTarget.Panel:
@@ -623,8 +689,23 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
             return;
         }
 
+        // Validate dimensions for sticky note / panel
+        if (_target == WidgetSettingsTarget.StickyNote || _target == WidgetSettingsTarget.Panel)
+        {
+            if (!double.TryParse(WidgetWidth, out var w) || w < 100 || w > 2000)
+            {
+                MessageBox.Show(_loc["Settings.WidthRange"], _loc["Settings.ValidationError"]);
+                return;
+            }
+            if (!double.TryParse(WidgetHeight, out var h) || h < 100 || h > 2000)
+            {
+                MessageBox.Show(_loc["Settings.HeightRange"], _loc["Settings.ValidationError"]);
+                return;
+            }
+        }
+
         // Title bar
-        if (_target == WidgetSettingsTarget.StickyNote)
+        if (_target == WidgetSettingsTarget.StickyNote || _target == WidgetSettingsTarget.Panel)
         {
             _titleBarOpacity = TitleOpacitySlider.Value;
             _buttonOpacity = ButtonOpacitySlider.Value;

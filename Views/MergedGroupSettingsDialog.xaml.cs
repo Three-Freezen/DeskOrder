@@ -43,6 +43,8 @@ public partial class MergedGroupSettingsDialog : Window, INotifyPropertyChanged
         NameBox.Text = zone.MergedGroupName;
         IconCharBox.Text = zone.MergedGroupIcon;
         QuickBarModeToggle.IsChecked = zone.MergedGroupQuickBarMode;
+        WidthBox.Text = zone.Width.ToString("F0");
+        HeightBox.Text = zone.Height.ToString("F0");
         BorderThicknessBox.Text = zone.MergedGroupBorderThickness.ToString("F1");
         BgImagePathBox.Text = zone.MergedGroupBackgroundImagePath;
         OffsetXBox.Text = zone.MergedGroupBgImageOffsetX.ToString("F0");
@@ -79,8 +81,12 @@ public partial class MergedGroupSettingsDialog : Window, INotifyPropertyChanged
         ApplyButton.Click += ApplyButton_Click;
         BrowseBgBtn.Click += BrowseBgImage_Click;
         ClearBgBtn.Click += (_, _) => { BgImagePathBox.Text = ""; UpdateCropBtnState(); };
-        // Liquid Glass settings button
+        // Liquid Glass toggle + settings
+        LiquidGlassToggle.IsChecked = zone.EnableLiquidGlass;
+        LiquidGlassToggle.Checked += (_, _) => { _liquidGlass = true; UpdateLiquidButton(); };
+        LiquidGlassToggle.Unchecked += (_, _) => { _liquidGlass = false; UpdateLiquidButton(); };
         LiquidGlassSettingsBtn.Click += LiquidGlassSettings_Click;
+        UpdateLiquidButton();
 
         // Crop button
         CropBtn.Click += CropBgImage_Click;
@@ -130,6 +136,18 @@ public partial class MergedGroupSettingsDialog : Window, INotifyPropertyChanged
             _glassTintLuminosity = luminosity;
             _glassColorMode = colorMode;
         }
+    }
+
+    void UpdateLiquidButton()
+    {
+        if (LiquidGlassSettingsBtn == null) return;
+        var accent = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#7C3AED");
+        var muted = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#1E1E36");
+        LiquidGlassSettingsBtn.Background = new SolidColorBrush(_liquidGlass ? accent : muted);
+        LiquidGlassSettingsBtn.Foreground = System.Windows.Media.Brushes.White;
+        LiquidGlassSettingsBtn.BorderBrush = new SolidColorBrush(_liquidGlass
+            ? System.Windows.Media.Color.FromArgb(0x80, 0x7C, 0x3A, 0xED)
+            : (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#404060"));
     }
 
     void CropBgImage_Click(object s, RoutedEventArgs e)
@@ -187,6 +205,8 @@ public partial class MergedGroupSettingsDialog : Window, INotifyPropertyChanged
         DialogTitle.Text = cn ? "组合分区设置" : "Merged Group Settings";
         LabelName.Text = cn ? "组合名称" : "Group Name";
         LabelQuickBarMode.Text = cn ? "快捷栏模式" : "QuickBar Mode";
+        LabelWidth.Text = _loc["Settings.Width"];
+        LabelHeight.Text = _loc["Settings.Height"];
         LabelTextColor.Text = cn ? "分区名称颜色" : "Zone Name Color";
         LabelIcon.Text = cn ? "组合图标" : "Group Icon";
         LabelIconColor.Text = cn ? "分区图标颜色" : "Zone Icon Color";
@@ -202,6 +222,7 @@ public partial class MergedGroupSettingsDialog : Window, INotifyPropertyChanged
         KeepOriginalRadio.Content = cn ? "保留原有填充" : "Keep Original Fill";
         GlassSectionTitle.Text = cn ? "玻璃效果" : "Glass Effect";
         LabelGlassIntensity.Text = cn ? "液态玻璃" : "Liquid Glass";
+        LiquidGlassToggle.Content = cn ? "启用液态玻璃" : "Enable Liquid Glass";
         LiquidGlassSettingsBtn.Content = cn ? "💧 液态玻璃设置" : "💧 Liquid Glass Settings";
         LabelBgImage.Text = cn ? "背景图片" : "Background Image";
         LabelBgStretch.Text = cn ? "图片裁剪" : "Crop";
@@ -314,6 +335,14 @@ public partial class MergedGroupSettingsDialog : Window, INotifyPropertyChanged
         _zone.MergedGroupName = NameBox.Text;
         _zone.MergedGroupIcon = IconCharBox.Text;
         _zone.MergedGroupQuickBarMode = QuickBarModeToggle.IsChecked == true;
+
+        if (double.TryParse(WidthBox.Text, System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var w) && w >= 100 && w <= 4000)
+            _zone.Width = w;
+        if (double.TryParse(HeightBox.Text, System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var h) && h >= 100 && h <= 4000)
+            _zone.Height = h;
+
         _zone.MergedGroupTitleTextColor = GetSelectedTextColor();
         _zone.MergedGroupIconColor = GetSelectedIconColor();
 

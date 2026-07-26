@@ -111,7 +111,7 @@
                     <!-- 2. Zone Name Color -->
                     <TextBlock x:Name="LabelTextColor" Style="{StaticResource DLb}"/>
                     <StackPanel x:Name="TextColorPresets" Orientation="Horizontal" Margin="0,2,0,0">
-                        <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#00000000" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="TextColorPreset_Click" ToolTip="Transparent"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFFFFF" Offset="0"/><GradientStop Color="#CCCCCC" Offset="0.5"/><GradientStop Color="#FFFFFF" Offset="1"/></LinearGradientBrush></Border.Background></Border>
+                        <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#01000000" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="TextColorPreset_Click" ToolTip="Transparent"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFFFFF" Offset="0"/><GradientStop Color="#CCCCCC" Offset="0.5"/><GradientStop Color="#FFFFFF" Offset="1"/></LinearGradientBrush></Border.Background></Border>
                         <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#A0000000" BorderBrush="#80FFFFFF" BorderThickness="1" MouseLeftButtonDown="TextColorPreset_Click"><Border.Background><SolidColorBrush Color="#000000"/></Border.Background></Border>
                         <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#A0FFFFFF" BorderBrush="#80FFFFFF" BorderThickness="1" MouseLeftButtonDown="TextColorPreset_Click"><Border.Background><SolidColorBrush Color="#FFFFFF"/></Border.Background></Border>
                         <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#A0808080" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="TextColorPreset_Click"><Border.Background><SolidColorBrush Color="#808080"/></Border.Background></Border>
@@ -161,7 +161,7 @@
                     <!-- 4. Icon Color -->
                     <TextBlock x:Name="LabelIconColor" Style="{StaticResource DLb}"/>
                     <StackPanel x:Name="IconColorPresets" Orientation="Horizontal" Margin="0,2,0,0">
-                        <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#00000000" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="IconColorPreset_Click" ToolTip="Transparent"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFFFFF" Offset="0"/><GradientStop Color="#CCCCCC" Offset="0.5"/><GradientStop Color="#FFFFFF" Offset="1"/></LinearGradientBrush></Border.Background></Border>
+                        <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#01000000" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="IconColorPreset_Click" ToolTip="Transparent"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFFFFF" Offset="0"/><GradientStop Color="#CCCCCC" Offset="0.5"/><GradientStop Color="#FFFFFF" Offset="1"/></LinearGradientBrush></Border.Background></Border>
                         <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#000000" Background="#000000" BorderBrush="#80FFFFFF" BorderThickness="1" MouseLeftButtonDown="IconColorPreset_Click"/>
                         <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#FFFFFF" Background="#FFFFFF" BorderBrush="#80FFFFFF" BorderThickness="1" MouseLeftButtonDown="IconColorPreset_Click"/>
                         <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#808080" Background="#808080" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="IconColorPreset_Click"/>
@@ -207,7 +207,7 @@
                     <!-- 8. Border Color -->
                     <TextBlock x:Name="LabelBorderColor" Style="{StaticResource DLb}"/>
                     <StackPanel x:Name="BorderColorPresets" Orientation="Horizontal" Margin="0,2,0,0">
-                        <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#00000000" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="BorderColorPreset_Click" ToolTip="Transparent"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFFFFF" Offset="0"/><GradientStop Color="#CCCCCC" Offset="0.5"/><GradientStop Color="#FFFFFF" Offset="1"/></LinearGradientBrush></Border.Background></Border>
+                        <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#01000000" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="BorderColorPreset_Click" ToolTip="Transparent"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFFFFF" Offset="0"/><GradientStop Color="#CCCCCC" Offset="0.5"/><GradientStop Color="#FFFFFF" Offset="1"/></LinearGradientBrush></Border.Background></Border>
                         <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#60000000" BorderBrush="#80FFFFFF" BorderThickness="1" MouseLeftButtonDown="BorderColorPreset_Click"><Border.Background><SolidColorBrush Color="#000000"/></Border.Background></Border>
                         <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#60FFFFFF" BorderBrush="#80FFFFFF" BorderThickness="1" MouseLeftButtonDown="BorderColorPreset_Click"><Border.Background><SolidColorBrush Color="#FFFFFF"/></Border.Background></Border>
                         <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#60808080" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="BorderColorPreset_Click"><Border.Background><SolidColorBrush Color="#808080"/></Border.Background></Border>
@@ -224,7 +224,7 @@
                     <!-- 9. Title Bar Fill -->
                     <TextBlock x:Name="LabelTitleBar" Style="{StaticResource DLb}"/>
                     <StackPanel x:Name="TitleBarPresets" Orientation="Horizontal" Margin="0,2,0,0">
-                        <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#00000000" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="TitleBarColorPreset_Click" ToolTip="Transparent"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFFFFF" Offset="0"/><GradientStop Color="#CCCCCC" Offset="0.5"/><GradientStop Color="#FFFFFF" Offset="1"/></LinearGradientBrush></Border.Background></Border>
+                        <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#01000000" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="TitleBarColorPreset_Click" ToolTip="Transparent"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFFFFF" Offset="0"/><GradientStop Color="#CCCCCC" Offset="0.5"/><GradientStop Color="#FFFFFF" Offset="1"/></LinearGradientBrush></Border.Background></Border>
                         <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#60000000" BorderBrush="#80FFFFFF" BorderThickness="1" MouseLeftButtonDown="TitleBarColorPreset_Click"><Border.Background><SolidColorBrush Color="#000000"/></Border.Background></Border>
                         <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#60FFFFFF" BorderBrush="#80FFFFFF" BorderThickness="1" MouseLeftButtonDown="TitleBarColorPreset_Click"><Border.Background><SolidColorBrush Color="#FFFFFF"/></Border.Background></Border>
                         <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#60808080" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="TitleBarColorPreset_Click"><Border.Background><SolidColorBrush Color="#808080"/></Border.Background></Border>
@@ -257,7 +257,7 @@
                     <!-- Fill Color -->
                     <TextBlock x:Name="LabelFillColor" Style="{StaticResource DLb}"/>
                     <StackPanel x:Name="FillColorPresets" Orientation="Horizontal" Margin="0,2,0,0">
-                        <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#00000000" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="FillColorPreset_Click" ToolTip="Transparent"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFFFFF" Offset="0"/><GradientStop Color="#CCCCCC" Offset="0.5"/><GradientStop Color="#FFFFFF" Offset="1"/></LinearGradientBrush></Border.Background></Border>
+                        <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#01000000" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="FillColorPreset_Click" ToolTip="Transparent"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFFFFF" Offset="0"/><GradientStop Color="#CCCCCC" Offset="0.5"/><GradientStop Color="#FFFFFF" Offset="1"/></LinearGradientBrush></Border.Background></Border>
                         <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#60000000" BorderBrush="#80FFFFFF" BorderThickness="1" MouseLeftButtonDown="FillColorPreset_Click"><Border.Background><SolidColorBrush Color="#000000"/></Border.Background></Border>
                         <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#60FFFFFF" BorderBrush="#80FFFFFF" BorderThickness="1" MouseLeftButtonDown="FillColorPreset_Click"><Border.Background><SolidColorBrush Color="#FFFFFF"/></Border.Background></Border>
                         <Border Width="28" Height="28" CornerRadius="14" Margin="0,0,6,0" Cursor="Hand" Tag="#60808080" BorderBrush="#40FFFFFF" BorderThickness="1" MouseLeftButtonDown="FillColorPreset_Click"><Border.Background><SolidColorBrush Color="#808080"/></Border.Background></Border>
@@ -287,9 +287,14 @@
                                        FontSize="12" FontWeight="SemiBold"
                                        Foreground="{StaticResource T1}" Margin="0,0,0,6"/>
 
-                            <!-- Liquid Glass settings button (acrylic always on, liquid glass default) -->
+                            <!-- Liquid Glass toggle + settings -->
                             <TextBlock x:Name="LabelGlassIntensity" Style="{StaticResource DLb}" Margin="0,0,0,4"/>
                             <StackPanel x:Name="GlassIntensityPanel">
+                                <CheckBox x:Name="LiquidGlassToggle" IsChecked="{Binding LiquidGlassEnabled}"
+                                          Foreground="{StaticResource T1}" FontSize="13" Margin="0,0,0,4"
+                                          Checked="LiquidGlass_Changed" Unchecked="LiquidGlass_Changed">
+                                    <TextBlock x:Name="LabelLiquidGlassToggle"/>
+                                </CheckBox>
                                 <Button x:Name="LiquidGlassSettingsBtn" Content="💧 液态玻璃设置"
                                         Width="200" Height="34" FontSize="12" FontWeight="SemiBold"
                                         Cursor="Hand" Margin="0,0,0,4"

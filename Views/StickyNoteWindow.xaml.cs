@@ -50,6 +50,7 @@ public partial class StickyNoteWindow : Window
         LoadContent(note.Content);
 
         ApplyStyle();
+        ApplyTitleBar();
         if (note.PinnedTop) Topmost = true;
 
         LocationChanged += (_, _) => { _note.X = Left; _note.Y = Top; };
@@ -70,6 +71,7 @@ public partial class StickyNoteWindow : Window
             ApplyAcrylic();
         ApplyBackgroundImage();
         ApplyStyle();
+        ApplyTitleBar();
     }
 
     private void LoadContent(string content)
@@ -108,15 +110,18 @@ public partial class StickyNoteWindow : Window
 
     public void ShowNote()
     {
+        // Save dimensions before any reference swap can occur
+        var savedW = _note.Width; var savedH = _note.Height;
         if (!IsVisible) Show();
         ApplyAcrylic();
         Left = _note.X; Top = _note.Y;
         MainContent.Visibility = Visibility.Visible; RestoreButton.Visibility = Visibility.Collapsed;
         MinWidth = 180; MinHeight = 120;
-        Width = _note.Width; Height = _note.Height;
         _note.IsVisible = true; NativeMethods.PinToDesktop(this);
         NativeMethods.SetRoundedCorners(this, 10);
         _notesService.UpdateNote(_note);
+        // Restore dimensions AFTER UpdateNote (which may trigger OnNotesChanged / reference swap)
+        Width = savedW; Height = savedH;
         Topmost = true;
         Activate();
         OnStateChanged?.Invoke();
@@ -232,6 +237,24 @@ public partial class StickyNoteWindow : Window
             var bc = (Color)ColorConverter.ConvertFromString(_note.BorderColor);
             NoteBorder.BorderBrush = new SolidColorBrush(bc);
             NoteBorder.BorderThickness = new Thickness(_note.BorderThickness);
+        }
+        catch { }
+    }
+
+    void ApplyTitleBar()
+    {
+        try
+        {
+            // Apply title bar fill with ARGB alpha controlling background transparency
+            var tbColor = (Color)ColorConverter.ConvertFromString(_note.TitleBarFillColor);
+            TitleBarBorder.Background = new SolidColorBrush(tbColor);
+            // Apply title text color
+            if (!string.IsNullOrEmpty(_note.TitleTextColor))
+            {
+                var tc = (Color)ColorConverter.ConvertFromString(_note.TitleTextColor);
+                TitleBox.Foreground = new SolidColorBrush(tc);
+                TitleBox.CaretBrush = new SolidColorBrush(tc);
+            }
         }
         catch { }
     }

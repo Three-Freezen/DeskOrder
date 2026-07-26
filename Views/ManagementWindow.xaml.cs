@@ -1037,6 +1037,8 @@ public partial class ManagementWindow : Window
         dlg.LoadFromNote(note);
         if (dlg.ShowDialog() == true && dlg.DialogResultOk)
         {
+            note.Width = dlg.ParsedWidth;
+            note.Height = dlg.ParsedHeight;
             note.BorderThickness = dlg.ParsedBorderThickness;
             note.BorderColor = dlg.ParsedBorderColor;
             note.FillColor = dlg.ParsedFillColor;
@@ -1045,9 +1047,11 @@ public partial class ManagementWindow : Window
             note.GlassTintOpacity = dlg.ParsedGlassTintOpacity;
             note.GlassTintLuminosity = dlg.ParsedGlassLuminosity;
             note.GlassColorMode = dlg.ParsedGlassColorMode;
+            note.EnableLiquidGlass = dlg.ParsedLiquidGlass;
             note.TitleBarFillColor = dlg.ParsedTitleBarFill;
             note.TitleBarOpacity = dlg.ParsedTitleBarOpacity;
             note.ControlOpacity = dlg.ParsedButtonOpacity;
+            note.TitleTextColor = dlg.ParsedTitleTextColor;
             note.BackgroundImagePath = dlg.ParsedBgImagePath;
             note.BgImageOffsetX = dlg.ParsedBgOffsetX;
             note.BgImageOffsetY = dlg.ParsedBgOffsetY;
@@ -1074,6 +1078,7 @@ public partial class ManagementWindow : Window
             clock.GlassTintOpacity = dlg.ParsedGlassTintOpacity;
             clock.GlassTintLuminosity = dlg.ParsedGlassLuminosity;
             clock.GlassColorMode = dlg.ParsedGlassColorMode;
+            clock.EnableLiquidGlass = dlg.ParsedLiquidGlass;
             clock.BackgroundImagePath = dlg.ParsedBgImagePath;
             clock.BgImageOffsetX = dlg.ParsedBgOffsetX;
             clock.BgImageOffsetY = dlg.ParsedBgOffsetY;
@@ -1105,6 +1110,7 @@ public partial class ManagementWindow : Window
             cal.GlassTintOpacity = dlg.ParsedGlassTintOpacity;
             cal.GlassTintLuminosity = dlg.ParsedGlassLuminosity;
             cal.GlassColorMode = dlg.ParsedGlassColorMode;
+            cal.EnableLiquidGlass = dlg.ParsedLiquidGlass;
             cal.BackgroundImagePath = dlg.ParsedBgImagePath;
             cal.BgImageOffsetX = dlg.ParsedBgOffsetX;
             cal.BgImageOffsetY = dlg.ParsedBgOffsetY;
@@ -2860,14 +2866,19 @@ public partial class ManagementWindow : Window
             dlg.LoadFromConfig(config);
             if (dlg.ShowDialog() == true && dlg.DialogResultOk)
             {
+                config.PanelWidth = dlg.ParsedWidth;
+                config.PanelHeight = dlg.ParsedHeight;
                 config.GlobalBorderThickness = dlg.ParsedBorderThickness;
                 config.GlobalBorderColor = dlg.ParsedBorderColor;
-                config.GlobalFillColor = dlg.ParsedFillColor;
+                config.PanelFillColor = dlg.ParsedFillColor;
                 config.PanelUseGlobalAppearance = dlg.ParsedUseGlobalAppearance;
                 config.GlassBlurAmount = dlg.ParsedGlassBlur;
                 config.GlassTintOpacity = dlg.ParsedGlassTintOpacity;
                 config.GlassTintLuminosity = dlg.ParsedGlassLuminosity;
                 config.GlassColorMode = dlg.ParsedGlassColorMode;
+                config.EnableLiquidGlass = dlg.ParsedLiquidGlass;
+                config.PanelTitleBarFillColor = dlg.ParsedTitleBarFill;
+                config.PanelControlOpacity = dlg.ParsedButtonOpacity;
 
                 // Panel background image
                 config.PanelBackgroundImagePath = dlg.ParsedBgImagePath;
