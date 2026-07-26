@@ -342,11 +342,80 @@ public static class AcrylicHelper
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Owner = owner,
             ResizeMode = ResizeMode.NoResize,
-            WindowStyle = WindowStyle.ToolWindow,
-            Background = new SolidColorBrush(Color.FromRgb(0x10, 0x11, 0x1A))
+            WindowStyle = WindowStyle.None,
+            AllowsTransparency = true,
+            Background = Brushes.Transparent
         };
 
+        var dlgBg = new Border
+        {
+            Background = new SolidColorBrush(Color.FromRgb(0x10, 0x11, 0x1A)),
+            CornerRadius = new CornerRadius(10),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF)),
+            BorderThickness = new Thickness(1)
+        };
+
+        var rootGrid = new Grid();
+        rootGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // title bar
+        rootGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // separator
+        rootGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // content
+
+        // Custom title bar
+        var titleBar = new Border
+        {
+            Background = new SolidColorBrush(Color.FromRgb(0x10, 0x11, 0x1A)),
+            CornerRadius = new CornerRadius(10, 10, 0, 0),
+            Padding = new Thickness(12, 8, 12, 8),
+            Cursor = System.Windows.Input.Cursors.SizeAll
+        };
+        titleBar.MouseLeftButtonDown += (_, _) => { try { dlg.DragMove(); } catch { } };
+
+        var titlePanel = new System.Windows.Controls.StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal };
+        titlePanel.Children.Add(new System.Windows.Controls.TextBlock
+        {
+            Text = $"💧 {title}",
+            FontSize = 14, FontWeight = FontWeights.SemiBold,
+            Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0)),
+            VerticalAlignment = VerticalAlignment.Center
+        });
+
+        var closeBtn = new System.Windows.Controls.Button
+        {
+            Content = "✕", Width = 28, Height = 28,
+            FontSize = 12, Cursor = System.Windows.Input.Cursors.Hand,
+            Background = Brushes.Transparent,
+            Foreground = new SolidColorBrush(Color.FromRgb(0x80, 0x80, 0xA0)),
+            BorderThickness = new Thickness(0),
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 0, 0)
+        };
+        closeBtn.Click += (_, _) => dlg.Close();
+
+        var titleRow = new System.Windows.Controls.Grid();
+        titleRow.Children.Add(titlePanel);
+        titleRow.Children.Add(closeBtn);
+        System.Windows.Controls.Grid.SetColumn(closeBtn, 0);
+        titleBar.Child = titleRow;
+
+        var separator = new Border
+        {
+            Height = 1,
+            Background = new SolidColorBrush(Color.FromArgb(0x20, 0xFF, 0xFF, 0xFF)),
+            Margin = new Thickness(12, 0, 12, 0)
+        };
+
+        System.Windows.Controls.Grid.SetRow(titleBar, 0);
+        System.Windows.Controls.Grid.SetRow(separator, 1);
+        rootGrid.Children.Add(titleBar);
+        rootGrid.Children.Add(separator);
+
         var grid = new Grid { Margin = new Thickness(20) };
+        System.Windows.Controls.Grid.SetRow(grid, 2);
+        rootGrid.Children.Add(grid);
+
+        dlgBg.Child = rootGrid;
+        dlg.Content = dlgBg;
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // title
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // blur slider
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // opacity slider
@@ -486,7 +555,6 @@ public static class AcrylicHelper
         Grid.SetRow(btnRow, row++);
         grid.Children.Add(btnRow);
 
-        dlg.Content = grid;
         dlg.ShowDialog();
 
         // Copy locals back to ref params

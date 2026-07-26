@@ -47,7 +47,7 @@ public class AppConfig
 
     // ── Panel Hotkey ──
     public bool PanelHotkeyEnabled { get; set; } = false;
-    public int PanelHotkeyModifiers { get; set; } = 0x0008; // MOD_WIN
+    public int PanelHotkeyModifiers { get; set; } = 0x0006; // MOD_CONTROL | MOD_SHIFT
     public int PanelHotkeyKey { get; set; } = 0x50; // 'P'
     public List<CustomHotkey> PanelCustomHotkeys { get; set; } = new();
 

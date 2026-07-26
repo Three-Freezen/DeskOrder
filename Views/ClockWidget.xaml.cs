@@ -55,7 +55,6 @@ public partial class ClockWidget : Window
         Loaded += OnLoad;
         SizeChanged += OnSizeChanged;
         LocationChanged += (_, _) => { _clock.X = Left; _clock.Y = Top; };
-        Activated += (_, _) => { Topmost = true; };
         _langChanged = _ => UpdateContextMenuLabels();
         _loc.LanguageChanged += _langChanged;
         _widgetService.ClocksChanged += OnClocksChanged;
@@ -416,10 +415,7 @@ public partial class ClockWidget : Window
         if (e.OriginalSource is System.Windows.Controls.Button) return;
         // Allow restore button to handle its own clicks
         if (RestoreButton.Visibility == Visibility.Visible) return;
-        if (s is FrameworkElement fe && fe.Parent is Window)
-        {
-            try { DragMove(); NativeMethods.PinToDesktop(this); } catch { }
-        }
+        try { DragMove(); NativeMethods.PinToDesktop(this); } catch { }
     }
 
     void Window_PreviewMouseRightButtonDown(object s, MouseButtonEventArgs e)
@@ -507,8 +503,12 @@ public partial class ClockWidget : Window
         MinWidth = 140; MinHeight = 80;
         Width = _clock.Width > 140 ? _clock.Width : 320;
         Height = _clock.Height > 80 ? _clock.Height : 140;
-        _clock.IsVisible = true; NativeMethods.PinToDesktop(this);
+        _clock.IsVisible = true;
+        _widgetService.UpdateClock(_clock);
+        NativeMethods.PinToDesktop(this);
         NativeMethods.SetRoundedCorners(this, 10);
+        Topmost = true;
+        Activate();
     }
 
     public void HideClock()

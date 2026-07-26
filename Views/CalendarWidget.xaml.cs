@@ -47,7 +47,6 @@ public partial class CalendarWidget : Window
         Loaded += OnLoad;
         SizeChanged += OnSizeChanged;
         LocationChanged += (_, _) => { _calendar.X = Left; _calendar.Y = Top; };
-        Activated += (_, _) => { Topmost = true; };
         _langChanged = _ => ApplyLoc();
         _loc.LanguageChanged += _langChanged;
         _widgetService.CalendarsChanged += OnCalendarsChanged;
@@ -569,8 +568,12 @@ public partial class CalendarWidget : Window
         MinWidth = 260; MinHeight = 340;
         Width = _calendar.Width > 260 ? _calendar.Width : 320;
         Height = _calendar.Height > 340 ? _calendar.Height : 440;
-        _calendar.IsVisible = true; NativeMethods.PinToDesktop(this);
+        _calendar.IsVisible = true;
+        _widgetService.UpdateCalendar(_calendar);
+        NativeMethods.PinToDesktop(this);
         NativeMethods.SetRoundedCorners(this, 10);
+        Topmost = true;
+        Activate();
     }
 
     public void HideCalendar()

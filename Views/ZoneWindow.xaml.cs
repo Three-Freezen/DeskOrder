@@ -60,6 +60,7 @@ public partial class ZoneWindow : Window
     private FrameworkElement? _de;
     private readonly System.Windows.Threading.DispatcherTimer _saveDebounce = new() { Interval = TimeSpan.FromMilliseconds(500) };
     private bool _savePending;
+    private string _resolvedFillColor = "#08000000";
 
     public ZoneWindow(Zone zone, ZoneManager mgr, ShellIconService icons)
     {
@@ -119,9 +120,7 @@ public partial class ZoneWindow : Window
         NativeMethods.PinToDesktop(this); NativeMethods.SetToolWindow(this);
         NativeMethods.SetRoundedCorners(this, (int)_zone.CornerRadius);
         // Re-apply acrylic now that HWND is valid (constructor called ApplyStyle before HWND existed)
-        var config = _mgr.GetConfig();
-        string fillColor = config.UseGlobalAppearance ? config.GlobalFillColor : _zone.FillColor;
-        ApplyAcrylic(fillColor);
+        ApplyAcrylic(_resolvedFillColor);
         var hwnd = new WindowInteropHelper(this).Handle;
         int ex = NativeMethods.GetWindowLong(hwnd, NativeMethods.GWL_EXSTYLE);
         NativeMethods.SetWindowLong(hwnd, NativeMethods.GWL_EXSTYLE, ex & ~NativeMethods.WS_EX_APPWINDOW);
@@ -152,7 +151,9 @@ public partial class ZoneWindow : Window
         if (_zone.Width < 100) _zone.Width = 400; if (_zone.Height < 100) _zone.Height = 300;
         Width = _zone.Width; Height = _zone.Height; Left = _zone.X; Top = _zone.Y;
         MainContent.Visibility = Visibility.Visible; RestoreButton.Visibility = Visibility.Collapsed;
-        _zone.IsVisible = true; NativeMethods.PinToDesktop(this);
+        _zone.IsVisible = true;
+        ApplyStyle();
+        NativeMethods.PinToDesktop(this);
         NativeMethods.SetRoundedCorners(this, (int)_zone.CornerRadius);
         _mgr.FireZoneVisibilityChanged(_zone.Id, true);
     }
@@ -642,6 +643,7 @@ public partial class ZoneWindow : Window
         }
 
         // Acrylic: pass resolved fillColor so it uses the correct value (not stale config)
+        _resolvedFillColor = fillColor;
         ApplyAcrylic(fillColor);
 
         // Border: always apply user's border color and thickness (AFTER acrylic to ensure they're not overridden)
@@ -728,9 +730,22 @@ public partial class ZoneWindow : Window
     void UpdateCanvasSize()
     {
         if (_itemCanvas == null) return;
-        if (_zone.Items.Count == 0) { _itemCanvas.Width = _zone.Width - 2; _itemCanvas.Height = _zone.Height - 50; return; }
+
+        // Use the actually displayed items list (sub-zone's items when a sub-zone tab is selected)
+        List<Models.ZoneItem> displayItems;
+        if (_zone.MergedSubZoneIds.Count > 0 && _vm.SelectedSubZoneId.HasValue && _vm.SelectedSubZoneId.Value != _zone.Id)
+        {
+            var subZone = _mgr.Zones.FirstOrDefault(z => z.Id == _vm.SelectedSubZoneId.Value);
+            displayItems = subZone?.Items ?? _zone.Items;
+        }
+        else
+        {
+            displayItems = _zone.Items;
+        }
+
+        if (displayItems.Count == 0) { _itemCanvas.Width = _zone.Width - 2; _itemCanvas.Height = _zone.Height - 50; return; }
         double maxX = 0, maxY = 0;
-        foreach (var i in _zone.Items) { if (i.X + 80 > maxX) maxX = i.X + 80; if (i.Y + 96 > maxY) maxY = i.Y + 96; }
+        foreach (var i in displayItems) { if (i.X + 80 > maxX) maxX = i.X + 80; if (i.Y + 96 > maxY) maxY = i.Y + 96; }
         _itemCanvas.Width = Math.Max(_zone.Width - 20, maxX + 20);
         _itemCanvas.Height = Math.Max(_zone.Height - 50, maxY + 20);
     }

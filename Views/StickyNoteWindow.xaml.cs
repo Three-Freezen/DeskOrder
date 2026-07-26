@@ -56,7 +56,6 @@ public partial class StickyNoteWindow : Window
         SizeChanged += (_, _) => { if (MainContent.Visibility == Visibility.Visible) { _note.Width = Width; _note.Height = Height; NativeMethods.UpdateRoundedCorners(this, 10); } };
 
         Loaded += OnLoad;
-        Activated += (_, _) => { Topmost = true; };
         _notesService.NotesChanged += OnNotesChanged;
 
         _initializing = false;
@@ -118,6 +117,8 @@ public partial class StickyNoteWindow : Window
         _note.IsVisible = true; NativeMethods.PinToDesktop(this);
         NativeMethods.SetRoundedCorners(this, 10);
         _notesService.UpdateNote(_note);
+        Topmost = true;
+        Activate();
         OnStateChanged?.Invoke();
     }
 

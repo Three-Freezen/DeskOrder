@@ -25,9 +25,12 @@ public partial class ManagementWindow : Window
     private static readonly SolidColorBrush InactiveBg = new(Color.FromArgb(0x20, 0xFF, 0xFF, 0xFF));
 
     // Track widget windows opened from management window
-    private readonly Dictionary<Guid, Window> _openNoteWindows = new();
+    // Notes are managed by App.xaml.cs — use IsNoteWindowOpen() to check
     private readonly Dictionary<Guid, Window> _openClockWindows = new();
     private readonly Dictionary<Guid, Window> _openCalendarWindows = new();
+
+    private bool IsNoteWindowOpen(Guid id) => ((App)System.Windows.Application.Current).IsNoteWindowOpen(id);
+    private Window? GetNoteWindow(Guid id) => ((App)System.Windows.Application.Current)._noteWindows.TryGetValue(id, out var w) ? w : null;
     // Track toggle dots for animation
     private readonly Dictionary<Guid, Border> _noteToggleDots = new();
     private readonly Dictionary<Guid, Border> _clockToggleDots = new();
@@ -962,7 +965,7 @@ public partial class ManagementWindow : Window
         btns.Children.Add(appBtn);
 
         // Toggle switch (matching zone/clock/calendar style)
-        bool noteVisible = _openNoteWindows.TryGetValue(note.Id, out var noteWin) && noteWin is StickyNoteWindow snw && snw.MainContent.Visibility == Visibility.Visible;
+        bool noteVisible = GetNoteWindow(note.Id) is StickyNoteWindow snw && snw.MainContent.Visibility == Visibility.Visible;
         var noteToggleBorder = new Border
         {
             Width = 40, Height = 20, CornerRadius = new CornerRadius(10),
@@ -985,7 +988,7 @@ public partial class ManagementWindow : Window
         {
             ToggleNoteWindow(note);
             // Check actual window state after toggle and animate only this dot
-            bool nowVisible = _openNoteWindows.TryGetValue(note.Id, out var nw) && nw is StickyNoteWindow snw && snw.MainContent.Visibility == Visibility.Visible;
+            bool nowVisible = GetNoteWindow(note.Id) is StickyNoteWindow snw2 && snw2.MainContent.Visibility == Visibility.Visible;
             AnimateToggleDot(noteToggleDot, nowVisible);
         };
         btns.Children.Add(noteToggleBorder);
@@ -1216,7 +1219,7 @@ public partial class ManagementWindow : Window
                     RefreshNotesList();
                     popup.IsOpen = false;
                 };
-                item.MouseEnter += (s3, _) => { if (s3 is Border b3 && !isCurrent) b3.Background = new SolidColorBrush(Color.FromArgb(0x15, 0xFF, 0xFF, 0xFF)); };
+                item.MouseEnter += (s3, _) => { if (s3 is Border b3 && !isCurrent) b3.Background = new SolidColorBrush(Color.FromArgb(0x30, 0x6C, 0x63, 0xFF)); };
                 item.MouseLeave += (s3, _) => { if (s3 is Border b3 && !isCurrent) b3.Background = Brushes.Transparent; };
                 stack.Children.Add(item);
             }
@@ -1264,7 +1267,7 @@ public partial class ManagementWindow : Window
                         RefreshNotesList();
                         popup.IsOpen = false;
                     };
-                    item.MouseEnter += (s3, _) => { if (s3 is Border b3 && !isCurrent) b3.Background = new SolidColorBrush(Color.FromArgb(0x15, 0xFF, 0xFF, 0xFF)); };
+                    item.MouseEnter += (s3, _) => { if (s3 is Border b3 && !isCurrent) b3.Background = new SolidColorBrush(Color.FromArgb(0x30, 0x6C, 0x63, 0xFF)); };
                     item.MouseLeave += (s3, _) => { if (s3 is Border b3 && !isCurrent) b3.Background = Brushes.Transparent; };
                     Grid.SetColumn(item, 0);
                     itemGrid.Children.Add(item);
@@ -1534,23 +1537,18 @@ public partial class ManagementWindow : Window
 
     void ToggleNoteWindow(StickyNote note)
     {
-        if (_openNoteWindows.TryGetValue(note.Id, out var w) && w is StickyNoteWindow snw)
-        {
-            // Check MainContent visibility instead of IsVisible to handle minimized state correctly
-            if (snw.MainContent.Visibility == Visibility.Visible) snw.HideNote();
-            else snw.ShowNote();
-        }
-        else
-        {
-            // Set IsVisible BEFORE creating the window to prevent constructor from calling ApplyHidden()
-            note.IsVisible = true;
-            OpenNoteWindow(note);
-        }
+        var app = (App)System.Windows.Application.Current;
+        app.ToggleNoteWindow(note);
     }
 
     void DeleteNote(StickyNote note)
     {
-        if (_openNoteWindows.TryGetValue(note.Id, out var w)) w.Close();
+        var app = (App)System.Windows.Application.Current;
+        if (app.IsNoteWindowOpen(note.Id))
+        {
+            // Close via App's dictionary
+            if (app._noteWindows.TryGetValue(note.Id, out var w)) w.Close();
+        }
         _notesService?.DeleteNote(note.Id);
         RefreshNotesList();
     }
@@ -1730,7 +1728,7 @@ public partial class ManagementWindow : Window
         {
             DesktopClock c => _openClockWindows.TryGetValue(c.Id, out var cw) && cw.IsVisible,
             DesktopCalendar ca => _openCalendarWindows.TryGetValue(ca.Id, out var caw) && caw.IsVisible,
-            StickyNote n => _openNoteWindows.TryGetValue(n.Id, out var nw) && nw is StickyNoteWindow snw && snw.MainContent.Visibility == Visibility.Visible,
+            StickyNote n => GetNoteWindow(n.Id) is StickyNoteWindow snw3 && snw3.MainContent.Visibility == Visibility.Visible,
             _ => false
         };
 
@@ -1750,7 +1748,7 @@ public partial class ManagementWindow : Window
             {
                 DesktopClock c2 => _openClockWindows.TryGetValue(c2.Id, out var w2) && w2 is ClockWidget cw2 && cw2.RestoreButton.Visibility == Visibility.Visible,
                 DesktopCalendar ca2 => _openCalendarWindows.TryGetValue(ca2.Id, out var w3) && w3 is CalendarWidget cw3 && cw3.RestoreButton.Visibility == Visibility.Visible,
-                StickyNote n2 => _openNoteWindows.TryGetValue(n2.Id, out var w4) && w4 is StickyNoteWindow sw2 && sw2.RestoreButton.Visibility == Visibility.Visible,
+                StickyNote n2 => GetNoteWindow(n2.Id) is StickyNoteWindow sw2 && sw2.RestoreButton.Visibility == Visibility.Visible,
                 _ => false
             };
             isWidgetActive = widgetVisible && !isMinimized;
@@ -1783,7 +1781,7 @@ public partial class ManagementWindow : Window
             {
                 DesktopClock c2 => _openClockWindows.TryGetValue(c2.Id, out var cw2) && cw2 is ClockWidget cw3 && cw3.MainContent.Visibility == Visibility.Visible,
                 DesktopCalendar ca2 => _openCalendarWindows.TryGetValue(ca2.Id, out var caw2) && caw2 is CalendarWidget cw4 && cw4.MainContent.Visibility == Visibility.Visible,
-                StickyNote n2 => _openNoteWindows.TryGetValue(n2.Id, out var nw2) && nw2 is StickyNoteWindow sw2 && sw2.MainContent.Visibility == Visibility.Visible,
+                StickyNote n2 => GetNoteWindow(n2.Id) is StickyNoteWindow sw3 && sw3.MainContent.Visibility == Visibility.Visible,
                 _ => false
             };
             AnimateToggleDot(toggleDot, nowVisible);
@@ -1925,14 +1923,16 @@ public partial class ManagementWindow : Window
                         if (note.EnableRestoreButton)
                         {
                             // Enabled minimize mode: check if window is visible (not minimized)
-                            bool isWindowOpen = _openNoteWindows.TryGetValue(note.Id, out var win) && win.IsVisible;
-                            bool isMinimized = isWindowOpen && win is StickyNoteWindow sw && sw.RestoreButton.Visibility == Visibility.Visible;
+                            var noteWin = GetNoteWindow(note.Id);
+                            bool isWindowOpen = noteWin != null && noteWin.IsVisible;
+                            bool isMinimized = isWindowOpen && noteWin is StickyNoteWindow sw && sw.RestoreButton.Visibility == Visibility.Visible;
                             isActive = isWindowOpen && !isMinimized;
                         }
                         else
                         {
                             // Disabled minimize mode: check if window is visible
-                            isActive = _openNoteWindows.TryGetValue(note.Id, out var win) && win.IsVisible;
+                            var noteWin = GetNoteWindow(note.Id);
+                            isActive = noteWin != null && noteWin.IsVisible;
                         }
                         AnimateToggleDot(toggleDot, isActive);
                     }
@@ -2077,6 +2077,88 @@ public partial class ManagementWindow : Window
     void TitleBar_MouseLeftButtonDown(object s, MouseButtonEventArgs e) { if (e.ClickCount == 1) { try { DragMove(); } catch { } } }
     void MinimizeButton_Click(object s, RoutedEventArgs e) => WindowState = WindowState.Minimized;
     void CloseButton_Click(object s, RoutedEventArgs e) => Hide();
+
+    /// <summary>Wrap a dialog window with a custom dark title bar (replaces ToolWindow white title bar).
+    /// Exactly mirrors the liquid glass dialog pattern: dlgBg Border → rootGrid (titleBar + separator + content).</summary>
+    static void WrapDialogWithDarkTitleBar(Window dlg, Border contentBorder, string title)
+    {
+        dlg.WindowStyle = WindowStyle.None;
+        dlg.AllowsTransparency = true;
+        dlg.Background = Brushes.Transparent;
+
+        // Outer shell: dark background + rounded corners + border
+        var dlgBg = new Border
+        {
+            Background = new SolidColorBrush(Color.FromRgb(0x10, 0x11, 0x1A)),
+            CornerRadius = new CornerRadius(10),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF)),
+            BorderThickness = new Thickness(1)
+        };
+
+        var rootGrid = new Grid();
+        rootGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // title bar
+        rootGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // separator
+        rootGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // content
+
+        // Title bar
+        var titleBar = new Border
+        {
+            Background = new SolidColorBrush(Color.FromRgb(0x10, 0x11, 0x1A)),
+            CornerRadius = new CornerRadius(10, 10, 0, 0),
+            Padding = new Thickness(14, 8, 14, 8),
+            Cursor = Cursors.SizeAll
+        };
+        titleBar.MouseLeftButtonDown += (_, _) => { try { dlg.DragMove(); } catch { } };
+
+        var titlePanel = new StackPanel { Orientation = Orientation.Horizontal };
+        titlePanel.Children.Add(new TextBlock
+        {
+            Text = title, FontSize = 14, FontWeight = FontWeights.SemiBold,
+            Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0)),
+            VerticalAlignment = VerticalAlignment.Center
+        });
+
+        var closeBtn = new Button
+        {
+            Content = "✕", Width = 28, Height = 28, FontSize = 12,
+            Cursor = Cursors.Hand, Background = Brushes.Transparent,
+            Foreground = new SolidColorBrush(Color.FromRgb(0x80, 0x80, 0xA0)),
+            BorderThickness = new Thickness(0),
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        closeBtn.Click += (_, _) => dlg.Close();
+
+        var titleRow = new Grid();
+        titleRow.Children.Add(titlePanel);
+        titleRow.Children.Add(closeBtn);
+        titleBar.Child = titleRow;
+
+        // Separator
+        var separator = new Border
+        {
+            Height = 1,
+            Background = new SolidColorBrush(Color.FromArgb(0x20, 0xFF, 0xFF, 0xFF)),
+            Margin = new Thickness(12, 0, 12, 0)
+        };
+
+        // Strip original contentBorder's CornerRadius and Padding (handled by dlgBg)
+        contentBorder.CornerRadius = new CornerRadius(0);
+        contentBorder.Padding = new Thickness(0);
+        contentBorder.Margin = new Thickness(20);
+        contentBorder.Background = Brushes.Transparent;
+        contentBorder.BorderThickness = new Thickness(0);
+
+        Grid.SetRow(titleBar, 0);
+        Grid.SetRow(separator, 1);
+        Grid.SetRow(contentBorder, 2);
+        rootGrid.Children.Add(titleBar);
+        rootGrid.Children.Add(separator);
+        rootGrid.Children.Add(contentBorder);
+
+        dlgBg.Child = rootGrid;
+        dlg.Content = dlgBg;
+    }
     void LangToggle_Click(object s, RoutedEventArgs e)
     {
         _loc.ToggleLanguage();
@@ -2098,9 +2180,10 @@ public partial class ManagementWindow : Window
         _isBatchWidgetOperation = true;
         try
         {
+            var app = (App)System.Windows.Application.Current;
             if (_notesService != null)
                 foreach (var note in _notesService.Notes)
-                    if (!_openNoteWindows.ContainsKey(note.Id))
+                    if (!app.IsNoteWindowOpen(note.Id))
                         OpenNoteWindow(note);
             if (_widgetService != null)
             {
@@ -2122,7 +2205,7 @@ public partial class ManagementWindow : Window
         _isBatchWidgetOperation = true;
         try
         {
-            foreach (var w in _openNoteWindows.Values.ToList()) w.Hide();
+            // Notes managed by App — use ShowManagementWindow to show/hide
             foreach (var w in _openClockWindows.Values.ToList()) w.Hide();
             foreach (var w in _openCalendarWindows.Values.ToList()) w.Hide();
         }
@@ -2136,8 +2219,6 @@ public partial class ManagementWindow : Window
         _isBatchWidgetOperation = true;
         try
         {
-            foreach (var w in _openNoteWindows.Values.ToList()) w.Close();
-            _openNoteWindows.Clear();
             foreach (var w in _openClockWindows.Values.ToList()) w.Close();
             _openClockWindows.Clear();
             foreach (var w in _openCalendarWindows.Values.ToList()) w.Close();
@@ -2163,76 +2244,112 @@ public partial class ManagementWindow : Window
     {
         if (s is Button btn && btn.Tag is Zone zone && zone.MergedGroupId.HasValue)
         {
-            ShowMergedGroupContextMenu(zone);
+            ShowMergedGroupContextMenu(zone, btn);
         }
     }
 
-    void ShowMergedGroupContextMenu(Zone masterZone)
+    void ShowMergedGroupContextMenu(Zone masterZone, Button placementBtn)
     {
         var cn = _loc.CurrentLanguage == Services.Language.Chinese;
-        var menu = new ContextMenu();
 
-        // 1. Disband single zone (if multiple zones in group)
-        if (masterZone.MergedSubZoneIds.Count > 0)
+        // Use custom Popup to avoid WPF ContextMenu + AllowsTransparency bug
+        var popup = new System.Windows.Controls.Primitives.Popup
         {
-            var disbandSpaceItem = new MenuItem
+            AllowsTransparency = true,
+            PopupAnimation = System.Windows.Controls.Primitives.PopupAnimation.Fade,
+            StaysOpen = false
+        };
+
+        var bgBrush = new SolidColorBrush(Color.FromRgb(0x10, 0x11, 0x1A));
+        var fgBrush = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0));
+        var hoverBrush = new SolidColorBrush(Color.FromArgb(0x30, 0x6C, 0x63, 0xFF));
+
+        var menuBorder = new Border
+        {
+            Background = bgBrush,
+            BorderBrush = new SolidColorBrush(Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF)),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(6),
+            Padding = new Thickness(4),
+            MinWidth = 180
+        };
+
+        var stack = new StackPanel();
+
+        // Helper to create a menu item (Border + TextBlock, no Button template issues)
+        UIElement MakeItem(string text, Action onClick)
+        {
+            var tb = new TextBlock
             {
-                Header = cn ? "分离单个分区" : "Disband Single Zone",
-                Foreground = new SolidColorBrush(Colors.White)
+                Text = text,
+                Foreground = fgBrush,
+                FontSize = 12,
+                VerticalAlignment = VerticalAlignment.Center
             };
-            disbandSpaceItem.Click += (_, _) => DisbandSingleZone(masterZone);
-            menu.Items.Add(disbandSpaceItem);
+            var itemBorder = new Border
+            {
+                Background = Brushes.Transparent,
+                CornerRadius = new CornerRadius(3),
+                Padding = new Thickness(10, 6, 10, 6),
+                Margin = new Thickness(2, 1, 2, 1),
+                Cursor = Cursors.Hand,
+                Child = tb
+            };
+            itemBorder.MouseEnter += (_, _) => itemBorder.Background = hoverBrush;
+            itemBorder.MouseLeave += (_, _) => itemBorder.Background = Brushes.Transparent;
+            itemBorder.MouseLeftButtonDown += (_, _) => { popup.IsOpen = false; onClick(); };
+            return itemBorder;
         }
 
-        // 2. Disband entire group
-        var disbandAllItem = new MenuItem
-        {
-            Header = cn ? "解散组合分区" : "Disband Entire Group",
-            Foreground = new SolidColorBrush(Colors.White)
-        };
-        disbandAllItem.Click += (_, _) => DisbandEntireGroup(masterZone);
-        menu.Items.Add(disbandAllItem);
+        // 1. Disband single zone
+        if (masterZone.MergedSubZoneIds.Count > 0)
+            stack.Children.Add(MakeItem(cn ? "分离单个分区" : "Disband Single Zone", () => DisbandSingleZone(masterZone)));
 
-        menu.Items.Add(new Separator());
+        // 2. Disband entire group
+        stack.Children.Add(MakeItem(cn ? "解散组合分区" : "Disband Entire Group", () => DisbandEntireGroup(masterZone)));
+
+        // Separator
+        stack.Children.Add(new Border { Height = 1, Background = new SolidColorBrush(Color.FromArgb(0x20, 0xFF, 0xFF, 0xFF)), Margin = new Thickness(6, 4, 6, 4) });
 
         // 3. Add zone to group
-        var addItem = new MenuItem
-        {
-            Header = cn ? "添加分区到组合" : "Add Zone to Group",
-            Foreground = new SolidColorBrush(Colors.White)
-        };
-        addItem.Click += (_, _) => ShowMergeDialog(masterZone);
-        menu.Items.Add(addItem);
+        stack.Children.Add(MakeItem(cn ? "添加分区到组合" : "Add Zone to Group", () => ShowMergeDialog(masterZone)));
 
         // 4. Merge with another group
         if (_zoneManager.Zones.Any(z => z.MergedSubZoneIds.Count > 0 && z.Id != masterZone.Id))
-        {
-            var mergeItem = new MenuItem
-            {
-                Header = cn ? "与其他组合合并" : "Merge with Another Group",
-                Foreground = new SolidColorBrush(Colors.White)
-            };
-            mergeItem.Click += (_, _) => MergeWithAnotherGroup(masterZone);
-            menu.Items.Add(mergeItem);
-        }
+            stack.Children.Add(MakeItem(cn ? "与其他组合合并" : "Merge with Another Group", () => MergeWithAnotherGroup(masterZone)));
 
-        menu.IsOpen = true;
+        menuBorder.Child = stack;
+        popup.Child = menuBorder;
+        popup.PlacementTarget = placementBtn;
+        popup.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+
+        // Close on click outside
+        previewMouseDownHandler = (_, _) =>
+        {
+            if (popup.IsOpen) popup.IsOpen = false;
+        };
+        this.AddHandler(UIElement.PreviewMouseDownEvent, previewMouseDownHandler);
+        popup.Closed += (_, _) => this.RemoveHandler(UIElement.PreviewMouseDownEvent, previewMouseDownHandler);
+
+        popup.IsOpen = true;
     }
+
+    private MouseButtonEventHandler? previewMouseDownHandler;
 
     void DisbandSingleZone(Zone masterZone)
     {
         var cn = _loc.CurrentLanguage == Services.Language.Chinese;
 
         // Show dialog to select which zone to disband
+        var dialogTitle = cn ? "选择要分离的分区" : "Select Zone to Disband";
         var dialog = new Window
         {
-            Title = cn ? "选择要分离的分区" : "Select Zone to Disband",
+            Title = dialogTitle,
             Width = 300,
             Height = 250,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Owner = this,
-            ResizeMode = ResizeMode.NoResize,
-            WindowStyle = WindowStyle.ToolWindow
+            ResizeMode = ResizeMode.NoResize
         };
 
         var bgBorder = new Border
@@ -2353,7 +2470,7 @@ public partial class ManagementWindow : Window
         Grid.SetRow(btnRow, 2);
         grid.Children.Add(btnRow);
 
-        dialog.Content = bgBorder;
+        WrapDialogWithDarkTitleBar(dialog, bgBorder, dialogTitle);
         dialog.ShowDialog();
     }
 
@@ -2390,15 +2507,15 @@ public partial class ManagementWindow : Window
             return;
         }
 
+        var mergeTargetTitle = cn ? "选择要合并的目标组合" : "Select Target Group to Merge";
         var dialog = new Window
         {
-            Title = cn ? "选择要合并的目标组合" : "Select Target Group to Merge",
+            Title = mergeTargetTitle,
             Width = 360,
             Height = 300,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Owner = this,
-            ResizeMode = ResizeMode.NoResize,
-            WindowStyle = WindowStyle.ToolWindow
+            ResizeMode = ResizeMode.NoResize
         };
 
         var bgBorder = new Border
@@ -2524,7 +2641,7 @@ public partial class ManagementWindow : Window
         Grid.SetRow(btnRow, 2);
         grid.Children.Add(btnRow);
 
-        dialog.Content = bgBorder;
+        WrapDialogWithDarkTitleBar(dialog, bgBorder, mergeTargetTitle);
         dialog.ShowDialog();
     }
 
@@ -2560,8 +2677,7 @@ public partial class ManagementWindow : Window
             Width = 360, Height = 380,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Owner = this,
-            ResizeMode = ResizeMode.NoResize,
-            WindowStyle = WindowStyle.ToolWindow
+            ResizeMode = ResizeMode.NoResize
         };
 
         var bgBorder = new Border
@@ -2714,7 +2830,7 @@ public partial class ManagementWindow : Window
         Grid.SetRow(btnRow, 3);
         grid.Children.Add(btnRow);
 
-        dlg.Content = bgBorder;
+        WrapDialogWithDarkTitleBar(dlg, bgBorder, _loc["Merge.Title"]);
         dlg.ShowDialog();
         RefreshAll();
         RefreshAllStateButtons();
@@ -2889,7 +3005,7 @@ public partial class ManagementWindow : Window
                     RefreshPanelCard();
                     popup.IsOpen = false;
                 };
-                item.MouseEnter += (s3, _) => { if (s3 is Border b3 && !isCurrent) b3.Background = new SolidColorBrush(Color.FromArgb(0x15, 0xFF, 0xFF, 0xFF)); };
+                item.MouseEnter += (s3, _) => { if (s3 is Border b3 && !isCurrent) b3.Background = new SolidColorBrush(Color.FromArgb(0x30, 0x6C, 0x63, 0xFF)); };
                 item.MouseLeave += (s3, _) => { if (s3 is Border b3 && !isCurrent) b3.Background = Brushes.Transparent; };
                 stack.Children.Add(item);
             }
@@ -2942,7 +3058,7 @@ public partial class ManagementWindow : Window
                         RefreshPanelCard();
                         popup.IsOpen = false;
                     };
-                    item.MouseEnter += (s3, _) => { if (s3 is Border b3 && !isCurrent) b3.Background = new SolidColorBrush(Color.FromArgb(0x15, 0xFF, 0xFF, 0xFF)); };
+                    item.MouseEnter += (s3, _) => { if (s3 is Border b3 && !isCurrent) b3.Background = new SolidColorBrush(Color.FromArgb(0x30, 0x6C, 0x63, 0xFF)); };
                     item.MouseLeave += (s3, _) => { if (s3 is Border b3 && !isCurrent) b3.Background = Brushes.Transparent; };
                     Grid.SetColumn(item, 0);
                     itemGrid.Children.Add(item);
@@ -3304,35 +3420,9 @@ public partial class ManagementWindow : Window
 
     void OpenNoteWindow(StickyNote note)
     {
-        if (_openNoteWindows.ContainsKey(note.Id)) return;
-        var window = new StickyNoteWindow(note, _notesService!);
-        window.Closed += (_, _) =>
-        {
-            _openNoteWindows.Remove(note.Id);
-            Dispatcher.BeginInvoke(new Action(() => RefreshNotesList()), System.Windows.Threading.DispatcherPriority.Loaded);
-        };
-        window.OnStateChanged = () => Dispatcher.BeginInvoke(new Action(() =>
-        {
-            if (_noteToggleDots.TryGetValue(note.Id, out var dot))
-            {
-                bool isActive = window.MainContent.Visibility == Visibility.Visible;
-                AnimateToggleDot(dot, isActive);
-            }
-        }), System.Windows.Threading.DispatcherPriority.ContextIdle);
-        _openNoteWindows[note.Id] = window;
-        window.Show();
-        window.Activate();
-        // Sync toggle dot after window is fully rendered
-        Dispatcher.BeginInvoke(new Action(() =>
-        {
-            if (_noteToggleDots.TryGetValue(note.Id, out var dot))
-            {
-                bool isActive = window.MainContent.Visibility == Visibility.Visible;
-                AnimateToggleDot(dot, isActive);
-            }
-            else
-                RefreshNotesList();
-        }), System.Windows.Threading.DispatcherPriority.ContextIdle);
+        var app = (App)System.Windows.Application.Current;
+        app.OpenNoteWindowFromManager(note);
+        Dispatcher.BeginInvoke(new Action(() => RefreshNotesList()), System.Windows.Threading.DispatcherPriority.ContextIdle);
     }
 
     void OpenClockWindow(DesktopClock clock)
@@ -3396,10 +3486,7 @@ public partial class ManagementWindow : Window
 
     void SyncNoteWindows()
     {
-        if (_notesService == null) return;
-        var activeIds = new HashSet<Guid>(_notesService.Notes.Select(n => n.Id));
-        foreach (var kv in _openNoteWindows.ToList())
-        { if (!activeIds.Contains(kv.Key)) { try { kv.Value.Close(); } catch { } _openNoteWindows.Remove(kv.Key); } }
+        // Note windows are managed by App.xaml.cs — no sync needed here
     }
     void SyncClockWindows()
     {

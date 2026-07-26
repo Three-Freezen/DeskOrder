@@ -48,7 +48,8 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
     private string _titleBarFill = "#10FFFFFF";
     public string TitleBarFillValue { get => _titleBarFill; set { _titleBarFill = value; _titleBarOpacityPercent = ParseOpacity(value); UpdateHighlights(); OnPropertyChanged(); OnPropertyChanged(nameof(TitleBarOpacityPercent)); } }
     private string _bgImagePath = "";
-    public string BgImagePath { get => _bgImagePath; set { _bgImagePath = value; if (!string.IsNullOrEmpty(value)) _fillColor = "#00000000"; if (CropBtn != null) CropBtn.IsEnabled = !string.IsNullOrEmpty(value) && File.Exists(value); OnPropertyChanged(); } }
+    private bool _isLoading = true;
+    public string BgImagePath { get => _bgImagePath; set { _bgImagePath = value; if (!string.IsNullOrEmpty(value) && !_isLoading) _fillColor = "#00000000"; if (CropBtn != null) CropBtn.IsEnabled = !string.IsNullOrEmpty(value) && File.Exists(value); OnPropertyChanged(); } }
     private string _iconCharText = "";
     public string IconCharText { get => _iconCharText; set { _iconCharText = value; IconPreview.Text = string.IsNullOrEmpty(value) ? "⊞" : value[..Math.Min(value.Length, 2)]; OnPropertyChanged(); } }
     private string _iconColor = "#FFFFFF";
@@ -131,6 +132,7 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
         UpdateGlassSection();
         _langChanged = _ => ApplyLoc();
         _loc.LanguageChanged += _langChanged;
+        _isLoading = false;
     }
 
     protected override void OnClosed(EventArgs e)

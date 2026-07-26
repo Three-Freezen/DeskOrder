@@ -103,6 +103,7 @@ public class ZoneManager
             var master = Zones.FirstOrDefault(z => z.MergedGroupId == zone.MergedGroupId && z.MergedSubZoneIds.Count > 0);
             if (master != null)
             {
+                master.IsVisible = true;
                 ShowZone(master);
                 // Try to set the master to show the requested sub-zone's items
                 if (_zoneWindows.TryGetValue(master.Id, out var masterWin) && masterWin?.IsLoaded == true)

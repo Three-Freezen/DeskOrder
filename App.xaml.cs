@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Threading;
 using System.Windows;
 using System.Windows.Interop;
 using DesktopZones.Helpers;
@@ -19,11 +20,10 @@ public partial class App : System.Windows.Application
     private ReminderService? _reminderService;
     private ManagementWindow? _managementWindow;
     private readonly LocalizationService _loc = LocalizationService.Instance;
+    private static Mutex? _mutex;
 
-    // Track open widget windows
-    private readonly Dictionary<Guid, Window> _noteWindows = new();
-    private readonly Dictionary<Guid, Window> _clockWindows = new();
-    private readonly Dictionary<Guid, Window> _calendarWindows = new();
+    // Track open widget windows (notes only — clocks/calendars managed by ManagementWindow)
+    internal readonly Dictionary<Guid, Window> _noteWindows = new();
 
     // ── Global hotkey ──
     private const int WM_HOTKEY = 0x0312;
@@ -35,9 +35,18 @@ public partial class App : System.Windows.Application
 
     private void Application_Startup(object sender, StartupEventArgs e)
     {
+        // Single-instance check
+        _mutex = new Mutex(true, "DeskOrder_SingleInstance", out bool createdNew);
+        if (!createdNew)
+        {
+            Shutdown();
+            return;
+        }
+
         // Global crash guard — show error instead of crashing silently
         DispatcherUnhandledException += (s, args) =>
         {
+            System.Diagnostics.Debug.WriteLine($"[DeskOrder] Unhandled: {args.Exception}");
             MessageBox.Show($"Unhandled error:\n{args.Exception.Message}\n\n{args.Exception.StackTrace}",
                 "DeskOrder Error", MessageBoxButton.OK, MessageBoxImage.Error);
             args.Handled = true;
@@ -93,15 +102,20 @@ public partial class App : System.Windows.Application
         // Subscribe to change events for cross-component sync
         _notesService.NotesChanged += SyncNotes;
         _notesService.NotesChanged += RefreshNoteHotkeys;
-        _widgetService.ClocksChanged += SyncClocks;
-        _widgetService.CalendarsChanged += SyncCalendars;
 
         // Register hotkeys for notes that have them enabled
         RefreshNoteHotkeys();
 
         // Register panel hotkey
         if (config.PanelHotkeyEnabled && _mainHwnd != IntPtr.Zero)
-            NativeMethods.RegisterHotKey(_mainHwnd, HOTKEY_ID_PANEL, (uint)config.PanelHotkeyModifiers, (uint)config.PanelHotkeyKey);
+        {
+            bool ok = NativeMethods.RegisterHotKey(_mainHwnd, HOTKEY_ID_PANEL, (uint)config.PanelHotkeyModifiers, (uint)config.PanelHotkeyKey);
+            if (!ok)
+            {
+                // Hotkey registration failed — likely conflict with another app or system shortcut
+                System.Diagnostics.Debug.WriteLine($"[DeskOrder] Failed to register panel hotkey: 0x{config.PanelHotkeyModifiers:X}+0x{config.PanelHotkeyKey:X}");
+            }
+        }
 
         // Initialize reminder service
         if (_trayIcon != null)
@@ -111,12 +125,7 @@ public partial class App : System.Windows.Application
             _reminderService.Start();
         }
 
-        foreach (var note in _notesService.Notes)
-            if (note.IsVisible) OpenNoteWindow(note);
-        foreach (var clock in _widgetService.Clocks)
-            if (clock.IsVisible) OpenClockWindow(clock);
-        foreach (var cal in _widgetService.Calendars)
-            if (cal.IsVisible) OpenCalendarWindow(cal);
+        // Notes, clocks, and calendars are managed by ManagementWindow — no need to open here
 
         if (!config.StartMinimized)
             ShowManagementWindow();
@@ -190,6 +199,46 @@ public partial class App : System.Windows.Application
                 OpenNoteWindow(note);
         }
     }
+
+    // ── Note window management (used by ManagementWindow) ──
+
+    public void ToggleNoteWindow(Models.StickyNote note)
+    {
+        if (_noteWindows.TryGetValue(note.Id, out var window))
+        {
+            if (window.IsVisible)
+            {
+                if (window is StickyNoteWindow snw)
+                {
+                    if (snw.MainContent.Visibility == Visibility.Visible) snw.HideNote();
+                    else snw.ShowNote();
+                }
+                else
+                {
+                    window.Hide();
+                }
+            }
+            else
+            {
+                if (window is StickyNoteWindow snw) snw.ShowNote();
+                else window.Show();
+            }
+        }
+        else
+        {
+            note.IsVisible = true;
+            OpenNoteWindow(note);
+        }
+    }
+
+    public void OpenNoteWindowFromManager(Models.StickyNote note)
+    {
+        if (_noteWindows.ContainsKey(note.Id)) return;
+        note.IsVisible = true;
+        OpenNoteWindow(note);
+    }
+
+    public bool IsNoteWindowOpen(Guid noteId) => _noteWindows.ContainsKey(noteId);
 
     public void RefreshNoteHotkeys()
     {
@@ -288,8 +337,8 @@ public partial class App : System.Windows.Application
         {
             if (_widgetService == null) return;
             var wa = System.Windows.SystemParameters.WorkArea;
-            var clock = _widgetService.CreateClock(wa.Left + 300, wa.Top + 80);
-            OpenClockWindow(clock);
+            _widgetService.CreateClock(wa.Left + 300, wa.Top + 80);
+            ShowManagementWindow();
         }
         catch (Exception ex)
         {
@@ -303,8 +352,8 @@ public partial class App : System.Windows.Application
         {
             if (_widgetService == null) return;
             var wa = System.Windows.SystemParameters.WorkArea;
-            var cal = _widgetService.CreateCalendar(wa.Left + 400, wa.Top + 80);
-            OpenCalendarWindow(cal);
+            _widgetService.CreateCalendar(wa.Left + 400, wa.Top + 80);
+            ShowManagementWindow();
         }
         catch (Exception ex)
         {
@@ -323,24 +372,6 @@ public partial class App : System.Windows.Application
         var window = new StickyNoteWindow(note, _notesService!);
         window.Closed += (_, _) => _noteWindows.Remove(note.Id);
         _noteWindows[note.Id] = window;
-        window.Show();
-    }
-
-    private void OpenClockWindow(Models.DesktopClock clock)
-    {
-        if (_clockWindows.ContainsKey(clock.Id)) return;
-        var window = new ClockWidget(clock, _widgetService!);
-        window.Closed += (_, _) => _clockWindows.Remove(clock.Id);
-        _clockWindows[clock.Id] = window;
-        window.Show();
-    }
-
-    private void OpenCalendarWindow(Models.DesktopCalendar cal)
-    {
-        if (_calendarWindows.ContainsKey(cal.Id)) return;
-        var window = new CalendarWidget(cal, _widgetService!);
-        window.Closed += (_, _) => _calendarWindows.Remove(cal.Id);
-        _calendarWindows[cal.Id] = window;
         window.Show();
     }
 
@@ -413,34 +444,6 @@ public partial class App : System.Windows.Application
             {
                 try { kv.Value.Close(); } catch { }
                 _noteWindows.Remove(kv.Key);
-            }
-        }
-    }
-
-    void SyncClocks()
-    {
-        if (_widgetService == null) return;
-        var activeIds = new HashSet<Guid>(_widgetService.Clocks.Select(c => c.Id));
-        foreach (var kv in _clockWindows.ToList())
-        {
-            if (!activeIds.Contains(kv.Key))
-            {
-                try { kv.Value.Close(); } catch { }
-                _clockWindows.Remove(kv.Key);
-            }
-        }
-    }
-
-    void SyncCalendars()
-    {
-        if (_widgetService == null) return;
-        var activeIds = new HashSet<Guid>(_widgetService.Calendars.Select(c => c.Id));
-        foreach (var kv in _calendarWindows.ToList())
-        {
-            if (!activeIds.Contains(kv.Key))
-            {
-                try { kv.Value.Close(); } catch { }
-                _calendarWindows.Remove(kv.Key);
             }
         }
     }

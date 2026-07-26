@@ -35,5 +35,8 @@ public static class ComboBoxHelper
 
         if (template != null) combo.Template = template;
         if (itemStyle != null) combo.ItemContainerStyle = itemStyle;
+        // Foreground for the selected item text in the closed state
+        combo.Foreground = new System.Windows.Media.SolidColorBrush(
+            System.Windows.Media.Color.FromRgb(0xE0, 0xE0, 0xF0));
     }
 }

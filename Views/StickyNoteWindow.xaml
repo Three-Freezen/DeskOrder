@@ -158,41 +158,57 @@
                                     <TextBlock Text="Text Color" FontSize="10"
                                                Foreground="#8888A0" Margin="0,0,0,6"/>
                                     <WrapPanel x:Name="ColorPresetsPanel" Width="200">
+                                        <Border x:Name="PresetTransparent" Width="24" Height="24" CornerRadius="12"
+                                                Margin="0,0,4,4" Cursor="Hand" Tag="#00000000"
+                                                BorderBrush="#30FFFFFF" BorderThickness="1"
+                                                MouseLeftButtonDown="ColorPreset_Click" ToolTip="Transparent">
+                                            <Border.Background>
+                                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                                    <GradientStop Color="#FFFFFF" Offset="0"/>
+                                                    <GradientStop Color="#CCCCCC" Offset="0.5"/>
+                                                    <GradientStop Color="#FFFFFF" Offset="1"/>
+                                                </LinearGradientBrush>
+                                            </Border.Background>
+                                        </Border>
+                                        <Border x:Name="PresetBlack" Width="24" Height="24" CornerRadius="12"
+                                                Margin="0,0,4,4" Cursor="Hand" Tag="#000000"
+                                                Background="#000000" BorderBrush="#30FFFFFF" BorderThickness="1"
+                                                MouseLeftButtonDown="ColorPreset_Click"/>
                                         <Border x:Name="PresetWhite" Width="24" Height="24" CornerRadius="12"
                                                 Margin="0,0,4,4" Cursor="Hand" Tag="#FFFFFF"
-                                                Background="White" BorderBrush="#30FFFFFF" BorderThickness="1"
+                                                Background="#FFFFFF" BorderBrush="#30FFFFFF" BorderThickness="1"
                                                 MouseLeftButtonDown="ColorPreset_Click"/>
                                         <Border x:Name="PresetGray" Width="24" Height="24" CornerRadius="12"
-                                                Margin="0,0,4,4" Cursor="Hand" Tag="#888888"
-                                                Background="#888888" BorderBrush="#30FFFFFF" BorderThickness="1"
-                                                MouseLeftButtonDown="ColorPreset_Click"/>
-                                        <Border x:Name="PresetGold" Width="24" Height="24" CornerRadius="12"
-                                                Margin="0,0,4,4" Cursor="Hand" Tag="#FFD700"
-                                                Background="#FFD700" BorderBrush="#30FFFFFF" BorderThickness="1"
-                                                MouseLeftButtonDown="ColorPreset_Click"/>
-                                        <Border x:Name="PresetOrange" Width="24" Height="24" CornerRadius="12"
-                                                Margin="0,0,4,4" Cursor="Hand" Tag="#FF8C00"
-                                                Background="#FF8C00" BorderBrush="#30FFFFFF" BorderThickness="1"
+                                                Margin="0,0,4,4" Cursor="Hand" Tag="#808080"
+                                                Background="#808080" BorderBrush="#30FFFFFF" BorderThickness="1"
                                                 MouseLeftButtonDown="ColorPreset_Click"/>
                                         <Border x:Name="PresetRed" Width="24" Height="24" CornerRadius="12"
-                                                Margin="0,0,4,4" Cursor="Hand" Tag="#FF4444"
-                                                Background="#FF4444" BorderBrush="#30FFFFFF" BorderThickness="1"
+                                                Margin="0,0,4,4" Cursor="Hand" Tag="#FF0000"
+                                                Background="#FF0000" BorderBrush="#30FFFFFF" BorderThickness="1"
+                                                MouseLeftButtonDown="ColorPreset_Click"/>
+                                        <Border x:Name="PresetOrange" Width="24" Height="24" CornerRadius="12"
+                                                Margin="0,0,4,4" Cursor="Hand" Tag="#FF7D00"
+                                                Background="#FF7D00" BorderBrush="#30FFFFFF" BorderThickness="1"
+                                                MouseLeftButtonDown="ColorPreset_Click"/>
+                                        <Border x:Name="PresetYellow" Width="24" Height="24" CornerRadius="12"
+                                                Margin="0,0,4,4" Cursor="Hand" Tag="#FFFF00"
+                                                Background="#FFFF00" BorderBrush="#30FFFFFF" BorderThickness="1"
                                                 MouseLeftButtonDown="ColorPreset_Click"/>
                                         <Border x:Name="PresetGreen" Width="24" Height="24" CornerRadius="12"
-                                                Margin="0,0,4,4" Cursor="Hand" Tag="#50FA7B"
-                                                Background="#50FA7B" BorderBrush="#30FFFFFF" BorderThickness="1"
+                                                Margin="0,0,4,4" Cursor="Hand" Tag="#00FF00"
+                                                Background="#00FF00" BorderBrush="#30FFFFFF" BorderThickness="1"
                                                 MouseLeftButtonDown="ColorPreset_Click"/>
-                                        <Border x:Name="PresetPurple" Width="24" Height="24" CornerRadius="12"
-                                                Margin="0,0,4,4" Cursor="Hand" Tag="#6C63FF"
-                                                Background="#6C63FF" BorderBrush="#30FFFFFF" BorderThickness="1"
+                                        <Border x:Name="PresetBlue" Width="24" Height="24" CornerRadius="12"
+                                                Margin="0,0,4,4" Cursor="Hand" Tag="#0000FF"
+                                                Background="#0000FF" BorderBrush="#30FFFFFF" BorderThickness="1"
                                                 MouseLeftButtonDown="ColorPreset_Click"/>
-                                        <Border x:Name="PresetLavender" Width="24" Height="24" CornerRadius="12"
-                                                Margin="0,0,4,4" Cursor="Hand" Tag="#BD93F9"
-                                                Background="#BD93F9" BorderBrush="#30FFFFFF" BorderThickness="1"
+                                        <Border x:Name="PresetIndigo" Width="24" Height="24" CornerRadius="12"
+                                                Margin="0,0,4,4" Cursor="Hand" Tag="#00FFFF"
+                                                Background="#00FFFF" BorderBrush="#30FFFFFF" BorderThickness="1"
                                                 MouseLeftButtonDown="ColorPreset_Click"/>
-                                        <Border x:Name="PresetDark" Width="24" Height="24" CornerRadius="12"
-                                                Margin="0,0,4,4" Cursor="Hand" Tag="#333333"
-                                                Background="#333333" BorderBrush="#30FFFFFF" BorderThickness="1"
+                                        <Border x:Name="PresetViolet" Width="24" Height="24" CornerRadius="12"
+                                                Margin="0,0,4,4" Cursor="Hand" Tag="#FF00FF"
+                                                Background="#FF00FF" BorderBrush="#30FFFFFF" BorderThickness="1"
                                                 MouseLeftButtonDown="ColorPreset_Click"/>
                                         <!-- Custom -->
                                         <Button x:Name="ColorCustomBtn" Content="..." Width="24" Height="24"
