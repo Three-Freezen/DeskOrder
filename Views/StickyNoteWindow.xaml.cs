@@ -82,6 +82,12 @@ public partial class StickyNoteWindow : Window
             ContentBox.Document = new FlowDocument(new Paragraph(new Run("")));
             return;
         }
+        // Detect format tags → use rich loader
+        if (content.Contains("[size=") || content.Contains("[bold]") || content.Contains("[color="))
+        {
+            LoadFormatted(content);
+            return;
+        }
         var doc = new FlowDocument { LineHeight = double.NaN };
         var para = new Paragraph();
         para.Inlines.Add(new Run(content));
@@ -93,6 +99,259 @@ public partial class StickyNoteWindow : Window
     {
         var tr = new TextRange(ContentBox.Document.ContentStart, ContentBox.Document.ContentEnd);
         return tr.Text;
+    }
+
+    // ── Save to file ──
+
+    void SaveBtn_Click(object s, RoutedEventArgs e)
+    {
+        var menu = new ContextMenu();
+        var saveItem = new MenuItem { Header = "保存" };
+        saveItem.Click += (_, _) => SaveToFile();
+        var saveAsItem = new MenuItem { Header = "另存为" };
+        saveAsItem.Click += (_, _) => SaveAsToFile();
+        menu.Items.Add(saveItem);
+        menu.Items.Add(saveAsItem);
+        menu.Items.Add(new Separator());
+        var openItem = new MenuItem { Header = "打开文件" };
+        openItem.Click += (_, _) => OpenFile();
+        menu.Items.Add(openItem);
+        SaveBtn.ContextMenu = menu;
+        SaveBtn.ContextMenu.IsOpen = true;
+        e.Handled = true;
+    }
+
+    void SaveToFile()
+    {
+        if (!string.IsNullOrEmpty(_note.LastSavePath) && File.Exists(_note.LastSavePath))
+        {
+            File.WriteAllText(_note.LastSavePath, SaveFormatted(), System.Text.Encoding.UTF8);
+        }
+        else
+        {
+            SaveAsToFile();
+        }
+    }
+
+    void SaveAsToFile()
+    {
+        var dlg = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "保存便签",
+            Filter = "Text Files|*.txt|All Files|*.*",
+            DefaultExt = ".txt",
+            FileName = string.IsNullOrEmpty(_note.LastSavePath)
+                ? (_note.Title ?? "Note") + ".txt"
+                : Path.GetFileName(_note.LastSavePath),
+            InitialDirectory = string.IsNullOrEmpty(_note.LastSavePath)
+                ? Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)
+                : Path.GetDirectoryName(_note.LastSavePath)
+        };
+        if (dlg.ShowDialog() == true)
+        {
+            _note.LastSavePath = dlg.FileName;
+            File.WriteAllText(dlg.FileName, SaveFormatted(), System.Text.Encoding.UTF8);
+            Save();
+        }
+    }
+
+    void OpenFile()
+    {
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "打开便签文件",
+            Filter = "Text Files|*.txt|All Files|*.*",
+            DefaultExt = ".txt",
+            InitialDirectory = string.IsNullOrEmpty(_note.LastSavePath)
+                ? Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)
+                : Path.GetDirectoryName(_note.LastSavePath)
+        };
+        if (dlg.ShowDialog() == true)
+        {
+            string content = File.ReadAllText(dlg.FileName, System.Text.Encoding.UTF8);
+            LoadFormatted(content);
+            _note.LastSavePath = dlg.FileName;
+            Save();
+        }
+    }
+
+    string SaveFormatted()
+    {
+        var sb = new System.Text.StringBuilder();
+        foreach (var block in ContentBox.Document.Blocks)
+        {
+            if (block is Paragraph para)
+            {
+                foreach (var inline in para.Inlines)
+                {
+                    WriteInline(sb, inline);
+                }
+                sb.AppendLine();
+            }
+        }
+        return sb.ToString();
+    }
+
+    void WriteInline(System.Text.StringBuilder sb, Inline inline)
+    {
+        if (inline is Run run)
+        {
+            // Collect formatting from parent elements
+            var formats = new List<string>();
+            var parent = run.Parent;
+            while (parent is Span span)
+            {
+                if (HasDecoration(span, TextDecorations.Underline))
+                    formats.Add("underline");
+                if (span.Style != null)
+                {
+                    // Check bold/italic from style setters
+                    foreach (var setter in span.Style.Setters.OfType<Setter>())
+                    {
+                        if (setter.Property == Inline.FontWeightProperty && (FontWeight)setter.Value == FontWeights.Bold)
+                            formats.Add("bold");
+                        if (setter.Property == Inline.FontStyleProperty && (FontStyle)setter.Value == FontStyles.Italic)
+                            formats.Add("italic");
+                    }
+                }
+                parent = span.Parent;
+            }
+
+            // Get font size and color from the Run itself or inherited
+            double fs = run.FontSize > 0 ? run.FontSize : ContentBox.FontSize;
+            var fg = run.Foreground as SolidColorBrush;
+            if (fg == null && parent is Paragraph p)
+                fg = p.Foreground as SolidColorBrush;
+            if (fg == null) fg = ContentBox.Foreground as SolidColorBrush;
+
+            string colorHex = fg != null ? $"#{fg.Color.R:X2}{fg.Color.G:X2}{fg.Color.B:X2}" : "#E0E0E0";
+
+            // Check if Run itself has TextDecorations
+            if (run.TextDecorations != null && run.TextDecorations.Count > 0)
+                if (!formats.Contains("underline")) formats.Add("underline");
+
+            // Write format tags
+            sb.Append($"[size={fs:F0}][color={colorHex}]");
+            foreach (var f in formats.Distinct())
+                sb.Append($"[{f}]");
+
+            sb.Append(run.Text);
+
+            foreach (var f in formats.Distinct().Reverse())
+                sb.Append($"[/{f}]");
+            sb.Append("[/color][/size]");
+        }
+        else if (inline is Span span2)
+        {
+            foreach (var child in span2.Inlines)
+                WriteInline(sb, child);
+        }
+    }
+
+    static bool HasDecoration(Span span, TextDecorationCollection decoration)
+    {
+        return span.TextDecorations != null && span.TextDecorations.Count > 0;
+    }
+
+    void LoadFormatted(string content)
+    {
+        if (string.IsNullOrEmpty(content))
+        {
+            ContentBox.Document = new FlowDocument(new Paragraph(new Run("")));
+            return;
+        }
+
+        var doc = new FlowDocument { LineHeight = double.NaN };
+        var para = new Paragraph();
+        int i = 0;
+
+        while (i < content.Length)
+        {
+            if (content[i] == '\r' || content[i] == '\n')
+            {
+                // End of line → new paragraph
+                if (para.Inlines.Count > 0 || content[i] == '\n')
+                {
+                    doc.Blocks.Add(para);
+                    para = new Paragraph();
+                }
+                if (content[i] == '\r' && i + 1 < content.Length && content[i + 1] == '\n') i++;
+                i++;
+                continue;
+            }
+
+            if (content[i] == '[')
+            {
+                // Parse tag
+                int close = content.IndexOf(']', i);
+                if (close < 0) { i++; continue; }
+                string tag = content[(i + 1)..close];
+
+                if (tag.StartsWith("size="))
+                {
+                    if (double.TryParse(tag[5..], out var fs))
+                        para.FontSize = fs;
+                }
+                else if (tag.StartsWith("color="))
+                {
+                    try
+                    {
+                        var color = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(tag[6..]);
+                        para.Foreground = new SolidColorBrush(color);
+                    }
+                    catch { }
+                }
+                else if (tag == "bold" || tag == "italic" || tag == "underline")
+                {
+                    // Find matching close tag
+                    string closeTag = $"[/{tag}]";
+                    int closeIdx = content.IndexOf(closeTag, close + 1, StringComparison.Ordinal);
+                    string inner;
+                    if (closeIdx > 0)
+                    {
+                        inner = content[(close + 1)..closeIdx];
+                        i = closeIdx + closeTag.Length;
+                    }
+                    else
+                    {
+                        inner = content[(close + 1)..];
+                        i = content.Length;
+                    }
+
+                    var run = new Run(inner);
+                    if (tag == "bold") run.FontWeight = FontWeights.Bold;
+                    if (tag == "italic") run.FontStyle = FontStyles.Italic;
+                    if (tag == "underline") run.TextDecorations = TextDecorations.Underline;
+                    run.FontSize = para.FontSize > 0 ? para.FontSize : ContentBox.FontSize;
+                    if (para.Foreground != null) run.Foreground = para.Foreground;
+                    para.Inlines.Add(run);
+                    continue;
+                }
+                i = close + 1;
+            }
+            else
+            {
+                // Plain text → accumulate until next tag or newline
+                int next = content.IndexOf('[', i);
+                if (next < 0) next = content.Length;
+                int end = next;
+                while (end > i && (content[end - 1] == '\r' || content[end - 1] == '\n')) end--;
+                string text = content[i..end];
+                if (text.Length > 0)
+                {
+                    var run = new Run(text);
+                    run.FontSize = para.FontSize > 0 ? para.FontSize : ContentBox.FontSize;
+                    if (para.Foreground != null) run.Foreground = para.Foreground;
+                    para.Inlines.Add(run);
+                }
+                i = next;
+            }
+        }
+
+        if (para.Inlines.Count > 0)
+            doc.Blocks.Add(para);
+
+        ContentBox.Document = doc;
     }
 
     void OnLoad(object s, RoutedEventArgs e)
@@ -311,6 +570,16 @@ public partial class StickyNoteWindow : Window
         catch { if (NoteBgImage != null) { NoteBgImage.Source = null; NoteBgImage.Opacity = 0; } }
     }
 
+    /// <summary>Refresh all visual styles from the current _note model (for live preview).</summary>
+    public void RefreshAppearance()
+    {
+        if (MainContent.Visibility == Visibility.Visible)
+            ApplyAcrylic();
+        ApplyBackgroundImage();
+        ApplyStyle();
+        ApplyTitleBar();
+    }
+
     // ── Title bar ──
 
     void TitleBar_Drag(object s, MouseButtonEventArgs e)
@@ -332,11 +601,40 @@ public partial class StickyNoteWindow : Window
         e.Handled = true;
     }
 
+    void PinBtn_Enter(object s, MouseEventArgs e)
+    {
+        PinBtn.Background = new SolidColorBrush(Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF));
+        PinBtn.Foreground = Brushes.White;
+    }
+
+    void PinBtn_Leave(object s, MouseEventArgs e)
+    {
+        PinBtn.Background = Brushes.Transparent;
+        PinBtn.Foreground = _vm.PinnedTop
+            ? new SolidColorBrush(Color.FromRgb(0x7C, 0x3A, 0xED))
+            : new SolidColorBrush(Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF));
+    }
+
+    void SaveBtn_Enter(object s, MouseEventArgs e)
+    {
+        SaveBtn.Background = new SolidColorBrush(Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF));
+        SaveBtn.Foreground = Brushes.White;
+    }
+
+    void SaveBtn_Leave(object s, MouseEventArgs e)
+    {
+        SaveBtn.Background = Brushes.Transparent;
+        SaveBtn.Foreground = new SolidColorBrush(Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF));
+    }
+
     void PinBtn_Click(object s, RoutedEventArgs e)
     {
         _vm.PinnedTop = !_vm.PinnedTop;
         Topmost = _vm.PinnedTop;
         if (!_vm.PinnedTop) NativeMethods.PinToDesktop(this);
+        PinBtn.Foreground = _vm.PinnedTop
+            ? new SolidColorBrush(Color.FromRgb(0x7C, 0x3A, 0xED))
+            : new SolidColorBrush(Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF));
         Save();
     }
 
@@ -481,6 +779,7 @@ public partial class StickyNoteWindow : Window
             _pendingUnderline = !_pendingUnderline;
             if (_pendingUnderline)
                 ContentBox.Selection.ApplyPropertyValue(Inline.TextDecorationsProperty, TextDecorations.Underline);
+            ApplyUnderlinePadding();
             UpdateFormatButtons();
             return;
         }
@@ -489,7 +788,20 @@ public partial class StickyNoteWindow : Window
             ? null : TextDecorations.Underline;
         sel.ApplyPropertyValue(Inline.TextDecorationsProperty, newDeco);
         _pendingUnderline = newDeco != null;
+        ApplyUnderlinePadding();
         UpdateFormatButtons();
+    }
+
+    void ApplyUnderlinePadding()
+    {
+        // Add bottom padding to paragraphs when underline is active,
+        // creating a gap between text and underline (matching reference design).
+        var pad = _pendingUnderline ? new Thickness(0, 0, 0, 6) : new Thickness(0);
+        foreach (var block in ContentBox.Document.Blocks)
+        {
+            if (block is Paragraph p)
+                p.Padding = pad;
+        }
     }
 
     void FontColorBtn_Click(object s, RoutedEventArgs e)

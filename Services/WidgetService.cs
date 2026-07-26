@@ -17,6 +17,8 @@ public class WidgetService
     public event Action? CalendarsChanged;
 
     public AppConfig GetConfig() => _appConfig!;
+    public void NotifyClocksChanged() => ClocksChanged?.Invoke();
+    public void NotifyCalendarsChanged() => CalendarsChanged?.Invoke();
 
     public WidgetService(ConfigService configService)
     {

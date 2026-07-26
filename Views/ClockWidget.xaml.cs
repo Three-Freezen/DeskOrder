@@ -291,6 +291,16 @@ public partial class ClockWidget : Window
 
     // ── Style (border / fill) ──
 
+    /// <summary>Refresh all visual styles from the current _clock model (for live preview).</summary>
+    public void RefreshAppearance()
+    {
+        if (MainContent.Visibility == Visibility.Visible)
+            ApplyAcrylic();
+        ApplyBackgroundImage();
+        ApplyDigitalBackgroundImage();
+        ApplyStyle();
+    }
+
     void ApplyStyle()
     {
         // Always apply user's border color (overrides chromatic border from LiquidGlass if needed)

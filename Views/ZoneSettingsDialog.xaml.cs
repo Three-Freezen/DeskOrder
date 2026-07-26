@@ -17,6 +17,8 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
     private readonly Zone _editingZone;
     private readonly ZoneManager _zoneManager;
     private readonly LocalizationService _loc = LocalizationService.Instance;
+    private readonly Zone _snapshot; // for cancel-revert
+    private bool _suppressPreview; // suppress live preview during init
     public Zone ResultZone { get; private set; }
 
     private string _zoneName = "";
@@ -42,31 +44,31 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
     public string BorderThicknessText { get => _borderThicknessText; set { _borderThicknessText = value; OnPropertyChanged(); } }
 
     private string _borderColor = "#30FFFFFF";
-    public string BorderColorValue { get => _borderColor; set { _borderColor = value; UpdateHighlights(); OnPropertyChanged(); } }
+    public string BorderColorValue { get => _borderColor; set { _borderColor = value; UpdateHighlights(); OnPropertyChanged(); PushToZone(); } }
     private string _fillColor = "#08000000";
-    public string FillColorValue { get => _fillColor; set { _fillColor = value; _fillOpacityPercent = ParseOpacity(value); UpdateHighlights(); OnPropertyChanged(); OnPropertyChanged(nameof(FillOpacityPercent)); } }
+    public string FillColorValue { get => _fillColor; set { _fillColor = value; _fillOpacityPercent = ParseOpacity(value); UpdateHighlights(); OnPropertyChanged(); OnPropertyChanged(nameof(FillOpacityPercent)); PushToZone(); } }
     private string _titleBarFill = "#10FFFFFF";
-    public string TitleBarFillValue { get => _titleBarFill; set { _titleBarFill = value; _titleBarOpacityPercent = ParseOpacity(value); UpdateHighlights(); OnPropertyChanged(); OnPropertyChanged(nameof(TitleBarOpacityPercent)); } }
+    public string TitleBarFillValue { get => _titleBarFill; set { _titleBarFill = value; _titleBarOpacityPercent = ParseOpacity(value); UpdateHighlights(); OnPropertyChanged(); OnPropertyChanged(nameof(TitleBarOpacityPercent)); PushToZone(); } }
     private string _bgImagePath = "";
     private bool _isLoading = true;
     public string BgImagePath { get => _bgImagePath; set { _bgImagePath = value; if (!string.IsNullOrEmpty(value) && !_isLoading) _fillColor = "#01000000"; if (CropBtn != null) CropBtn.IsEnabled = !string.IsNullOrEmpty(value) && File.Exists(value); OnPropertyChanged(); } }
     private string _iconCharText = "";
     public string IconCharText { get => _iconCharText; set { _iconCharText = value; IconPreview.Text = string.IsNullOrEmpty(value) ? "⊞" : value[..Math.Min(value.Length, 2)]; OnPropertyChanged(); } }
     private string _iconColor = "#FFFFFF";
-    public string IconColorValue { get => _iconColor; set { _iconColor = value; UpdateHighlights(); OnPropertyChanged(); } }
+    public string IconColorValue { get => _iconColor; set { _iconColor = value; UpdateHighlights(); OnPropertyChanged(); PushToZone(); } }
     private string _textColor = "#A0FFFFFF";
-    public string TextColorValue { get => _textColor; set { _textColor = value; UpdateHighlights(); OnPropertyChanged(); } }
+    public string TextColorValue { get => _textColor; set { _textColor = value; UpdateHighlights(); OnPropertyChanged(); PushToZone(); } }
 
     private double _fillOpacityPercent = 8;
     public double FillOpacityPercent { get => _fillOpacityPercent; set { _fillOpacityPercent = value; UpdateFillFromOpacity(); OnPropertyChanged(); } }
     private double _titleBarOpacityPercent = 6;
     public double TitleBarOpacityPercent { get => _titleBarOpacityPercent; set { _titleBarOpacityPercent = value; UpdateTitleBarFromOpacity(); OnPropertyChanged(); } }
     private double _ctrlOpacity = 40;
-    public double CtrlOpacity { get => _ctrlOpacity; set { _ctrlOpacity = value; OnPropertyChanged(); } }
+    public double CtrlOpacity { get => _ctrlOpacity; set { _ctrlOpacity = value; OnPropertyChanged(); PushToZone(); } }
     private double _bgImageOpacity = 40;
-    public double BgImageOpacityPercent { get => _bgImageOpacity; set { _bgImageOpacity = value; OnPropertyChanged(); } }
+    public double BgImageOpacityPercent { get => _bgImageOpacity; set { _bgImageOpacity = value; OnPropertyChanged(); PushToZone(); } }
     private bool _autoArrange;
-    public bool AutoArrange { get => _autoArrange; set { _autoArrange = value; OnPropertyChanged(); } }
+    public bool AutoArrange { get => _autoArrange; set { _autoArrange = value; OnPropertyChanged(); PushToZone(); } }
     private double _bgOffsetX;
     public string BgOffsetX { get => _bgOffsetX.ToString("F0"); set { if (double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v)) _bgOffsetX = v; OnPropertyChanged(); } }
     private double _bgOffsetY;
@@ -75,28 +77,28 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
     public double BgZoomVal { get => _bgZoomVal; set { _bgZoomVal = value; OnPropertyChanged(); } }
 
     private bool _acrylicEnabled = true;
-    public bool AcrylicEnabled { get => _acrylicEnabled; set { _acrylicEnabled = value; OnPropertyChanged(); } }
+    public bool AcrylicEnabled { get => _acrylicEnabled; set { _acrylicEnabled = value; OnPropertyChanged(); PushToZone(); } }
 
     // ── Liquid Glass settings ──
     private int _glassBlurAmount = 18;
-    public int GlassBlurAmount { get => _glassBlurAmount; set { _glassBlurAmount = value; OnPropertyChanged(); } }
+    public int GlassBlurAmount { get => _glassBlurAmount; set { _glassBlurAmount = value; OnPropertyChanged(); PushToZone(); } }
     private int _glassTintOpacity = 50;
-    public int GlassTintOpacity { get => _glassTintOpacity; set { _glassTintOpacity = value; OnPropertyChanged(); } }
+    public int GlassTintOpacity { get => _glassTintOpacity; set { _glassTintOpacity = value; OnPropertyChanged(); PushToZone(); } }
     private int _glassTintLuminosity = 100;
-    public int GlassTintLuminosity { get => _glassTintLuminosity; set { _glassTintLuminosity = value; OnPropertyChanged(); } }
+    public int GlassTintLuminosity { get => _glassTintLuminosity; set { _glassTintLuminosity = value; OnPropertyChanged(); PushToZone(); } }
     private string _glassColorMode = "Default";
-    public string GlassColorMode { get => _glassColorMode; set { _glassColorMode = value; OnPropertyChanged(); } }
+    public string GlassColorMode { get => _glassColorMode; set { _glassColorMode = value; OnPropertyChanged(); PushToZone(); } }
     private bool _liquidGlass = true;
-    public bool LiquidGlassEnabled { get => _liquidGlass; set { _liquidGlass = value; OnPropertyChanged(); } }
+    public bool LiquidGlassEnabled { get => _liquidGlass; set { _liquidGlass = value; OnPropertyChanged(); PushToZone(); } }
 
     private bool _quickBarMode;
-    public bool QuickBarMode { get => _quickBarMode; set { _quickBarMode = value; OnPropertyChanged(); } }
+    public bool QuickBarMode { get => _quickBarMode; set { _quickBarMode = value; OnPropertyChanged(); PushToZone(); } }
 
     private bool _enableRestoreButton = true;
-    public bool EnableRestoreButton { get => _enableRestoreButton; set { _enableRestoreButton = value; OnPropertyChanged(); } }
+    public bool EnableRestoreButton { get => _enableRestoreButton; set { _enableRestoreButton = value; OnPropertyChanged(); PushToZone(); } }
 
     private bool _useGlobalAppearance = true;
-    public bool UseGlobalAppearance { get => _useGlobalAppearance; set { _useGlobalAppearance = value; OnPropertyChanged(); } }
+    public bool UseGlobalAppearance { get => _useGlobalAppearance; set { _useGlobalAppearance = value; OnPropertyChanged(); PushToZone(); } }
 
     private Action<Services.Language>? _langChanged;
 
@@ -104,6 +106,8 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
     {
         InitializeComponent();
         _editingZone = zone.Clone(); _zoneManager = zoneManager; ResultZone = zone;
+        _snapshot = zone.Clone(); // snapshot for cancel-revert
+        _suppressPreview = true;
 
         ZoneName = zone.Name; ZoneWidth = zone.Width.ToString("F0"); ZoneHeight = zone.Height.ToString("F0");
         GridSize = zone.GridSize.ToString(); SnapToGrid = zone.SnapToGrid;
@@ -133,6 +137,7 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
         _langChanged = _ => ApplyLoc();
         _loc.LanguageChanged += _langChanged;
         _isLoading = false;
+        _suppressPreview = false;
     }
 
     protected override void OnClosed(EventArgs e)
@@ -216,7 +221,12 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
 
         bool saved = AcrylicHelper.ShowLiquidGlassDialog(this,
             cn ? "液态玻璃设置" : "Liquid Glass Settings",
-            ref blur, ref opacity, ref luminosity, ref colorMode, cn);
+            ref blur, ref opacity, ref luminosity, ref colorMode, cn,
+            onPreviewChanged: (b, o, l, m) =>
+            {
+                GlassBlurAmount = b; GlassTintOpacity = o;
+                GlassTintLuminosity = l; GlassColorMode = m;
+            });
 
         if (saved)
         {
@@ -225,6 +235,7 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
             GlassTintLuminosity = luminosity;
             GlassColorMode = colorMode;
         }
+        PushToZone();
     }
 
     void LiquidGlass_Changed(object s, RoutedEventArgs e)
@@ -254,8 +265,8 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
         if (LabelLiquidGlassToggle != null) LabelLiquidGlassToggle.Text = _loc.CurrentLanguage == Services.Language.Chinese ? "启用液态玻璃" : "Enable Liquid Glass";
     }
 
-    void UpdateFillFromOpacity() { _fillColor = $"#{(int)(_fillOpacityPercent / 100 * 255):X2}{(_fillColor.Length > 3 ? _fillColor[3..] : "000000")}"; }
-    void UpdateTitleBarFromOpacity() { _titleBarFill = $"#{(int)(_titleBarOpacityPercent / 100 * 255):X2}{(_titleBarFill.Length > 3 ? _titleBarFill[3..] : "FFFFFF")}"; }
+    void UpdateFillFromOpacity() { _fillColor = $"#{(int)(_fillOpacityPercent / 100 * 255):X2}{(_fillColor.Length > 3 ? _fillColor[3..] : "000000")}"; PushToZone(); }
+    void UpdateTitleBarFromOpacity() { _titleBarFill = $"#{(int)(_titleBarOpacityPercent / 100 * 255):X2}{(_titleBarFill.Length > 3 ? _titleBarFill[3..] : "FFFFFF")}"; PushToZone(); }
     static double ParseOpacity(string a) { if (a.Length >= 3 && a[0] == '#') try { return int.Parse(a[1..3], System.Globalization.NumberStyles.HexNumber) / 255.0 * 100; } catch { } return 8; }
 
     /// <summary>
@@ -284,6 +295,41 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
         UpdateGlassSection();
     }
 
+    /// <summary>Push current dialog state to the live zone for real-time preview.</summary>
+    void PushToZone()
+    {
+        if (_suppressPreview) return;
+
+        var zone = ResultZone;
+        double.TryParse(ZoneWidth, out var w); double.TryParse(ZoneHeight, out var h);
+        double.TryParse(BorderThicknessText, out var bt);
+        int.TryParse(GridSize, out var gs);
+
+        zone.Name = ZoneName; zone.Width = w; zone.Height = h;
+        zone.GridSize = gs; zone.SnapToGrid = SnapToGrid;
+        zone.BorderThickness = bt; zone.BorderColor = BorderColorValue;
+        zone.FillColor = FillColorValue; zone.TitleBarFillColor = TitleBarFillValue;
+        zone.BackgroundImagePath = BgImagePath; zone.IconChar = IconCharText;
+        zone.ControlOpacity = CtrlOpacity;
+        zone.BackgroundImageOpacity = BgImageOpacityPercent;
+        zone.AutoArrange = AutoArrange;
+        zone.BgImageOffsetX = _bgOffsetX; zone.BgImageOffsetY = _bgOffsetY;
+        zone.BgImageZoom = _bgZoomVal;
+        zone.IconColor = IconColorValue; zone.TitleTextColor = TextColorValue;
+        zone.EnableAcrylic = AcrylicEnabled;
+        zone.GlassBlurAmount = GlassBlurAmount;
+        zone.GlassTintOpacity = GlassTintOpacity;
+        zone.GlassTintLuminosity = GlassTintLuminosity;
+        zone.GlassColorMode = GlassColorMode;
+        zone.EnableLiquidGlass = _liquidGlass;
+        zone.QuickBarMode = _quickBarMode;
+        zone.EnableRestoreButton = EnableRestoreButton;
+
+        // Apply visual changes to the live zone window
+        if (_zoneManager.GetZoneWindow(zone.Id) is { } win)
+            win.RefreshZone(zone);
+    }
+
     void ApplyButton_Click(object s, RoutedEventArgs e)
     {
         var err = _loc["Settings.ValidationError"];
@@ -293,37 +339,50 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
         if (!int.TryParse(GridSize, out var gs) || gs < 32 || gs > 256) { MessageBox.Show(_loc["Settings.GridRange"], err); return; }
         if (!double.TryParse(BorderThicknessText, out var bt) || bt < 0.5 || bt > 10) { MessageBox.Show(_loc["Settings.BorderRange"], err); return; }
 
-        _editingZone.Name = ZoneName; _editingZone.Width = w; _editingZone.Height = h;
-        _editingZone.GridSize = gs; _editingZone.SnapToGrid = SnapToGrid;
-        _editingZone.BorderThickness = bt; _editingZone.BorderColor = BorderColorValue;
-        _editingZone.FillColor = FillColorValue; _editingZone.TitleBarFillColor = TitleBarFillValue;
-        _editingZone.BackgroundImagePath = BgImagePath; _editingZone.IconChar = IconCharText;
-        _editingZone.ControlOpacity = CtrlOpacity;
-        _editingZone.BackgroundImageOpacity = BgImageOpacityPercent;
-        _editingZone.AutoArrange = AutoArrange; // BgImageStretch unified to UniformToFill
-        _editingZone.BgImageOffsetX = _bgOffsetX; _editingZone.BgImageOffsetY = _bgOffsetY;
-        _editingZone.BgImageZoom = _bgZoomVal;
-        _editingZone.IconColor = IconColorValue; _editingZone.TitleTextColor = TextColorValue;
-        _editingZone.EnableAcrylic = AcrylicEnabled;
-        _editingZone.GlassBlurAmount = GlassBlurAmount;
-        _editingZone.GlassTintOpacity = GlassTintOpacity;
-        _editingZone.GlassTintLuminosity = GlassTintLuminosity;
-        _editingZone.GlassColorMode = GlassColorMode;
-        _editingZone.EnableLiquidGlass = _liquidGlass;
-        _editingZone.QuickBarMode = _quickBarMode;
-        _editingZone.EnableRestoreButton = EnableRestoreButton;
-        ResultZone = _editingZone; _zoneManager.UpdateZone(_editingZone);
+        // Push final state (already previewed, but ensure consistency)
+        PushToZone();
 
-        // Save UseGlobalAppearance to config (deferred from checkbox toggle)
+        // Save UseGlobalAppearance to config
         var config = _zoneManager.GetConfig();
         config.UseGlobalAppearance = UseGlobalAppearance;
         _zoneManager.SaveConfig();
 
-        // Refresh dialog state from the applied zone so subsequent edits stay in sync
-        SyncFromZone(_editingZone);
+        _zoneManager.SaveConfig();
+        DialogResult = true;
+        Close();
     }
 
-    void CancelButton_Click(object s, RoutedEventArgs e) { DialogResult = false; Close(); }
+    void CancelButton_Click(object s, RoutedEventArgs e)
+    {
+        // Restore zone to snapshot state
+        var zone = ResultZone;
+        zone.Name = _snapshot.Name; zone.Width = _snapshot.Width; zone.Height = _snapshot.Height;
+        zone.GridSize = _snapshot.GridSize; zone.SnapToGrid = _snapshot.SnapToGrid;
+        zone.BorderThickness = _snapshot.BorderThickness; zone.BorderColor = _snapshot.BorderColor;
+        zone.FillColor = _snapshot.FillColor; zone.TitleBarFillColor = _snapshot.TitleBarFillColor;
+        zone.BackgroundImagePath = _snapshot.BackgroundImagePath; zone.IconChar = _snapshot.IconChar;
+        zone.ControlOpacity = _snapshot.ControlOpacity;
+        zone.BackgroundImageOpacity = _snapshot.BackgroundImageOpacity;
+        zone.AutoArrange = _snapshot.AutoArrange;
+        zone.BgImageOffsetX = _snapshot.BgImageOffsetX; zone.BgImageOffsetY = _snapshot.BgImageOffsetY;
+        zone.BgImageZoom = _snapshot.BgImageZoom;
+        zone.IconColor = _snapshot.IconColor; zone.TitleTextColor = _snapshot.TitleTextColor;
+        zone.EnableAcrylic = _snapshot.EnableAcrylic;
+        zone.GlassBlurAmount = _snapshot.GlassBlurAmount;
+        zone.GlassTintOpacity = _snapshot.GlassTintOpacity;
+        zone.GlassTintLuminosity = _snapshot.GlassTintLuminosity;
+        zone.GlassColorMode = _snapshot.GlassColorMode;
+        zone.EnableLiquidGlass = _snapshot.EnableLiquidGlass;
+        zone.QuickBarMode = _snapshot.QuickBarMode;
+        zone.EnableRestoreButton = _snapshot.EnableRestoreButton;
+
+        // Refresh window with restored state
+        if (_zoneManager.GetZoneWindow(zone.Id) is { } win)
+            win.RefreshZone(zone);
+
+        DialogResult = false;
+        Close();
+    }
 
     void UseGlobal_Changed(object s, RoutedEventArgs e)
     {

@@ -753,9 +753,12 @@ public partial class ZoneWindow : Window
 
     void SetRestoreIcon()
     {
-        var icon = string.IsNullOrEmpty(_zone.IconChar) ? (string.IsNullOrEmpty(_zone.Name) ? "⊞" : _zone.Name[..1]) : _zone.IconChar;
+        // For merged groups, prefer MergedGroupIcon; otherwise use IconChar
+        string iconChar = _zone.MergedSubZoneIds.Count > 0 && !string.IsNullOrEmpty(_zone.MergedGroupIcon)
+            ? _zone.MergedGroupIcon : _zone.IconChar;
+        var icon = string.IsNullOrEmpty(iconChar) ? (string.IsNullOrEmpty(_zone.Name) ? "⊞" : _zone.Name[..1]) : iconChar;
         RestoreIconChar.Text = icon;
-        TitleIconChar.Text = string.IsNullOrEmpty(_zone.IconChar) ? icon : _zone.IconChar;
+        TitleIconChar.Text = string.IsNullOrEmpty(iconChar) ? icon : iconChar;
     }
     void OnSize(object s, SizeChangedEventArgs e) { if (!IsLoaded || MainContent.Visibility != Visibility.Visible) return; _zone.Width = Width; _zone.Height = Height; ScheduleSave(); RearrangeAll(); UpdateCanvasSize(); NativeMethods.UpdateRoundedCorners(this, (int)_zone.CornerRadius); }
 

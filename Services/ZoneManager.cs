@@ -231,6 +231,7 @@ public class ZoneManager
     }
 
     public bool IsZoneShown(Guid zoneId) => _zoneWindows.ContainsKey(zoneId);
+    public ZoneWindow? GetZoneWindow(Guid zoneId) => _zoneWindows.TryGetValue(zoneId, out var w) ? w : null;
     public bool IsZoneMinimized(Guid zoneId) => _zoneWindows.TryGetValue(zoneId, out var w) && w.RestoreButton.Visibility == System.Windows.Visibility.Visible;
 
     public void ToggleAll()

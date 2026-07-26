@@ -50,11 +50,18 @@
                                  LostFocus="TitleBox_LostFocus"
                                  KeyDown="TitleBox_KeyDown"/>
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,4,0">
+                            <Button x:Name="SaveBtn" Content="💾" Width="20" Height="20"
+                                    FontSize="10"
+                                    Background="Transparent" BorderThickness="0"
+                                    Cursor="Hand" Click="SaveBtn_Click" Margin="3,0,0,0"
+                                    Foreground="#80FFFFFF"
+                                    MouseEnter="SaveBtn_Enter" MouseLeave="SaveBtn_Leave"/>
                             <Button x:Name="PinBtn" Content="📌" Width="20" Height="20"
                                     FontSize="10"
                                     Background="Transparent" BorderThickness="0"
                                     Cursor="Hand" Click="PinBtn_Click" Margin="3,0,0,0"
-                                    Foreground="#80FFFFFF"/>
+                                    Foreground="#80FFFFFF"
+                                    MouseEnter="PinBtn_Enter" MouseLeave="PinBtn_Leave"/>
                             <Button x:Name="HideBtn" Content="─" Width="20" Height="20"
                                     FontSize="11" Foreground="#80FFFFFF"
                                     Background="Transparent" BorderThickness="0"

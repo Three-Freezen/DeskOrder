@@ -31,6 +31,8 @@ public partial class ManagementWindow : Window
 
     private bool IsNoteWindowOpen(Guid id) => ((App)System.Windows.Application.Current).IsNoteWindowOpen(id);
     private Window? GetNoteWindow(Guid id) => ((App)System.Windows.Application.Current)._noteWindows.TryGetValue(id, out var w) ? w : null;
+    public ClockWidget? GetClockWindow(Guid id) => _openClockWindows.TryGetValue(id, out var w) && w is ClockWidget cw ? cw : null;
+    public CalendarWidget? GetCalendarWindow(Guid id) => _openCalendarWindows.TryGetValue(id, out var w) && w is CalendarWidget cal ? cal : null;
     // Track toggle dots for animation
     private readonly Dictionary<Guid, Border> _noteToggleDots = new();
     private readonly Dictionary<Guid, Border> _clockToggleDots = new();
@@ -158,7 +160,7 @@ public partial class ManagementWindow : Window
         catch { }
     }
 
-    void RefreshAll()
+    public void RefreshAll()
     {
         try
         {
@@ -720,19 +722,13 @@ public partial class ManagementWindow : Window
 
     void ShowMergedGroupSettingsDialog(Zone masterZone)
     {
-        var dialog = new MergedGroupSettingsDialog(masterZone)
+        var dialog = new MergedGroupSettingsDialog(masterZone, _zoneManager)
         {
             Owner = this
         };
-        if (dialog.ShowDialog() == true)
-        {
-            _zoneManager.SaveConfig();
-            if (_zoneManager.IsZoneShown(masterZone.Id))
-            {
-                _zoneManager.UpdateZone(masterZone);
-            }
-            RefreshAll();
-        }
+        dialog.ShowDialog();
+        // Dialog handles apply (save+close) and cancel (restore+close) internally
+        RefreshAll();
     }
 
     TextBlock CreateLabel(string text)

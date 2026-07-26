@@ -327,13 +327,16 @@ public static class AcrylicHelper
     /// </summary>
     public static bool ShowLiquidGlassDialog(Window owner, string title,
         ref int blurAmount, ref int tintOpacity, ref int tintLuminosity, ref string colorMode,
-        bool isChinese)
+        bool isChinese, Action<int, int, int, string>? onPreviewChanged = null)
     {
         // Copy ref params to locals for lambda capture
         int localBlur = blurAmount;
         int localTintOpacity = tintOpacity;
         int localTintLuminosity = tintLuminosity;
         string localColorMode = colorMode;
+
+        // Helper to fire live preview
+        void FirePreview() => onPreviewChanged?.Invoke(localBlur, localTintOpacity, localTintLuminosity, localColorMode);
 
         var dlg = new Window
         {
@@ -446,21 +449,21 @@ public static class AcrylicHelper
         // Blur Amount slider (0-60)
         var blurSaved = localBlur;
         var blurLabelRow = BuildSliderRow(isChinese ? "模糊半径" : "Blur Radius", 0, 60, localBlur,
-            t1, t2, (v, lbl) => { localBlur = (int)v; lbl.Text = $"{(int)v}"; });
+            t1, t2, (v, lbl) => { localBlur = (int)v; lbl.Text = $"{(int)v}"; FirePreview(); });
         Grid.SetRow(blurLabelRow, row++);
         grid.Children.Add(blurLabelRow);
 
         // Tint Opacity slider (0-100%)
         var opacitySaved = localTintOpacity;
         var opacityLabelRow = BuildSliderRow(isChinese ? "着色不透明度" : "Tint Opacity", 0, 100, localTintOpacity,
-            t1, t2, (v, lbl) => { localTintOpacity = (int)v; lbl.Text = $"{localTintOpacity}%"; });
+            t1, t2, (v, lbl) => { localTintOpacity = (int)v; lbl.Text = $"{localTintOpacity}%"; FirePreview(); });
         Grid.SetRow(opacityLabelRow, row++);
         grid.Children.Add(opacityLabelRow);
 
         // Tint Luminosity slider (0-150%)
         var luminositySaved = localTintLuminosity;
         var luminosityLabelRow = BuildSliderRow(isChinese ? "着色亮度" : "Tint Luminosity", 0, 150, localTintLuminosity,
-            t1, t2, (v, lbl) => { localTintLuminosity = (int)v; lbl.Text = $"{localTintLuminosity}%"; });
+            t1, t2, (v, lbl) => { localTintLuminosity = (int)v; lbl.Text = $"{localTintLuminosity}%"; FirePreview(); });
         Grid.SetRow(luminosityLabelRow, row++);
         grid.Children.Add(luminosityLabelRow);
 
@@ -490,6 +493,7 @@ public static class AcrylicHelper
             if (ColorPresetNames[i] == colorMode) selectedIdx = i;
         }
         presetCombo.SelectedIndex = selectedIdx;
+        presetCombo.SelectionChanged += (_, _) => { localColorMode = ColorPresetNames[presetCombo.SelectedIndex]; FirePreview(); };
         colorRow.Children.Add(presetCombo);
         Grid.SetRow(colorRow, row++);
         grid.Children.Add(colorRow);
@@ -547,6 +551,7 @@ public static class AcrylicHelper
             localBlur = blurSaved;
             localTintOpacity = opacitySaved;
             localTintLuminosity = luminositySaved;
+            FirePreview(); // revert preview to original values
             dlg.Close();
         };
 

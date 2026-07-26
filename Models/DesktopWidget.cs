@@ -43,6 +43,8 @@ public class StickyNote
     public double BgImageOffsetX { get; set; } = 0;
     public double BgImageOffsetY { get; set; } = 0;
     public bool EnableRestoreButton { get; set; } = true;
+    // ── Save ──
+    public string LastSavePath { get; set; } = "";
     // ── Hotkey ──
     public bool HotkeyEnabled { get; set; } = false;
     public int HotkeyModifiers { get; set; } = 1; // MOD_ALT = 0x0001
@@ -67,7 +69,7 @@ public class StickyNote
         BackgroundImagePath = BackgroundImagePath, BgImageStretch = BgImageStretch,
         BackgroundImageOpacity = BackgroundImageOpacity, BgImageZoom = BgImageZoom,
         BgImageOffsetX = BgImageOffsetX, BgImageOffsetY = BgImageOffsetY,
-        EnableRestoreButton = EnableRestoreButton,
+        EnableRestoreButton = EnableRestoreButton, LastSavePath = LastSavePath,
         HotkeyEnabled = HotkeyEnabled, HotkeyModifiers = HotkeyModifiers,
         HotkeyKey = HotkeyKey, CustomHotkeys = new List<CustomHotkey>(CustomHotkeys),
         CreatedAt = CreatedAt, ModifiedAt = ModifiedAt

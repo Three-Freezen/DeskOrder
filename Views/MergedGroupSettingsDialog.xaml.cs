@@ -15,6 +15,8 @@ namespace DesktopZones.Views;
 public partial class MergedGroupSettingsDialog : Window, INotifyPropertyChanged
 {
     private readonly Zone _zone;
+    private readonly Zone _snapshot; // for cancel-revert
+    private readonly ZoneManager _zoneManager;
     private readonly LocalizationService _loc = LocalizationService.Instance;
 
     // Glass settings
@@ -24,10 +26,12 @@ public partial class MergedGroupSettingsDialog : Window, INotifyPropertyChanged
     private string _glassColorMode;
     private bool _liquidGlass;
 
-    public MergedGroupSettingsDialog(Zone zone)
+    public MergedGroupSettingsDialog(Zone zone, ZoneManager zoneManager)
     {
         InitializeComponent();
         _zone = zone;
+        _snapshot = zone.Clone(); // snapshot for cancel-revert
+        _zoneManager = zoneManager;
         DataContext = this;
 
         // Initialize glass settings from zone
@@ -43,6 +47,8 @@ public partial class MergedGroupSettingsDialog : Window, INotifyPropertyChanged
         NameBox.Text = zone.MergedGroupName;
         IconCharBox.Text = zone.MergedGroupIcon;
         QuickBarModeToggle.IsChecked = zone.MergedGroupQuickBarMode;
+        QuickBarModeToggle.Checked += (_, _) => PushToZone();
+        QuickBarModeToggle.Unchecked += (_, _) => PushToZone();
         WidthBox.Text = zone.Width.ToString("F0");
         HeightBox.Text = zone.Height.ToString("F0");
         BorderThicknessBox.Text = zone.MergedGroupBorderThickness.ToString("F1");
@@ -50,41 +56,52 @@ public partial class MergedGroupSettingsDialog : Window, INotifyPropertyChanged
         OffsetXBox.Text = zone.MergedGroupBgImageOffsetX.ToString("F0");
         OffsetYBox.Text = zone.MergedGroupBgImageOffsetY.ToString("F0");
 
+        // Wire up TextChanged for live preview
+        NameBox.TextChanged += (_, _) => PushToZone();
+        IconCharBox.TextChanged += (_, _) => PushToZone();
+        WidthBox.TextChanged += (_, _) => PushToZone();
+        HeightBox.TextChanged += (_, _) => PushToZone();
+        BorderThicknessBox.TextChanged += (_, _) => PushToZone();
+        OffsetXBox.TextChanged += (_, _) => PushToZone();
+        OffsetYBox.TextChanged += (_, _) => PushToZone();
+
         // Opacity sliders
         TitleOpacitySlider.Value = zone.MergedGroupTitleBarOpacity;
         TitleOpacityValue.Text = $"{(int)zone.MergedGroupTitleBarOpacity}%";
-        TitleOpacitySlider.ValueChanged += (_, _) => TitleOpacityValue.Text = $"{(int)TitleOpacitySlider.Value}%";
+        TitleOpacitySlider.ValueChanged += (_, _) => { TitleOpacityValue.Text = $"{(int)TitleOpacitySlider.Value}%"; PushToZone(); };
 
         CtrlOpacitySlider.Value = zone.MergedGroupControlOpacity;
         CtrlOpacityValue.Text = $"{(int)zone.MergedGroupControlOpacity}%";
-        CtrlOpacitySlider.ValueChanged += (_, _) => CtrlOpacityValue.Text = $"{(int)CtrlOpacitySlider.Value}%";
+        CtrlOpacitySlider.ValueChanged += (_, _) => { CtrlOpacityValue.Text = $"{(int)CtrlOpacitySlider.Value}%"; PushToZone(); };
 
         FillOpacitySlider.Value = zone.MergedGroupBackgroundImageOpacity;
         FillOpacityValue.Text = $"{(int)zone.MergedGroupBackgroundImageOpacity}%";
-        FillOpacitySlider.ValueChanged += (_, _) => FillOpacityValue.Text = $"{(int)FillOpacitySlider.Value}%";
+        FillOpacitySlider.ValueChanged += (_, _) => { FillOpacityValue.Text = $"{(int)FillOpacitySlider.Value}%"; PushToZone(); };
 
         BgZoomSlider.Value = zone.MergedGroupBgImageZoom;
         BgZoomValue.Text = $"{zone.MergedGroupBgImageZoom:F1}x";
-        BgZoomSlider.ValueChanged += (_, _) => BgZoomValue.Text = $"{BgZoomSlider.Value:F1}x";
+        BgZoomSlider.ValueChanged += (_, _) => { BgZoomValue.Text = $"{BgZoomSlider.Value:F1}x"; PushToZone(); };
 
         // Bg stretch: always UniformToFill
         // Fill mode
         UnifiedFillRadio.IsChecked = zone.MergedGroupUseUnifiedFill;
         KeepOriginalRadio.IsChecked = !zone.MergedGroupUseUnifiedFill;
+        UnifiedFillRadio.Checked += (_, _) => PushToZone();
+        KeepOriginalRadio.Checked += (_, _) => PushToZone();
 
         // Highlight selected colors
         UpdateHighlights();
         UpdateCropBtnState();
 
         // Wire up events
-        CancelButton.Click += (_, _) => Close();
+        CancelButton.Click += CancelButton_Click;
         ApplyButton.Click += ApplyButton_Click;
         BrowseBgBtn.Click += BrowseBgImage_Click;
         ClearBgBtn.Click += (_, _) => { BgImagePathBox.Text = ""; UpdateCropBtnState(); };
         // Liquid Glass toggle + settings
         LiquidGlassToggle.IsChecked = zone.EnableLiquidGlass;
-        LiquidGlassToggle.Checked += (_, _) => { _liquidGlass = true; UpdateLiquidButton(); };
-        LiquidGlassToggle.Unchecked += (_, _) => { _liquidGlass = false; UpdateLiquidButton(); };
+        LiquidGlassToggle.Checked += (_, _) => { _liquidGlass = true; UpdateLiquidButton(); PushToZone(); };
+        LiquidGlassToggle.Unchecked += (_, _) => { _liquidGlass = false; UpdateLiquidButton(); PushToZone(); };
         LiquidGlassSettingsBtn.Click += LiquidGlassSettings_Click;
         UpdateLiquidButton();
 
@@ -127,7 +144,13 @@ public partial class MergedGroupSettingsDialog : Window, INotifyPropertyChanged
 
         bool saved = AcrylicHelper.ShowLiquidGlassDialog(this,
             cn ? "液态玻璃设置" : "Liquid Glass Settings",
-            ref blur, ref opacity, ref luminosity, ref colorMode, cn);
+            ref blur, ref opacity, ref luminosity, ref colorMode, cn,
+            onPreviewChanged: (b, o, l, m) =>
+            {
+                _glassBlurAmount = b; _glassTintOpacity = o;
+                _glassTintLuminosity = l; _glassColorMode = m;
+                PushToZone();
+            });
 
         if (saved)
         {
@@ -136,6 +159,7 @@ public partial class MergedGroupSettingsDialog : Window, INotifyPropertyChanged
             _glassTintLuminosity = luminosity;
             _glassColorMode = colorMode;
         }
+        PushToZone();
     }
 
     void UpdateLiquidButton()
@@ -148,6 +172,54 @@ public partial class MergedGroupSettingsDialog : Window, INotifyPropertyChanged
         LiquidGlassSettingsBtn.BorderBrush = new SolidColorBrush(_liquidGlass
             ? System.Windows.Media.Color.FromArgb(0x80, 0x7C, 0x3A, 0xED)
             : (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#404060"));
+    }
+
+    /// <summary>Push current dialog state to the live zone for real-time preview.</summary>
+    void PushToZone()
+    {
+        _zone.MergedGroupName = NameBox.Text;
+        _zone.MergedGroupIcon = IconCharBox.Text;
+        _zone.MergedGroupQuickBarMode = QuickBarModeToggle.IsChecked == true;
+
+        double.TryParse(WidthBox.Text, System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var w);
+        double.TryParse(HeightBox.Text, System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var h);
+        if (w >= 100 && w <= 4000) _zone.Width = w;
+        if (h >= 100 && h <= 4000) _zone.Height = h;
+
+        _zone.MergedGroupTitleTextColor = GetSelectedTextColor();
+        _zone.MergedGroupIconColor = GetSelectedIconColor();
+
+        double.TryParse(BorderThicknessBox.Text, System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var bt);
+        _zone.MergedGroupBorderThickness = bt;
+        _zone.MergedGroupBorderColor = GetSelectedBorderColor();
+        _zone.MergedGroupTitleBarFillColor = GetSelectedTitleBarColor();
+        _zone.MergedGroupTitleBarOpacity = TitleOpacitySlider.Value;
+        _zone.MergedGroupControlOpacity = CtrlOpacitySlider.Value;
+        _zone.MergedGroupFillColor = GetSelectedFillColor();
+        _zone.MergedGroupUseUnifiedFill = UnifiedFillRadio.IsChecked == true;
+
+        _zone.GlassBlurAmount = _glassBlurAmount;
+        _zone.GlassTintOpacity = _glassTintOpacity;
+        _zone.GlassTintLuminosity = _glassTintLuminosity;
+        _zone.GlassColorMode = _glassColorMode;
+        _zone.EnableLiquidGlass = _liquidGlass;
+
+        _zone.MergedGroupBackgroundImagePath = BgImagePathBox.Text;
+        double.TryParse(OffsetXBox.Text, System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var ox);
+        double.TryParse(OffsetYBox.Text, System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var oy);
+        _zone.MergedGroupBgImageOffsetX = ox;
+        _zone.MergedGroupBgImageOffsetY = oy;
+        _zone.MergedGroupBgImageZoom = BgZoomSlider.Value;
+        _zone.MergedGroupBackgroundImageOpacity = FillOpacitySlider.Value;
+
+        // Apply visual changes to the live zone window
+        if (_zoneManager.GetZoneWindow(_zone.Id) is { } win)
+            win.RefreshZone(_zone);
     }
 
     void CropBgImage_Click(object s, RoutedEventArgs e)
@@ -288,6 +360,7 @@ public partial class MergedGroupSettingsDialog : Window, INotifyPropertyChanged
                     pb.BorderThickness = new Thickness(1);
             }
             b.BorderThickness = new Thickness(3);
+            PushToZone();
         }
     }
 
@@ -331,52 +404,48 @@ public partial class MergedGroupSettingsDialog : Window, INotifyPropertyChanged
 
     void ApplyButton_Click(object sender, RoutedEventArgs e)
     {
-        // Only update MergedGroup* properties, NOT the zone's Name
-        _zone.MergedGroupName = NameBox.Text;
-        _zone.MergedGroupIcon = IconCharBox.Text;
-        _zone.MergedGroupQuickBarMode = QuickBarModeToggle.IsChecked == true;
+        // Push final state (already previewed, but ensure consistency)
+        PushToZone();
 
-        if (double.TryParse(WidthBox.Text, System.Globalization.NumberStyles.Float,
-            System.Globalization.CultureInfo.InvariantCulture, out var w) && w >= 100 && w <= 4000)
-            _zone.Width = w;
-        if (double.TryParse(HeightBox.Text, System.Globalization.NumberStyles.Float,
-            System.Globalization.CultureInfo.InvariantCulture, out var h) && h >= 100 && h <= 4000)
-            _zone.Height = h;
-
-        _zone.MergedGroupTitleTextColor = GetSelectedTextColor();
-        _zone.MergedGroupIconColor = GetSelectedIconColor();
-
-        if (double.TryParse(BorderThicknessBox.Text, System.Globalization.NumberStyles.Float,
-            System.Globalization.CultureInfo.InvariantCulture, out var bt))
-            _zone.MergedGroupBorderThickness = bt;
-
-        _zone.MergedGroupBorderColor = GetSelectedBorderColor();
-        _zone.MergedGroupTitleBarFillColor = GetSelectedTitleBarColor();
-        _zone.MergedGroupTitleBarOpacity = TitleOpacitySlider.Value;
-        _zone.MergedGroupControlOpacity = CtrlOpacitySlider.Value;
-        _zone.MergedGroupFillColor = GetSelectedFillColor();
-        _zone.MergedGroupUseUnifiedFill = UnifiedFillRadio.IsChecked == true;
-
-        // Glass settings
-        _zone.GlassBlurAmount = _glassBlurAmount;
-        _zone.GlassTintOpacity = _glassTintOpacity;
-        _zone.GlassTintLuminosity = _glassTintLuminosity;
-        _zone.GlassColorMode = _glassColorMode;
-        _zone.EnableLiquidGlass = _liquidGlass;
-
-        // Background image
-        _zone.MergedGroupBackgroundImagePath = BgImagePathBox.Text;
-        // Stretch: always UniformToFill, no longer stored per-zone
-        if (double.TryParse(OffsetXBox.Text, System.Globalization.NumberStyles.Float,
-            System.Globalization.CultureInfo.InvariantCulture, out var ox))
-            _zone.MergedGroupBgImageOffsetX = ox;
-        if (double.TryParse(OffsetYBox.Text, System.Globalization.NumberStyles.Float,
-            System.Globalization.CultureInfo.InvariantCulture, out var oy))
-            _zone.MergedGroupBgImageOffsetY = oy;
-        _zone.MergedGroupBgImageZoom = BgZoomSlider.Value;
-        _zone.MergedGroupBackgroundImageOpacity = FillOpacitySlider.Value;
+        // Save config
+        _zoneManager.SaveConfig();
 
         DialogResult = true;
+    }
+
+    void CancelButton_Click(object sender, RoutedEventArgs e)
+    {
+        // Restore zone to snapshot state
+        _zone.MergedGroupName = _snapshot.MergedGroupName;
+        _zone.MergedGroupIcon = _snapshot.MergedGroupIcon;
+        _zone.MergedGroupQuickBarMode = _snapshot.MergedGroupQuickBarMode;
+        _zone.Width = _snapshot.Width;
+        _zone.Height = _snapshot.Height;
+        _zone.MergedGroupTitleTextColor = _snapshot.MergedGroupTitleTextColor;
+        _zone.MergedGroupIconColor = _snapshot.MergedGroupIconColor;
+        _zone.MergedGroupBorderThickness = _snapshot.MergedGroupBorderThickness;
+        _zone.MergedGroupBorderColor = _snapshot.MergedGroupBorderColor;
+        _zone.MergedGroupTitleBarFillColor = _snapshot.MergedGroupTitleBarFillColor;
+        _zone.MergedGroupTitleBarOpacity = _snapshot.MergedGroupTitleBarOpacity;
+        _zone.MergedGroupControlOpacity = _snapshot.MergedGroupControlOpacity;
+        _zone.MergedGroupFillColor = _snapshot.MergedGroupFillColor;
+        _zone.MergedGroupUseUnifiedFill = _snapshot.MergedGroupUseUnifiedFill;
+        _zone.GlassBlurAmount = _snapshot.GlassBlurAmount;
+        _zone.GlassTintOpacity = _snapshot.GlassTintOpacity;
+        _zone.GlassTintLuminosity = _snapshot.GlassTintLuminosity;
+        _zone.GlassColorMode = _snapshot.GlassColorMode;
+        _zone.EnableLiquidGlass = _snapshot.EnableLiquidGlass;
+        _zone.MergedGroupBackgroundImagePath = _snapshot.MergedGroupBackgroundImagePath;
+        _zone.MergedGroupBgImageOffsetX = _snapshot.MergedGroupBgImageOffsetX;
+        _zone.MergedGroupBgImageOffsetY = _snapshot.MergedGroupBgImageOffsetY;
+        _zone.MergedGroupBgImageZoom = _snapshot.MergedGroupBgImageZoom;
+        _zone.MergedGroupBackgroundImageOpacity = _snapshot.MergedGroupBackgroundImageOpacity;
+
+        // Refresh window with restored state
+        if (_zoneManager.GetZoneWindow(_zone.Id) is { } win)
+            win.RefreshZone(_zone);
+
+        Close();
     }
 
     // Event stubs for XAML

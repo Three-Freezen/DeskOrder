@@ -186,6 +186,15 @@ public partial class CalendarWidget : Window
         CalendarBorder.BorderThickness = new Thickness(_calendar.BorderThickness);
     }
 
+    /// <summary>Refresh all visual styles from the current _calendar model (for live preview).</summary>
+    public void RefreshAppearance()
+    {
+        if (MainContent.Visibility == Visibility.Visible)
+            ApplyAcrylic();
+        ApplyBackgroundImage();
+        ApplyStyle();
+    }
+
     void ApplyLoc()
     {
         var cn = _loc.CurrentLanguage == Services.Language.Chinese;
