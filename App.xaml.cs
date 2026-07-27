@@ -187,7 +187,15 @@ public partial class App : System.Windows.Application
             {
                 if (window.IsActive)
                 {
-                    window.Hide();
+                    if (window is StickyNoteWindow snwHide && snwHide.IsLoaded)
+                    {
+                        // Use HideNote to properly handle EnableRestoreButton
+                        snwHide.HideNote();
+                    }
+                    else
+                    {
+                        window.Hide();
+                    }
                 }
                 else
                 {
