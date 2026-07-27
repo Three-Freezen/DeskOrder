@@ -382,6 +382,7 @@ public partial class ClockWidget : Window
             while (src != null)
             {
                 if (src is System.Windows.Controls.ContextMenu) return;
+                if (src is System.Windows.Controls.Button) return;
                 src = VisualTreeHelper.GetParent(src);
             }
         }
