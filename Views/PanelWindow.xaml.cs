@@ -180,7 +180,7 @@ public partial class PanelWindow : Window
             ApplyStyle();
             ApplyBackgroundImage();
         }
-        e.Handled = true;
+        e?.Handled = true;
     }
 
     void OnLoad(object s, RoutedEventArgs e)
@@ -1027,7 +1027,7 @@ public partial class PanelWindow : Window
         config.PanelEnabled = false;
         _configService.Save(config);
         Close();
-        e.Handled = true;
+        e?.Handled = true;
     }
 
     void Ctrl_Enter(object s, MouseEventArgs e)
