@@ -34,8 +34,9 @@
                 <!-- Hide button (top-right) -->
                 <Button x:Name="HideBtn" Content="─" Width="20" Height="20"
                         FontSize="10" Foreground="#60FFFFFF"
-                        Background="Transparent" BorderThickness="0"
+                        Background="#01000000" BorderThickness="0"
                         Cursor="Hand" Click="HideBtn_Click"
+                        MouseLeftButtonDown="HideBtn_MouseDown"
                         HorizontalAlignment="Right" VerticalAlignment="Top"
                         Margin="0,4,8,0" Panel.ZIndex="10">
                     <Button.Resources>

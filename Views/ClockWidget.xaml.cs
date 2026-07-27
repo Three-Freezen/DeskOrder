@@ -494,6 +494,12 @@ public partial class ClockWidget : Window
         HideClock();
     }
 
+    void HideBtn_MouseDown(object s, MouseButtonEventArgs e)
+    {
+        // Mark event as handled to prevent Window_PreviewMouseLeftButtonDown from firing DragMove
+        e.Handled = true;
+    }
+
     void Delete_Click(object s, RoutedEventArgs e)
     {
         _timer.Stop();
@@ -530,6 +536,8 @@ public partial class ClockWidget : Window
 
     public void HideClock()
     {
+        System.IO.File.AppendAllText("D:\\mimo\\DesktopZones\\debug_clock.log",
+            $"[{DateTime.Now:HH:mm:ss.fff}] HideClock: EnableRestore={_clock.EnableRestoreButton}, W={Width}, H={Height}\n");
         _clock.X = Left; _clock.Y = Top; _clock.Width = Width; _clock.Height = Height;
         // Always disable blur and clean up state before hiding
         AcrylicHelper.DisableBlur(this);
