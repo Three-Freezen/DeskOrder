@@ -37,7 +37,7 @@
                         Background="Transparent" BorderThickness="0"
                         Cursor="Hand" Click="HideBtn_Click"
                         HorizontalAlignment="Right" VerticalAlignment="Top"
-                        Margin="0,4,8,0">
+                        Margin="0,4,8,0" Panel.ZIndex="10">
                     <Button.Resources>
                         <Style TargetType="Border">
                             <Setter Property="CornerRadius" Value="4"/>
