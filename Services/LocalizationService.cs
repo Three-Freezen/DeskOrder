@@ -225,6 +225,26 @@ public class LocalizationService : INotifyPropertyChanged
         ["CropPreview.Zoom"] = new() { [Language.Chinese] = "缩放", [Language.English] = "Zoom" },
         ["CropPreview.Opacity"] = new() { [Language.Chinese] = "透明度", [Language.English] = "Opacity" },
         ["CropPreview.Stretch"] = new() { [Language.Chinese] = "拉伸模式", [Language.English] = "Stretch Mode" },
+
+        // ── Presets ──
+        ["Preset.SaveButton"] = new() { [Language.Chinese] = "保存预设", [Language.English] = "Save Preset" },
+        ["Preset.LoadButton"] = new() { [Language.Chinese] = "加载预设", [Language.English] = "Load Preset" },
+        ["Preset.SaveTitle"] = new() { [Language.Chinese] = "保存分区预设", [Language.English] = "Save Zone Preset" },
+        ["Preset.LoadTitle"] = new() { [Language.Chinese] = "加载分区预设", [Language.English] = "Load Zone Preset" },
+        ["Preset.NameLabel"] = new() { [Language.Chinese] = "预设名称", [Language.English] = "Preset Name" },
+        ["Preset.EmptyNameHint"] = new() { [Language.Chinese] = "请输入预设名称", [Language.English] = "Please enter a preset name" },
+        ["Preset.DefaultNamePrefix"] = new() { [Language.Chinese] = "预设", [Language.English] = "Preset " },
+        ["Preset.Empty"] = new() { [Language.Chinese] = "暂无预设", [Language.English] = "No presets yet" },
+        ["Preset.Apply"] = new() { [Language.Chinese] = "应用", [Language.English] = "Apply" },
+        ["Preset.Cancel"] = new() { [Language.Chinese] = "取消", [Language.English] = "Cancel" },
+        ["Preset.Save"] = new() { [Language.Chinese] = "保存", [Language.English] = "Save" },
+        ["Preset.Saved"] = new() { [Language.Chinese] = "预设已保存", [Language.English] = "Preset saved" },
+        ["Preset.OverwriteTitle"] = new() { [Language.Chinese] = "覆盖预设", [Language.English] = "Overwrite Preset" },
+        ["Preset.OverwritePrompt"] = new() { [Language.Chinese] = "预设 \"{0}\" 已存在,是否覆盖当前预设?", [Language.English] = "Preset \"{0}\" already exists. Overwrite it?" },
+        ["Preset.Overwrite"] = new() { [Language.Chinese] = "覆盖", [Language.English] = "Overwrite" },
+        ["Preset.DeleteMenuItem"] = new() { [Language.Chinese] = "删除此预设", [Language.English] = "Delete Preset" },
+        ["Preset.DeleteConfirmTitle"] = new() { [Language.Chinese] = "删除预设", [Language.English] = "Delete Preset" },
+        ["Preset.DeleteConfirmMessage"] = new() { [Language.Chinese] = "确定要删除预设 \"{0}\" 吗？\n此操作不可撤销。", [Language.English] = "Delete preset \"{0}\"?\nThis cannot be undone." },
     };
 
     private Language _currentLanguage = Language.Chinese;

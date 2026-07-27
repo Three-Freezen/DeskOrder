@@ -6,6 +6,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 using DesktopZones.Helpers;
 using DesktopZones.Models;
 using DesktopZones.Services;
@@ -17,7 +18,7 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
     private readonly Zone _editingZone;
     private readonly ZoneManager _zoneManager;
     private readonly LocalizationService _loc = LocalizationService.Instance;
-    private readonly Zone _snapshot; // for cancel-revert
+    private Zone _snapshot; // for cancel-revert — reassigned after LoadPreset Apply to preserve the preset across an outer Cancel
     private bool _suppressPreview; // suppress live preview during init
     public Zone ResultZone { get; private set; }
 
@@ -101,6 +102,10 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
     public bool UseGlobalAppearance { get => _useGlobalAppearance; set { _useGlobalAppearance = value; OnPropertyChanged(); PushToZone(); } }
 
     private Action<Services.Language>? _langChanged;
+    private Zone? _loadDialogSnapshot;        // captured before opening LoadPresetDialog for cancel-revert
+    private DispatcherTimer? _savedHintTimer;
+    private PresetService? _zonePresetService;
+    private PresetService ZonePresetService => _zonePresetService ??= new PresetService("Zones");
 
     public ZoneSettingsDialog(Zone zone, ZoneManager zoneManager)
     {
@@ -157,12 +162,12 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
         LabelGlassIntensity.Text = cn ? "液态玻璃" : "Liquid Glass";
 
         LabelName.Text = _loc["Settings.Name"];
-        LabelQuickBarMode.Text = cn ? "快捷栏模式" : "QuickBar Mode";
-        LabelEnableRestoreButton.Text = cn ? "启用恢复按钮" : "Enable Restore Button";
+        LabelQuickBarMode.Text = cn ? "极简模式" : "Minimal Mode";
+        LabelEnableRestoreButton.Text = cn ? "恢复按钮" : "Restore Button";
         LabelIcon.Text = _loc["Settings.Icon"]; LabelWidth.Text = _loc["Settings.Width"];
         LabelHeight.Text = _loc["Settings.Height"]; LabelGridSize.Text = _loc["Settings.GridSize"];
         LabelSnapToGrid.Text = _loc["Settings.SnapToGrid"];
-        LabelUseGlobal.Text = cn ? "使用全局外观" : "Use Global Appearance";
+        LabelUseGlobal.Text = cn ? "全局外观" : "Global Appearance";
         LabelBorderThickness.Text = _loc["Settings.BorderThickness"];
         LabelBorderColor.Text = _loc["Settings.BorderColor"]; LabelFillColor.Text = _loc["Settings.FillColor"];
         LabelOpacity.Text = cn ? "填充透明度" : "Fill Opacity";
@@ -189,6 +194,100 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
         CropUniform.Content = cn ? "等比缩放" : "Uniform";
         CropUniformToFill.Content = cn ? "等比填充" : "UniformToFill";
         CropNone.Content = cn ? "原始尺寸" : "None";
+
+        SavePresetButton.Content = _loc["Preset.SaveButton"];
+        LoadPresetButton.Content = _loc["Preset.LoadButton"];
+        SavedHint.Text = _loc["Preset.Saved"];
+    }
+
+    // ── Preset actions ──
+
+    void SavePresetButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new SavePresetDialog(ZonePresetService, ResultZone) { Owner = this };
+        if (dlg.ShowDialog() == true) ShowSavedHint();
+    }
+
+    void LoadPresetButton_Click(object sender, RoutedEventArgs e)
+    {
+        // Snapshot the zone before opening, so Cancel can restore both the live window
+        // and the dialog state. Outer Cancel still reverts from _snapshot (unchanged).
+        _loadDialogSnapshot = ResultZone.Clone();
+
+        var dlg = new LoadPresetDialog(ZonePresetService, onCardPicked: preset =>
+        {
+            // Real-time preview: write preset values to ResultZone and refresh the live window.
+            CopyZoneFields(preset.Zone, ResultZone);
+            _zoneManager.GetZoneWindow(ResultZone.Id)?.RefreshZone(ResultZone);
+        }) { Owner = this };
+
+        if (dlg.ShowDialog() == true)
+        {
+            // Final commit: copy the chosen preset's values to ResultZone and sync all
+            // dialog controls (TextBox/CheckBox/Slider/...) so subsequent edits stay consistent.
+            CopyZoneFields(dlg.SelectedPreset!.Zone, ResultZone);
+            SyncFromZone(ResultZone);
+            _zoneManager.GetZoneWindow(ResultZone.Id)?.RefreshZone(ResultZone);
+
+            // Promote the applied preset to the snapshot baseline so a later outer Cancel
+            // reverts to "post-preset" state — the preset itself is preserved across Cancel.
+            _snapshot = ResultZone.Clone();
+        }
+        else
+        {
+            // Cancel — revert ResultZone to the state captured before the dialog opened.
+            if (_loadDialogSnapshot != null)
+            {
+                CopyZoneFields(_loadDialogSnapshot, ResultZone);
+                _zoneManager.GetZoneWindow(ResultZone.Id)?.RefreshZone(ResultZone);
+            }
+        }
+
+        // Defensive chain: ensure all in-flight setter→PushToZone→RefreshZone cycles have
+        // settled, then force one more layout pass + refresh so the live window paints
+        // the final state regardless of which branch ran above.
+        var win = _zoneManager.GetZoneWindow(ResultZone.Id);
+        win?.RefreshZone(ResultZone);
+        win?.UpdateLayout();
+        win?.RefreshZone(ResultZone);
+
+        _loadDialogSnapshot = null;
+    }
+
+    static void CopyZoneFields(Zone src, Zone dst)
+    {
+        dst.Name = src.Name; dst.Width = src.Width; dst.Height = src.Height;
+        dst.GridSize = src.GridSize; dst.SnapToGrid = src.SnapToGrid;
+        dst.BorderThickness = src.BorderThickness; dst.BorderColor = src.BorderColor;
+        dst.FillColor = src.FillColor; dst.TitleBarFillColor = src.TitleBarFillColor;
+        dst.BackgroundImagePath = src.BackgroundImagePath; dst.IconChar = src.IconChar;
+        dst.ControlOpacity = src.ControlOpacity;
+        dst.BackgroundImageOpacity = src.BackgroundImageOpacity;
+        dst.AutoArrange = src.AutoArrange;
+        dst.BgImageOffsetX = src.BgImageOffsetX; dst.BgImageOffsetY = src.BgImageOffsetY;
+        dst.BgImageZoom = src.BgImageZoom;
+        dst.IconColor = src.IconColor; dst.TitleTextColor = src.TitleTextColor;
+        dst.EnableAcrylic = src.EnableAcrylic;
+        dst.GlassBlurAmount = src.GlassBlurAmount;
+        dst.GlassTintOpacity = src.GlassTintOpacity;
+        dst.GlassTintLuminosity = src.GlassTintLuminosity;
+        dst.GlassColorMode = src.GlassColorMode;
+        dst.EnableLiquidGlass = src.EnableLiquidGlass;
+        dst.QuickBarMode = src.QuickBarMode;
+        dst.EnableRestoreButton = src.EnableRestoreButton;
+    }
+
+    void ShowSavedHint()
+    {
+        SavedHint.Visibility = Visibility.Visible;
+        _savedHintTimer?.Stop();
+        _savedHintTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+        _savedHintTimer.Tick += (_, _) =>
+        {
+            SavedHint.Visibility = Visibility.Collapsed;
+            _savedHintTimer!.Stop();
+        };
+        _savedHintTimer.Start();
     }
 
     void UpdateHighlights()
@@ -262,7 +361,7 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
         if (GlassIntensityPanel != null) GlassIntensityPanel.Visibility = Visibility.Visible;
         if (LabelGlassIntensity != null) LabelGlassIntensity.Visibility = Visibility.Visible;
         if (GlassSectionTitle != null) GlassSectionTitle.Text = _loc.CurrentLanguage == Services.Language.Chinese ? "玻璃效果" : "Glass Effect";
-        if (LabelLiquidGlassToggle != null) LabelLiquidGlassToggle.Text = _loc.CurrentLanguage == Services.Language.Chinese ? "启用液态玻璃" : "Enable Liquid Glass";
+        if (LabelLiquidGlassToggle != null) LabelLiquidGlassToggle.Text = _loc.CurrentLanguage == Services.Language.Chinese ? "液态玻璃" : "Liquid Glass";
     }
 
     void UpdateFillFromOpacity() { _fillColor = $"#{(int)(_fillOpacityPercent / 100 * 255):X2}{(_fillColor.Length > 3 ? _fillColor[3..] : "000000")}"; PushToZone(); }

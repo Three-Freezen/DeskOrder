@@ -510,7 +510,7 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         };
 
         // Common
-        LabelUseGlobal.Text = cn ? "使用全局外观" : "Use Global Appearance";
+        LabelUseGlobal.Text = cn ? "全局外观" : "Global Appearance";
         LabelWidth.Text = _loc["Settings.Width"];
         LabelHeight.Text = _loc["Settings.Height"];
         LabelBorderThickness.Text = cn ? "边框粗细" : "Border Thickness";
@@ -526,10 +526,10 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         GlassSectionTitle.Text = cn ? "玻璃效果" : "Glass Effect";
         LiquidGlassSettingsBtn.Content = cn ? "💧 液态玻璃设置" : "💧 Liquid Glass Settings";
         LabelGlassIntensity.Text = cn ? "液态玻璃" : "Liquid Glass";
-        LiquidGlassToggle.Content = cn ? "启用液态玻璃" : "Enable Liquid Glass";
+        LiquidGlassToggle.Content = cn ? "液态玻璃" : "Liquid Glass";
 
         // Enable restore button
-        LabelEnableRestoreButton.Text = cn ? "启用恢复按钮" : "Enable Restore Button";
+        LabelEnableRestoreButton.Text = cn ? "恢复按钮" : "Restore Button";
 
         // Title bar (sticky note)
         LabelTitleBar.Text = cn ? "标题栏填充" : "Title Bar Fill";

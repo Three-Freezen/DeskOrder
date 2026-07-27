@@ -197,7 +197,7 @@
                               Foreground="{StaticResource T1}" FontSize="13"
                               IsChecked="{Binding UseGlobalAppearance}"
                               Checked="UseGlobal_Changed" Unchecked="UseGlobal_Changed">
-                        <TextBlock x:Name="LabelUseGlobal" Text="使用全局外观"/>
+                        <TextBlock x:Name="LabelUseGlobal" Text="全局外观"/>
                     </CheckBox>
 
                     <!-- 7. Border Thickness -->
@@ -357,10 +357,64 @@
                 </StackPanel>
             </ScrollViewer>
 
-            <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
-                <Button x:Name="CancelButton" Content="Cancel" Background="#15FFFFFF" Foreground="{StaticResource T2}" BorderBrush="{StaticResource IBd}" BorderThickness="1" Padding="20,8" Cursor="Hand" FontSize="12" Click="CancelButton_Click"><Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="6"/></Style></Button.Resources></Button>
-                <Button x:Name="ApplyButton" Content="Apply" Background="{StaticResource Acc}" Foreground="White" BorderThickness="0" Padding="20,8" Margin="8,0,0,0" Cursor="Hand" FontSize="12" FontWeight="SemiBold" Click="ApplyButton_Click"><Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="6"/></Style></Button.Resources></Button>
-            </StackPanel>
+            <Grid Grid.Row="2" Margin="0,14,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Saved hint, briefly shown after a successful preset save -->
+                <TextBlock x:Name="SavedHint" Text="预设已保存"
+                           Foreground="#A0E0FFE0" FontSize="11"
+                           VerticalAlignment="Center" Margin="0,0,12,0"
+                           Visibility="Collapsed"/>
+
+                <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button x:Name="SavePresetButton" Click="SavePresetButton_Click"
+                            Background="#15FFFFFF" Foreground="{StaticResource T1}"
+                            BorderBrush="{StaticResource IBd}" BorderThickness="1"
+                            Padding="14,8" Cursor="Hand" FontSize="12">
+                        <Button.Resources>
+                            <Style TargetType="Border">
+                                <Setter Property="CornerRadius" Value="6"/>
+                            </Style>
+                        </Button.Resources>
+                    </Button>
+                    <Button x:Name="LoadPresetButton" Click="LoadPresetButton_Click"
+                            Margin="8,0,0,0"
+                            Background="#15FFFFFF" Foreground="{StaticResource T1}"
+                            BorderBrush="{StaticResource IBd}" BorderThickness="1"
+                            Padding="14,8" Cursor="Hand" FontSize="12">
+                        <Button.Resources>
+                            <Style TargetType="Border">
+                                <Setter Property="CornerRadius" Value="6"/>
+                            </Style>
+                        </Button.Resources>
+                    </Button>
+                    <Button x:Name="CancelButton" Content="Cancel" Click="CancelButton_Click"
+                            Margin="8,0,0,0"
+                            Background="#15FFFFFF" Foreground="{StaticResource T2}"
+                            BorderBrush="{StaticResource IBd}" BorderThickness="1"
+                            Padding="20,8" Cursor="Hand" FontSize="12">
+                        <Button.Resources>
+                            <Style TargetType="Border">
+                                <Setter Property="CornerRadius" Value="6"/>
+                            </Style>
+                        </Button.Resources>
+                    </Button>
+                    <Button x:Name="ApplyButton" Content="Apply" Click="ApplyButton_Click"
+                            Margin="8,0,0,0"
+                            Background="{StaticResource Acc}" Foreground="White"
+                            BorderThickness="0" Padding="20,8"
+                            Cursor="Hand" FontSize="12" FontWeight="SemiBold">
+                        <Button.Resources>
+                            <Style TargetType="Border">
+                                <Setter Property="CornerRadius" Value="6"/>
+                            </Style>
+                        </Button.Resources>
+                    </Button>
+                </StackPanel>
+            </Grid>
         </Grid>
     </Border>
 </Window>

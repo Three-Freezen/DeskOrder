@@ -276,7 +276,7 @@ public partial class MergedGroupSettingsDialog : Window, INotifyPropertyChanged
         var cn = _loc.CurrentLanguage == Services.Language.Chinese;
         DialogTitle.Text = cn ? "组合分区设置" : "Merged Group Settings";
         LabelName.Text = cn ? "组合名称" : "Group Name";
-        LabelQuickBarMode.Text = cn ? "快捷栏模式" : "QuickBar Mode";
+        LabelQuickBarMode.Text = cn ? "极简模式" : "Minimal Mode";
         LabelWidth.Text = _loc["Settings.Width"];
         LabelHeight.Text = _loc["Settings.Height"];
         LabelTextColor.Text = cn ? "分区名称颜色" : "Zone Name Color";
@@ -294,7 +294,7 @@ public partial class MergedGroupSettingsDialog : Window, INotifyPropertyChanged
         KeepOriginalRadio.Content = cn ? "保留原有填充" : "Keep Original Fill";
         GlassSectionTitle.Text = cn ? "玻璃效果" : "Glass Effect";
         LabelGlassIntensity.Text = cn ? "液态玻璃" : "Liquid Glass";
-        LiquidGlassToggle.Content = cn ? "启用液态玻璃" : "Enable Liquid Glass";
+        LiquidGlassToggle.Content = cn ? "液态玻璃" : "Liquid Glass";
         LiquidGlassSettingsBtn.Content = cn ? "💧 液态玻璃设置" : "💧 Liquid Glass Settings";
         LabelBgImage.Text = cn ? "背景图片" : "Background Image";
         LabelBgStretch.Text = cn ? "图片裁剪" : "Crop";
