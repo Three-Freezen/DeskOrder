@@ -199,10 +199,11 @@ public partial class App : System.Windows.Application
             }
             else
             {
-                // Hidden → show and bring to front
-                window.Show();
+                // Hidden → show with full initialization
                 if (window is StickyNoteWindow snw)
-                    snw.BringToFront();
+                    snw.ShowNote();
+                else
+                    window.Show();
             }
         }
         else
