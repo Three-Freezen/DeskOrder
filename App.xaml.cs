@@ -159,8 +159,12 @@ public partial class App : System.Windows.Application
                 }
                 else
                 {
-                    ShowManagementWindow();
-                    _managementWindow?.TogglePanel();
+                    // Create instance without showing — only need it for TogglePanel
+                    _managementWindow = new ManagementWindow(_zoneManager!, _configService!, _notesService, _widgetService);
+                    _managementWindow.Closed += (_, _) => _managementWindow = null;
+                    if (_appIconImage == null) _appIconImage = IconToImageSource(CreateAppIcon());
+                    _managementWindow.Icon = _appIconImage;
+                    _managementWindow.TogglePanel();
                 }
                 handled = true;
                 return IntPtr.Zero;
