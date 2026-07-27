@@ -70,11 +70,11 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
     private bool _autoArrange;
     public bool AutoArrange { get => _autoArrange; set { _autoArrange = value; OnPropertyChanged(); PushToZone(); } }
     private double _bgOffsetX;
-    public string BgOffsetX { get => _bgOffsetX.ToString("F0"); set { if (double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v)) _bgOffsetX = v; OnPropertyChanged(); } }
+    public string BgOffsetX { get => _bgOffsetX.ToString("F0"); set { if (double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v)) _bgOffsetX = v; OnPropertyChanged(); PushToZone(); } }
     private double _bgOffsetY;
-    public string BgOffsetY { get => _bgOffsetY.ToString("F0"); set { if (double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v)) _bgOffsetY = v; OnPropertyChanged(); } }
+    public string BgOffsetY { get => _bgOffsetY.ToString("F0"); set { if (double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v)) _bgOffsetY = v; OnPropertyChanged(); PushToZone(); } }
     private double _bgZoomVal = 1.0;
-    public double BgZoomVal { get => _bgZoomVal; set { _bgZoomVal = value; OnPropertyChanged(); } }
+    public double BgZoomVal { get => _bgZoomVal; set { _bgZoomVal = value; OnPropertyChanged(); PushToZone(); } }
 
     private bool _acrylicEnabled = true;
     public bool AcrylicEnabled { get => _acrylicEnabled; set { _acrylicEnabled = value; OnPropertyChanged(); PushToZone(); } }
@@ -347,7 +347,6 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
         config.UseGlobalAppearance = UseGlobalAppearance;
         _zoneManager.SaveConfig();
 
-        _zoneManager.SaveConfig();
         DialogResult = true;
         Close();
     }

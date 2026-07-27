@@ -60,6 +60,7 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
     private double _bgOpacity = 30;
 
     public bool DialogResultOk { get; private set; }
+    private bool _suppressPreview; // suppress live preview during LoadFrom* initialization
 
     // Model references for live preview
     private DesktopClock? _clockModel;
@@ -87,6 +88,8 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
     private int _snapGlassBlur, _snapGlassTintOpacity, _snapGlassTintLuminosity;
     private string _snapGlassColorMode = "";
     private string _snapWidgetWidth = "", _snapWidgetHeight = "";
+    private string _snapGlobalFillColor = "", _snapGlobalBorderColor = "";
+    private double _snapGlobalBorderThickness;
 
     // Public getters for caller to read results
     public double ParsedBorderThickness => double.TryParse(BorderThicknessText, out var v) ? v : 1.0;
@@ -175,7 +178,7 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
 
         // Wire up slider labels
         ZoomSlider.ValueChanged += (_, _) => { ZoomLabel.Text = $"{ZoomSlider.Value:F1}x"; };
-        BgOpacitySlider.ValueChanged += (_, _) => { BgOpacityLabel.Text = $"{(int)BgOpacitySlider.Value}%"; };
+        BgOpacitySlider.ValueChanged += (_, _) => { BgOpacityLabel.Text = $"{(int)BgOpacitySlider.Value}%"; PushToWidget(); };
 
         _langChanged = _ => ApplyLoc();
         _loc.LanguageChanged += _langChanged;
@@ -219,6 +222,7 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
     /// <summary>Load settings from a clock model.</summary>
     public void LoadFromClock(DesktopClock clock)
     {
+        _suppressPreview = true;
         _clockModel = clock;
         UseGlobalAppearance = clock.UseGlobalAppearance;
         BorderThicknessText = clock.BorderThickness.ToString("F1");
@@ -282,11 +286,18 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         _snapLiquidGlass = _liquidGlass; _snapGlassBlur = _glassBlurAmount;
         _snapGlassTintOpacity = _glassTintOpacity; _snapGlassTintLuminosity = _glassTintLuminosity;
         _snapGlassColorMode = _glassColorMode;
+        // Snapshot global values for cancel-revert
+        if (Application.Current is App cApp && cApp.ManagementWindow?.WidgetService is { } cSvc)
+        {
+            var cCfg = cSvc.GetConfig(); _snapGlobalFillColor = cCfg.GlobalFillColor; _snapGlobalBorderColor = cCfg.GlobalBorderColor; _snapGlobalBorderThickness = cCfg.GlobalBorderThickness;
+        }
+        _suppressPreview = false;
     }
 
     /// <summary>Load settings from a calendar model.</summary>
     public void LoadFromCalendar(DesktopCalendar cal)
     {
+        _suppressPreview = true;
         _calModel = cal;
         UseGlobalAppearance = cal.UseGlobalAppearance;
         BorderThicknessText = cal.BorderThickness.ToString("F1");
@@ -332,11 +343,18 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         _snapLiquidGlass = _liquidGlass; _snapGlassBlur = _glassBlurAmount;
         _snapGlassTintOpacity = _glassTintOpacity; _snapGlassTintLuminosity = _glassTintLuminosity;
         _snapGlassColorMode = _glassColorMode;
+        // Snapshot global values for cancel-revert
+        if (Application.Current is App calApp && calApp.ManagementWindow?.WidgetService is { } calSvc)
+        {
+            var calCfg = calSvc.GetConfig(); _snapGlobalFillColor = calCfg.GlobalFillColor; _snapGlobalBorderColor = calCfg.GlobalBorderColor; _snapGlobalBorderThickness = calCfg.GlobalBorderThickness;
+        }
+        _suppressPreview = false;
     }
 
     /// <summary>Load settings from a sticky note model.</summary>
     public void LoadFromNote(StickyNote note, ZoneManager? zoneManager = null)
     {
+        _suppressPreview = true;
         _noteModel = note;
         _panelZoneManager = zoneManager;
         UseGlobalAppearance = note.UseGlobalAppearance;
@@ -401,11 +419,18 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         _snapGlassTintOpacity = _glassTintOpacity; _snapGlassTintLuminosity = _glassTintLuminosity;
         _snapGlassColorMode = _glassColorMode;
         _snapWidgetWidth = note.Width.ToString("F0"); _snapWidgetHeight = note.Height.ToString("F0");
+        // Snapshot global values for cancel-revert
+        if (Application.Current is App nApp && nApp.ManagementWindow?.WidgetService is { } nSvc)
+        {
+            var nCfg = nSvc.GetConfig(); _snapGlobalFillColor = nCfg.GlobalFillColor; _snapGlobalBorderColor = nCfg.GlobalBorderColor; _snapGlobalBorderThickness = nCfg.GlobalBorderThickness;
+        }
+        _suppressPreview = false;
     }
 
     /// <summary>Load settings from global config (panel).</summary>
     public void LoadFromConfig(AppConfig config, ZoneManager? zoneManager = null)
     {
+        _suppressPreview = true;
         _panelConfig = config;
         _panelZoneManager = zoneManager;
         UseGlobalAppearance = config.PanelUseGlobalAppearance;
@@ -465,6 +490,9 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         _snapGlassTintOpacity = _glassTintOpacity; _snapGlassTintLuminosity = _glassTintLuminosity;
         _snapGlassColorMode = _glassColorMode;
         _snapWidgetWidth = config.PanelWidth.ToString("F0"); _snapWidgetHeight = config.PanelHeight.ToString("F0");
+        // Snapshot global values for cancel-revert
+        _snapGlobalFillColor = config.GlobalFillColor; _snapGlobalBorderColor = config.GlobalBorderColor; _snapGlobalBorderThickness = config.GlobalBorderThickness;
+        _suppressPreview = false;
     }
 
     void SetColorModeCombo(string mode) { _glassColorMode = mode; }
@@ -565,8 +593,8 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
     void TitleTextColorPreset_Click(object s, MouseButtonEventArgs e) { if (s is Border b && b.Tag is string c) { TitleTextColorValue = c; UpdateHighlights(); PushToWidget(); } }
     void TitleTextColorCustom_Click(object s, RoutedEventArgs e) { var d = new ColorPickerDialog(TitleTextColorValue.Length >= 7 ? TitleTextColorValue[1..] : "E0E0E0") { Owner = this }; if (d.ShowDialog() == true) { TitleTextColorValue = "#" + d.SelectedColor; PushToWidget(); } }
 
-    void BorderCustom_Click(object s, RoutedEventArgs e) { var d = new ColorPickerDialog(BorderColorValue.Length >= 9 ? BorderColorValue[3..] : "FFFFFF") { Owner = this }; if (d.ShowDialog() == true) BorderColorValue = (BorderColorValue.Length >= 3 ? BorderColorValue[..3] : "#40") + d.SelectedColor; }
-    void FillCustom_Click(object s, RoutedEventArgs e) { var d = new ColorPickerDialog(FillColorValue.Length >= 9 ? FillColorValue[3..] : "000000") { Owner = this }; if (d.ShowDialog() == true) { var alpha = FillColorValue.Length >= 3 ? FillColorValue[..3] : "#08"; _fillColor = alpha + d.SelectedColor; _fillOpacityPercent = ParseOpacity(_fillColor); FillOpacitySlider.Value = _fillOpacityPercent; FillOpacityLabel.Text = $"{(int)_fillOpacityPercent}%"; UpdateHighlights(); OnPropertyChanged(nameof(FillColorValue)); OnPropertyChanged(nameof(FillOpacityPercent)); } }
+    void BorderCustom_Click(object s, RoutedEventArgs e) { var d = new ColorPickerDialog(BorderColorValue.Length >= 9 ? BorderColorValue[3..] : "FFFFFF") { Owner = this }; if (d.ShowDialog() == true) { BorderColorValue = (BorderColorValue.Length >= 3 ? BorderColorValue[..3] : "#40") + d.SelectedColor; PushToWidget(); } }
+    void FillCustom_Click(object s, RoutedEventArgs e) { var d = new ColorPickerDialog(FillColorValue.Length >= 9 ? FillColorValue[3..] : "000000") { Owner = this }; if (d.ShowDialog() == true) { var alpha = FillColorValue.Length >= 3 ? FillColorValue[..3] : "#08"; _fillColor = alpha + d.SelectedColor; _fillOpacityPercent = ParseOpacity(_fillColor); FillOpacitySlider.Value = _fillOpacityPercent; FillOpacityLabel.Text = $"{(int)_fillOpacityPercent}%"; UpdateHighlights(); OnPropertyChanged(nameof(FillColorValue)); OnPropertyChanged(nameof(FillOpacityPercent)); PushToWidget(); } }
 
     void FillOpacity_Changed(object s, RoutedPropertyChangedEventArgs<double> e)
     {
@@ -784,6 +812,7 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
     /// <summary>Push current dialog state to the live model for real-time preview.</summary>
     void PushToWidget()
     {
+        if (_suppressPreview) return;
         var fillColor = UpdateFillFromOpacity();
         var titleBarFill = _target == WidgetSettingsTarget.Panel
             ? $"#{(int)(_titleBarOpacity / 100 * 255):X2}{(_titleBarFill.Length > 3 ? _titleBarFill[3..] : "FFFFFF")}"
@@ -976,13 +1005,11 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
                 _panelConfig.EnableLiquidGlass = _snapLiquidGlass; _panelConfig.GlassBlurAmount = _snapGlassBlur;
                 _panelConfig.GlassTintOpacity = _snapGlassTintOpacity; _panelConfig.GlassTintLuminosity = _snapGlassTintLuminosity;
                 _panelConfig.GlassColorMode = _snapGlassColorMode;
-                if (_snapUseGlobal)
-                {
-                    _panelConfig.GlobalFillColor = _snapFillColor;
-                }
+                // Always restore global values (PushToWidget may have modified them when UseGlobal was toggled)
+                _panelConfig.GlobalFillColor = _snapGlobalFillColor;
                 if (double.TryParse(_snapWidgetWidth, out var pw)) _panelConfig.PanelWidth = pw;
                 if (double.TryParse(_snapWidgetHeight, out var ph)) _panelConfig.PanelHeight = ph;
-                _panelZoneManager?.SaveConfig();
+                // NOTE: Do NOT call SaveConfig() here — it reloads from disk and overwrites restored values
                 if (Application.Current is App appC1 && appC1.PanelWindow is PanelWindow panelWinC)
                 {
                     panelWinC.ApplyAcrylic();
@@ -994,11 +1021,12 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
             case WidgetSettingsTarget.Clock when _clockModel != null:
                 _clockModel.FillColor = _snapFillColor; _clockModel.BorderColor = _snapBorderColor;
                 _clockModel.BorderThickness = _snapBorderThickness; _clockModel.UseGlobalAppearance = _snapUseGlobal;
-                if (_snapUseGlobal && Application.Current is App cAppC && cAppC.ManagementWindow?.WidgetService is { } wSvcC)
+                // Always restore global values
+                if (Application.Current is App cAppC && cAppC.ManagementWindow?.WidgetService is { } wSvcC)
                 {
                     var wCfgC = wSvcC.GetConfig();
-                    wCfgC.GlobalBorderThickness = _snapBorderThickness;
-                    wCfgC.GlobalFillColor = _snapFillColor;
+                    wCfgC.GlobalBorderThickness = _snapGlobalBorderThickness;
+                    wCfgC.GlobalFillColor = _snapGlobalFillColor;
                 }
                 _clockModel.EnableRestoreButton = _snapEnableRestore;
                 _clockModel.EnableLiquidGlass = _snapLiquidGlass; _clockModel.GlassBlurAmount = _snapGlassBlur;
@@ -1017,11 +1045,12 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
             case WidgetSettingsTarget.Calendar when _calModel != null:
                 _calModel.FillColor = _snapFillColor; _calModel.BorderColor = _snapBorderColor;
                 _calModel.BorderThickness = _snapBorderThickness; _calModel.UseGlobalAppearance = _snapUseGlobal;
-                if (_snapUseGlobal && Application.Current is App calAppC && calAppC.ManagementWindow?.WidgetService is { } wSvcCal)
+                // Always restore global values
+                if (Application.Current is App calAppC && calAppC.ManagementWindow?.WidgetService is { } wSvcCal)
                 {
                     var wCfgCal = wSvcCal.GetConfig();
-                    wCfgCal.GlobalBorderThickness = _snapBorderThickness;
-                    wCfgCal.GlobalFillColor = _snapFillColor;
+                    wCfgCal.GlobalBorderThickness = _snapGlobalBorderThickness;
+                    wCfgCal.GlobalFillColor = _snapGlobalFillColor;
                 }
                 _calModel.EnableRestoreButton = _snapEnableRestore;
                 _calModel.EnableLiquidGlass = _snapLiquidGlass; _calModel.GlassBlurAmount = _snapGlassBlur;

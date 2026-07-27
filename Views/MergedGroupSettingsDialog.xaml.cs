@@ -191,9 +191,9 @@ public partial class MergedGroupSettingsDialog : Window, INotifyPropertyChanged
         _zone.MergedGroupTitleTextColor = GetSelectedTextColor();
         _zone.MergedGroupIconColor = GetSelectedIconColor();
 
-        double.TryParse(BorderThicknessBox.Text, System.Globalization.NumberStyles.Float,
-            System.Globalization.CultureInfo.InvariantCulture, out var bt);
-        _zone.MergedGroupBorderThickness = bt;
+        if (double.TryParse(BorderThicknessBox.Text, System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var bt))
+            _zone.MergedGroupBorderThickness = bt;
         _zone.MergedGroupBorderColor = GetSelectedBorderColor();
         _zone.MergedGroupTitleBarFillColor = GetSelectedTitleBarColor();
         _zone.MergedGroupTitleBarOpacity = TitleOpacitySlider.Value;

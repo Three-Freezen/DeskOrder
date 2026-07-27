@@ -334,6 +334,7 @@ public static class AcrylicHelper
         int localTintOpacity = tintOpacity;
         int localTintLuminosity = tintLuminosity;
         string localColorMode = colorMode;
+        string colorModeSaved = colorMode;
 
         // Helper to fire live preview
         void FirePreview() => onPreviewChanged?.Invoke(localBlur, localTintOpacity, localTintLuminosity, localColorMode);
@@ -551,6 +552,7 @@ public static class AcrylicHelper
             localBlur = blurSaved;
             localTintOpacity = opacitySaved;
             localTintLuminosity = luminositySaved;
+            localColorMode = colorModeSaved;
             FirePreview(); // revert preview to original values
             dlg.Close();
         };
