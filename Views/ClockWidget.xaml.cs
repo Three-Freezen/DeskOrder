@@ -422,7 +422,13 @@ public partial class ClockWidget : Window
     void Window_PreviewMouseLeftButtonDown(object s, MouseButtonEventArgs e)
     {
         // Allow resize grips and buttons to handle their own clicks
-        if (e.OriginalSource is System.Windows.Controls.Button) return;
+        // OriginalSource may be a child (e.g. TextBlock inside Button), so walk up the visual tree
+        var src = e.OriginalSource as System.Windows.DependencyObject;
+        while (src != null && src != s)
+        {
+            if (src == HideBtn || src is System.Windows.Controls.Button) return;
+            src = System.Windows.Media.VisualTreeHelper.GetParent(src);
+        }
         // Allow restore button to handle its own clicks
         if (RestoreButton.Visibility == Visibility.Visible) return;
         try { DragMove(); NativeMethods.PinToDesktop(this); } catch { }
