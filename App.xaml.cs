@@ -178,18 +178,21 @@ public partial class App : System.Windows.Application
     {
         if (_noteWindows.TryGetValue(noteId, out var window))
         {
-            if (window.IsVisible)
+            if (window is StickyNoteWindow snw && snw.RestoreButton.Visibility == Visibility.Visible)
+            {
+                // Minimized to restore button → show full note
+                snw.ShowNote();
+            }
+            else if (window.IsVisible)
             {
                 if (window.IsActive)
                 {
-                    // Already visible and active → hide it
                     window.Hide();
                 }
                 else
                 {
-                    // Visible but not active → bring to front
-                    if (window is StickyNoteWindow snw)
-                        snw.BringToFront();
+                    if (window is StickyNoteWindow snw2)
+                        snw2.BringToFront();
                     else
                     {
                         window.Activate();
@@ -199,9 +202,8 @@ public partial class App : System.Windows.Application
             }
             else
             {
-                // Hidden → show with full initialization
-                if (window is StickyNoteWindow snw)
-                    snw.ShowNote();
+                if (window is StickyNoteWindow snw3)
+                    snw3.ShowNote();
                 else
                     window.Show();
             }
