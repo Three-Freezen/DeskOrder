@@ -507,6 +507,7 @@ public partial class ClockWidget : Window
     public void ShowClock()
     {
         if (!IsVisible) Show();
+        ApplyMode();
         ApplyAcrylic();
         Left = _clock.X; Top = _clock.Y;
         MainContent.Visibility = Visibility.Visible; RestoreButton.Visibility = Visibility.Collapsed;
