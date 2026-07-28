@@ -52,7 +52,7 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
     public string TitleBarFillValue { get => _titleBarFill; set { _titleBarFill = value; _titleBarOpacityPercent = ParseOpacity(value); UpdateHighlights(); OnPropertyChanged(); OnPropertyChanged(nameof(TitleBarOpacityPercent)); PushToZone(); } }
     private string _bgImagePath = "";
     private bool _isLoading = true;
-    public string BgImagePath { get => _bgImagePath; set { _bgImagePath = value; if (!string.IsNullOrEmpty(value) && !_isLoading) _fillColor = "#01000000"; if (CropBtn != null) CropBtn.IsEnabled = !string.IsNullOrEmpty(value) && File.Exists(value); OnPropertyChanged(); } }
+    public string BgImagePath { get => _bgImagePath; set { _bgImagePath = value; if (!string.IsNullOrEmpty(value) && !_isLoading) _fillColor = "#01000000"; if (CropBtn != null) CropBtn.IsEnabled = !string.IsNullOrEmpty(value) && File.Exists(value); OnPropertyChanged(); PushToZone(); } }
     private string _iconCharText = "";
     public string IconCharText { get => _iconCharText; set { _iconCharText = value; IconPreview.Text = string.IsNullOrEmpty(value) ? "⊞" : value[..Math.Min(value.Length, 2)]; OnPropertyChanged(); PushToZone(); } }
     private string _iconColor = "#FFFFFF";
