@@ -52,7 +52,11 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
     public string TitleBarFillValue { get => _titleBarFill; set { _titleBarFill = value; _titleBarOpacityPercent = ParseOpacity(value); UpdateHighlights(); OnPropertyChanged(); OnPropertyChanged(nameof(TitleBarOpacityPercent)); PushToZone(); } }
     private string _bgImagePath = "";
     private bool _isLoading = true;
-    public string BgImagePath { get => _bgImagePath; set { _bgImagePath = value; if (!string.IsNullOrEmpty(value) && !_isLoading) _fillColor = "#01000000"; if (CropBtn != null) CropBtn.IsEnabled = !string.IsNullOrEmpty(value) && File.Exists(value); OnPropertyChanged(); PushToZone(); } }
+    // Note: the BgImagePath setter is intentionally side-effect-free besides UI refresh —
+    // any "auto-fill" coupling (e.g. "importing an image should also clear the fill colour")
+    // belongs in the call site (see BrowseBgImage_Click). Coupling auto-fill here would
+    // clobber a preset's FillColor during SyncFromZone, since the setter fires mid-stream.
+    public string BgImagePath { get => _bgImagePath; set { _bgImagePath = value; if (CropBtn != null) CropBtn.IsEnabled = !string.IsNullOrEmpty(value) && File.Exists(value); OnPropertyChanged(); PushToZone(); } }
     private string _iconCharText = "";
     public string IconCharText { get => _iconCharText; set { _iconCharText = value; IconPreview.Text = string.IsNullOrEmpty(value) ? "⊞" : value[..Math.Min(value.Length, 2)]; OnPropertyChanged(); PushToZone(); } }
     private string _iconColor = "#FFFFFF";
@@ -488,7 +492,10 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
     }
 
     void IconPreset_Click(object s, RoutedEventArgs e) { if (s is Button b && b.Tag is string ic) IconCharText = ic; }
-    void BrowseBgImage_Click(object s, RoutedEventArgs e) { var d = new Microsoft.Win32.OpenFileDialog { Title = _loc["Settings.BrowseBg"], Filter = "Images|*.jpg;*.jpeg;*.png;*.bmp;*.gif|All|*.*" }; if (d.ShowDialog() == true) BgImagePath = d.FileName; }
+    // "Pick an image → also clear the fill" was originally baked into the BgImagePath
+    // setter. Moving it here keeps the UX (live zone shows transparent fill + image
+    // immediately) without poisoning preset apply: SyncFromZone now sees a pure setter.
+    void BrowseBgImage_Click(object s, RoutedEventArgs e) { var d = new Microsoft.Win32.OpenFileDialog { Title = _loc["Settings.BrowseBg"], Filter = "Images|*.jpg;*.jpeg;*.png;*.bmp;*.gif|All|*.*" }; if (d.ShowDialog() == true) { FillColorValue = "#01000000"; BgImagePath = d.FileName; } }
     void ClearBgImage_Click(object s, RoutedEventArgs e) => BgImagePath = "";
     void CropBgImage_Click(object s, RoutedEventArgs e)
     {
