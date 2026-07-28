@@ -51,7 +51,6 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
     private string _titleBarFill = "#10FFFFFF";
     public string TitleBarFillValue { get => _titleBarFill; set { _titleBarFill = value; _titleBarOpacityPercent = ParseOpacity(value); UpdateHighlights(); OnPropertyChanged(); OnPropertyChanged(nameof(TitleBarOpacityPercent)); PushToZone(); } }
     private string _bgImagePath = "";
-    private bool _isLoading = true;
     // Note: the BgImagePath setter is intentionally side-effect-free besides UI refresh —
     // any "auto-fill" coupling (e.g. "importing an image should also clear the fill colour")
     // belongs in the call site (see BrowseBgImage_Click). Coupling auto-fill here would
@@ -145,7 +144,6 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
         UpdateGlassSection();
         _langChanged = _ => ApplyLoc();
         _loc.LanguageChanged += _langChanged;
-        _isLoading = false;
         _suppressPreview = false;
     }
 
@@ -375,27 +373,41 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
     /// <summary>
     /// Re-read zone properties into dialog local state so subsequent edits stay in sync after Apply.
     /// </summary>
+    /// <remarks>
+    /// IMPORTANT: each setter below fires <see cref="PushToZone"/> via its property changed event.
+    /// <see cref="PushToZone"/> writes ALL dialog fields back to <see cref="ResultZone"/> — so when
+    /// early setters here read STALE dialog fields (those whose SyncFromZone line hasn't run yet),
+    /// they'd overwrite the preset values that <see cref="CopyZoneFields"/> just laid down.
+    /// Suppressing preview around the bulk sync keeps <see cref="ResultZone"/> pristine; the caller
+    /// is expected to paint the live zone once after this returns.
+    /// </remarks>
     void SyncFromZone(Zone zone)
     {
-        ZoneName = zone.Name; ZoneWidth = zone.Width.ToString("F0"); ZoneHeight = zone.Height.ToString("F0");
-        GridSize = zone.GridSize.ToString(); SnapToGrid = zone.SnapToGrid;
-        BorderThicknessText = zone.BorderThickness.ToString("F1");
-        BorderColorValue = zone.BorderColor; FillColorValue = zone.FillColor;
-        TitleBarFillValue = zone.TitleBarFillColor; BgImagePath = zone.BackgroundImagePath;
-        IconCharText = zone.IconChar; CtrlOpacity = zone.ControlOpacity;
-        BgImageOpacityPercent = zone.BackgroundImageOpacity; AutoArrange = zone.AutoArrange;
-        _bgOffsetX = zone.BgImageOffsetX; _bgOffsetY = zone.BgImageOffsetY; _bgZoomVal = zone.BgImageZoom;
-        AcrylicEnabled = zone.EnableAcrylic;
-        _glassBlurAmount = zone.GlassBlurAmount;
-        _glassTintOpacity = zone.GlassTintOpacity;
-        _glassTintLuminosity = zone.GlassTintLuminosity;
-        _glassColorMode = zone.GlassColorMode;
-        _liquidGlass = zone.EnableLiquidGlass;
-        _quickBarMode = zone.QuickBarMode;
-        _enableRestoreButton = zone.EnableRestoreButton;
-        IconColorValue = string.IsNullOrEmpty(zone.IconColor) ? "#FFFFFF" : zone.IconColor;
-        TextColorValue = string.IsNullOrEmpty(zone.TitleTextColor) ? "#A0FFFFFF" : zone.TitleTextColor;
-        UpdateGlassSection();
+        var prev = _suppressPreview;
+        _suppressPreview = true;
+        try
+        {
+            ZoneName = zone.Name; ZoneWidth = zone.Width.ToString("F0"); ZoneHeight = zone.Height.ToString("F0");
+            GridSize = zone.GridSize.ToString(); SnapToGrid = zone.SnapToGrid;
+            BorderThicknessText = zone.BorderThickness.ToString("F1");
+            BorderColorValue = zone.BorderColor; FillColorValue = zone.FillColor;
+            TitleBarFillValue = zone.TitleBarFillColor; BgImagePath = zone.BackgroundImagePath;
+            IconCharText = zone.IconChar; CtrlOpacity = zone.ControlOpacity;
+            BgImageOpacityPercent = zone.BackgroundImageOpacity; AutoArrange = zone.AutoArrange;
+            _bgOffsetX = zone.BgImageOffsetX; _bgOffsetY = zone.BgImageOffsetY; _bgZoomVal = zone.BgImageZoom;
+            AcrylicEnabled = zone.EnableAcrylic;
+            _glassBlurAmount = zone.GlassBlurAmount;
+            _glassTintOpacity = zone.GlassTintOpacity;
+            _glassTintLuminosity = zone.GlassTintLuminosity;
+            _glassColorMode = zone.GlassColorMode;
+            _liquidGlass = zone.EnableLiquidGlass;
+            _quickBarMode = zone.QuickBarMode;
+            _enableRestoreButton = zone.EnableRestoreButton;
+            IconColorValue = string.IsNullOrEmpty(zone.IconColor) ? "#FFFFFF" : zone.IconColor;
+            TextColorValue = string.IsNullOrEmpty(zone.TitleTextColor) ? "#A0FFFFFF" : zone.TitleTextColor;
+            UpdateGlassSection();
+        }
+        finally { _suppressPreview = prev; }
     }
 
     /// <summary>Push current dialog state to the live zone for real-time preview.</summary>
