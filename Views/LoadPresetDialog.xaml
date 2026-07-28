@@ -23,13 +23,15 @@
 
         <local:HexColorConverter x:Key="Hex2Color"/>
         <local:PercentToOpacityConverter x:Key="PercentToOpacity"/>
+        <local:LiquidGlassBrushConverter x:Key="GlassMode2Brush"/>
+        <local:TitleBarFillConverter x:Key="TitleBarFill2"/>
 
         <!-- Card visual template. TransformGroup = RotateTransform (set in code) +
              ScaleTransform (animated in code on hover/select) — so the same Border
              handles both fan rotation and the hover-pop animation. -->
         <DataTemplate x:Key="PresetCardTemplate">
             <Border x:Name="Card" Width="180" Height="220"
-                    Background="{StaticResource Bg}"
+                    Background="#FF0E0E14"
                     BorderBrush="#15787878" BorderThickness="1"
                     CornerRadius="12" Cursor="Hand"
                     MouseEnter="Card_MouseEnter"
@@ -61,7 +63,8 @@
                     <Border x:Name="ZonePreview" Margin="8,8,8,2"
                             ClipToBounds="True"
                             CornerRadius="{Binding Zone.CornerRadius}"
-                            BorderThickness="{Binding Zone.BorderThickness}">
+                            BorderThickness="{Binding Zone.BorderThickness}"
+                            Background="#FFC0C0C0">
                         <Border.BorderBrush>
                             <SolidColorBrush Color="{Binding Zone.BorderColor, Converter={StaticResource Hex2Color}}"/>
                         </Border.BorderBrush>
@@ -72,19 +75,33 @@
                             </Grid.RowDefinitions>
 
                             <Border x:Name="TitleBarBg" Grid.Row="0"
-                                    Background="{Binding Zone.TitleBarFillColor, Converter={StaticResource Hex2Color}, FallbackValue=#10FFFFFF}"
                                     CornerRadius="3,3,0,0">
-                                <Grid>
+                                <!--
+                                  Title-bar fill now mirrors what the live zone actually
+                                  displays: the user's Zone.TitleBarFillColor (parsed via
+                                  Hex2Color). The previous GlassColorMode-based approach
+                                  was rendering as washed-out tan on light backdrop.
+                                -->
+                                <Border.Background>
+                                    <SolidColorBrush Color="{Binding Zone.TitleBarFillColor, Converter={StaticResource Hex2Color}, FallbackValue=#FF7C3AED}"/>
+                                </Border.Background>
+                                <Grid ClipToBounds="True">
                                     <StackPanel Orientation="Horizontal"
                                                 VerticalAlignment="Center" Margin="3,0,0,0">
                                         <TextBlock Text="⊞" FontSize="9"
-                                                   Foreground="{Binding Zone.IconColor, Converter={StaticResource Hex2Color}, FallbackValue=#FFFFFF}"
-                                                   VerticalAlignment="Center" Margin="0,0,3,0"/>
+                                                   VerticalAlignment="Center" Margin="0,0,3,0">
+                                            <TextBlock.Foreground>
+                                                <SolidColorBrush Color="{Binding Zone.IconColor, Converter={StaticResource Hex2Color}, FallbackValue=#FFFFFF}"/>
+                                            </TextBlock.Foreground>
+                                        </TextBlock>
                                         <TextBlock Text="New Zone" FontSize="8"
-                                                   Foreground="{Binding Zone.TitleTextColor, Converter={StaticResource Hex2Color}, FallbackValue=#A0FFFFFF}"
                                                    VerticalAlignment="Center"
                                                    TextTrimming="CharacterEllipsis"
-                                                   MaxWidth="80"/>
+                                                   MaxWidth="80">
+                                            <TextBlock.Foreground>
+                                                <SolidColorBrush Color="{Binding Zone.TitleTextColor, Converter={StaticResource Hex2Color}, FallbackValue=#A0FFFFFF}"/>
+                                            </TextBlock.Foreground>
+                                        </TextBlock>
                                     </StackPanel>
                                     <StackPanel Orientation="Horizontal"
                                                 HorizontalAlignment="Right"
@@ -109,46 +126,74 @@
                             </Border>
 
                             <Grid Grid.Row="1" ClipToBounds="True">
+                                <!--
+                                  Layer 0a — preset's image (crisp, no blur). Visible iff path set.
+                                -->
+                                <Image Source="{Binding Zone.BackgroundImagePath}"
+                                       Stretch="UniformToFill"
+                                       RenderOptions.BitmapScalingMode="HighQuality">
+                                    <Image.Style>
+                                        <Style TargetType="Image">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Zone.BackgroundImagePath}" Value="">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Image.Style>
+                                </Image>
+
+                                <!--
+                                  Layer 0b — gradient fallback for presets without an image.
+                                -->
+                                <Rectangle>
+                                    <Rectangle.Fill>
+                                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                            <GradientStop Color="#60FF6B9D" Offset="0"/>
+                                            <GradientStop Color="#608D6BFF" Offset="0.5"/>
+                                            <GradientStop Color="#60FFB36B" Offset="1"/>
+                                        </LinearGradientBrush>
+                                    </Rectangle.Fill>
+                                    <Rectangle.Style>
+                                        <Style TargetType="Rectangle">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Zone.BackgroundImagePath}" Value="">
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Rectangle.Style>
+                                </Rectangle>
+
+                                <!--
+                                  Layer 1 — FillColor tint. Hex already carries the alpha byte
+                                  from the FillOpacityPercent slider.
+                                -->
                                 <Rectangle>
                                     <Rectangle.Fill>
                                         <SolidColorBrush Color="{Binding Zone.FillColor, Converter={StaticResource Hex2Color}, FallbackValue=#08000000}"/>
                                     </Rectangle.Fill>
                                 </Rectangle>
-                                <Image Source="{Binding Zone.BackgroundImagePath}"
-                                       Stretch="UniformToFill"
-                                       RenderOptions.BitmapScalingMode="HighQuality"
-                                       Opacity="{Binding Zone.BackgroundImageOpacity, Converter={StaticResource PercentToOpacity}, FallbackValue=0.4}"
-                                       IsHitTestVisible="False">
-                                    <Image.RenderTransform>
-                                        <TransformGroup>
-                                            <TranslateTransform X="{Binding Zone.BgImageOffsetX}" Y="{Binding Zone.BgImageOffsetY}"/>
-                                            <ScaleTransform ScaleX="{Binding Zone.BgImageZoom}" ScaleY="{Binding Zone.BgImageZoom}"/>
-                                        </TransformGroup>
-                                    </Image.RenderTransform>
-                                </Image>
+
+                                <!--
+                                  Layer 2 — hard-stacked LiquidGlass overlay. Gradient is built
+                                  on the fly from Zone.GlassColorMode so each preset's card
+                                  reflects its actual color choice (OceanBlue → blue, RosePink →
+                                  pink, ForestGreen → green, etc.) — mirroring what the live zone
+                                  does via DWM blur with the same base color table.
+                                -->
                                 <Border IsHitTestVisible="False">
                                     <Border.Background>
-                                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                                            <GradientStop Color="#50FF6B9D" Offset="0"/>
-                                            <GradientStop Color="#508D6BFF" Offset="0.5"/>
-                                            <GradientStop Color="#50FFB36B" Offset="1"/>
-                                        </LinearGradientBrush>
+                                        <Binding Path="Zone.GlassColorMode"
+                                                 Converter="{StaticResource GlassMode2Brush}"/>
                                     </Border.Background>
                                     <Border.Opacity>
                                         <Binding Path="Zone.GlassTintOpacity"
                                                  Converter="{StaticResource PercentToOpacity}"
-                                                 FallbackValue="0.5"/>
+                                                 FallbackValue="0.7"/>
                                     </Border.Opacity>
-                                    <Border.Style>
-                                        <Style TargetType="Border">
-                                            <Setter Property="Visibility" Value="Collapsed"/>
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding Zone.EnableLiquidGlass}" Value="True">
-                                                    <Setter Property="Visibility" Value="Visible"/>
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </Border.Style>
                                 </Border>
                             </Grid>
                         </Grid>

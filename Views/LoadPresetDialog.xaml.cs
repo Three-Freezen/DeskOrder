@@ -300,6 +300,103 @@ public class PercentToOpacityConverter : IValueConverter
 }
 
 /// <summary>
+/// Maps <see cref="Models.Zone.GlassColorMode"/> strings (e.g. "OceanBlue", "RosePink")
+/// to a 3-stop <see cref="LinearGradientBrush"/> tinted around that mode's base color,
+/// producing an "iridescent glass" feel in the preset card without relying on Win32 DWM blur.
+///
+/// KEEP IN SYNC with <c>Helpers/AcrylicHelper.cs : ResolveBaseColorARGB</c> — the live zone
+/// applies the same base colors via DWM. If either side adds/removes a mode, update both.
+/// </summary>
+public class LiquidGlassBrushConverter : IValueConverter
+{
+    public static readonly Dictionary<string, Color> BaseColors = new()
+    {
+        ["Default"]       = Color.FromArgb(0xFF, 0x70, 0x95, 0xC5), // soft sky-blue so Default mode never reads as gray
+        ["Accent"]        = Color.FromArgb(0xFF, 0x40, 0x90, 0xE2), // Win32 system accent unavailable in static XAML
+        ["GlassWhite"]    = Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF),
+        ["MistGrey"]      = Color.FromArgb(0xFF, 0xC0, 0xC0, 0xC0),
+        ["DeepBlack"]     = Color.FromArgb(0xFF, 0x10, 0x10, 0x10),
+        ["OceanBlue"]     = Color.FromArgb(0xFF, 0x11, 0x85, 0xFF),
+        ["AuroraCyan"]    = Color.FromArgb(0xFF, 0x00, 0xD4, 0xD4),
+        ["RosePink"]      = Color.FromArgb(0xFF, 0xFF, 0x69, 0xB4),
+        ["BordeauxRed"]   = Color.FromArgb(0xFF, 0x8B, 0x00, 0x00),
+        ["ForestGreen"]   = Color.FromArgb(0xFF, 0x22, 0x8B, 0x22),
+        ["RoyalPurple"]   = Color.FromArgb(0xFF, 0x6A, 0x0D, 0xAD),
+        ["SunsetOrange"]  = Color.FromArgb(0xFF, 0xFF, 0x8C, 0x00),
+        ["ChampagneGold"] = Color.FromArgb(0xFF, 0xDA, 0xA5, 0x20),
+        ["MorandiSage"]   = Color.FromArgb(0xFF, 0x87, 0xA9, 0x6B),
+    };
+
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        string mode = (value as string) ?? "Default";
+        if (!BaseColors.TryGetValue(mode, out var baseColor))
+            mode = "Default";
+        baseColor = BaseColors[mode];
+
+        // Force every stop's alpha to ~75% so Layer 2 reads as a clear glassy tint.
+        // User's GlassTintOpacity can still dial this back to near-zero; at full
+        // GlassTintOpacity we land around 50% effective alpha — visible iridescence
+        // without fully covering FillColor.
+        const byte stopAlpha = 0xC0;
+        baseColor = Color.FromArgb(stopAlpha, baseColor.R, baseColor.G, baseColor.B);
+
+        // Three stops form the iridescent feel in lieu of DWM blur:
+        //   brighter  →  base  →  darker  (along 0,0 → 1,1 diagonal)
+        var brighter = Lighten(baseColor, 0.35);
+        var darker   = Darken(baseColor,   0.30);
+
+        var brush = new LinearGradientBrush
+        {
+            StartPoint = new Point(0, 0),
+            EndPoint   = new Point(1, 1)
+        };
+        brush.GradientStops.Add(new GradientStop(brighter, 0.0));
+        brush.GradientStops.Add(new GradientStop(baseColor, 0.5));
+        brush.GradientStops.Add(new GradientStop(darker,   1.0));
+        return brush;
+    }
+
+    static Color Lighten(Color c, double amt) => Color.FromArgb(c.A,
+        (byte)Math.Min(255, c.R + (255 - c.R) * amt),
+        (byte)Math.Min(255, c.G + (255 - c.G) * amt),
+        (byte)Math.Min(255, c.B + (255 - c.B) * amt));
+
+    static Color Darken(Color c, double amt) => Color.FromArgb(c.A,
+        (byte)(c.R * (1 - amt)),
+        (byte)(c.G * (1 - amt)),
+        (byte)(c.B * (1 - amt)));
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
+
+/// <summary>
+/// Title-bar fill: maps <see cref="Models.Zone.GlassColorMode"/> to a vivid solid <see cref="Color"/>
+/// at full alpha (no glass tint, no alpha floor — a clean color block). Bound via the
+/// SolidColorBrush.Color= pattern (which is known-good; direct Border.Background=Binding
+/// on a Brush-returning converter was rendering as muted gray over the light card base).
+///
+/// KEEP IN SYNC with <see cref="LiquidGlassBrushConverter.BaseColors"/>.
+/// </summary>
+public class TitleBarFillConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        string mode = (value as string) ?? "Default";
+        if (!LiquidGlassBrushConverter.BaseColors.TryGetValue(mode, out var c))
+            mode = "Default";
+        c = LiquidGlassBrushConverter.BaseColors[mode];
+        // Force full alpha so the title bar reads at full saturation over the card's
+        // light-gray base, regardless of the alpha the preset's source color carried.
+        return Color.FromArgb(0xFF, c.R, c.G, c.B);
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
+
+/// <summary>
 /// Horizontal fan layout: lays children out in a single row with a small <see cref="StepWidth"/> per card,
 /// so neighbouring cards overlap heavily. Card rotation, Y offset, and scale are the caller's responsibility
 /// (applied per-card via <c>RenderTransform</c> in the DataTemplate).
