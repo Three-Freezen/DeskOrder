@@ -226,38 +226,12 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         _clockModel = clock;
         UseGlobalAppearance = clock.UseGlobalAppearance;
         BorderThicknessText = clock.BorderThickness.ToString("F1");
-        BorderColorValue = clock.BorderColor;
-        _fillColor = clock.FillColor;
-        _fillOpacityPercent = ParseOpacity(clock.FillColor);
-        FillOpacitySlider.Value = _fillOpacityPercent;
-        FillOpacityLabel.Text = $"{(int)_fillOpacityPercent}%";
-        _glassBlurAmount = clock.GlassBlurAmount;
-        _glassTintOpacity = clock.GlassTintOpacity;
-        _glassTintLuminosity = clock.GlassTintLuminosity;
-        _glassColorMode = clock.GlassColorMode;
-        _liquidGlass = clock.EnableLiquidGlass;
-        LiquidGlassToggle.IsChecked = _liquidGlass;
-
-        // Enable restore button
-        _enableRestoreButton = clock.EnableRestoreButton;
-        EnableRestoreButtonToggle.IsChecked = _enableRestoreButton;
-
-        // Background image
-        _bgImagePath = clock.BackgroundImagePath;
-        BgImagePathBox.Text = _bgImagePath;
-        if (CropBtn != null) CropBtn.IsEnabled = !string.IsNullOrEmpty(_bgImagePath) && System.IO.File.Exists(_bgImagePath);
-        _bgOffsetX = clock.BgImageOffsetX;
-        _bgOffsetY = clock.BgImageOffsetY;
-        _bgZoom = clock.BgImageZoom;
+        PullAppearanceFields(clock);
         _bgOpacity = clock.BackgroundImageOpacity;
-        OffsetXBox.Text = _bgOffsetX.ToString("F0");
-        OffsetYBox.Text = _bgOffsetY.ToString("F0");
-        ZoomSlider.Value = _bgZoom;
-        ZoomLabel.Text = $"{_bgZoom:F1}x";
         BgOpacitySlider.Value = _bgOpacity;
         BgOpacityLabel.Text = $"{(int)_bgOpacity}%";
 
-        // Digital background image
+        // Digital background image (Clock-specific)
         _digitalBgImagePath = clock.DigitalBackgroundImagePath;
         DigitalBgImagePathBox.Text = _digitalBgImagePath;
         if (DigitalCropBtn != null) DigitalCropBtn.IsEnabled = !string.IsNullOrEmpty(_digitalBgImagePath) && System.IO.File.Exists(_digitalBgImagePath);
@@ -271,7 +245,6 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         DigitalZoomLabel.Text = $"{_digitalBgZoom:F1}x";
         DigitalBgOpacitySlider.Value = _digitalBgOpacity;
         DigitalBgOpacityLabel.Text = $"{(int)_digitalBgOpacity}%";
-        UpdateHighlights();
 
         // Snapshot for cancel-revert
         _snapFillColor = clock.FillColor; _snapBorderColor = clock.BorderColor;
@@ -301,37 +274,10 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         _calModel = cal;
         UseGlobalAppearance = cal.UseGlobalAppearance;
         BorderThicknessText = cal.BorderThickness.ToString("F1");
-        BorderColorValue = cal.BorderColor;
-        _fillColor = cal.FillColor;
-        _fillOpacityPercent = ParseOpacity(cal.FillColor);
-        FillOpacitySlider.Value = _fillOpacityPercent;
-        FillOpacityLabel.Text = $"{(int)_fillOpacityPercent}%";
-        _glassBlurAmount = cal.GlassBlurAmount;
-        _glassTintOpacity = cal.GlassTintOpacity;
-        _glassTintLuminosity = cal.GlassTintLuminosity;
-        _glassColorMode = cal.GlassColorMode;
-        _liquidGlass = cal.EnableLiquidGlass;
-        LiquidGlassToggle.IsChecked = _liquidGlass;
-
-        // Enable restore button
-        _enableRestoreButton = cal.EnableRestoreButton;
-        EnableRestoreButtonToggle.IsChecked = _enableRestoreButton;
-
-        // Background image
-        _bgImagePath = cal.BackgroundImagePath;
-        BgImagePathBox.Text = _bgImagePath;
-        if (CropBtn != null) CropBtn.IsEnabled = !string.IsNullOrEmpty(_bgImagePath) && System.IO.File.Exists(_bgImagePath);
-        _bgOffsetX = cal.BgImageOffsetX;
-        _bgOffsetY = cal.BgImageOffsetY;
-        _bgZoom = cal.BgImageZoom;
+        PullAppearanceFields(cal);
         _bgOpacity = cal.BackgroundImageOpacity;
-        OffsetXBox.Text = _bgOffsetX.ToString("F0");
-        OffsetYBox.Text = _bgOffsetY.ToString("F0");
-        ZoomSlider.Value = _bgZoom;
-        ZoomLabel.Text = $"{_bgZoom:F1}x";
         BgOpacitySlider.Value = _bgOpacity;
         BgOpacityLabel.Text = $"{(int)_bgOpacity}%";
-        UpdateHighlights();
 
         // Snapshot for cancel-revert
         _snapFillColor = cal.FillColor; _snapBorderColor = cal.BorderColor;
@@ -361,18 +307,9 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         WidgetWidth = note.Width.ToString("F0");
         WidgetHeight = note.Height.ToString("F0");
         BorderThicknessText = note.BorderThickness.ToString("F1");
-        BorderColorValue = note.BorderColor;
-        _fillColor = note.FillColor;
-        _fillOpacityPercent = ParseOpacity(note.FillColor);
-        FillOpacitySlider.Value = _fillOpacityPercent;
-        FillOpacityLabel.Text = $"{(int)_fillOpacityPercent}%";
-        _glassBlurAmount = note.GlassBlurAmount;
-        _glassTintOpacity = note.GlassTintOpacity;
-        _glassTintLuminosity = note.GlassTintLuminosity;
-        _glassColorMode = note.GlassColorMode;
-        _liquidGlass = note.EnableLiquidGlass;
-        LiquidGlassToggle.IsChecked = _liquidGlass;
+        PullAppearanceFields(note);
 
+        // Note-specific title bar / button opacity
         _titleBarFill = note.TitleBarFillColor;
         _titleBarOpacity = note.TitleBarOpacity;
         _buttonOpacity = note.ControlOpacity;
@@ -382,29 +319,14 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         ButtonOpacitySlider.Value = _buttonOpacity;
         ButtonOpacityLabel.Text = $"{(int)_buttonOpacity}%";
 
-        // Enable restore button
-        _enableRestoreButton = note.EnableRestoreButton;
-        EnableRestoreButtonToggle.IsChecked = _enableRestoreButton;
-
-        // Store note dimensions for crop preview
+        // Note-specific dimensions for crop preview
         _noteWidth = note.Width;
         _noteHeight = note.Height;
 
-        // Background image
-        _bgImagePath = note.BackgroundImagePath;
-        BgImagePathBox.Text = _bgImagePath;
-        if (CropBtn != null) CropBtn.IsEnabled = !string.IsNullOrEmpty(_bgImagePath) && System.IO.File.Exists(_bgImagePath);
-        _bgOffsetX = note.BgImageOffsetX;
-        _bgOffsetY = note.BgImageOffsetY;
-        _bgZoom = note.BgImageZoom;
+        // Background image opacity (per-widget)
         _bgOpacity = note.BackgroundImageOpacity;
-        OffsetXBox.Text = _bgOffsetX.ToString("F0");
-        OffsetYBox.Text = _bgOffsetY.ToString("F0");
-        ZoomSlider.Value = _bgZoom;
-        ZoomLabel.Text = $"{_bgZoom:F1}x";
         BgOpacitySlider.Value = _bgOpacity;
         BgOpacityLabel.Text = $"{(int)_bgOpacity}%";
-        UpdateHighlights();
 
         // Snapshot for cancel-revert
         _snapFillColor = note.FillColor; _snapBorderColor = note.BorderColor;
@@ -848,19 +770,13 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         switch (_target)
         {
             case WidgetSettingsTarget.StickyNote when _noteModel != null:
-                _noteModel.FillColor = fillColor; _noteModel.BorderColor = BorderColorValue;
-                _noteModel.BorderThickness = bt; _noteModel.UseGlobalAppearance = UseGlobalAppearance;
-                _noteModel.EnableRestoreButton = _enableRestoreButton;
+                PushAppearanceFields(_noteModel);
+                _noteModel.UseGlobalAppearance = UseGlobalAppearance;
+                _noteModel.BorderThickness = bt;
+                _noteModel.BackgroundImageOpacity = _bgOpacity;
                 _noteModel.TitleBarFillColor = titleBarFill; _noteModel.TitleBarOpacity = _titleBarOpacity;
                 _noteModel.ControlOpacity = _buttonOpacity; _noteModel.TitleTextColor = _titleTextColor;
-                _noteModel.BackgroundImagePath = _bgImagePath; _noteModel.BgImageOffsetX = _bgOffsetX;
-                _noteModel.BgImageOffsetY = _bgOffsetY; _noteModel.BgImageZoom = _bgZoom;
-                _noteModel.BackgroundImageOpacity = _bgOpacity;
-                _noteModel.EnableLiquidGlass = _liquidGlass; _noteModel.GlassBlurAmount = _glassBlurAmount;
-                _noteModel.GlassTintOpacity = _glassTintOpacity; _noteModel.GlassTintLuminosity = _glassTintLuminosity;
-                _noteModel.GlassColorMode = _glassColorMode;
                 if (w >= 100) _noteModel.Width = w; if (h >= 100) _noteModel.Height = h;
-                // Refresh the note window via App.NotesService.Windows
                 if (Application.Current is App noteApp && noteApp.NotesService?.Windows.TryGetValue(_noteModel.Id, out var noteWin) == true)
                     noteWin.RefreshAppearance();
                 break;
@@ -880,7 +796,6 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
                     _panelConfig.GlobalFillColor = fillColor;
                 }
                 if (w >= 100) _panelConfig.PanelWidth = w; if (h >= 100) _panelConfig.PanelHeight = h;
-                // Refresh panel window via App lookup (same pattern as notes)
                 if (Application.Current is App panelApp && panelApp.PanelWindow is PanelWindow panelWin)
                 {
                     panelWin.ApplyAcrylic();
@@ -890,8 +805,10 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
                 break;
 
             case WidgetSettingsTarget.Clock when _clockModel != null:
-                _clockModel.FillColor = fillColor; _clockModel.BorderColor = BorderColorValue;
-                _clockModel.BorderThickness = bt; _clockModel.UseGlobalAppearance = UseGlobalAppearance;
+                PushAppearanceFields(_clockModel);
+                _clockModel.UseGlobalAppearance = UseGlobalAppearance;
+                _clockModel.BorderThickness = bt;
+                _clockModel.BackgroundImageOpacity = _bgOpacity;
                 // When UseGlobalAppearance=true, ApplyAcrylic reads GlobalBorderThickness/GlobalFillColor
                 if (UseGlobalAppearance && Application.Current is App cApp && cApp.ManagementWindow?.WidgetService is { } wSvc)
                 {
@@ -899,24 +816,18 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
                     wCfg.GlobalBorderThickness = bt;
                     wCfg.GlobalFillColor = fillColor;
                 }
-                _clockModel.EnableRestoreButton = _enableRestoreButton;
-                _clockModel.EnableLiquidGlass = _liquidGlass; _clockModel.GlassBlurAmount = _glassBlurAmount;
-                _clockModel.GlassTintOpacity = _glassTintOpacity; _clockModel.GlassTintLuminosity = _glassTintLuminosity;
-                _clockModel.GlassColorMode = _glassColorMode;
-                _clockModel.BackgroundImagePath = _bgImagePath; _clockModel.BgImageOffsetX = _bgOffsetX;
-                _clockModel.BgImageOffsetY = _bgOffsetY; _clockModel.BgImageZoom = _bgZoom;
-                _clockModel.BackgroundImageOpacity = _bgOpacity;
                 _clockModel.DigitalBackgroundImagePath = _digitalBgImagePath;
                 _clockModel.DigitalBgImageOffsetX = _digitalBgOffsetX; _clockModel.DigitalBgImageOffsetY = _digitalBgOffsetY;
                 _clockModel.DigitalBgImageZoom = _digitalBgZoom; _clockModel.DigitalBackgroundImageOpacity = _digitalBgOpacity;
-                // Refresh clock window via App lookup (same pattern as notes)
                 if (Application.Current is App app2)
                     app2.GetClockWindow(_clockModel.Id)?.RefreshAppearance();
                 break;
 
             case WidgetSettingsTarget.Calendar when _calModel != null:
-                _calModel.FillColor = fillColor; _calModel.BorderColor = BorderColorValue;
-                _calModel.BorderThickness = bt; _calModel.UseGlobalAppearance = UseGlobalAppearance;
+                PushAppearanceFields(_calModel);
+                _calModel.UseGlobalAppearance = UseGlobalAppearance;
+                _calModel.BorderThickness = bt;
+                _calModel.BackgroundImageOpacity = _bgOpacity;
                 // When UseGlobalAppearance=true, ApplyAcrylic reads GlobalBorderThickness/GlobalFillColor
                 if (UseGlobalAppearance && Application.Current is App calApp && calApp.ManagementWindow?.WidgetService is { } wSvc2)
                 {
@@ -924,14 +835,6 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
                     wCfg2.GlobalBorderThickness = bt;
                     wCfg2.GlobalFillColor = fillColor;
                 }
-                _calModel.EnableRestoreButton = _enableRestoreButton;
-                _calModel.EnableLiquidGlass = _liquidGlass; _calModel.GlassBlurAmount = _glassBlurAmount;
-                _calModel.GlassTintOpacity = _glassTintOpacity; _calModel.GlassTintLuminosity = _glassTintLuminosity;
-                _calModel.GlassColorMode = _glassColorMode;
-                _calModel.BackgroundImagePath = _bgImagePath; _calModel.BgImageOffsetX = _bgOffsetX;
-                _calModel.BgImageOffsetY = _bgOffsetY; _calModel.BgImageZoom = _bgZoom;
-                _calModel.BackgroundImageOpacity = _bgOpacity;
-                // Refresh calendar window via App lookup (same pattern as notes)
                 if (Application.Current is App app3)
                     app3.GetCalendarWindow(_calModel.Id)?.RefreshAppearance();
                 break;
@@ -1071,6 +974,78 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         }
     }
 
+    // ── Appearance field mappers (P3) ──
+    // Push: dialog → model. Pull: model → dialog. Generic over AppearanceModel
+    // so the same 14 fields are handled for all 3 widget kinds (Clock/Calendar/StickyNote).
+    // BorderThickness and BackgroundImageOpacity stay per-model and are handled by the caller.
+
+    /// <summary>Writes the 13 shared AppearanceModel fields from dialog state into <paramref name="model"/>.
+    /// UseGlobalAppearance is per-widget (Zone has none) — caller sets it after.</summary>
+    void PushAppearanceFields<T>(T model) where T : AppearanceModel
+    {
+        model.BorderColor = BorderColorValue;
+        model.FillColor = UpdateFillFromOpacity();
+        model.EnableLiquidGlass = _liquidGlass;
+        model.GlassBlurAmount = _glassBlurAmount;
+        model.GlassTintOpacity = _glassTintOpacity;
+        model.GlassTintLuminosity = _glassTintLuminosity;
+        model.GlassColorMode = _glassColorMode;
+        model.BackgroundImagePath = _bgImagePath;
+        model.BgImageOffsetX = _bgOffsetX;
+        model.BgImageOffsetY = _bgOffsetY;
+        model.BgImageZoom = _bgZoom;
+        model.EnableRestoreButton = _enableRestoreButton;
+    }
+
+    /// <summary>Reads the 13 shared AppearanceModel fields from <paramref name="model"/> into dialog state.
+    /// UseGlobalAppearance is per-widget — caller sets UseGlobalAppearance property after.</summary>
+    void PullAppearanceFields<T>(T model) where T : AppearanceModel
+    {
+        BorderColorValue = model.BorderColor;
+        _fillColor = model.FillColor;
+        _fillOpacityPercent = ParseOpacity(model.FillColor);
+        FillOpacitySlider.Value = _fillOpacityPercent;
+        FillOpacityLabel.Text = $"{(int)_fillOpacityPercent}%";
+        _liquidGlass = model.EnableLiquidGlass;
+        LiquidGlassToggle.IsChecked = _liquidGlass;
+        UpdateLiquidButton();
+        _glassBlurAmount = model.GlassBlurAmount;
+        _glassTintOpacity = model.GlassTintOpacity;
+        _glassTintLuminosity = model.GlassTintLuminosity;
+        _glassColorMode = model.GlassColorMode;
+        _enableRestoreButton = model.EnableRestoreButton;
+        EnableRestoreButtonToggle.IsChecked = _enableRestoreButton;
+        _bgImagePath = model.BackgroundImagePath;
+        BgImagePathBox.Text = _bgImagePath;
+        if (CropBtn != null) CropBtn.IsEnabled = !string.IsNullOrEmpty(_bgImagePath) && System.IO.File.Exists(_bgImagePath);
+        _bgOffsetX = model.BgImageOffsetX;
+        OffsetXBox.Text = _bgOffsetX.ToString("F0");
+        _bgOffsetY = model.BgImageOffsetY;
+        OffsetYBox.Text = _bgOffsetY.ToString("F0");
+        _bgZoom = model.BgImageZoom;
+        ZoomSlider.Value = _bgZoom;
+        ZoomLabel.Text = $"{_bgZoom:F1}x";
+        UpdateHighlights();
+    }
+
+    /// <summary>Restores the 13 shared AppearanceModel fields on <paramref name="model"/> from the
+    /// dialog's cancel-revert snapshot. UseGlobalAppearance is per-widget — caller sets after.</summary>
+    void CancelRestoreFields<T>(T model) where T : AppearanceModel
+    {
+        model.BorderColor = _snapBorderColor;
+        model.FillColor = _snapFillColor;
+        model.EnableLiquidGlass = _snapLiquidGlass;
+        model.GlassBlurAmount = _snapGlassBlur;
+        model.GlassTintOpacity = _snapGlassTintOpacity;
+        model.GlassTintLuminosity = _snapGlassTintLuminosity;
+        model.GlassColorMode = _snapGlassColorMode;
+        model.BackgroundImagePath = _snapBgImagePath;
+        model.BgImageOffsetX = _snapBgOffsetX;
+        model.BgImageOffsetY = _snapBgOffsetY;
+        model.BgImageZoom = _snapBgZoom;
+        model.EnableRestoreButton = _snapEnableRestore;
+    }
+
     void ApplyButton_Click(object s, RoutedEventArgs e)
     {
         if (!double.TryParse(BorderThicknessText, out var bt) || bt < 0.5 || bt > 10)
@@ -1111,17 +1086,12 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         switch (_target)
         {
             case WidgetSettingsTarget.StickyNote when _noteModel != null:
-                _noteModel.FillColor = _snapFillColor; _noteModel.BorderColor = _snapBorderColor;
-                _noteModel.BorderThickness = _snapBorderThickness; _noteModel.UseGlobalAppearance = _snapUseGlobal;
-                _noteModel.EnableRestoreButton = _snapEnableRestore;
+                CancelRestoreFields(_noteModel);
+                _noteModel.UseGlobalAppearance = _snapUseGlobal;
+                _noteModel.BorderThickness = _snapBorderThickness;
+                _noteModel.BackgroundImageOpacity = _snapBgOpacity;
                 _noteModel.TitleBarFillColor = _snapTitleBarFill; _noteModel.TitleBarOpacity = _snapTitleBarOpacity;
                 _noteModel.ControlOpacity = _snapButtonOpacity; _noteModel.TitleTextColor = _snapTitleTextColor;
-                _noteModel.BackgroundImagePath = _snapBgImagePath; _noteModel.BgImageOffsetX = _snapBgOffsetX;
-                _noteModel.BgImageOffsetY = _snapBgOffsetY; _noteModel.BgImageZoom = _snapBgZoom;
-                _noteModel.BackgroundImageOpacity = _snapBgOpacity;
-                _noteModel.EnableLiquidGlass = _snapLiquidGlass; _noteModel.GlassBlurAmount = _snapGlassBlur;
-                _noteModel.GlassTintOpacity = _snapGlassTintOpacity; _noteModel.GlassTintLuminosity = _snapGlassTintLuminosity;
-                _noteModel.GlassColorMode = _snapGlassColorMode;
                 if (double.TryParse(_snapWidgetWidth, out var rw)) _noteModel.Width = rw;
                 if (double.TryParse(_snapWidgetHeight, out var rh)) _noteModel.Height = rh;
                 if (Application.Current is App app3 && app3.NotesService?.Windows.TryGetValue(_noteModel.Id, out var noteWin3) == true)
@@ -1152,8 +1122,10 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
                 break;
 
             case WidgetSettingsTarget.Clock when _clockModel != null:
-                _clockModel.FillColor = _snapFillColor; _clockModel.BorderColor = _snapBorderColor;
-                _clockModel.BorderThickness = _snapBorderThickness; _clockModel.UseGlobalAppearance = _snapUseGlobal;
+                CancelRestoreFields(_clockModel);
+                _clockModel.UseGlobalAppearance = _snapUseGlobal;
+                _clockModel.BorderThickness = _snapBorderThickness;
+                _clockModel.BackgroundImageOpacity = _snapBgOpacity;
                 // Always restore global values
                 if (Application.Current is App cAppC && cAppC.ManagementWindow?.WidgetService is { } wSvcC)
                 {
@@ -1161,13 +1133,6 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
                     wCfgC.GlobalBorderThickness = _snapGlobalBorderThickness;
                     wCfgC.GlobalFillColor = _snapGlobalFillColor;
                 }
-                _clockModel.EnableRestoreButton = _snapEnableRestore;
-                _clockModel.EnableLiquidGlass = _snapLiquidGlass; _clockModel.GlassBlurAmount = _snapGlassBlur;
-                _clockModel.GlassTintOpacity = _snapGlassTintOpacity; _clockModel.GlassTintLuminosity = _snapGlassTintLuminosity;
-                _clockModel.GlassColorMode = _snapGlassColorMode;
-                _clockModel.BackgroundImagePath = _snapBgImagePath; _clockModel.BgImageOffsetX = _snapBgOffsetX;
-                _clockModel.BgImageOffsetY = _snapBgOffsetY; _clockModel.BgImageZoom = _snapBgZoom;
-                _clockModel.BackgroundImageOpacity = _snapBgOpacity;
                 _clockModel.DigitalBackgroundImagePath = _snapDigitalBgImagePath;
                 _clockModel.DigitalBgImageOffsetX = _snapDigitalBgOffsetX; _clockModel.DigitalBgImageOffsetY = _snapDigitalBgOffsetY;
                 _clockModel.DigitalBgImageZoom = _snapDigitalBgZoom; _clockModel.DigitalBackgroundImageOpacity = _snapDigitalBgOpacity;
@@ -1176,8 +1141,10 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
                 break;
 
             case WidgetSettingsTarget.Calendar when _calModel != null:
-                _calModel.FillColor = _snapFillColor; _calModel.BorderColor = _snapBorderColor;
-                _calModel.BorderThickness = _snapBorderThickness; _calModel.UseGlobalAppearance = _snapUseGlobal;
+                CancelRestoreFields(_calModel);
+                _calModel.UseGlobalAppearance = _snapUseGlobal;
+                _calModel.BorderThickness = _snapBorderThickness;
+                _calModel.BackgroundImageOpacity = _snapBgOpacity;
                 // Always restore global values
                 if (Application.Current is App calAppC && calAppC.ManagementWindow?.WidgetService is { } wSvcCal)
                 {
@@ -1185,13 +1152,6 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
                     wCfgCal.GlobalBorderThickness = _snapGlobalBorderThickness;
                     wCfgCal.GlobalFillColor = _snapGlobalFillColor;
                 }
-                _calModel.EnableRestoreButton = _snapEnableRestore;
-                _calModel.EnableLiquidGlass = _snapLiquidGlass; _calModel.GlassBlurAmount = _snapGlassBlur;
-                _calModel.GlassTintOpacity = _snapGlassTintOpacity; _calModel.GlassTintLuminosity = _snapGlassTintLuminosity;
-                _calModel.GlassColorMode = _snapGlassColorMode;
-                _calModel.BackgroundImagePath = _snapBgImagePath; _calModel.BgImageOffsetX = _snapBgOffsetX;
-                _calModel.BgImageOffsetY = _snapBgOffsetY; _calModel.BgImageZoom = _snapBgZoom;
-                _calModel.BackgroundImageOpacity = _snapBgOpacity;
                 if (Application.Current is App appC3)
                     appC3.GetCalendarWindow(_calModel.Id)?.RefreshAppearance();
                 break;
