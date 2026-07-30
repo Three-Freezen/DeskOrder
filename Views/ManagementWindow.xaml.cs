@@ -20,6 +20,7 @@ public partial class ManagementWindow : Window
     private readonly ConfigService _configService;
     private readonly NotesService? _notesService;
     private readonly WidgetService? _widgetService;
+    private readonly PanelService? _panelService;
     private readonly LocalizationService _loc = LocalizationService.Instance;
     private static readonly SolidColorBrush ActiveBg = new(Color.FromRgb(0x7C, 0x3A, 0xED));
     private static readonly SolidColorBrush InactiveBg = new(Color.FromArgb(0x20, 0xFF, 0xFF, 0xFF));
@@ -39,9 +40,6 @@ public partial class ManagementWindow : Window
 
     // Track expanded/collapsed state for merged zones
     private readonly Dictionary<Guid, bool> _expandedZones = new();
-
-    // Panel window
-    private PanelWindow? _panelWindow;
 
     // Guard flag to prevent re-entrant batch widget operations
     private bool _isBatchWidgetOperation;
@@ -71,13 +69,14 @@ public partial class ManagementWindow : Window
     public System.Collections.ObjectModel.ObservableCollection<Zone> Zones => _zoneManager.Zones;
 
     public ManagementWindow(ZoneManager zoneManager, ConfigService configService,
-        NotesService? notesService = null, WidgetService? widgetService = null)
+        NotesService? notesService = null, WidgetService? widgetService = null, PanelService? panelService = null)
     {
         InitializeComponent();
         _zoneManager = zoneManager;
         _configService = configService;
         _notesService = notesService;
         _widgetService = widgetService;
+        _panelService = panelService;
         _viewModel = new ManagementViewModel(zoneManager, configService);
         DataContext = this;
 
@@ -104,24 +103,20 @@ public partial class ManagementWindow : Window
             try
             {
                 var config = _configService.Load();
-                if (config.PanelEnabled && _panelWindow == null)
-                {
-                    _panelWindow = new PanelWindow(_zoneManager, _configService);
-                    ((App)System.Windows.Application.Current)._panelWindow = _panelWindow;
-                    _panelWindow.Closed += (__, _) =>
-                    {
-                        _panelWindow = null;
-                        ((App)System.Windows.Application.Current)._panelWindow = null;
-                        if (NewPanelBtn != null) NewPanelBtn.ToolTip = _loc["Manage.NewPanel"];
-                    };
-                    _panelWindow.Show();
-                }
-                if (_panelWindow != null && NewPanelBtn != null)
+                if (config.PanelEnabled)
+                    _panelService?.Show(config);
+                if (_panelService?.IsOpen == true && NewPanelBtn != null)
                     NewPanelBtn.ToolTip = _loc["Manage.PanelOpen"];
             }
             catch { }
         };
         _loc.LanguageChanged += _ => { try { ApplyLoc(); } catch { } };
+        if (_panelService != null)
+            _panelService.WindowClosed += () =>
+            {
+                if (NewPanelBtn != null) NewPanelBtn.ToolTip = _loc["Manage.NewPanel"];
+                Dispatcher.BeginInvoke(new Action(() => RefreshPanelCard()));
+            };
     }
 
     void ApplyLoc()
@@ -830,7 +825,7 @@ public partial class ManagementWindow : Window
                 PanelSection.Visibility = Visibility.Visible;
                 if (PanelToggleDot != null)
                 {
-                    bool panelOpen = _panelWindow != null && _panelWindow.IsVisible;
+                    bool panelOpen = _panelService?.IsOpen == true;
                     AnimateToggleDot(PanelToggleDot, panelOpen);
                 }
                 if (PanelHotkeyText != null)
@@ -2886,12 +2881,7 @@ public partial class ManagementWindow : Window
                 _configService.Save(config);
 
                 // Refresh panel window if open
-                if (_panelWindow != null)
-                {
-                    _panelWindow.ApplyAcrylic();
-                    _panelWindow.ApplyStyle();
-                    _panelWindow.ApplyBackgroundImage();
-                }
+                _panelService?.RefreshAppearance();
             }
         }
         catch (Exception ex)
@@ -2909,30 +2899,16 @@ public partial class ManagementWindow : Window
     {
         try
         {
-            if (_panelWindow != null)
-            {
-                _panelWindow.Close();
-                _panelWindow = null;
-                RefreshPanelCard();
-                return;
-            }
-
-            var cn = _loc.CurrentLanguage == Services.Language.Chinese;
-            var win = new PanelWindow(_zoneManager, _configService);
-            ((App)System.Windows.Application.Current)._panelWindow = win;
-            win.Closed += (_, _) =>
-            {
-                _panelWindow = null;
-                ((App)System.Windows.Application.Current)._panelWindow = null;
-                Dispatcher.BeginInvoke(new Action(() => RefreshPanelCard()));
-            };
-            win.Show();
-            win.Activate();
-            _panelWindow = win;
-
+            if (_panelService == null) return;
             var config = _configService.Load();
-            config.PanelEnabled = true;
-            _configService.Save(config);
+            if (_panelService.IsOpen)
+            {
+                _panelService.CloseAndClear();
+            }
+            else
+            {
+                _panelService.Show(config);
+            }
             RefreshPanelCard();
         }
         catch (Exception ex)
@@ -3347,28 +3323,16 @@ public partial class ManagementWindow : Window
     {
         try
         {
-            if (_panelWindow != null)
-            {
-                _panelWindow.Close();
-                _panelWindow = null;
-                RefreshPanelCard();
-                return;
-            }
-
-            _panelWindow = new PanelWindow(_zoneManager, _configService);
-            ((App)System.Windows.Application.Current)._panelWindow = _panelWindow;
-            _panelWindow.Closed += (_, _) =>
-            {
-                _panelWindow = null;
-                ((App)System.Windows.Application.Current)._panelWindow = null;
-                Dispatcher.BeginInvoke(new Action(() => RefreshPanelCard()));
-            };
-            _panelWindow.Show();
-            _panelWindow.Activate();
-
+            if (_panelService == null) return;
             var config = _configService.Load();
-            config.PanelEnabled = true;
-            _configService.Save(config);
+            if (_panelService.IsOpen)
+            {
+                _panelService.CloseAndClear();
+            }
+            else
+            {
+                _panelService.Show(config);
+            }
             RefreshPanelCard();
         }
         catch { }

@@ -17,6 +17,7 @@ public partial class App : System.Windows.Application
     private ConfigService? _configService;
     private NotesService? _notesService;
     private WidgetService? _widgetService;
+    private PanelService? _panelService;
     private ReminderService? _reminderService;
     private ManagementWindow? _managementWindow;
     private readonly LocalizationService _loc = LocalizationService.Instance;
@@ -26,12 +27,12 @@ public partial class App : System.Windows.Application
     internal readonly Dictionary<Guid, Window> _noteWindows = new();
     internal readonly Dictionary<Guid, Window> _clockWindows = new();
     internal readonly Dictionary<Guid, Window> _calendarWindows = new();
-    internal Window? _panelWindow;
 
     // Public accessors for live preview lookup
-    public Window? PanelWindow => _panelWindow;
+    public PanelWindow? PanelWindow => _panelService?.Window;
     public ClockWidget? GetClockWindow(Guid id) => _clockWindows.TryGetValue(id, out var w) && w is ClockWidget cw ? cw : null;
     public CalendarWidget? GetCalendarWindow(Guid id) => _calendarWindows.TryGetValue(id, out var w) && w is CalendarWidget cal ? cal : null;
+    public PanelService? PanelService => _panelService;
     public ManagementWindow? ManagementWindow => _managementWindow;
 
     // ── Global hotkey ──
@@ -65,6 +66,7 @@ public partial class App : System.Windows.Application
         _zoneManager = new ZoneManager(_configService);
         _notesService = new NotesService(_configService);
         _widgetService = new WidgetService(_configService);
+        _panelService = new PanelService(_zoneManager, _configService);
 
         var appIcon = IconToImageSource(CreateAppIcon());
 
@@ -160,7 +162,7 @@ public partial class App : System.Windows.Application
                 else
                 {
                     // Create instance without showing — only need it for TogglePanel
-                    _managementWindow = new ManagementWindow(_zoneManager!, _configService!, _notesService, _widgetService);
+                    _managementWindow = new ManagementWindow(_zoneManager!, _configService!, _notesService, _widgetService, _panelService);
                     _managementWindow.Closed += (_, _) => _managementWindow = null;
                     if (_appIconImage == null) _appIconImage = IconToImageSource(CreateAppIcon());
                     _managementWindow.Icon = _appIconImage;
@@ -405,7 +407,7 @@ public partial class App : System.Windows.Application
     {
         if (_managementWindow == null)
         {
-            _managementWindow = new ManagementWindow(_zoneManager!, _configService!, _notesService, _widgetService);
+            _managementWindow = new ManagementWindow(_zoneManager!, _configService!, _notesService, _widgetService, _panelService);
             _managementWindow.Closed += (_, _) => _managementWindow = null;
             // Set the custom icon
             if (_appIconImage == null) _appIconImage = IconToImageSource(CreateAppIcon());
