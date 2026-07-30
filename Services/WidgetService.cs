@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.ObjectModel;
 using System.Linq;
 using DesktopZones.Models;
+using DesktopZones.Views;
 
 namespace DesktopZones.Services;
 
@@ -15,6 +16,16 @@ public class WidgetService
     public ObservableCollection<DesktopCalendar> Calendars { get; } = new();
     public event Action? ClocksChanged;
     public event Action? CalendarsChanged;
+
+    /// <summary>Open ClockWidget instances keyed by clock Id (was App._clockWindows before P5).</summary>
+    public Dictionary<Guid, ClockWidget> ClockWindows { get; } = new();
+    /// <summary>Open CalendarWidget instances keyed by calendar Id (was App._calendarWindows before P5).</summary>
+    public Dictionary<Guid, CalendarWidget> CalendarWindows { get; } = new();
+
+    public ClockWidget? GetClockWindow(Guid id)
+        => ClockWindows.TryGetValue(id, out var w) ? w : null;
+    public CalendarWidget? GetCalendarWindow(Guid id)
+        => CalendarWindows.TryGetValue(id, out var w) ? w : null;
 
     public AppConfig GetConfig() => _appConfig!;
 

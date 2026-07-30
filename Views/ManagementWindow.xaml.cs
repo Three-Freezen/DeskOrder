@@ -31,7 +31,7 @@ public partial class ManagementWindow : Window
     private readonly Dictionary<Guid, Window> _openCalendarWindows = new();
 
     private bool IsNoteWindowOpen(Guid id) => ((App)System.Windows.Application.Current).IsNoteWindowOpen(id);
-    private Window? GetNoteWindow(Guid id) => ((App)System.Windows.Application.Current)._noteWindows.TryGetValue(id, out var w) ? w : null;
+    private Window? GetNoteWindow(Guid id) => _notesService?.Windows.TryGetValue(id, out var w) == true ? w : null;
     // Track toggle dots for animation
     private readonly Dictionary<Guid, Border> _noteToggleDots = new();
     private readonly Dictionary<Guid, Border> _clockToggleDots = new();
@@ -1544,7 +1544,7 @@ public partial class ManagementWindow : Window
         if (app.IsNoteWindowOpen(note.Id))
         {
             // Close via App's dictionary
-            if (app._noteWindows.TryGetValue(note.Id, out var w)) w.Close();
+            if (app.NotesService?.Windows.TryGetValue(note.Id, out var w) == true) w.Close();
         }
         _notesService?.DeleteNote(note.Id);
         RefreshNotesList();
@@ -3407,11 +3407,11 @@ public partial class ManagementWindow : Window
         window.Closed += (_, _) =>
         {
             _openClockWindows.Remove(clock.Id);
-            ((App)System.Windows.Application.Current)._clockWindows.Remove(clock.Id);
+            _widgetService!.ClockWindows.Remove(clock.Id);
             Dispatcher.BeginInvoke(new Action(() => RefreshClocksList()), System.Windows.Threading.DispatcherPriority.Loaded);
         };
         _openClockWindows[clock.Id] = window;
-        ((App)System.Windows.Application.Current)._clockWindows[clock.Id] = window;
+        _widgetService!.ClockWindows[clock.Id] = window;
         window.Show();
         window.Activate();
         Dispatcher.BeginInvoke(new Action(() =>
@@ -3430,11 +3430,11 @@ public partial class ManagementWindow : Window
         window.Closed += (_, _) =>
         {
             _openCalendarWindows.Remove(cal.Id);
-            ((App)System.Windows.Application.Current)._calendarWindows.Remove(cal.Id);
+            _widgetService!.CalendarWindows.Remove(cal.Id);
             Dispatcher.BeginInvoke(new Action(() => RefreshCalendarsList()), System.Windows.Threading.DispatcherPriority.Loaded);
         };
         _openCalendarWindows[cal.Id] = window;
-        ((App)System.Windows.Application.Current)._calendarWindows[cal.Id] = window;
+        _widgetService!.CalendarWindows[cal.Id] = window;
         window.Show();
         window.Activate();
         Dispatcher.BeginInvoke(new Action(() =>

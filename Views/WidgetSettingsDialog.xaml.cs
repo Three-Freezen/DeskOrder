@@ -860,9 +860,9 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
                 _noteModel.GlassTintOpacity = _glassTintOpacity; _noteModel.GlassTintLuminosity = _glassTintLuminosity;
                 _noteModel.GlassColorMode = _glassColorMode;
                 if (w >= 100) _noteModel.Width = w; if (h >= 100) _noteModel.Height = h;
-                // Refresh the note window via App._noteWindows
-                if (Application.Current is App noteApp && noteApp._noteWindows.TryGetValue(_noteModel.Id, out var noteWin) && noteWin is StickyNoteWindow snw)
-                    snw.RefreshAppearance();
+                // Refresh the note window via App.NotesService.Windows
+                if (Application.Current is App noteApp && noteApp.NotesService?.Windows.TryGetValue(_noteModel.Id, out var noteWin) == true)
+                    noteWin.RefreshAppearance();
                 break;
 
             case WidgetSettingsTarget.Panel when _panelConfig != null:
@@ -938,6 +938,139 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         }
     }
 
+    void LoadPreset_Click(object s, RoutedEventArgs e)
+    {
+        var kind = TargetToKind(_target);
+        var snap = BuildCurrentPayload();
+        if (snap == null) return;
+        var applied = PresetButtonsHelper.OpenLoad(this, kind, snap,
+            picked => { /* onCardPicked already applied — no-op */ },
+            record => ApplyCardPicked(record));
+        if (applied != true)
+        {
+            // Cancel — restore model + dialog UI from snapshot, then push to live widget.
+            ApplyPayload(snap);
+            PushToWidget();
+        }
+        else
+        {
+            // Apply — model + UI are already at preset's state; ensure live widget reflects it.
+            // (LoadFromXxx-driven setters already fired PushToWidget via PropertyChanged, but
+            // be defensive in case a path didn't reach one.)
+            PushToWidget();
+        }
+        // Outer dialog STAYS OPEN so the user can verify and decide Apply / Cancel on
+        // the widget settings themselves. The previous behavior auto-closing via
+        // DialogResult=true was losing the in-dialog verification step.
+    }
+
+    /// <summary>
+    /// Per-card click hook for the Load Preset dialog. Writes the preset's payload into
+    /// the live model, refreshes the in-dialog controls (which in turn fires the
+    /// setter→PushToWidget chain so the live widget updates too), but never closes this
+    /// dialog or saves config — that's the outer Apply's job.
+    /// </summary>
+    void ApplyCardPicked(PresetRecord record)
+    {
+        // Direct copy → model + direct refresh of live window. Mirrors
+        // ZoneSettingsDialog / MergedGroupSettingsDialog preview pattern:
+        // dialog controls stay untouched during preview (they only sync on
+        // OK via ApplyPayload in LoadPreset_Click). Passes the model to
+        // RefreshAppearance so the widget reassigns its cached field to
+        // the dialog's fresh reference (KEY FIX pattern from
+        // ZoneWindow.RefreshZone — otherwise OnClocksChanged could have
+        // swapped the widget's _clock to a stale object).
+        System.Diagnostics.Debug.WriteLine($"[preview] enter target={_target} recordType={record?.GetType().Name} modelClock={_clockModel!=null} modelCal={_calModel!=null} modelNote={_noteModel!=null} modelPanel={_panelConfig!=null}");
+        var app = Application.Current as App;
+        switch (_target)
+        {
+            case WidgetSettingsTarget.Clock when _clockModel != null && record is ClockPreset c:
+                System.Diagnostics.Debug.WriteLine($"[preview] Clock before CopyInto: FillColor={_clockModel.FillColor} BorderColor={_clockModel.BorderColor}");
+                CopyInto(c.Clock, _clockModel);
+                System.Diagnostics.Debug.WriteLine($"[preview] Clock after  CopyInto: FillColor={_clockModel.FillColor} BorderColor={_clockModel.BorderColor}");
+                var cw = app?.GetClockWindow(_clockModel.Id);
+                System.Diagnostics.Debug.WriteLine($"[preview] Clock GetClockWindow id={_clockModel.Id} null? {cw==null}");
+                cw?.RefreshAppearance(_clockModel);
+                System.Diagnostics.Debug.WriteLine($"[preview] Clock RefreshAppearance done");
+                break;
+            case WidgetSettingsTarget.Calendar when _calModel != null && record is CalendarPreset cal:
+                CopyInto(cal.Calendar, _calModel);
+                app?.GetCalendarWindow(_calModel.Id)?.RefreshAppearance(_calModel);
+                break;
+            case WidgetSettingsTarget.StickyNote when _noteModel != null && record is StickyNotePreset n:
+                CopyInto(n.Note, _noteModel);
+                if (app?.NotesService?.Windows.TryGetValue(_noteModel.Id, out var nw) == true && nw is StickyNoteWindow snw)
+                    snw.RefreshAppearance(_noteModel);
+                break;
+            case WidgetSettingsTarget.Panel when _panelConfig != null && record is PanelPreset p:
+                if (app?.PanelWindow is PanelWindow pw)
+                    pw.RefreshAppearance(p.Config);
+                break;
+        }
+    }
+
+    void SavePreset_Click(object s, RoutedEventArgs e)
+    {
+        var kind = TargetToKind(_target);
+        var payload = BuildCurrentPayload();
+        if (payload == null) return;
+        PresetButtonsHelper.OpenSave(this, kind, payload);
+    }
+
+    private static PresetKind TargetToKind(WidgetSettingsTarget t) => t switch
+    {
+        WidgetSettingsTarget.Clock => PresetKind.Clock,
+        WidgetSettingsTarget.Calendar => PresetKind.Calendar,
+        WidgetSettingsTarget.StickyNote => PresetKind.StickyNote,
+        WidgetSettingsTarget.Panel => PresetKind.Panel,
+        _ => PresetKind.Zone
+    };
+
+    /// <summary>Snapshot the dialog's current state into the right typed payload.</summary>
+    private object? BuildCurrentPayload() => _target switch
+    {
+        WidgetSettingsTarget.Clock when _clockModel != null => _clockModel.Clone(),
+        WidgetSettingsTarget.Calendar when _calModel != null => _calModel.Clone(),
+        WidgetSettingsTarget.StickyNote when _noteModel != null => _noteModel.Clone(),
+        WidgetSettingsTarget.Panel when _panelConfig != null => PanelPresetConfig.FromConfig(_panelConfig),
+        _ => null
+    };
+
+    /// <summary>Replace the dialog's model with the picked preset's payload and refresh widgets.</summary>
+    private void ApplyPayload(object picked)
+    {
+        switch (_target)
+        {
+            case WidgetSettingsTarget.Clock when _clockModel != null && picked is DesktopClock c:
+                CopyInto(c, _clockModel);
+                LoadFromClock(_clockModel);
+                break;
+            case WidgetSettingsTarget.Calendar when _calModel != null && picked is DesktopCalendar cal:
+                CopyInto(cal, _calModel);
+                LoadFromCalendar(_calModel);
+                break;
+            case WidgetSettingsTarget.StickyNote when _noteModel != null && picked is StickyNote n:
+                CopyInto(n, _noteModel);
+                LoadFromNote(_noteModel, _panelZoneManager);
+                break;
+            case WidgetSettingsTarget.Panel when _panelConfig != null && picked is PanelPresetConfig pcfg:
+                pcfg.ApplyTo(_panelConfig);
+                LoadFromConfig(_panelConfig, _panelZoneManager);
+                break;
+        }
+    }
+
+    private static void CopyInto<T>(T src, T dst) where T : class
+    {
+        // POCOs in this project expose public mutable properties — assignment is enough.
+        foreach (var prop in typeof(T).GetProperties())
+        {
+            if (!prop.CanRead || !prop.CanWrite) continue;
+            if (prop.GetSetMethod(true) == null) continue;
+            prop.SetValue(dst, prop.GetValue(src));
+        }
+    }
+
     void ApplyButton_Click(object s, RoutedEventArgs e)
     {
         if (!double.TryParse(BorderThicknessText, out var bt) || bt < 0.5 || bt > 10)
@@ -991,8 +1124,8 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
                 _noteModel.GlassColorMode = _snapGlassColorMode;
                 if (double.TryParse(_snapWidgetWidth, out var rw)) _noteModel.Width = rw;
                 if (double.TryParse(_snapWidgetHeight, out var rh)) _noteModel.Height = rh;
-                if (Application.Current is App app3 && app3._noteWindows.TryGetValue(_noteModel.Id, out var noteWin3) && noteWin3 is StickyNoteWindow snw3)
-                    snw3.RefreshAppearance();
+                if (Application.Current is App app3 && app3.NotesService?.Windows.TryGetValue(_noteModel.Id, out var noteWin3) == true)
+                    noteWin3.RefreshAppearance();
                 break;
 
             case WidgetSettingsTarget.Panel when _panelConfig != null:

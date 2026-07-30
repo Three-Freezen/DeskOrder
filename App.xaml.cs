@@ -23,16 +23,14 @@ public partial class App : System.Windows.Application
     private readonly LocalizationService _loc = LocalizationService.Instance;
     private static Mutex? _mutex;
 
-    // Track open widget windows
-    internal readonly Dictionary<Guid, Window> _noteWindows = new();
-    internal readonly Dictionary<Guid, Window> _clockWindows = new();
-    internal readonly Dictionary<Guid, Window> _calendarWindows = new();
-
-    // Public accessors for live preview lookup
+    // Public accessors for live preview lookup (forward to services — windows
+    // are now owned by NotesService / WidgetService / PanelService, not here)
     public PanelWindow? PanelWindow => _panelService?.Window;
-    public ClockWidget? GetClockWindow(Guid id) => _clockWindows.TryGetValue(id, out var w) && w is ClockWidget cw ? cw : null;
-    public CalendarWidget? GetCalendarWindow(Guid id) => _calendarWindows.TryGetValue(id, out var w) && w is CalendarWidget cal ? cal : null;
+    public ClockWidget? GetClockWindow(Guid id) => _widgetService?.GetClockWindow(id);
+    public CalendarWidget? GetCalendarWindow(Guid id) => _widgetService?.GetCalendarWindow(id);
     public PanelService? PanelService => _panelService;
+    public NotesService? NotesService => _notesService;
+    public WidgetService? WidgetService => _widgetService;
     public ManagementWindow? ManagementWindow => _managementWindow;
 
     // ── Global hotkey ──
@@ -178,7 +176,7 @@ public partial class App : System.Windows.Application
 
     private void ToggleNoteByHotkey(Guid noteId)
     {
-        if (_noteWindows.TryGetValue(noteId, out var window))
+        if (_notesService.Windows.TryGetValue(noteId, out var window))
         {
             if (window is StickyNoteWindow snw && snw.RestoreButton.Visibility == Visibility.Visible)
             {
@@ -230,7 +228,7 @@ public partial class App : System.Windows.Application
 
     public void ToggleNoteWindow(Models.StickyNote note)
     {
-        if (_noteWindows.TryGetValue(note.Id, out var window))
+        if (_notesService.Windows.TryGetValue(note.Id, out var window))
         {
             if (window.IsVisible)
             {
@@ -259,12 +257,12 @@ public partial class App : System.Windows.Application
 
     public void OpenNoteWindowFromManager(Models.StickyNote note)
     {
-        if (_noteWindows.ContainsKey(note.Id)) return;
+        if (_notesService.Windows.ContainsKey(note.Id)) return;
         note.IsVisible = true;
         OpenNoteWindow(note);
     }
 
-    public bool IsNoteWindowOpen(Guid noteId) => _noteWindows.ContainsKey(noteId);
+    public bool IsNoteWindowOpen(Guid noteId) => _notesService.Windows.ContainsKey(noteId);
 
     public void RefreshNoteHotkeys()
     {
@@ -394,10 +392,10 @@ public partial class App : System.Windows.Application
 
     private void OpenNoteWindow(Models.StickyNote note)
     {
-        if (_noteWindows.ContainsKey(note.Id)) return;
+        if (_notesService.Windows.ContainsKey(note.Id)) return;
         var window = new StickyNoteWindow(note, _notesService!);
-        window.Closed += (_, _) => _noteWindows.Remove(note.Id);
-        _noteWindows[note.Id] = window;
+        window.Closed += (_, _) => _notesService.Windows.Remove(note.Id);
+        _notesService.Windows[note.Id] = window;
         window.Show();
     }
 
@@ -464,12 +462,12 @@ public partial class App : System.Windows.Application
     {
         if (_notesService == null) return;
         var activeIds = new HashSet<Guid>(_notesService.Notes.Select(n => n.Id));
-        foreach (var kv in _noteWindows.ToList())
+        foreach (var kv in _notesService.Windows.ToList())
         {
             if (!activeIds.Contains(kv.Key))
             {
                 try { kv.Value.Close(); } catch { }
-                _noteWindows.Remove(kv.Key);
+                _notesService.Windows.Remove(kv.Key);
             }
         }
     }
