@@ -62,15 +62,9 @@ public class NotesService
     public void Save()
     {
         if (_appConfig == null) return;
-        // Reload config to preserve settings managed by other components (e.g., hotkeys)
-        var latestConfig = _configService.Load();
-        _appConfig.Notes = Notes.ToList();
-        // Preserve hotkey and other settings from the latest config
-        _appConfig.PanelHotkeyEnabled = latestConfig.PanelHotkeyEnabled;
-        _appConfig.PanelHotkeyModifiers = latestConfig.PanelHotkeyModifiers;
-        _appConfig.PanelHotkeyKey = latestConfig.PanelHotkeyKey;
-        _appConfig.PanelCustomHotkeys = latestConfig.PanelCustomHotkeys;
-        _appConfig.PanelUseGlobalAppearance = latestConfig.PanelUseGlobalAppearance;
-        try { _configService.Save(_appConfig); } catch { }
+        ConfigSaver.SavePreservingPanelSettings(_configService, cfg =>
+        {
+            cfg.Notes = Notes.ToList();
+        });
     }
 }

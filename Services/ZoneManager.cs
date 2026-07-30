@@ -281,25 +281,10 @@ public class ZoneManager
         ZonesChanged?.Invoke();
     }
 
-    public void SaveConfig()
+    public void SaveConfig() => ConfigSaver.SavePreservingPanelSettings(_configService, cfg =>
     {
-        // Reload config to preserve settings managed by other components (e.g., hotkeys)
-        var latestConfig = _configService.Load();
-        _config.Zones = Zones.ToList();
-        // Preserve hotkey and other settings from the latest config
-        _config.PanelHotkeyEnabled = latestConfig.PanelHotkeyEnabled;
-        _config.PanelHotkeyModifiers = latestConfig.PanelHotkeyModifiers;
-        _config.PanelHotkeyKey = latestConfig.PanelHotkeyKey;
-        _config.PanelCustomHotkeys = latestConfig.PanelCustomHotkeys;
-        _config.PanelBackgroundImagePath = latestConfig.PanelBackgroundImagePath;
-        _config.PanelUseGlobalAppearance = latestConfig.PanelUseGlobalAppearance;
-        // PanelBgImageStretch: always UniformToFill
-        _config.PanelBackgroundImageOpacity = latestConfig.PanelBackgroundImageOpacity;
-        _config.PanelBgImageZoom = latestConfig.PanelBgImageZoom;
-        _config.PanelBgImageOffsetX = latestConfig.PanelBgImageOffsetX;
-        _config.PanelBgImageOffsetY = latestConfig.PanelBgImageOffsetY;
-        _configService.Save(_config);
-    }
+        cfg.Zones = Zones.ToList();
+    });
 
     public AppConfig GetConfig() => _config;
 

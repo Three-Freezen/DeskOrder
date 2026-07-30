@@ -59,6 +59,17 @@ public class WidgetService
         ClocksChanged?.Invoke();
     }
 
+    /// <summary>
+    /// The clock the user is most likely interacting with — currently the most
+    /// recently added visible clock. Used by <see cref="Views.LoadPresetDialog"/>
+    /// to live-track which mode (Digital / Analog) to show in the ClockCard preview.
+    /// Returns null if no visible clock exists.
+    /// </summary>
+    public DesktopClock? GetActiveClock()
+    {
+        return Clocks.LastOrDefault(c => c.IsVisible);
+    }
+
     // ── Calendar ──
 
     public DesktopCalendar CreateCalendar(double x = 400, double y = 100)
@@ -90,16 +101,10 @@ public class WidgetService
     public void Save()
     {
         if (_appConfig == null) return;
-        // Reload config to preserve settings managed by other components (e.g., hotkeys)
-        var latestConfig = _configService.Load();
-        _appConfig.Clocks = Clocks.ToList();
-        _appConfig.Calendars = Calendars.ToList();
-        // Preserve hotkey and other settings from the latest config
-        _appConfig.PanelHotkeyEnabled = latestConfig.PanelHotkeyEnabled;
-        _appConfig.PanelHotkeyModifiers = latestConfig.PanelHotkeyModifiers;
-        _appConfig.PanelHotkeyKey = latestConfig.PanelHotkeyKey;
-        _appConfig.PanelCustomHotkeys = latestConfig.PanelCustomHotkeys;
-        _appConfig.PanelUseGlobalAppearance = latestConfig.PanelUseGlobalAppearance;
-        try { _configService.Save(_appConfig); } catch { }
+        ConfigSaver.SavePreservingPanelSettings(_configService, cfg =>
+        {
+            cfg.Clocks = Clocks.ToList();
+            cfg.Calendars = Calendars.ToList();
+        });
     }
 }
