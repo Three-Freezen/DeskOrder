@@ -6,7 +6,7 @@ namespace DesktopZones.Models;
 
 // ── Sticky Note ──
 
-public class StickyNote
+public class StickyNote : AppearanceModel
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Title { get; set; } = "Note";
@@ -19,30 +19,16 @@ public class StickyNote
     public double FontSize { get; set; } = 14;
     public bool IsVisible { get; set; } = true;
     public bool PinnedTop { get; set; } = false;
-    // ── Appearance (mirrors Zone appearance system) ──
-    public bool EnableAcrylic { get; set; } = true;
-    public string BorderColor { get; set; } = "#40FFFFFF";
-    public string FillColor { get; set; } = "#08000000";
+    // ── Appearance (most fields inherited from AppearanceModel) ──
     public double BorderThickness { get; set; } = 1.0;
-    public int GlassBlurAmount { get; set; } = 18;
-    public int GlassTintOpacity { get; set; } = 50;
-    public int GlassTintLuminosity { get; set; } = 100;
-    public string GlassColorMode { get; set; } = "Default";
-    public bool EnableLiquidGlass { get; set; } = false;
     public bool UseGlobalAppearance { get; set; } = true;
     // ── Title bar / button appearance ──
     public string TitleBarFillColor { get; set; } = "#10FFFFFF";
     public double TitleBarOpacity { get; set; } = 6;
     public double ControlOpacity { get; set; } = 40;
     public string TitleTextColor { get; set; } = "#E0E0E0";
-    // ── Background image ──
-    public string BackgroundImagePath { get; set; } = "";
-    public string BgImageStretch { get; set; } = "UniformToFill";
+    // ── Background image (Opacity stays per-model — StickyNote uses 30, Zone uses 40) ──
     public double BackgroundImageOpacity { get; set; } = 30;
-    public double BgImageZoom { get; set; } = 1.0;
-    public double BgImageOffsetX { get; set; } = 0;
-    public double BgImageOffsetY { get; set; } = 0;
-    public bool EnableRestoreButton { get; set; } = true;
     // ── Save ──
     public string LastSavePath { get; set; } = "";
     // ── Hotkey ──
@@ -53,34 +39,33 @@ public class StickyNote
     public DateTime CreatedAt { get; set; } = DateTime.Now;
     public DateTime ModifiedAt { get; set; } = DateTime.Now;
 
-    public StickyNote Clone() => new()
+    public StickyNote Clone()
     {
-        Id = Id, Title = Title, Content = Content,
-        X = X, Y = Y, Width = Width, Height = Height,
-        NoteColor = NoteColor, FontSize = FontSize,
-        IsVisible = IsVisible, PinnedTop = PinnedTop,
-        EnableAcrylic = EnableAcrylic, BorderColor = BorderColor,
-        FillColor = FillColor, BorderThickness = BorderThickness,
-        GlassBlurAmount = GlassBlurAmount, GlassTintOpacity = GlassTintOpacity,
-        GlassTintLuminosity = GlassTintLuminosity, GlassColorMode = GlassColorMode,
-        EnableLiquidGlass = EnableLiquidGlass, UseGlobalAppearance = UseGlobalAppearance,
-        TitleBarFillColor = TitleBarFillColor, TitleBarOpacity = TitleBarOpacity,
-        ControlOpacity = ControlOpacity, TitleTextColor = TitleTextColor,
-        BackgroundImagePath = BackgroundImagePath, BgImageStretch = BgImageStretch,
-        BackgroundImageOpacity = BackgroundImageOpacity, BgImageZoom = BgImageZoom,
-        BgImageOffsetX = BgImageOffsetX, BgImageOffsetY = BgImageOffsetY,
-        EnableRestoreButton = EnableRestoreButton, LastSavePath = LastSavePath,
-        HotkeyEnabled = HotkeyEnabled, HotkeyModifiers = HotkeyModifiers,
-        HotkeyKey = HotkeyKey, CustomHotkeys = new List<CustomHotkey>(CustomHotkeys),
-        CreatedAt = CreatedAt, ModifiedAt = ModifiedAt
-    };
+        var copy = new StickyNote
+        {
+            Id = Id, Title = Title, Content = Content,
+            X = X, Y = Y, Width = Width, Height = Height,
+            NoteColor = NoteColor, FontSize = FontSize,
+            IsVisible = IsVisible, PinnedTop = PinnedTop,
+            BorderThickness = BorderThickness, UseGlobalAppearance = UseGlobalAppearance,
+            TitleBarFillColor = TitleBarFillColor, TitleBarOpacity = TitleBarOpacity,
+            ControlOpacity = ControlOpacity, TitleTextColor = TitleTextColor,
+            BackgroundImageOpacity = BackgroundImageOpacity,
+            LastSavePath = LastSavePath,
+            HotkeyEnabled = HotkeyEnabled, HotkeyModifiers = HotkeyModifiers,
+            HotkeyKey = HotkeyKey, CustomHotkeys = new List<CustomHotkey>(CustomHotkeys),
+            CreatedAt = CreatedAt, ModifiedAt = ModifiedAt
+        };
+        Helpers.CloneHelper.CopyBaseProperties<AppearanceModel>(this, copy);
+        return copy;
+    }
 }
 
 // ── Desktop Clock ──
 
 public enum ClockDisplayMode { Digital, Analog }
 
-public class DesktopClock
+public class DesktopClock : AppearanceModel
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public double X { get; set; } = 300;
@@ -97,28 +82,14 @@ public class DesktopClock
     public double Opacity { get; set; } = 1.0;
     public ClockDisplayMode Mode { get; set; } = ClockDisplayMode.Digital;
     public string AccentColor { get; set; } = "#FFFFFFFF";
-    // ── Appearance ──
-    public bool EnableAcrylic { get; set; } = true;
-    public string BorderColor { get; set; } = "#40FFFFFF";
-    public string FillColor { get; set; } = "#08000000";
+    // ── Appearance (most fields inherited from AppearanceModel) ──
     public double BorderThickness { get; set; } = 1.0;
-    public int GlassBlurAmount { get; set; } = 18;
-    public int GlassTintOpacity { get; set; } = 50;
-    public int GlassTintLuminosity { get; set; } = 100;
-    public string GlassColorMode { get; set; } = "Default";
-    public bool EnableLiquidGlass { get; set; } = false;
     public bool UseGlobalAppearance { get; set; } = true;
     // ── Mode-independent fill ──
     public string AnalogFillColor { get; set; } = "#08000000";
     public string DigitalFillColor { get; set; } = "#08000000";
-    // ── Analog clock background image ──
-    public string BackgroundImagePath { get; set; } = "";
-    public string BgImageStretch { get; set; } = "UniformToFill";
+    // ── Background image (Opacity stays per-model — 30 default) ──
     public double BackgroundImageOpacity { get; set; } = 30;
-    public double BgImageZoom { get; set; } = 1.0;
-    public double BgImageOffsetX { get; set; } = 0;
-    public double BgImageOffsetY { get; set; } = 0;
-    public bool EnableRestoreButton { get; set; } = true;
     // ── Digital clock background image ──
     public string DigitalBackgroundImagePath { get; set; } = "";
     public string DigitalBgImageStretch { get; set; } = "UniformToFill";
@@ -127,33 +98,28 @@ public class DesktopClock
     public double DigitalBgImageOffsetX { get; set; } = 0;
     public double DigitalBgImageOffsetY { get; set; } = 0;
 
-    public DesktopClock Clone() => new()
+    public DesktopClock Clone()
     {
-        Id = Id, X = X, Y = Y, Width = Width, Height = Height, IsVisible = IsVisible,
-        ShowSeconds = ShowSeconds, ShowDate = ShowDate,
-        Use24Hour = Use24Hour, TextColor = TextColor,
-        FontSize = FontSize, FontFamily = FontFamily,
-        Opacity = Opacity, Mode = Mode, AccentColor = AccentColor,
-        EnableAcrylic = EnableAcrylic, BorderColor = BorderColor,
-        FillColor = FillColor, BorderThickness = BorderThickness,
-        GlassBlurAmount = GlassBlurAmount, GlassTintOpacity = GlassTintOpacity,
-        GlassTintLuminosity = GlassTintLuminosity, GlassColorMode = GlassColorMode,
-        EnableLiquidGlass = EnableLiquidGlass, UseGlobalAppearance = UseGlobalAppearance,
-        AnalogFillColor = AnalogFillColor, DigitalFillColor = DigitalFillColor,
-        BackgroundImagePath = BackgroundImagePath,
-        BgImageStretch = BgImageStretch,
-        BackgroundImageOpacity = BackgroundImageOpacity,
-        BgImageZoom = BgImageZoom,
-        BgImageOffsetX = BgImageOffsetX,
-        BgImageOffsetY = BgImageOffsetY,
-        EnableRestoreButton = EnableRestoreButton,
-        DigitalBackgroundImagePath = DigitalBackgroundImagePath,
-        DigitalBgImageStretch = DigitalBgImageStretch,
-        DigitalBackgroundImageOpacity = DigitalBackgroundImageOpacity,
-        DigitalBgImageZoom = DigitalBgImageZoom,
-        DigitalBgImageOffsetX = DigitalBgImageOffsetX,
-        DigitalBgImageOffsetY = DigitalBgImageOffsetY
-    };
+        var copy = new DesktopClock
+        {
+            Id = Id, X = X, Y = Y, Width = Width, Height = Height, IsVisible = IsVisible,
+            ShowSeconds = ShowSeconds, ShowDate = ShowDate,
+            Use24Hour = Use24Hour, TextColor = TextColor,
+            FontSize = FontSize, FontFamily = FontFamily,
+            Opacity = Opacity, Mode = Mode, AccentColor = AccentColor,
+            BorderThickness = BorderThickness, UseGlobalAppearance = UseGlobalAppearance,
+            AnalogFillColor = AnalogFillColor, DigitalFillColor = DigitalFillColor,
+            BackgroundImageOpacity = BackgroundImageOpacity,
+            DigitalBackgroundImagePath = DigitalBackgroundImagePath,
+            DigitalBgImageStretch = DigitalBgImageStretch,
+            DigitalBackgroundImageOpacity = DigitalBackgroundImageOpacity,
+            DigitalBgImageZoom = DigitalBgImageZoom,
+            DigitalBgImageOffsetX = DigitalBgImageOffsetX,
+            DigitalBgImageOffsetY = DigitalBgImageOffsetY
+        };
+        Helpers.CloneHelper.CopyBaseProperties<AppearanceModel>(this, copy);
+        return copy;
+    }
 }
 
 // ── Desktop Calendar ──
@@ -184,7 +150,7 @@ public class CalendarNote
     };
 }
 
-public class DesktopCalendar
+public class DesktopCalendar : AppearanceModel
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public double X { get; set; } = 400;
@@ -198,25 +164,11 @@ public class DesktopCalendar
     public string TodayColor { get; set; } = "#FF6C63FF";
     public double FontSize { get; set; } = 14;
     public double Opacity { get; set; } = 1.0;
-    // ── Appearance ──
-    public bool EnableAcrylic { get; set; } = true;
-    public string BorderColor { get; set; } = "#40FFFFFF";
-    public string FillColor { get; set; } = "#08000000";
+    // ── Appearance (most fields inherited from AppearanceModel) ──
     public double BorderThickness { get; set; } = 1.0;
-    public int GlassBlurAmount { get; set; } = 18;
-    public int GlassTintOpacity { get; set; } = 50;
-    public int GlassTintLuminosity { get; set; } = 100;
-    public string GlassColorMode { get; set; } = "Default";
-    public bool EnableLiquidGlass { get; set; } = false;
     public bool UseGlobalAppearance { get; set; } = true;
-    // ── Background image ──
-    public string BackgroundImagePath { get; set; } = "";
-    public string BgImageStretch { get; set; } = "UniformToFill";
+    // ── Background image (Opacity stays per-model — 30 default) ──
     public double BackgroundImageOpacity { get; set; } = 30;
-    public double BgImageZoom { get; set; } = 1.0;
-    public double BgImageOffsetX { get; set; } = 0;
-    public double BgImageOffsetY { get; set; } = 0;
-    public bool EnableRestoreButton { get; set; } = true;
     // Notes keyed by "yyyy-MM-dd"
     private Dictionary<string, List<CalendarNote>> _notes = new();
     public Dictionary<string, List<CalendarNote>> Notes
@@ -230,21 +182,19 @@ public class DesktopCalendar
     [JsonIgnore]
     public int DisplayMonth { get; set; } = DateTime.Now.Month;
 
-    public DesktopCalendar Clone() => new()
+    public DesktopCalendar Clone()
     {
-        Id = Id, X = X, Y = Y, Width = Width, Height = Height, IsVisible = IsVisible,
-        ShowWeekNumbers = ShowWeekNumbers, StartOnMonday = StartOnMonday,
-        TextColor = TextColor, TodayColor = TodayColor,
-        FontSize = FontSize, Opacity = Opacity,
-        EnableAcrylic = EnableAcrylic, BorderColor = BorderColor,
-        FillColor = FillColor, BorderThickness = BorderThickness,
-        GlassBlurAmount = GlassBlurAmount, GlassTintOpacity = GlassTintOpacity,
-        GlassTintLuminosity = GlassTintLuminosity, GlassColorMode = GlassColorMode,
-        EnableLiquidGlass = EnableLiquidGlass, UseGlobalAppearance = UseGlobalAppearance,
-        BackgroundImagePath = BackgroundImagePath, BgImageStretch = BgImageStretch,
-        BackgroundImageOpacity = BackgroundImageOpacity, BgImageZoom = BgImageZoom,
-        BgImageOffsetX = BgImageOffsetX, BgImageOffsetY = BgImageOffsetY,
-        EnableRestoreButton = EnableRestoreButton,
-        Notes = Notes.ToDictionary(kvp => kvp.Key, kvp => new List<CalendarNote>(kvp.Value.Select(n => n.Clone())))
-    };
+        var copy = new DesktopCalendar
+        {
+            Id = Id, X = X, Y = Y, Width = Width, Height = Height, IsVisible = IsVisible,
+            ShowWeekNumbers = ShowWeekNumbers, StartOnMonday = StartOnMonday,
+            TextColor = TextColor, TodayColor = TodayColor,
+            FontSize = FontSize, Opacity = Opacity,
+            BorderThickness = BorderThickness, UseGlobalAppearance = UseGlobalAppearance,
+            BackgroundImageOpacity = BackgroundImageOpacity,
+            Notes = Notes.ToDictionary(kvp => kvp.Key, kvp => new List<CalendarNote>(kvp.Value.Select(n => n.Clone())))
+        };
+        Helpers.CloneHelper.CopyBaseProperties<AppearanceModel>(this, copy);
+        return copy;
+    }
 }
