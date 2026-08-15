@@ -363,11 +363,7 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
-                <!-- Saved hint, briefly shown after a successful preset save -->
-                <TextBlock x:Name="SavedHint" Text="预设已保存"
-                           Foreground="#A0E0FFE0" FontSize="11"
-                           VerticalAlignment="Center" Margin="0,0,12,0"
-                           Visibility="Collapsed"/>
+                <!-- SavedHint was moved into SavePresetDialog.xaml so every caller gets it. -->
 
                 <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
                     <Button x:Name="SavePresetButton" Click="SavePresetButton_Click"

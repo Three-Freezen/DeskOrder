@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Threading;
 using DesktopZones.Models;
 using DesktopZones.Services;
 
@@ -9,16 +10,18 @@ public partial class SavePresetDialog : Window
 {
     private readonly LocalizationService _loc = LocalizationService.Instance;
     private readonly PresetService _service;
-    private readonly Zone _zone;
+    private readonly object _payload;
 
     /// <summary>The preset that was saved (set when DialogResult is true).</summary>
-    public ZonePreset? SavedPreset { get; private set; }
+    public PresetRecord? SavedPreset { get; private set; }
 
-    public SavePresetDialog(PresetService service, Zone zone)
+    private DispatcherTimer? _savedHintTimer;
+
+    public SavePresetDialog(PresetService service, object payload)
     {
         InitializeComponent();
         _service = service;
-        _zone = zone;
+        _payload = payload;
         ApplyLoc();
         NameBox.Text = _service.SuggestNextName();
         NameBox.Focus();
@@ -28,12 +31,16 @@ public partial class SavePresetDialog : Window
     private void ApplyLoc()
     {
         var cn = _loc.CurrentLanguage == Services.Language.Chinese;
-        Title = _loc["Preset.SaveTitle"];
-        DialogTitle.Text = _loc["Preset.SaveTitle"];
+        // Window/Dialog title — derived per-kind so Clock/Calendar/Note/MergedGroup/Panel
+        // no longer share Zone's hardcoded "保存分区预设".
+        var titleKey = $"Preset.SaveTitle.{_service.Kind}";
+        Title = _loc[titleKey];
+        DialogTitle.Text = _loc[titleKey];
         LabelName.Text = _loc["Preset.NameLabel"];
         EmptyHint.Text = _loc["Preset.EmptyNameHint"];
         SaveButton.Content = _loc["Preset.Save"];
         CancelButton.Content = _loc["Preset.Cancel"];
+        SavedHint.Text = _loc["Preset.Saved"];
         RefreshEmptyHint();
     }
 
@@ -81,7 +88,8 @@ public partial class SavePresetDialog : Window
 
         try
         {
-            SavedPreset = _service.Save(name, _zone);
+            SavedPreset = _service.Save(name, _payload);
+            ShowSavedHint();
             DialogResult = true;
             Close();
         }
@@ -90,6 +98,21 @@ public partial class SavePresetDialog : Window
             MessageBox.Show($"Failed to save preset:\n{ex.Message}", "DeskOrder",
                 MessageBoxButton.OK, MessageBoxImage.Error);
         }
+    }
+
+    /// <summary>Briefly flash the "saved" hint. Used to live here only on ZoneSettingsDialog;
+    /// moved into the dialog itself so every caller benefits from the same UX.</summary>
+    void ShowSavedHint()
+    {
+        SavedHint.Visibility = Visibility.Visible;
+        _savedHintTimer?.Stop();
+        _savedHintTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+        _savedHintTimer.Tick += (_, _) =>
+        {
+            SavedHint.Visibility = Visibility.Collapsed;
+            _savedHintTimer!.Stop();
+        };
+        _savedHintTimer.Start();
     }
 
     private void CancelButton_Click(object sender, RoutedEventArgs e)

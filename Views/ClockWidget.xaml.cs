@@ -291,9 +291,14 @@ public partial class ClockWidget : Window
 
     // ── Style (border / fill) ──
 
-    /// <summary>Refresh all visual styles from the current _clock model (for live preview).</summary>
-    public void RefreshAppearance()
+    /// <summary>Refresh all visual styles from the current _clock model (for live preview).
+    /// Accepts an optional <paramref name="clock"/> to refresh the local reference, mirroring
+    /// ZoneWindow.RefreshZone's "KEY FIX" pattern — without it, OnClocksChanged reassigning
+    /// _clock leaves the widget looking at a stale object after a save while the dialog
+    /// still holds the fresh one.</summary>
+    public void RefreshAppearance(DesktopClock? clock = null)
     {
+        if (clock != null) _clock = clock;
         if (MainContent.Visibility == Visibility.Visible)
             ApplyAcrylic();
         ApplyBackgroundImage();

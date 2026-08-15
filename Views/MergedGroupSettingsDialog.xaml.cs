@@ -413,6 +413,58 @@ public partial class MergedGroupSettingsDialog : Window, INotifyPropertyChanged
         DialogResult = true;
     }
 
+    void LoadPreset_Click(object sender, RoutedEventArgs e)
+    {
+        var snap = _zone.Clone();
+        var applied = PresetButtonsHelper.OpenLoad(this, PresetKind.MergedGroup, _zone,
+            picked => { /* onCardPicked already applied — no-op */ },
+            record =>
+            {
+                var picked = (Zone)PresetService.GetPayload(record);
+                CopyMergedGroupFields(picked, _zone);
+                // Skip PushToZone here: it reads from the dialog controls (which still
+                // hold the pre-preset values) and would overwrite the preset copy
+                // we just laid down. ZoneSettingsDialog's onCardPicked has the same
+                // shape for the same reason.
+                _zoneManager.GetZoneWindow(_zone.Id)?.RefreshZone(_zone);
+            });
+        if (applied != true)
+        {
+            CopyMergedGroupFields(snap, _zone);
+            PushToZone();
+            _zoneManager.GetZoneWindow(_zone.Id)?.RefreshZone(_zone);
+        }
+    }
+
+    void SavePreset_Click(object sender, RoutedEventArgs e)
+    {
+        PushToZone();
+        PresetButtonsHelper.OpenSave(this, PresetKind.MergedGroup, _zone.Clone());
+    }
+
+    private static void CopyMergedGroupFields(Zone src, Zone dst)
+    {
+        dst.MergedGroupName = src.MergedGroupName;
+        dst.MergedGroupIcon = src.MergedGroupIcon;
+        dst.MergedGroupBorderColor = src.MergedGroupBorderColor;
+        dst.MergedGroupBorderThickness = src.MergedGroupBorderThickness;
+        dst.MergedGroupCornerRadius = src.MergedGroupCornerRadius;
+        dst.MergedGroupFillColor = src.MergedGroupFillColor;
+        dst.MergedGroupTitleBarFillColor = src.MergedGroupTitleBarFillColor;
+        dst.MergedGroupTitleTextColor = src.MergedGroupTitleTextColor;
+        dst.MergedGroupIconColor = src.MergedGroupIconColor;
+        dst.MergedGroupControlOpacity = src.MergedGroupControlOpacity;
+        dst.MergedGroupTitleBarOpacity = src.MergedGroupTitleBarOpacity;
+        dst.MergedGroupUseUnifiedFill = src.MergedGroupUseUnifiedFill;
+        dst.MergedGroupQuickBarMode = src.MergedGroupQuickBarMode;
+        dst.MergedGroupBackgroundImagePath = src.MergedGroupBackgroundImagePath;
+        dst.MergedGroupBgImageStretch = src.MergedGroupBgImageStretch;
+        dst.MergedGroupBgImageOffsetX = src.MergedGroupBgImageOffsetX;
+        dst.MergedGroupBgImageOffsetY = src.MergedGroupBgImageOffsetY;
+        dst.MergedGroupBgImageZoom = src.MergedGroupBgImageZoom;
+        dst.MergedGroupBackgroundImageOpacity = src.MergedGroupBackgroundImageOpacity;
+    }
+
     void CancelButton_Click(object sender, RoutedEventArgs e)
     {
         // Restore zone to snapshot state

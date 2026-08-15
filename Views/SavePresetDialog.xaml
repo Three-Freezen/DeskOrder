@@ -63,8 +63,19 @@
             </Grid>
 
             <!-- Buttons -->
-            <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
-                <Button x:Name="CancelButton" Content="取消"
+            <Grid Grid.Row="3" Margin="0,8,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <!-- Saved hint, briefly shown after a successful preset save. Lives here so every caller
+                     of SavePresetDialog benefits without each one wiring its own timer. -->
+                <TextBlock x:Name="SavedHint" Text="预设已保存"
+                           Foreground="#A0E0FFE0" FontSize="11"
+                           VerticalAlignment="Center" Margin="0,0,12,0"
+                           Visibility="Collapsed"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button x:Name="CancelButton" Content="取消"
                         Background="#15FFFFFF" Foreground="{StaticResource T2}"
                         BorderBrush="{StaticResource IBd}" BorderThickness="1"
                         Padding="20,8" Cursor="Hand" FontSize="12"
@@ -87,7 +98,8 @@
                         </Style>
                     </Button.Resources>
                 </Button>
-            </StackPanel>
+                </StackPanel>
+            </Grid>
         </Grid>
     </Border>
 </Window>

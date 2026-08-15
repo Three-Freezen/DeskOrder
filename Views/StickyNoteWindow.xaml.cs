@@ -24,7 +24,7 @@ public partial class StickyNoteWindow : Window
     static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
     private StickyNote _note;
     private readonly NotesService _notesService;
-    private readonly StickyNoteViewModel _vm;
+    private StickyNoteViewModel _vm;
     private readonly LocalizationService _loc = LocalizationService.Instance;
     private bool _initializing = true;
     private bool _pendingUnderline;
@@ -571,8 +571,9 @@ public partial class StickyNoteWindow : Window
     }
 
     /// <summary>Refresh all visual styles from the current _note model (for live preview).</summary>
-    public void RefreshAppearance()
+    public void RefreshAppearance(StickyNote? note = null)
     {
+        if (note != null) _note = note;
         if (MainContent.Visibility == Visibility.Visible)
             ApplyAcrylic();
         ApplyBackgroundImage();

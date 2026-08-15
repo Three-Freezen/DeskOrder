@@ -213,6 +213,17 @@ public partial class PanelWindow : Window
 
     // ── Acrylic ──
 
+    /// <summary>Refresh all visual styles. Optional <paramref name="cfg"/> is applied
+    /// to the underlying config first; mirrors ZoneWindow.RefreshZone's reference-update
+    /// pattern (see ClockWidget.RefreshAppearance for rationale).</summary>
+    public void RefreshAppearance(Models.PanelPresetConfig? cfg = null)
+    {
+        if (cfg != null) cfg.ApplyTo(_zoneManager.GetConfig());
+        ApplyAcrylic();
+        ApplyStyle();
+        ApplyBackgroundImage();
+    }
+
     public void ApplyAcrylic()
     {
         var config = _zoneManager.GetConfig();

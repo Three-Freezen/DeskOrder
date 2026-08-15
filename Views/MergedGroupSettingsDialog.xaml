@@ -330,7 +330,9 @@
             </ScrollViewer>
 
             <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
-                <Button x:Name="CancelButton" Background="#15FFFFFF" Foreground="{StaticResource T2}" BorderBrush="{StaticResource IBd}" BorderThickness="1" Padding="20,8" Cursor="Hand" FontSize="12"><Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="6"/></Style></Button.Resources></Button>
+                <Button x:Name="LoadPresetButton" Content="加载预设" Background="#15FFFFFF" Foreground="{StaticResource T2}" BorderBrush="{StaticResource IBd}" BorderThickness="1" Padding="16,8" Cursor="Hand" FontSize="12" Click="LoadPreset_Click"><Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="6"/></Style></Button.Resources></Button>
+                <Button x:Name="SavePresetButton" Content="保存预设" Background="#15FFFFFF" Foreground="{StaticResource T2}" BorderBrush="{StaticResource IBd}" BorderThickness="1" Padding="16,8" Margin="8,0,0,0" Cursor="Hand" FontSize="12" Click="SavePreset_Click"><Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="6"/></Style></Button.Resources></Button>
+                <Button x:Name="CancelButton" Background="#15FFFFFF" Foreground="{StaticResource T2}" BorderBrush="{StaticResource IBd}" BorderThickness="1" Padding="20,8" Margin="8,0,0,0" Cursor="Hand" FontSize="12"><Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="6"/></Style></Button.Resources></Button>
                 <Button x:Name="ApplyButton" Background="{StaticResource Acc}" Foreground="White" BorderThickness="0" Padding="20,8" Margin="8,0,0,0" Cursor="Hand" FontSize="12" FontWeight="SemiBold"><Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="6"/></Style></Button.Resources></Button>
             </StackPanel>
         </Grid>

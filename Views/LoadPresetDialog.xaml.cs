@@ -1,44 +1,75 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Threading;
 using DesktopZones.Models;
 using DesktopZones.Services;
+using DesktopZones.Views.Cards;
 
 namespace DesktopZones.Views;
 
-public partial class LoadPresetDialog : Window
+public partial class LoadPresetDialog : Window, INotifyPropertyChanged
 {
     private readonly LocalizationService _loc = LocalizationService.Instance;
     private readonly PresetService _service;
-    private readonly ObservableCollection<ZonePreset> _presets;
-    private readonly Action<ZonePreset>? _onCardPicked;
+    private readonly Services.WidgetService? _widgetService;
+    private readonly ObservableCollection<PresetRecord> _presets;
+    /// <summary>Wrapper items fed to the ItemsControl. Backing collection of typed wrappers.</summary>
+    private readonly ObservableCollection<Cards.PresetCardItem> _items = new();
+    private readonly Action<PresetRecord>? _onCardPicked;
+    private readonly DispatcherTimer? _clockModeTimer;
 
     /// <summary>The preset the user committed to (set when DialogResult is true).</summary>
-    public ZonePreset? SelectedPreset { get; private set; }
+    public PresetRecord? SelectedPreset { get; private set; }
 
-    private Border? _selectedCard; // the card that stays highlighted & scaled after the cursor leaves
+    /// <summary>The typed payload out of <see cref="SelectedPreset"/> (Zone / DesktopClock / …).</summary>
+    public object? SelectedPayload { get; private set; }
+
+    private Border? _selectedCard;
+
+    /// <summary>Live clock mode for ClockCard auto-switching (Digital ↔ Analog). Updates every 500ms.</summary>
+    private ClockDisplayMode _liveClockMode = ClockDisplayMode.Digital;
+    public ClockDisplayMode LiveClockMode
+    {
+        get => _liveClockMode;
+        private set
+        {
+            if (_liveClockMode != value)
+            {
+                _liveClockMode = value;
+                OnPropertyChanged();
+            }
+        }
+    }
 
     /// <summary>Cards fan out from the center: each index-step from center adds 4° of rotation.</summary>
     private const double AngleStep = 4.0;
-
-    /// <summary>Scale factors applied on hover. Always reverts to 1.0 on MouseLeave;
-    /// the selected card also reverts but keeps the Acc border + ZIndex.</summary>
     private const double HoverScaleX = 1.18;
     private const double HoverScaleY = 1.22;
 
-    public LoadPresetDialog(PresetService service, Action<ZonePreset>? onCardPicked)
+    public LoadPresetDialog(
+        PresetService service,
+        Services.WidgetService? widgetService = null,
+        Action<PresetRecord>? onCardPicked = null)
     {
         InitializeComponent();
         _service = service;
+        _widgetService = widgetService;
         _onCardPicked = onCardPicked;
-        _presets = new ObservableCollection<ZonePreset>(service.LoadAll());
+        _presets = new ObservableCollection<PresetRecord>(service.LoadAll());
+
+        // Card template is selected by PresetCardTemplateSelector (declared in XAML)
+        // based on each item's Kind — no per-call template wiring needed.
+
         ApplyLoc();
 
         if (_presets.Count == 0)
@@ -51,19 +82,90 @@ public partial class LoadPresetDialog : Window
         {
             EmptyHint.Visibility = Visibility.Collapsed;
             CardScroller.Visibility = Visibility.Visible;
-            ApplyButton.IsEnabled = false;  // enabled only after a card click
-            PresetList.ItemsSource = _presets;
+            ApplyButton.IsEnabled = false;
+            RebuildItems();
+            PresetList.ItemsSource = _items;
         }
+
+        // ClockCard live-mode polling: only active for Clock / MergedGroup / Panel
+        // (Panel has its own clock readout too — see the live Panel top bar).
+        if (_widgetService != null && (service.Kind == PresetKind.Clock || service.Kind == PresetKind.Panel))
+        {
+            LiveClockMode = _widgetService.GetActiveClock()?.Mode ?? ClockDisplayMode.Digital;
+            _clockModeTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+            _clockModeTimer.Tick += (_, _) =>
+            {
+                var m = _widgetService.GetActiveClock()?.Mode;
+                if (m.HasValue) LiveClockMode = m.Value;
+            };
+            _clockModeTimer.Start();
+            Closed += (_, _) => _clockModeTimer.Stop();
+
+            // Auto-select the first preset whose stored mode matches the live clock.
+            Dispatcher.BeginInvoke(new Action(AutoSelectMatchingMode), DispatcherPriority.Loaded);
+        }
+    }
+
+    private void AutoSelectMatchingMode()
+    {
+        foreach (var item in _items)
+        {
+            if (item.Payload is DesktopClock c && c.Mode == LiveClockMode)
+            {
+                if (PresetList.ItemContainerGenerator.ContainerFromItem(item) is DependencyObject container)
+                {
+                    var card = FindVisualChild<Border>(container);
+                    if (card != null)
+                    {
+                        Card_MouseLeftButtonDown(card, new MouseButtonEventArgs(InputManager.Current.PrimaryMouseDevice, 0, MouseButton.Left));
+                    }
+                }
+                break;
+            }
+        }
+    }
+
+    private static T? FindVisualChild<T>(DependencyObject parent) where T : DependencyObject
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            if (child is T t) return t;
+            var result = FindVisualChild<T>(child);
+            if (result != null) return result;
+        }
+        return null;
     }
 
     private void ApplyLoc()
     {
         var cn = _loc.CurrentLanguage == Services.Language.Chinese;
-        Title = _loc["Preset.LoadTitle"];
-        DialogTitle.Text = _loc["Preset.LoadTitle"];
+        // Window/Dialog title — derived per-kind. See SavePresetDialog for the matching key set.
+        var titleKey = $"Preset.LoadTitle.{_service.Kind}";
+        Title = _loc[titleKey];
+        DialogTitle.Text = _loc[titleKey];
         EmptyHintText.Text = _loc["Preset.Empty"];
         ApplyButton.Content = _loc["Preset.Apply"];
         CancelButton.Content = _loc["Preset.Cancel"];
+    }
+
+    // ── Items wrapping ──
+
+    private void RebuildItems()
+    {
+        _items.Clear();
+        foreach (var p in _presets)
+        {
+            // Calendar needs precomputed day grid + weekday header that the base wrapper
+            // can't carry. Other kinds (including MergedGroup, whose card is intentionally
+            // hardcoded with a fixed 3-tab layout) use the plain wrapper.
+            PresetCardItem item = p switch
+            {
+                CalendarPreset cp => new Cards.CalendarPresetCardItem(cp),
+                _ => new Cards.PresetCardItem(p)
+            };
+            _items.Add(item);
+        }
     }
 
     // ── Per-card setup ──
@@ -71,18 +173,37 @@ public partial class LoadPresetDialog : Window
     private void Card_Loaded(object sender, RoutedEventArgs e)
     {
         if (sender is not Border card) return;
-        if (card.DataContext is not ZonePreset preset) return;
+        if (card.DataContext is not Cards.PresetCardItem item) return;
 
-        var idx = _presets.IndexOf(preset);
+        // Construct TransformGroup in code so the Freezable is NOT auto-frozen by the
+        // XAML parser. Inline <Border.RenderTransform><TransformGroup>...</TransformGroup>
+        // in XAML freezes the group during parse, making RotateTransform.Angle read-only.
+        // A code-constructed TransformGroup stays mutable for SetCardAngle / AnimateScale.
+        if (card.RenderTransform is not TransformGroup || card.RenderTransform.IsFrozen)
+        {
+            card.RenderTransform = new TransformGroup
+            {
+                Children = new TransformCollection
+                {
+                    new RotateTransform(),
+                    new ScaleTransform()
+                }
+            };
+        }
+
+        var idx = _items.IndexOf(item);
         if (idx < 0) return;
-        card.Tag = idx;   // remember index for default rotation
+        card.Tag = idx;
         SetCardAngle(card, DefaultAngleFor(idx));
 
-        // Localize the right-click "Delete Preset" menu item (ContextMenu lives in a
-        // separate namescope so we walk the Items collection rather than FindName).
-        if (card.ContextMenu is { } menu && menu.Items.Count > 0 && menu.Items[0] is MenuItem item)
+        // Right-click delete: build the ContextMenu in code so the routed-event handler
+        // isn't trapped inside a Style.Setter.Value (WPF BAML compiler picks a wrong
+        // host type for AddHandler calls in that location, breaking the build).
+        if (card.ContextMenu == null)
         {
-            item.Header = _loc["Preset.DeleteMenuItem"];
+            var mi = new MenuItem { Header = _loc["Preset.DeleteMenuItem"] };
+            mi.Click += DeletePresetMenuItem_Click;
+            card.ContextMenu = new ContextMenu { Items = { mi } };
         }
     }
 
@@ -91,7 +212,6 @@ public partial class LoadPresetDialog : Window
 
     private static void SetCardAngle(Border card, double angle)
     {
-        // TransformGroup: [0] = RotateTransform (set in code), [1] = ScaleTransform (animated in code).
         if (card.RenderTransform is TransformGroup tg &&
             tg.Children.Count > 0 &&
             tg.Children[0] is RotateTransform rt)
@@ -100,14 +220,11 @@ public partial class LoadPresetDialog : Window
         }
     }
 
-    // ── Hover / Select: scale animation + ZIndex lift ──
-    // The card itself scales up on hover; Panel.SetZIndex raises it above its neighbours
-    // without any Panel.GetVisualChild override, so ItemsPanelTemplate is left untouched.
+    // ── Hover / Select ──
 
     private void Card_MouseEnter(object sender, MouseEventArgs e)
     {
         if (sender is not Border card) return;
-        // Lift the hovered card to the front and scale it up.
         SetCardZIndex(card, 1);
         AnimateScale(card, HoverScaleX, HoverScaleY);
     }
@@ -115,8 +232,6 @@ public partial class LoadPresetDialog : Window
     private void Card_MouseLeave(object sender, MouseEventArgs e)
     {
         if (sender is not Border card) return;
-        // Always return to normal size and back in the fan stack on MouseLeave.
-        // The selected card's Acc border is preserved (only ZIndex/scale revert).
         AnimateScale(card, 1.0, 1.0);
         SetCardZIndex(card, 0);
     }
@@ -124,9 +239,8 @@ public partial class LoadPresetDialog : Window
     private void Card_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (sender is not Border card) return;
-        if (card.DataContext is not ZonePreset preset) return;
+        if (card.DataContext is not Cards.PresetCardItem item) return;
 
-        // Demote the previously selected card (if any) back to default scale + Z.
         var prev = _selectedCard;
         _selectedCard = card;
         if (prev != null && prev != card)
@@ -136,20 +250,18 @@ public partial class LoadPresetDialog : Window
             AnimateScale(prev, 1.0, 1.0);
         }
 
-        // Promote the newly clicked card.
         SetCardSelectedStyle(card, selected: true);
         SetCardZIndex(card, 1);
         AnimateScale(card, HoverScaleX, HoverScaleY);
 
-        SelectedPreset = preset;
+        SelectedPreset = item.Record;
+        SelectedPayload = item.Payload;
         ApplyButton.IsEnabled = true;
 
-        // Push preview to the live zone window.
-        try { _onCardPicked?.Invoke(preset); }
-        catch { /* swallow preview errors so dialog stays usable */ }
+        try { _onCardPicked?.Invoke(item.Record); }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[preset preview] {ex}"); }
     }
 
-    /// <summary>Animate the card's ScaleTransform (index 1 in its TransformGroup) to (sx, sy).</summary>
     private static void AnimateScale(Border card, double sx, double sy)
     {
         if (card.RenderTransform is not TransformGroup tg) return;
@@ -171,19 +283,16 @@ public partial class LoadPresetDialog : Window
     /// </summary>
     private static void SetCardZIndex(Border card, int z)
     {
-        // Fast path: in a DataTemplate the root's TemplatedParent is the ContentPresenter
-        // that applied the template, which is exactly the FanPanel's direct child.
         if (card.TemplatedParent is UIElement container)
         {
             Panel.SetZIndex(container, z);
             return;
         }
-        // Fallback: walk the visual tree until we find the node whose parent is a Panel.
         DependencyObject? current = card;
         while (current != null)
         {
             var parent = VisualTreeHelper.GetParent(current);
-            if (parent == null) return;     // disconnected, give up
+            if (parent == null) return;
             if (parent is Panel && current is UIElement ui)
             {
                 Panel.SetZIndex(ui, z);
@@ -219,11 +328,10 @@ public partial class LoadPresetDialog : Window
 
     private void DeletePresetMenuItem_Click(object sender, RoutedEventArgs e)
     {
-        // The MenuItem's DataContext is inherited from its placement target (the Card Border),
-        // so it carries the ZonePreset we want to delete.
         if (sender is not MenuItem item) return;
-        if (item.DataContext is not ZonePreset preset) return;
+        if (item.DataContext is not Cards.PresetCardItem ci) return;
 
+        var preset = ci.Record;
         var confirm = MessageBox.Show(
             _loc.Get("Preset.DeleteConfirmMessage", preset.Name),
             _loc["Preset.DeleteConfirmTitle"],
@@ -231,23 +339,19 @@ public partial class LoadPresetDialog : Window
             MessageBoxImage.Warning);
         if (confirm != MessageBoxResult.OK) return;
 
-        // Persist deletion to disk before mutating the UI list.
         _service.Delete(preset.Id);
 
-        // If the deleted preset was the currently selected one, clear the selection state
-        // so the Apply button disables and the live zone preview is no longer "stale".
-        if (_selectedCard?.DataContext == preset)
+        if (_selectedCard?.DataContext == ci)
         {
             _selectedCard = null;
             SelectedPreset = null;
+            SelectedPayload = null;
             ApplyButton.IsEnabled = false;
         }
 
-        // ObservableCollection raises CollectionChanged, so the ItemsControl drops the card
-        // automatically — no need to re-assign ItemsSource.
         _presets.Remove(preset);
+        _items.Remove(ci);
 
-        // Last preset removed: switch the body to the empty-hint view.
         if (_presets.Count == 0)
         {
             EmptyHint.Visibility = Visibility.Visible;
@@ -255,6 +359,10 @@ public partial class LoadPresetDialog : Window
             ApplyButton.IsEnabled = false;
         }
     }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+    private void OnPropertyChanged([CallerMemberName] string? name = null)
+        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 }
 
 /// <summary>Parses "#AARRGGBB"/"#RRGGBB" hex strings into <see cref="Color"/>.</summary>
@@ -265,22 +373,16 @@ public class HexColorConverter : IValueConverter
         try
         {
             var s = value as string ?? "#FFFFFF";
-            // ConvertFromString supports #RRGGBB and #AARRGGBB; missing alpha defaults to FF.
-            var color = (Color)ColorConverter.ConvertFromString(s)!;
-            return color;
+            return (Color)ColorConverter.ConvertFromString(s)!;
         }
-        catch
-        {
-            return Colors.White;
-        }
+        catch { return Colors.White; }
     }
 
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
         => throw new NotSupportedException();
 }
 
-/// <summary>Converts a 0-100 percent value into a 0.0-1.0 opacity (used for
-/// <c>GlassTintOpacity</c> and <c>BackgroundImageOpacity</c>).</summary>
+/// <summary>Converts a 0-100 percent value into a 0.0-1.0 opacity.</summary>
 public class PercentToOpacityConverter : IValueConverter
 {
     public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
@@ -300,19 +402,53 @@ public class PercentToOpacityConverter : IValueConverter
 }
 
 /// <summary>
+/// Maps a <see cref="ClockDisplayMode"/> value to Visibility. Parameter is the
+/// mode name to match ("Digital" or "Analog"); mismatched → Collapsed.
+/// </summary>
+public class ModeToVisibilityConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        var want = (parameter as string) ?? "";
+        var have = value?.ToString() ?? "";
+        return string.Equals(want, have, StringComparison.OrdinalIgnoreCase)
+            ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
+
+/// <summary>Maps a <see cref="ClockDisplayMode"/> value to a localized display name.</summary>
+public class ModeToNameConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        var mode = value?.ToString() ?? "";
+        var cn = LocalizationService.Instance.CurrentLanguage == Services.Language.Chinese;
+        return mode switch
+        {
+            "Digital" => cn ? "数字" : "Digital",
+            "Analog" => cn ? "指针" : "Analog",
+            _ => mode
+        };
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}
+
+/// <summary>
 /// Maps <see cref="Models.Zone.GlassColorMode"/> strings (e.g. "OceanBlue", "RosePink")
-/// to a 3-stop <see cref="LinearGradientBrush"/> tinted around that mode's base color,
-/// producing an "iridescent glass" feel in the preset card without relying on Win32 DWM blur.
-///
-/// KEEP IN SYNC with <c>Helpers/AcrylicHelper.cs : ResolveBaseColorARGB</c> — the live zone
-/// applies the same base colors via DWM. If either side adds/removes a mode, update both.
+/// to a 3-stop <see cref="LinearGradientBrush"/> tinted around that mode's base color.
+/// KEEP IN SYNC with <c>Helpers/AcrylicHelper.cs : ResolveBaseColorARGB</c>.
 /// </summary>
 public class LiquidGlassBrushConverter : IValueConverter
 {
     public static readonly Dictionary<string, Color> BaseColors = new()
     {
-        ["Default"]       = Color.FromArgb(0xFF, 0x70, 0x95, 0xC5), // soft sky-blue so Default mode never reads as gray
-        ["Accent"]        = Color.FromArgb(0xFF, 0x40, 0x90, 0xE2), // Win32 system accent unavailable in static XAML
+        ["Default"]       = Color.FromArgb(0xFF, 0x70, 0x95, 0xC5),
+        ["Accent"]        = Color.FromArgb(0xFF, 0x40, 0x90, 0xE2),
         ["GlassWhite"]    = Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF),
         ["MistGrey"]      = Color.FromArgb(0xFF, 0xC0, 0xC0, 0xC0),
         ["DeepBlack"]     = Color.FromArgb(0xFF, 0x10, 0x10, 0x10),
@@ -334,23 +470,13 @@ public class LiquidGlassBrushConverter : IValueConverter
             mode = "Default";
         baseColor = BaseColors[mode];
 
-        // Force every stop's alpha to ~75% so Layer 2 reads as a clear glassy tint.
-        // User's GlassTintOpacity can still dial this back to near-zero; at full
-        // GlassTintOpacity we land around 50% effective alpha — visible iridescence
-        // without fully covering FillColor.
         const byte stopAlpha = 0xC0;
         baseColor = Color.FromArgb(stopAlpha, baseColor.R, baseColor.G, baseColor.B);
 
-        // Three stops form the iridescent feel in lieu of DWM blur:
-        //   brighter  →  base  →  darker  (along 0,0 → 1,1 diagonal)
         var brighter = Lighten(baseColor, 0.35);
         var darker   = Darken(baseColor,   0.30);
 
-        var brush = new LinearGradientBrush
-        {
-            StartPoint = new Point(0, 0),
-            EndPoint   = new Point(1, 1)
-        };
+        var brush = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(1, 1) };
         brush.GradientStops.Add(new GradientStop(brighter, 0.0));
         brush.GradientStops.Add(new GradientStop(baseColor, 0.5));
         brush.GradientStops.Add(new GradientStop(darker,   1.0));
@@ -372,34 +498,8 @@ public class LiquidGlassBrushConverter : IValueConverter
 }
 
 /// <summary>
-/// Title-bar fill: maps <see cref="Models.Zone.GlassColorMode"/> to a vivid solid <see cref="Color"/>
-/// at full alpha (no glass tint, no alpha floor — a clean color block). Bound via the
-/// SolidColorBrush.Color= pattern (which is known-good; direct Border.Background=Binding
-/// on a Brush-returning converter was rendering as muted gray over the light card base).
-///
-/// KEEP IN SYNC with <see cref="LiquidGlassBrushConverter.BaseColors"/>.
-/// </summary>
-public class TitleBarFillConverter : IValueConverter
-{
-    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
-    {
-        string mode = (value as string) ?? "Default";
-        if (!LiquidGlassBrushConverter.BaseColors.TryGetValue(mode, out var c))
-            mode = "Default";
-        c = LiquidGlassBrushConverter.BaseColors[mode];
-        // Force full alpha so the title bar reads at full saturation over the card's
-        // light-gray base, regardless of the alpha the preset's source color carried.
-        return Color.FromArgb(0xFF, c.R, c.G, c.B);
-    }
-
-    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
-        => throw new NotSupportedException();
-}
-
-/// <summary>
-/// Horizontal fan layout: lays children out in a single row with a small <see cref="StepWidth"/> per card,
-/// so neighbouring cards overlap heavily. Card rotation, Y offset, and scale are the caller's responsibility
-/// (applied per-card via <c>RenderTransform</c> in the DataTemplate).
+/// Horizontal fan layout: lays children out in a single row with a small <see cref="StepWidth"/> per card.
+/// Card rotation, Y offset, and scale are the caller's responsibility (applied per-card via RenderTransform).
 /// </summary>
 public class FanPanel : Panel
 {
@@ -419,7 +519,6 @@ public class FanPanel : Panel
     public double CardWidth { get => (double)GetValue(CardWidthProperty); set => SetValue(CardWidthProperty, value); }
     public double CardHeight { get => (double)GetValue(CardHeightProperty); set => SetValue(CardHeightProperty, value); }
     public double StepWidth { get => (double)GetValue(StepWidthProperty); set => SetValue(StepWidthProperty, value); }
-    /// <summary>Extra room above/below the row so rotated cards aren't clipped by the parent.</summary>
     public double VerticalPadding { get => (double)GetValue(VerticalPaddingProperty); set => SetValue(VerticalPaddingProperty, value); }
 
     protected override Size MeasureOverride(Size availableSize)

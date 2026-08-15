@@ -186,9 +186,12 @@ public partial class CalendarWidget : Window
         CalendarBorder.BorderThickness = new Thickness(_calendar.BorderThickness);
     }
 
-    /// <summary>Refresh all visual styles from the current _calendar model (for live preview).</summary>
-    public void RefreshAppearance()
+    /// <summary>Refresh all visual styles from the current _calendar model (for live preview).
+    /// Accepts an optional <paramref name="calendar"/> to refresh the local reference, mirroring
+    /// ZoneWindow.RefreshZone's "KEY FIX" pattern — see ClockWidget.RefreshAppearance for rationale.</summary>
+    public void RefreshAppearance(DesktopCalendar? calendar = null)
     {
+        if (calendar != null) _calendar = calendar;
         if (MainContent.Visibility == Visibility.Visible)
             ApplyAcrylic();
         ApplyBackgroundImage();

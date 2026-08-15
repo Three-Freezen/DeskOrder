@@ -106,9 +106,8 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
 
     private Action<Services.Language>? _langChanged;
     private Zone? _loadDialogSnapshot;        // captured before opening LoadPresetDialog for cancel-revert
-    private DispatcherTimer? _savedHintTimer;
     private PresetService? _zonePresetService;
-    private PresetService ZonePresetService => _zonePresetService ??= new PresetService("Zones");
+    private PresetService ZonePresetService => _zonePresetService ??= PresetService.For(PresetKind.Zone);
 
     public ZoneSettingsDialog(Zone zone, ZoneManager zoneManager)
     {
@@ -199,7 +198,7 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
 
         SavePresetButton.Content = _loc["Preset.SaveButton"];
         LoadPresetButton.Content = _loc["Preset.LoadButton"];
-        SavedHint.Text = _loc["Preset.Saved"];
+        // SavedHint now lives inside SavePresetDialog itself — it handles its own localization/timer.
     }
 
     // ── Preset actions ──
@@ -207,7 +206,8 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
     void SavePresetButton_Click(object sender, RoutedEventArgs e)
     {
         var dlg = new SavePresetDialog(ZonePresetService, ResultZone) { Owner = this };
-        if (dlg.ShowDialog() == true) ShowSavedHint();
+        // SavePresetDialog owns the "saved" hint now — no need to react to its return.
+        dlg.ShowDialog();
     }
 
     void LoadPresetButton_Click(object sender, RoutedEventArgs e)
@@ -216,10 +216,11 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
         // and the dialog state. Outer Cancel still reverts from _snapshot (unchanged).
         _loadDialogSnapshot = ResultZone.Clone();
 
-        var dlg = new LoadPresetDialog(ZonePresetService, onCardPicked: preset =>
+        var dlg = new LoadPresetDialog(ZonePresetService, onCardPicked: record =>
         {
+            var picked = ((ZonePreset)record).Zone;
             // Real-time preview: write preset values to ResultZone and refresh the live window.
-            CopyZoneFields(preset.Zone, ResultZone);
+            CopyZoneFields(picked, ResultZone);
             _zoneManager.GetZoneWindow(ResultZone.Id)?.RefreshZone(ResultZone);
         }) { Owner = this };
 
@@ -227,7 +228,8 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
         {
             // Final commit: copy the chosen preset's values to ResultZone and sync all
             // dialog controls (TextBox/CheckBox/Slider/...) so subsequent edits stay consistent.
-            CopyZoneFields(dlg.SelectedPreset!.Zone, ResultZone);
+            var picked = ((ZonePreset)dlg.SelectedPreset!).Zone;
+            CopyZoneFields(picked, ResultZone);
             SyncFromZone(ResultZone);
             _zoneManager.GetZoneWindow(ResultZone.Id)?.RefreshZone(ResultZone);
 
@@ -277,19 +279,6 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
         dst.EnableLiquidGlass = src.EnableLiquidGlass;
         dst.QuickBarMode = src.QuickBarMode;
         dst.EnableRestoreButton = src.EnableRestoreButton;
-    }
-
-    void ShowSavedHint()
-    {
-        SavedHint.Visibility = Visibility.Visible;
-        _savedHintTimer?.Stop();
-        _savedHintTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
-        _savedHintTimer.Tick += (_, _) =>
-        {
-            SavedHint.Visibility = Visibility.Collapsed;
-            _savedHintTimer!.Stop();
-        };
-        _savedHintTimer.Start();
     }
 
     void UpdateHighlights()
