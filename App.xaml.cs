@@ -4,7 +4,9 @@ using System.Drawing;
 using System.Threading;
 using System.Windows;
 using System.Windows.Interop;
+using System.Windows.Threading;
 using DesktopZones.Helpers;
+using DesktopZones.Models;
 using DesktopZones.Services;
 using DesktopZones.Views;
 
@@ -135,6 +137,46 @@ public partial class App : System.Windows.Application
         }
 
         // Notes, clocks, and calendars are managed by ManagementWindow — no need to open here
+
+        // ── Debug: --load-preset=KIND auto-opens LoadPresetDialog (useful for screenshots) ──
+        var debugKind = ParseLoadPresetArg(e.Args);
+        if (debugKind.HasValue)
+        {
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                var svc = PresetService.For(debugKind.Value);
+                new LoadPresetDialog(svc, _widgetService) { Owner = null }.Show();
+            }), DispatcherPriority.Background);
+            return;
+        }
+
+        // ── Debug: --spawn-widget=KIND auto-creates one widget for reference screenshots ──
+        var spawnKind = ParseSpawnWidgetArg(e.Args);
+        if (spawnKind != null)
+        {
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                var wa = System.Windows.SystemParameters.WorkArea;
+                switch (spawnKind)
+                {
+                    case "clock":
+                        var c = _widgetService?.CreateClock(wa.Left + 200, wa.Top + 100);
+                        if (c != null) new ClockWidget(c, _widgetService!).Show();
+                        break;
+                    case "calendar":
+                        var cal = _widgetService?.CreateCalendar(wa.Left + 200, wa.Top + 100);
+                        if (cal != null) new CalendarWidget(cal, _widgetService!).Show();
+                        break;
+                    case "stickynote":
+                        var note = _notesService?.CreateNote(wa.Left + 200, wa.Top + 100);
+                        if (note != null) OpenNoteWindow(note);
+                        break;
+                    case "panel":
+                        _panelService?.Show(_configService!.Load());
+                        break;
+                }
+            }), DispatcherPriority.Background);
+        }
 
         if (!config.StartMinimized)
             ShowManagementWindow();
@@ -292,6 +334,38 @@ public partial class App : System.Windows.Application
     }
 
     public IntPtr GetMainHwnd() => _mainHwnd;
+
+    private static PresetKind? ParseLoadPresetArg(string[] args)
+    {
+        foreach (var a in args)
+        {
+            if (a.StartsWith("--load-preset=", StringComparison.OrdinalIgnoreCase))
+            {
+                var s = a.Substring("--load-preset=".Length);
+                return s.ToLowerInvariant() switch
+                {
+                    "zone" => PresetKind.Zone,
+                    "clock" => PresetKind.Clock,
+                    "calendar" => PresetKind.Calendar,
+                    "stickynote" => PresetKind.StickyNote,
+                    "mergedgroup" => PresetKind.MergedGroup,
+                    "panel" => PresetKind.Panel,
+                    _ => null
+                };
+            }
+        }
+        return null;
+    }
+
+    private static string? ParseSpawnWidgetArg(string[] args)
+    {
+        foreach (var a in args)
+        {
+            if (a.StartsWith("--spawn-widget=", StringComparison.OrdinalIgnoreCase))
+                return a.Substring("--spawn-widget=".Length).ToLowerInvariant();
+        }
+        return null;
+    }
 
     // ── Tray ──
 

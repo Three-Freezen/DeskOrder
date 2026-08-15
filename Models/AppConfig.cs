@@ -39,6 +39,7 @@ public class AppConfig
     public double PanelHeight { get; set; } = 500;
     public string PanelTitleBarFillColor { get; set; } = "#10FFFFFF";
     public string PanelFillColor { get; set; } = "#08000000";
+    public string PanelBorderColor { get; set; } = "#40FFFFFF";
     public double PanelControlOpacity { get; set; } = 40;
     // ── Panel Background Image ──
     public string PanelBackgroundImagePath { get; set; } = "";

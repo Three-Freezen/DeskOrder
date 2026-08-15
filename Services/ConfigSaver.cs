@@ -39,6 +39,7 @@ public static class ConfigSaver
         int panelHotkeyKey = cfg.PanelHotkeyKey;
         List<CustomHotkey> panelCustomHotkeys = cfg.PanelCustomHotkeys;
         bool panelUseGlobalAppearance = cfg.PanelUseGlobalAppearance;
+        string panelBorderColor = cfg.PanelBorderColor;
         string panelBackgroundImagePath = cfg.PanelBackgroundImagePath;
         double panelBackgroundImageOpacity = cfg.PanelBackgroundImageOpacity;
         double panelBgImageZoom = cfg.PanelBgImageZoom;
@@ -54,6 +55,7 @@ public static class ConfigSaver
         cfg.PanelHotkeyKey = panelHotkeyKey;
         cfg.PanelCustomHotkeys = panelCustomHotkeys;
         cfg.PanelUseGlobalAppearance = panelUseGlobalAppearance;
+        cfg.PanelBorderColor = panelBorderColor;
         cfg.PanelBackgroundImagePath = panelBackgroundImagePath;
         cfg.PanelBackgroundImageOpacity = panelBackgroundImageOpacity;
         cfg.PanelBgImageZoom = panelBgImageZoom;
