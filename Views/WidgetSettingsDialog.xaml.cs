@@ -220,7 +220,8 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
     }
 
     /// <summary>Load settings from a clock model.</summary>
-    public void LoadFromClock(DesktopClock clock)
+    public void LoadFromClock(DesktopClock clock) => LoadFromClock(clock, resnapshot: true);
+    public void LoadFromClock(DesktopClock clock, bool resnapshot)
     {
         _suppressPreview = true;
         _clockModel = clock;
@@ -246,29 +247,34 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         DigitalBgOpacitySlider.Value = _digitalBgOpacity;
         DigitalBgOpacityLabel.Text = $"{(int)_digitalBgOpacity}%";
 
-        // Snapshot for cancel-revert
-        _snapFillColor = clock.FillColor; _snapBorderColor = clock.BorderColor;
-        _snapFillOpacity = _fillOpacityPercent;
-        _snapBgImagePath = _bgImagePath; _snapBgOffsetX = _bgOffsetX;
-        _snapBgOffsetY = _bgOffsetY; _snapBgZoom = _bgZoom; _snapBgOpacity = _bgOpacity;
-        _snapDigitalBgImagePath = _digitalBgImagePath; _snapDigitalBgOffsetX = _digitalBgOffsetX;
-        _snapDigitalBgOffsetY = _digitalBgOffsetY; _snapDigitalBgZoom = _digitalBgZoom;
-        _snapDigitalBgOpacity = _digitalBgOpacity;
-        _snapUseGlobal = clock.UseGlobalAppearance; _snapEnableRestore = _enableRestoreButton;
-        _snapBorderThickness = clock.BorderThickness;
-        _snapLiquidGlass = _liquidGlass; _snapGlassBlur = _glassBlurAmount;
-        _snapGlassTintOpacity = _glassTintOpacity; _snapGlassTintLuminosity = _glassTintLuminosity;
-        _snapGlassColorMode = _glassColorMode;
-        // Snapshot global values for cancel-revert
-        if (Application.Current is App cApp && cApp.ManagementWindow?.WidgetService is { } cSvc)
+        if (resnapshot)
         {
-            var cCfg = cSvc.GetConfig(); _snapGlobalFillColor = cCfg.GlobalFillColor; _snapGlobalBorderColor = cCfg.GlobalBorderColor; _snapGlobalBorderThickness = cCfg.GlobalBorderThickness;
+            // Snapshot for cancel-revert (only on initial load — applying a preset must
+            // NOT clobber the original snapshot, otherwise outer Cancel can't revert).
+            _snapFillColor = clock.FillColor; _snapBorderColor = clock.BorderColor;
+            _snapFillOpacity = _fillOpacityPercent;
+            _snapBgImagePath = _bgImagePath; _snapBgOffsetX = _bgOffsetX;
+            _snapBgOffsetY = _bgOffsetY; _snapBgZoom = _bgZoom; _snapBgOpacity = _bgOpacity;
+            _snapDigitalBgImagePath = _digitalBgImagePath; _snapDigitalBgOffsetX = _digitalBgOffsetX;
+            _snapDigitalBgOffsetY = _digitalBgOffsetY; _snapDigitalBgZoom = _digitalBgZoom;
+            _snapDigitalBgOpacity = _digitalBgOpacity;
+            _snapUseGlobal = clock.UseGlobalAppearance; _snapEnableRestore = _enableRestoreButton;
+            _snapBorderThickness = clock.BorderThickness;
+            _snapLiquidGlass = _liquidGlass; _snapGlassBlur = _glassBlurAmount;
+            _snapGlassTintOpacity = _glassTintOpacity; _snapGlassTintLuminosity = _glassTintLuminosity;
+            _snapGlassColorMode = _glassColorMode;
+            // Snapshot global values for cancel-revert
+            if (Application.Current is App cApp && cApp.ManagementWindow?.WidgetService is { } cSvc)
+            {
+                var cCfg = cSvc.GetConfig(); _snapGlobalFillColor = cCfg.GlobalFillColor; _snapGlobalBorderColor = cCfg.GlobalBorderColor; _snapGlobalBorderThickness = cCfg.GlobalBorderThickness;
+            }
         }
         _suppressPreview = false;
     }
 
     /// <summary>Load settings from a calendar model.</summary>
-    public void LoadFromCalendar(DesktopCalendar cal)
+    public void LoadFromCalendar(DesktopCalendar cal) => LoadFromCalendar(cal, resnapshot: true);
+    public void LoadFromCalendar(DesktopCalendar cal, bool resnapshot)
     {
         _suppressPreview = true;
         _calModel = cal;
@@ -279,26 +285,30 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         BgOpacitySlider.Value = _bgOpacity;
         BgOpacityLabel.Text = $"{(int)_bgOpacity}%";
 
-        // Snapshot for cancel-revert
-        _snapFillColor = cal.FillColor; _snapBorderColor = cal.BorderColor;
-        _snapFillOpacity = _fillOpacityPercent;
-        _snapBgImagePath = _bgImagePath; _snapBgOffsetX = _bgOffsetX;
-        _snapBgOffsetY = _bgOffsetY; _snapBgZoom = _bgZoom; _snapBgOpacity = _bgOpacity;
-        _snapUseGlobal = cal.UseGlobalAppearance; _snapEnableRestore = _enableRestoreButton;
-        _snapBorderThickness = cal.BorderThickness;
-        _snapLiquidGlass = _liquidGlass; _snapGlassBlur = _glassBlurAmount;
-        _snapGlassTintOpacity = _glassTintOpacity; _snapGlassTintLuminosity = _glassTintLuminosity;
-        _snapGlassColorMode = _glassColorMode;
-        // Snapshot global values for cancel-revert
-        if (Application.Current is App calApp && calApp.ManagementWindow?.WidgetService is { } calSvc)
+        if (resnapshot)
         {
-            var calCfg = calSvc.GetConfig(); _snapGlobalFillColor = calCfg.GlobalFillColor; _snapGlobalBorderColor = calCfg.GlobalBorderColor; _snapGlobalBorderThickness = calCfg.GlobalBorderThickness;
+            // Snapshot for cancel-revert (see LoadFromClock note about resnapshot).
+            _snapFillColor = cal.FillColor; _snapBorderColor = cal.BorderColor;
+            _snapFillOpacity = _fillOpacityPercent;
+            _snapBgImagePath = _bgImagePath; _snapBgOffsetX = _bgOffsetX;
+            _snapBgOffsetY = _bgOffsetY; _snapBgZoom = _bgZoom; _snapBgOpacity = _bgOpacity;
+            _snapUseGlobal = cal.UseGlobalAppearance; _snapEnableRestore = _enableRestoreButton;
+            _snapBorderThickness = cal.BorderThickness;
+            _snapLiquidGlass = _liquidGlass; _snapGlassBlur = _glassBlurAmount;
+            _snapGlassTintOpacity = _glassTintOpacity; _snapGlassTintLuminosity = _glassTintLuminosity;
+            _snapGlassColorMode = _glassColorMode;
+            // Snapshot global values for cancel-revert
+            if (Application.Current is App calApp && calApp.ManagementWindow?.WidgetService is { } calSvc)
+            {
+                var calCfg = calSvc.GetConfig(); _snapGlobalFillColor = calCfg.GlobalFillColor; _snapGlobalBorderColor = calCfg.GlobalBorderColor; _snapGlobalBorderThickness = calCfg.GlobalBorderThickness;
+            }
         }
         _suppressPreview = false;
     }
 
     /// <summary>Load settings from a sticky note model.</summary>
-    public void LoadFromNote(StickyNote note, ZoneManager? zoneManager = null)
+    public void LoadFromNote(StickyNote note, ZoneManager? zoneManager = null) => LoadFromNote(note, zoneManager, resnapshot: true);
+    public void LoadFromNote(StickyNote note, ZoneManager? zoneManager, bool resnapshot)
     {
         _suppressPreview = true;
         _noteModel = note;
@@ -328,29 +338,33 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         BgOpacitySlider.Value = _bgOpacity;
         BgOpacityLabel.Text = $"{(int)_bgOpacity}%";
 
-        // Snapshot for cancel-revert
-        _snapFillColor = note.FillColor; _snapBorderColor = note.BorderColor;
-        _snapFillOpacity = _fillOpacityPercent; _snapTitleBarFill = _titleBarFill;
-        _snapTitleBarOpacity = _titleBarOpacity; _snapButtonOpacity = _buttonOpacity;
-        _snapTitleTextColor = _titleTextColor; _snapBgImagePath = _bgImagePath;
-        _snapBgOffsetX = _bgOffsetX; _snapBgOffsetY = _bgOffsetY;
-        _snapBgZoom = _bgZoom; _snapBgOpacity = _bgOpacity;
-        _snapUseGlobal = note.UseGlobalAppearance; _snapEnableRestore = _enableRestoreButton;
-        _snapBorderThickness = note.BorderThickness;
-        _snapLiquidGlass = _liquidGlass; _snapGlassBlur = _glassBlurAmount;
-        _snapGlassTintOpacity = _glassTintOpacity; _snapGlassTintLuminosity = _glassTintLuminosity;
-        _snapGlassColorMode = _glassColorMode;
-        _snapWidgetWidth = note.Width.ToString("F0"); _snapWidgetHeight = note.Height.ToString("F0");
-        // Snapshot global values for cancel-revert
-        if (Application.Current is App nApp && nApp.ManagementWindow?.WidgetService is { } nSvc)
+        if (resnapshot)
         {
-            var nCfg = nSvc.GetConfig(); _snapGlobalFillColor = nCfg.GlobalFillColor; _snapGlobalBorderColor = nCfg.GlobalBorderColor; _snapGlobalBorderThickness = nCfg.GlobalBorderThickness;
+            // Snapshot for cancel-revert (see LoadFromClock note about resnapshot).
+            _snapFillColor = note.FillColor; _snapBorderColor = note.BorderColor;
+            _snapFillOpacity = _fillOpacityPercent; _snapTitleBarFill = _titleBarFill;
+            _snapTitleBarOpacity = _titleBarOpacity; _snapButtonOpacity = _buttonOpacity;
+            _snapTitleTextColor = _titleTextColor; _snapBgImagePath = _bgImagePath;
+            _snapBgOffsetX = _bgOffsetX; _snapBgOffsetY = _bgOffsetY;
+            _snapBgZoom = _bgZoom; _snapBgOpacity = _bgOpacity;
+            _snapUseGlobal = note.UseGlobalAppearance; _snapEnableRestore = _enableRestoreButton;
+            _snapBorderThickness = note.BorderThickness;
+            _snapLiquidGlass = _liquidGlass; _snapGlassBlur = _glassBlurAmount;
+            _snapGlassTintOpacity = _glassTintOpacity; _snapGlassTintLuminosity = _glassTintLuminosity;
+            _snapGlassColorMode = _glassColorMode;
+            _snapWidgetWidth = note.Width.ToString("F0"); _snapWidgetHeight = note.Height.ToString("F0");
+            // Snapshot global values for cancel-revert
+            if (Application.Current is App nApp && nApp.ManagementWindow?.WidgetService is { } nSvc)
+            {
+                var nCfg = nSvc.GetConfig(); _snapGlobalFillColor = nCfg.GlobalFillColor; _snapGlobalBorderColor = nCfg.GlobalBorderColor; _snapGlobalBorderThickness = nCfg.GlobalBorderThickness;
+            }
         }
         _suppressPreview = false;
     }
 
     /// <summary>Load settings from global config (panel).</summary>
-    public void LoadFromConfig(AppConfig config, ZoneManager? zoneManager = null)
+    public void LoadFromConfig(AppConfig config, ZoneManager? zoneManager = null) => LoadFromConfig(config, zoneManager, resnapshot: true);
+    public void LoadFromConfig(AppConfig config, ZoneManager? zoneManager, bool resnapshot)
     {
         _suppressPreview = true;
         _panelConfig = config;
@@ -400,20 +414,23 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         BgOpacityLabel.Text = $"{(int)_bgOpacity}%";
         UpdateHighlights();
 
-        // Snapshot for cancel-revert
-        _snapFillColor = config.PanelFillColor; _snapBorderColor = config.GlobalBorderColor;
-        _snapFillOpacity = _fillOpacityPercent; _snapTitleBarFill = _titleBarFill;
-        _snapTitleBarOpacity = _titleBarOpacity; _snapButtonOpacity = _buttonOpacity;
-        _snapBgImagePath = _bgImagePath; _snapBgOffsetX = _bgOffsetX;
-        _snapBgOffsetY = _bgOffsetY; _snapBgZoom = _bgZoom; _snapBgOpacity = _bgOpacity;
-        _snapUseGlobal = config.PanelUseGlobalAppearance; _snapEnableRestore = _enableRestoreButton;
-        _snapBorderThickness = config.GlobalBorderThickness;
-        _snapLiquidGlass = _liquidGlass; _snapGlassBlur = _glassBlurAmount;
-        _snapGlassTintOpacity = _glassTintOpacity; _snapGlassTintLuminosity = _glassTintLuminosity;
-        _snapGlassColorMode = _glassColorMode;
-        _snapWidgetWidth = config.PanelWidth.ToString("F0"); _snapWidgetHeight = config.PanelHeight.ToString("F0");
-        // Snapshot global values for cancel-revert
-        _snapGlobalFillColor = config.GlobalFillColor; _snapGlobalBorderColor = config.GlobalBorderColor; _snapGlobalBorderThickness = config.GlobalBorderThickness;
+        if (resnapshot)
+        {
+            // Snapshot for cancel-revert (see LoadFromClock note about resnapshot).
+            _snapFillColor = config.PanelFillColor; _snapBorderColor = config.GlobalBorderColor;
+            _snapFillOpacity = _fillOpacityPercent; _snapTitleBarFill = _titleBarFill;
+            _snapTitleBarOpacity = _titleBarOpacity; _snapButtonOpacity = _buttonOpacity;
+            _snapBgImagePath = _bgImagePath; _snapBgOffsetX = _bgOffsetX;
+            _snapBgOffsetY = _bgOffsetY; _snapBgZoom = _bgZoom; _snapBgOpacity = _bgOpacity;
+            _snapUseGlobal = config.PanelUseGlobalAppearance; _snapEnableRestore = _enableRestoreButton;
+            _snapBorderThickness = config.GlobalBorderThickness;
+            _snapLiquidGlass = _liquidGlass; _snapGlassBlur = _glassBlurAmount;
+            _snapGlassTintOpacity = _glassTintOpacity; _snapGlassTintLuminosity = _glassTintLuminosity;
+            _snapGlassColorMode = _glassColorMode;
+            _snapWidgetWidth = config.PanelWidth.ToString("F0"); _snapWidgetHeight = config.PanelHeight.ToString("F0");
+            // Snapshot global values for cancel-revert
+            _snapGlobalFillColor = config.GlobalFillColor; _snapGlobalBorderColor = config.GlobalBorderColor; _snapGlobalBorderThickness = config.GlobalBorderThickness;
+        }
         _suppressPreview = false;
     }
 
@@ -846,8 +863,13 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         var kind = TargetToKind(_target);
         var snap = BuildCurrentPayload();
         if (snap == null) return;
+        // Mirrors ZoneSettingsDialog.LoadPresetButton_Click:
+        //   onCardPicked   — real-time preview: writes preset → model + live widget (UI untouched)
+        //   onPicked(OK)   — final commit: writes preset → model + dialog UI controls
+        //                    (live widget is already at preset state from onCardPicked)
+        //   Cancel         — restores model + UI from snapshot, then refreshes live widget
         var applied = PresetButtonsHelper.OpenLoad(this, kind, snap,
-            picked => { /* onCardPicked already applied — no-op */ },
+            picked => ApplyPayload(picked),
             record => ApplyCardPicked(record));
         if (applied != true)
         {
@@ -855,13 +877,11 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
             ApplyPayload(snap);
             PushToWidget();
         }
-        else
-        {
-            // Apply — model + UI are already at preset's state; ensure live widget reflects it.
-            // (LoadFromXxx-driven setters already fired PushToWidget via PropertyChanged, but
-            // be defensive in case a path didn't reach one.)
-            PushToWidget();
-        }
+        // OK branch: ApplyPayload(picked) already synced model + UI from the preset.
+        // The live widget was last refreshed by ApplyCardPicked during preview, so no
+        // extra PushToWidget call is needed (and would be wrong — it would read the
+        // freshly-synced UI back into the model, but the UI is now at preset state, so
+        // that would be harmless only by coincidence; better to not duplicate work).
         // Outer dialog STAYS OPEN so the user can verify and decide Apply / Cancel on
         // the widget settings themselves. The previous behavior auto-closing via
         // DialogResult=true was losing the in-dialog verification step.
@@ -883,18 +903,12 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         // the dialog's fresh reference (KEY FIX pattern from
         // ZoneWindow.RefreshZone — otherwise OnClocksChanged could have
         // swapped the widget's _clock to a stale object).
-        System.Diagnostics.Debug.WriteLine($"[preview] enter target={_target} recordType={record?.GetType().Name} modelClock={_clockModel!=null} modelCal={_calModel!=null} modelNote={_noteModel!=null} modelPanel={_panelConfig!=null}");
         var app = Application.Current as App;
         switch (_target)
         {
             case WidgetSettingsTarget.Clock when _clockModel != null && record is ClockPreset c:
-                System.Diagnostics.Debug.WriteLine($"[preview] Clock before CopyInto: FillColor={_clockModel.FillColor} BorderColor={_clockModel.BorderColor}");
                 CopyInto(c.Clock, _clockModel);
-                System.Diagnostics.Debug.WriteLine($"[preview] Clock after  CopyInto: FillColor={_clockModel.FillColor} BorderColor={_clockModel.BorderColor}");
-                var cw = app?.GetClockWindow(_clockModel.Id);
-                System.Diagnostics.Debug.WriteLine($"[preview] Clock GetClockWindow id={_clockModel.Id} null? {cw==null}");
-                cw?.RefreshAppearance(_clockModel);
-                System.Diagnostics.Debug.WriteLine($"[preview] Clock RefreshAppearance done");
+                app?.GetClockWindow(_clockModel.Id)?.RefreshAppearance(_clockModel);
                 break;
             case WidgetSettingsTarget.Calendar when _calModel != null && record is CalendarPreset cal:
                 CopyInto(cal.Calendar, _calModel);
@@ -942,23 +956,26 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
     /// <summary>Replace the dialog's model with the picked preset's payload and refresh widgets.</summary>
     private void ApplyPayload(object picked)
     {
+        // resnapshot: false — applying a preset must NOT overwrite the original cancel
+        // snapshot (taken when the dialog first opened). Otherwise an outer Cancel after
+        // LoadPreset would revert to the preset's state instead of the pre-preset state.
         switch (_target)
         {
             case WidgetSettingsTarget.Clock when _clockModel != null && picked is DesktopClock c:
                 CopyInto(c, _clockModel);
-                LoadFromClock(_clockModel);
+                LoadFromClock(_clockModel, resnapshot: false);
                 break;
             case WidgetSettingsTarget.Calendar when _calModel != null && picked is DesktopCalendar cal:
                 CopyInto(cal, _calModel);
-                LoadFromCalendar(_calModel);
+                LoadFromCalendar(_calModel, resnapshot: false);
                 break;
             case WidgetSettingsTarget.StickyNote when _noteModel != null && picked is StickyNote n:
                 CopyInto(n, _noteModel);
-                LoadFromNote(_noteModel, _panelZoneManager);
+                LoadFromNote(_noteModel, _panelZoneManager, resnapshot: false);
                 break;
             case WidgetSettingsTarget.Panel when _panelConfig != null && picked is PanelPresetConfig pcfg:
                 pcfg.ApplyTo(_panelConfig);
-                LoadFromConfig(_panelConfig, _panelZoneManager);
+                LoadFromConfig(_panelConfig, _panelZoneManager, resnapshot: false);
                 break;
         }
     }

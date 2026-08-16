@@ -192,6 +192,10 @@ public partial class CalendarWidget : Window
     public void RefreshAppearance(DesktopCalendar? calendar = null)
     {
         if (calendar != null) _calendar = calendar;
+        // RebuildCells first: a preset load may change StartOnMonday (Sun-first vs Mon-first
+        // arrangement) or Notes (dot indicators). Without this the day grid keeps its
+        // previous layout even though _calendar has changed.
+        _vm?.RebuildCells();
         if (MainContent.Visibility == Visibility.Visible)
             ApplyAcrylic();
         ApplyBackgroundImage();

@@ -299,12 +299,23 @@ public partial class ClockWidget : Window
     public void RefreshAppearance(DesktopClock? clock = null)
     {
         if (clock != null) _clock = clock;
+        // ApplyMode first if the Mode actually changed (preset load can switch Digital↔Analog,
+        // changing window size + panel visibility). Gated by previous mode because ApplyMode
+        // resets Width/Height to mode defaults — calling it on every slider tweak would
+        // clobber any user-resized custom dimensions stored in _clock.Width/Height.
+        if (_lastAppliedMode != _clock.Mode)
+        {
+            _lastAppliedMode = _clock.Mode;
+            ApplyMode();
+        }
         if (MainContent.Visibility == Visibility.Visible)
             ApplyAcrylic();
         ApplyBackgroundImage();
         ApplyDigitalBackgroundImage();
         ApplyStyle();
     }
+
+    private ClockDisplayMode _lastAppliedMode = ClockDisplayMode.Digital;
 
     void ApplyStyle()
     {

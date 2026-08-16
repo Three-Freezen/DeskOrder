@@ -121,10 +121,10 @@
                                     Tag="{Binding DateKey}"
                                     Background="Transparent">
                                 <Grid>
-                                    <!-- Today highlight circle -->
-                                    <Ellipse x:Name="TodayCircle" Width="26" Height="26"
-                                             Fill="#306C63FF" Visibility="Collapsed"
-                                             HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    <!-- Today highlight (rounded square, was Ellipse circle) -->
+                                    <Border x:Name="TodayCircle" Width="26" Height="26"
+                                            CornerRadius="4" Background="#306C63FF" Visibility="Collapsed"
+                                            HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                     <StackPanel VerticalAlignment="Center">
                                         <TextBlock Text="{Binding DayNumber}"
                                                    FontSize="12" Foreground="#CCFFFFFF"

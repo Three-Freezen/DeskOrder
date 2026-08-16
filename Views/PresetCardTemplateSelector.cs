@@ -15,7 +15,8 @@ namespace DesktopZones.Views;
 public class PresetCardTemplateSelector : DataTemplateSelector
 {
     public DataTemplate? ZoneTemplate { get; set; }
-    public DataTemplate? ClockTemplate { get; set; }
+    public DataTemplate? ClockAnalogTemplate { get; set; }
+    public DataTemplate? ClockDigitalTemplate { get; set; }
     public DataTemplate? CalendarTemplate { get; set; }
     public DataTemplate? StickyNoteTemplate { get; set; }
     public DataTemplate? MergedGroupTemplate { get; set; }
@@ -27,7 +28,9 @@ public class PresetCardTemplateSelector : DataTemplateSelector
         return ci.Kind switch
         {
             PresetKind.Zone => ZoneTemplate,
-            PresetKind.Clock => ClockTemplate,
+            // Clock dispatches on DisplayClockMode (overridable by the dialog to match the live
+            // widget's current Digital/Analog state). Falls back to stored ClockMode when not set.
+            PresetKind.Clock => ci.DisplayClockMode == ClockDisplayMode.Analog ? ClockAnalogTemplate : ClockDigitalTemplate,
             PresetKind.Calendar => CalendarTemplate,
             PresetKind.StickyNote => StickyNoteTemplate,
             PresetKind.MergedGroup => MergedGroupTemplate,

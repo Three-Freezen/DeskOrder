@@ -145,7 +145,9 @@ public partial class App : System.Windows.Application
             Dispatcher.BeginInvoke(new Action(() =>
             {
                 var svc = PresetService.For(debugKind.Value);
-                new LoadPresetDialog(svc, _widgetService) { Owner = null }.Show();
+                // Use ShowDialog so ApplyButton_Click's DialogResult=true path works
+                // (otherwise setting DialogResult on a non-modal Window throws).
+                new LoadPresetDialog(svc, _widgetService) { Owner = null }.ShowDialog();
             }), DispatcherPriority.Background);
             return;
         }

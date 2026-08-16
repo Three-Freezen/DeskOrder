@@ -46,6 +46,13 @@ public partial class LoadPresetDialog : Window, INotifyPropertyChanged
             if (_liveClockMode != value)
             {
                 _liveClockMode = value;
+                // Push the new live mode to every Clock card so its template re-evaluates
+                // (ItemsControl re-runs the selector when the bound item raises PropertyChanged
+                // for the property the selector reads).
+                foreach (var item in _items)
+                {
+                    if (item.Kind == PresetKind.Clock) item.DisplayClockMode = value;
+                }
                 OnPropertyChanged();
             }
         }
@@ -154,6 +161,19 @@ public partial class LoadPresetDialog : Window, INotifyPropertyChanged
     private void RebuildItems()
     {
         _items.Clear();
+        try {
+            var log = new System.Text.StringBuilder();
+            log.AppendLine($"=== RebuildItems kind={_service.Kind} _presets.Count={_presets.Count} ===");
+            foreach (var p in _presets) {
+                if (p is PanelPreset pp)
+                    log.AppendLine($"  Name='{p.Name}' Fill={pp.Config.PanelFillColor} Glass={pp.Config.GlassColorMode} Ctl={pp.Config.PanelControlOpacity}");
+                else
+                    log.AppendLine($"  Name='{p.Name}' type={p.GetType().Name}");
+            }
+            System.IO.File.AppendAllText(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "preset_debug.log"), log.ToString());
+        } catch (Exception ex) {
+            System.IO.File.AppendAllText(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "preset_debug.log"), "EX: " + ex);
+        }
         foreach (var p in _presets)
         {
             // Calendar needs precomputed day grid + weekday header that the base wrapper
@@ -164,6 +184,9 @@ public partial class LoadPresetDialog : Window, INotifyPropertyChanged
                 CalendarPreset cp => new Cards.CalendarPresetCardItem(cp),
                 _ => new Cards.PresetCardItem(p)
             };
+            // Seed clock items with the current live mode so the first template evaluation
+            // already uses it (instead of the per-preset stored Mode).
+            if (item.Kind == PresetKind.Clock) item.DisplayClockMode = _liveClockMode;
             _items.Add(item);
         }
     }
@@ -208,7 +231,7 @@ public partial class LoadPresetDialog : Window, INotifyPropertyChanged
     }
 
     private double DefaultAngleFor(int idx) =>
-        (idx - (_presets.Count - 1) / 2.0) * AngleStep;
+        0; // TEMP DEBUG: disable fan rotation so we can see the true colors without visual overlap
 
     private static void SetCardAngle(Border card, double angle)
     {
@@ -447,6 +470,10 @@ public class LiquidGlassBrushConverter : IValueConverter
 {
     public static readonly Dictionary<string, Color> BaseColors = new()
     {
+        // "Default" is the preset card preview's gradient identity (purple-blue) when a preset
+        // has no explicit FillColor. Note: this differs from AcrylicHelper.ResolveBaseColorARGB
+        // (which returns 0x00000000) — here the preview wants a visible gradient, while live
+        // PanelWindow rendering uses transparent. Keep these in sync only if behavior should match.
         ["Default"]       = Color.FromArgb(0xFF, 0x70, 0x95, 0xC5),
         ["Accent"]        = Color.FromArgb(0xFF, 0x40, 0x90, 0xE2),
         ["GlassWhite"]    = Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF),

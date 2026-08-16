@@ -26,6 +26,11 @@ public partial class MergedGroupSettingsDialog : Window, INotifyPropertyChanged
     private string _glassColorMode;
     private bool _liquidGlass;
 
+    // Suppress PushToZone while we bulk-write controls from a preset (mirrors
+    // ZoneSettingsDialog._suppressPreview — without it the TextChanged/Slider.ValueChanged
+    // handlers fire and overwrite the values we just laid down).
+    private bool _suppressPush;
+
     public MergedGroupSettingsDialog(Zone zone, ZoneManager zoneManager)
     {
         InitializeComponent();
@@ -177,6 +182,7 @@ public partial class MergedGroupSettingsDialog : Window, INotifyPropertyChanged
     /// <summary>Push current dialog state to the live zone for real-time preview.</summary>
     void PushToZone()
     {
+        if (_suppressPush) return;
         _zone.MergedGroupName = NameBox.Text;
         _zone.MergedGroupIcon = IconCharBox.Text;
         _zone.MergedGroupQuickBarMode = QuickBarModeToggle.IsChecked == true;
@@ -220,6 +226,76 @@ public partial class MergedGroupSettingsDialog : Window, INotifyPropertyChanged
         // Apply visual changes to the live zone window
         if (_zoneManager.GetZoneWindow(_zone.Id) is { } win)
             win.RefreshZone(_zone);
+    }
+
+    /// <summary>Bulk-write all dialog controls from <see cref="_zone"/>. Mirrors
+    /// ZoneSettingsDialog.SyncFromZone — used by the Load Preset OK / Cancel branches to
+    /// keep dialog controls in sync with the model after a preset has been applied or
+    /// reverted. Suppresses <see cref="PushToZone"/> so the TextChanged/ValueChanged
+    /// handlers don't immediately overwrite the values we just wrote.</summary>
+    void SyncFromZone()
+    {
+        var prev = _suppressPush;
+        _suppressPush = true;
+        try
+        {
+            NameBox.Text = _zone.MergedGroupName;
+            IconCharBox.Text = _zone.MergedGroupIcon;
+            QuickBarModeToggle.IsChecked = _zone.MergedGroupQuickBarMode;
+            WidthBox.Text = _zone.Width.ToString("F0");
+            HeightBox.Text = _zone.Height.ToString("F0");
+            BorderThicknessBox.Text = _zone.MergedGroupBorderThickness.ToString("F1");
+            BgImagePathBox.Text = _zone.MergedGroupBackgroundImagePath;
+            OffsetXBox.Text = _zone.MergedGroupBgImageOffsetX.ToString("F0");
+            OffsetYBox.Text = _zone.MergedGroupBgImageOffsetY.ToString("F0");
+
+            // Sliders — also update their value labels (setters fired on ValueChanged handlers).
+            TitleOpacitySlider.Value = _zone.MergedGroupTitleBarOpacity;
+            TitleOpacityValue.Text = $"{(int)_zone.MergedGroupTitleBarOpacity}%";
+            CtrlOpacitySlider.Value = _zone.MergedGroupControlOpacity;
+            CtrlOpacityValue.Text = $"{(int)_zone.MergedGroupControlOpacity}%";
+            FillOpacitySlider.Value = _zone.MergedGroupBackgroundImageOpacity;
+            FillOpacityValue.Text = $"{(int)_zone.MergedGroupBackgroundImageOpacity}%";
+            BgZoomSlider.Value = _zone.MergedGroupBgImageZoom;
+            BgZoomValue.Text = $"{_zone.MergedGroupBgImageZoom:F1}x";
+
+            UnifiedFillRadio.IsChecked = _zone.MergedGroupUseUnifiedFill;
+            KeepOriginalRadio.IsChecked = !_zone.MergedGroupUseUnifiedFill;
+
+            // Color preset panels — highlight the chip matching each color string.
+            SelectPresetByTag(TextColorPresets, _zone.MergedGroupTitleTextColor);
+            SelectPresetByTag(IconColorPresets, _zone.MergedGroupIconColor);
+            SelectPresetByTag(BorderColorPresets, _zone.MergedGroupBorderColor);
+            SelectPresetByTag(TitleBarPresets, _zone.MergedGroupTitleBarFillColor);
+            SelectPresetByTag(FillColorPresets, _zone.MergedGroupFillColor);
+            UpdateHighlights();
+
+            // Liquid glass
+            _glassBlurAmount = _zone.GlassBlurAmount;
+            _glassTintOpacity = _zone.GlassTintOpacity;
+            _glassTintLuminosity = _zone.GlassTintLuminosity;
+            _glassColorMode = _zone.GlassColorMode;
+            _liquidGlass = _zone.EnableLiquidGlass;
+            LiquidGlassToggle.IsChecked = _liquidGlass;
+            UpdateLiquidButton();
+
+            UpdateCropBtnState();
+        }
+        finally { _suppressPush = prev; }
+    }
+
+    /// <summary>Highlight the preset chip in <paramref name="panel"/> whose Tag matches
+    /// <paramref name="value"/> (case-insensitive). Clears the highlight from all others.</summary>
+    static void SelectPresetByTag(Panel panel, string value)
+    {
+        foreach (var child in panel.Children)
+        {
+            if (child is Border b && b.Tag is string t)
+            {
+                bool match = string.Equals(t, value, StringComparison.OrdinalIgnoreCase);
+                b.BorderThickness = new Thickness(match ? 3 : 1);
+            }
+        }
     }
 
     void CropBgImage_Click(object s, RoutedEventArgs e)
@@ -416,8 +492,12 @@ public partial class MergedGroupSettingsDialog : Window, INotifyPropertyChanged
     void LoadPreset_Click(object sender, RoutedEventArgs e)
     {
         var snap = _zone.Clone();
+        // Mirrors ZoneSettingsDialog.LoadPresetButton_Click:
+        //   onCardPicked   — real-time preview: writes preset → _zone + live window
+        //   onPicked(OK)   — final commit: writes preset → _zone + dialog UI controls
+        //   Cancel         — restores _zone + UI from snapshot, refreshes live window
         var applied = PresetButtonsHelper.OpenLoad(this, PresetKind.MergedGroup, _zone,
-            picked => { /* onCardPicked already applied — no-op */ },
+            picked => SyncFromZone(),                    // OK: sync UI from _zone
             record =>
             {
                 var picked = (Zone)PresetService.GetPayload(record);
@@ -430,8 +510,12 @@ public partial class MergedGroupSettingsDialog : Window, INotifyPropertyChanged
             });
         if (applied != true)
         {
+            // Cancel — revert _zone from snapshot, sync UI, refresh live window.
+            // Skip PushToZone: it reads UI (still pre-preset) and would overwrite
+            // the snapshot values we just laid down. SyncFromZone writes snap → UI
+            // and uses _suppressPush so its setters don't loop back through PushToZone.
             CopyMergedGroupFields(snap, _zone);
-            PushToZone();
+            SyncFromZone();
             _zoneManager.GetZoneWindow(_zone.Id)?.RefreshZone(_zone);
         }
     }

@@ -115,10 +115,16 @@
                                             </TextBlock.Foreground>
                                         </TextBlock>
                                     </StackPanel>
-                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,3,0" Opacity="0.4">
-                                        <Border Width="6" Height="4" CornerRadius="1" Background="#60FFFFFF" Margin="0,0,1,0"/>
-                                        <Border Width="6" Height="4" CornerRadius="1" Background="#60FFFFFF" Margin="0,0,1,0"/>
-                                        <Border Width="6" Height="4" CornerRadius="1" Background="#60FFFFFF"/>
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,3,0" VerticalAlignment="Center">
+                                        <Border Width="11" Height="10" CornerRadius="2" Background="#30FFFFFF" Margin="0,0,2,0">
+                                            <TextBlock Text="+" FontSize="7" FontWeight="Bold" Foreground="#80FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <Border Width="11" Height="10" CornerRadius="2" Background="#30FFFFFF" Margin="0,0,2,0">
+                                            <TextBlock Text="⚙" FontSize="6" Foreground="#80FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <Border Width="11" Height="10" CornerRadius="2" Background="#30FFFFFF">
+                                            <TextBlock Text="─" FontSize="7" Foreground="#80FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-1,0,0"/>
+                                        </Border>
                                     </StackPanel>
                                 </Grid>
                                 <Border.Style>
@@ -149,7 +155,7 @@
             </Border>
         </DataTemplate>
 
-        <DataTemplate x:Key="ClockCardTemplate">
+        <DataTemplate x:Key="ClockDigitalCardTemplate">
             <Border Style="{StaticResource CardFrameStyle}"
                     MouseEnter="Card_MouseEnter"
                     MouseLeave="Card_MouseLeave"
@@ -160,25 +166,22 @@
                         <RowDefinition Height="*"/>
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
-                    <Border Margin="8,8,8,2" ClipToBounds="True" CornerRadius="10"
+                    <Border Margin="8,8,8,2"
                             Background="{Binding Payload.FillColor, Converter={StaticResource Hex2Color}, FallbackValue=#08000000}"
                             BorderThickness="{Binding Payload.BorderThickness}">
+                        <Border.Clip>
+                            <RectangleGeometry RadiusX="10" RadiusY="10" Rect="0,0,164,210"/>
+                        </Border.Clip>
                         <Border.BorderBrush>
                             <SolidColorBrush Color="{Binding Payload.BorderColor, Converter={StaticResource Hex2Color}}"/>
                         </Border.BorderBrush>
-                        <Grid>
-                            <!-- FillColor spans the whole inner Grid (no Row split) — Rectangle needs
-                                 explicit Stretch="Fill" because default Width/Height=0 leaves it 0×0
-                                 invisible without it. -->
+                        <Grid ClipToBounds="True">
                             <Rectangle Stretch="Fill" IsHitTestVisible="False">
                                 <Rectangle.Fill>
                                     <SolidColorBrush Color="{Binding Payload.FillColor, Converter={StaticResource Hex2Color}, FallbackValue=#08000000}"/>
                                 </Rectangle.Fill>
                             </Rectangle>
-                            <!-- Digital background image — visible only when this preset's stored Mode is Digital.
-                                 Switched from LiveClockMode (live widget's mode) so each card shows its own style. -->
-                            <Image Source="{Binding Payload.DigitalBackgroundImagePath}" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality"
-                                   Visibility="{Binding Payload.Mode, Converter={StaticResource Mode2Vis}, ConverterParameter=Digital}">
+                            <Image Source="{Binding Payload.DigitalBackgroundImagePath}" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality">
                                 <Image.Opacity>
                                     <Binding Path="Payload.DigitalBackgroundImageOpacity" Converter="{StaticResource PercentToOpacity}" FallbackValue="0.3"/>
                                 </Image.Opacity>
@@ -193,9 +196,75 @@
                                     </Style>
                                 </Image.Style>
                             </Image>
-                            <!-- Analog background image — visible only when this preset's stored Mode is Analog. -->
-                            <Image Source="{Binding Payload.BackgroundImagePath}" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality"
-                                   Visibility="{Binding Payload.Mode, Converter={StaticResource Mode2Vis}, ConverterParameter=Analog}">
+                            <Button Content="─" Width="11" Height="11" FontSize="6" Foreground="#60FFFFFF"
+                                    Background="#01000000" BorderThickness="0" Cursor="Hand"
+                                    HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,3,4,0" Panel.ZIndex="10">
+                                <Button.Resources>
+                                    <Style TargetType="Border"><Setter Property="CornerRadius" Value="2"/></Style>
+                                </Button.Resources>
+                            </Button>
+                            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,4,0,0">
+                                <TextBlock Text="14:30:00" FontSize="28" FontWeight="Light" FontFamily="Segoe UI" TextAlignment="Center">
+                                    <TextBlock.Foreground>
+                                        <SolidColorBrush Color="{Binding Payload.TextColor, Converter={StaticResource Hex2Color}, FallbackValue=#EEFFFFFF}"/>
+                                    </TextBlock.Foreground>
+                                    <TextBlock.Effect>
+                                        <DropShadowEffect BlurRadius="4" ShadowDepth="0" Color="#AA000000" Opacity="0.7"/>
+                                    </TextBlock.Effect>
+                                </TextBlock>
+                                <TextBlock Text="2026-01-01  周四" FontSize="9" Foreground="#AAFFFFFF" TextAlignment="Center" Margin="0,3,0,0">
+                                    <TextBlock.Effect>
+                                        <DropShadowEffect BlurRadius="2" ShadowDepth="0" Color="#66000000" Opacity="0.6"/>
+                                    </TextBlock.Effect>
+                                </TextBlock>
+                            </StackPanel>
+                            <Border IsHitTestVisible="False">
+                                <Border.Background>
+                                    <Binding Path="Payload.GlassColorMode" Converter="{StaticResource GlassMode2Brush}"/>
+                                </Border.Background>
+                                <Border.Opacity>
+                                    <Binding Path="Payload.GlassTintOpacity" Converter="{StaticResource PercentToOpacity}" FallbackValue="0.5"/>
+                                </Border.Opacity>
+                            </Border>
+                        </Grid>
+                    </Border>
+                    <StackPanel Grid.Row="1" Margin="12,4,12,8" VerticalAlignment="Top">
+                        <TextBlock Text="{Binding Name}" Foreground="{StaticResource T1}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                            <TextBlock Text="Digital" Foreground="{StaticResource T2}" FontSize="10"/>
+                            <TextBlock Text=" · " Foreground="{StaticResource T3}" FontSize="10"/>
+                            <TextBlock Text="{Binding CreatedAt, StringFormat=yyyy-MM-dd}" Foreground="{StaticResource T3}" FontSize="10"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </DataTemplate>
+
+        <DataTemplate x:Key="ClockAnalogCardTemplate">
+            <Border Style="{StaticResource CardFrameStyle}"
+                    MouseEnter="Card_MouseEnter"
+                    MouseLeave="Card_MouseLeave"
+                    MouseLeftButtonDown="Card_MouseLeftButtonDown"
+                    Loaded="Card_Loaded">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Border Margin="8,8,8,2" Background="{Binding Payload.FillColor, Converter={StaticResource Hex2Color}, FallbackValue=#08000000}" BorderThickness="{Binding Payload.BorderThickness}">
+                        <Border.Clip>
+                            <RectangleGeometry RadiusX="10" RadiusY="10" Rect="0,0,164,210"/>
+                        </Border.Clip>
+                        <Border.BorderBrush>
+                            <SolidColorBrush Color="{Binding Payload.BorderColor, Converter={StaticResource Hex2Color}}"/>
+                        </Border.BorderBrush>
+                        <Grid>
+                            <Rectangle Stretch="Fill" IsHitTestVisible="False">
+                                <Rectangle.Fill>
+                                    <SolidColorBrush Color="{Binding Payload.FillColor, Converter={StaticResource Hex2Color}, FallbackValue=#08000000}"/>
+                                </Rectangle.Fill>
+                            </Rectangle>
+                            <Image Source="{Binding Payload.BackgroundImagePath}" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality">
                                 <Image.Opacity>
                                     <Binding Path="Payload.BackgroundImageOpacity" Converter="{StaticResource PercentToOpacity}" FallbackValue="0.3"/>
                                 </Image.Opacity>
@@ -210,52 +279,36 @@
                                     </Style>
                                 </Image.Style>
                             </Image>
-                            <!-- Locked-time clock preview: analog face + digital text + date, all hardcoded to 14:30:00, 2026-08-15 周五 -->
-                            <Grid HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,2,0,0">
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto"/>
-                                    <RowDefinition Height="Auto"/>
-                                    <RowDefinition Height="Auto"/>
-                                </Grid.RowDefinitions>
-                                <!-- Analog face with hands set at 14:30:00 -->
-                                <Grid Grid.Row="0" Width="90" Height="90" HorizontalAlignment="Center">
-                                    <Ellipse Width="90" Height="90" Fill="#18000000" Stroke="#40FFFFFF" StrokeThickness="2"/>
-                                    <Rectangle Width="2" Height="6" Fill="#80FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,2,0,0"/>
-                                    <Rectangle Width="2" Height="6" Fill="#80FFFFFF" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,2,0"/>
-                                    <Rectangle Width="2" Height="6" Fill="#80FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,2"/>
-                                    <Rectangle Width="2" Height="6" Fill="#80FFFFFF" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="2,0,0,0"/>
-                                    <!-- Hour hand: 14:30 = 75° from 12 (clockwise) -->
-                                    <Line X1="45" Y1="45" X2="45" Y2="27" Stroke="White" StrokeThickness="3" StrokeStartLineCap="Round" StrokeEndLineCap="Round" RenderTransformOrigin="0.5,0.5">
-                                        <Line.RenderTransform>
-                                            <RotateTransform Angle="75"/>
-                                        </Line.RenderTransform>
-                                    </Line>
-                                    <!-- Minute hand: 30 = 180° -->
-                                    <Line X1="45" Y1="45" X2="45" Y2="13" Stroke="#CCFFFFFF" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" RenderTransformOrigin="0.5,0.5">
-                                        <Line.RenderTransform>
-                                            <RotateTransform Angle="180"/>
-                                        </Line.RenderTransform>
-                                    </Line>
-                                    <!-- Second hand: 0 = 0° (red) -->
-                                    <Line X1="45" Y1="48" X2="45" Y2="12" Stroke="#FFFF6666" StrokeThickness="1" RenderTransformOrigin="0.5,0.5">
-                                        <Line.RenderTransform>
-                                            <RotateTransform Angle="0"/>
-                                        </Line.RenderTransform>
-                                    </Line>
-                                    <Ellipse Width="6" Height="6" Fill="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                </Grid>
-                                <!-- Digital time text -->
-                                <TextBlock Grid.Row="1" Text="14:30:00" FontSize="18" FontWeight="Light" FontFamily="Segoe UI" HorizontalAlignment="Center" Margin="0,2,0,0">
-                                    <TextBlock.Foreground>
-                                        <SolidColorBrush Color="{Binding Payload.TextColor, Converter={StaticResource Hex2Color}, FallbackValue=#EEFFFFFF}"/>
-                                    </TextBlock.Foreground>
-                                </TextBlock>
-                                <!-- Date text -->
-                                <TextBlock Grid.Row="2" Text="2026-08-15  周五" FontSize="8" HorizontalAlignment="Center" Margin="0,1,0,0">
-                                    <TextBlock.Foreground>
-                                        <SolidColorBrush Color="{Binding Payload.TextColor, Converter={StaticResource Hex2Color}, FallbackValue=#AAFFFFFF}"/>
-                                    </TextBlock.Foreground>
-                                </TextBlock>
+                            <Button Content="─" Width="11" Height="11" FontSize="6" Foreground="#60FFFFFF"
+                                    Background="#01000000" BorderThickness="0" Cursor="Hand"
+                                    HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,3,4,0" Panel.ZIndex="10">
+                                <Button.Resources>
+                                    <Style TargetType="Border"><Setter Property="CornerRadius" Value="2"/></Style>
+                                </Button.Resources>
+                            </Button>
+                            <Grid Width="140" Height="140" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <Ellipse Width="140" Height="140" Fill="#18000000" Stroke="#40FFFFFF" StrokeThickness="2"/>
+                                <Rectangle Width="2" Height="8" Fill="#80FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,3,0,0"/>
+                                <Rectangle Width="2" Height="8" Fill="#80FFFFFF" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,3,0"/>
+                                <Rectangle Width="2" Height="8" Fill="#80FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,3"/>
+                                <Rectangle Width="2" Height="8" Fill="#80FFFFFF" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="3,0,0,0"/>
+                                <Line X1="70" Y1="70" X2="70" Y2="38" Stroke="White" StrokeThickness="3.5"
+                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round" RenderTransformOrigin="0.5,0.5">
+                                    <Line.RenderTransform><RotateTransform Angle="75"/></Line.RenderTransform>
+                                </Line>
+                                <Line X1="70" Y1="70" X2="70" Y2="22" Stroke="#CCFFFFFF" StrokeThickness="2.5"
+                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round" RenderTransformOrigin="0.5,0.5">
+                                    <Line.RenderTransform><RotateTransform Angle="180"/></Line.RenderTransform>
+                                </Line>
+                                <Line X1="70" Y1="75" X2="70" Y2="18" Stroke="#FFFF6666" StrokeThickness="1"
+                                      RenderTransformOrigin="0.5,0.5">
+                                    <Line.RenderTransform><RotateTransform Angle="0"/></Line.RenderTransform>
+                                </Line>
+                                <Ellipse Width="7" Height="7" Fill="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                <Border Width="22" Height="12" CornerRadius="2" Background="#20FFFFFF" BorderBrush="#40FFFFFF"
+                                        BorderThickness="0.5" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,18,0">
+                                    <TextBlock Text="1" FontSize="8" Foreground="#AAFFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
                             </Grid>
                             <Border IsHitTestVisible="False">
                                 <Border.Background>
@@ -270,7 +323,7 @@
                     <StackPanel Grid.Row="1" Margin="12,4,12,8" VerticalAlignment="Top">
                         <TextBlock Text="{Binding Name}" Foreground="{StaticResource T1}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
                         <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
-                            <TextBlock Text="{Binding Payload.Mode, Converter={StaticResource Mode2Name}}" Foreground="{StaticResource T2}" FontSize="10"/>
+                            <TextBlock Text="Analog" Foreground="{StaticResource T2}" FontSize="10"/>
                             <TextBlock Text=" · " Foreground="{StaticResource T3}" FontSize="10"/>
                             <TextBlock Text="{Binding CreatedAt, StringFormat=yyyy-MM-dd}" Foreground="{StaticResource T3}" FontSize="10"/>
                         </StackPanel>
@@ -280,7 +333,7 @@
         </DataTemplate>
 
         <DataTemplate x:Key="CalendarCardTemplate">
-            <Border Style="{StaticResource CardFrameStyle}"
+            <Border Style="{StaticResource CardFrameStyle}" Width="180" Height="290"
                     MouseEnter="Card_MouseEnter"
                     MouseLeave="Card_MouseLeave"
                     MouseLeftButtonDown="Card_MouseLeftButtonDown"
@@ -299,16 +352,18 @@
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
-                            <!-- FillColor spans both rows so the MonthLabel row tints with FillColor too
-                                 (matches CalendarWidget.ApplyAcrylic setting FillColor on the whole CalendarBorder). -->
-                            <Rectangle Grid.RowSpan="2" Stretch="Fill" IsHitTestVisible="False">
+                            <!-- FillColor spans all 5 rows (matches CalendarWidget.ApplyAcrylic setting FillColor on the whole CalendarBorder). -->
+                            <Rectangle Grid.RowSpan="5" Stretch="Fill" IsHitTestVisible="False">
                                 <Rectangle.Fill>
                                     <SolidColorBrush Color="{Binding Payload.FillColor, Converter={StaticResource Hex2Color}, FallbackValue=#08000000}"/>
                                 </Rectangle.Fill>
                             </Rectangle>
-                            <Image Grid.RowSpan="2" Source="{Binding Payload.BackgroundImagePath}" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality">
+                            <Image Grid.RowSpan="5" Source="{Binding Payload.BackgroundImagePath}" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality">
                                 <Image.Style>
                                     <Style TargetType="Image">
                                         <Setter Property="Visibility" Value="Visible"/>
@@ -320,76 +375,148 @@
                                     </Style>
                                 </Image.Style>
                             </Image>
-                            <TextBlock Grid.Row="0" Text="{Binding MonthLabel}" FontSize="10" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,3,0,2">
-                                <TextBlock.Foreground>
-                                    <SolidColorBrush Color="{Binding Payload.TextColor, Converter={StaticResource Hex2Color}, FallbackValue=#EEFFFFFF}"/>
-                                </TextBlock.Foreground>
-                            </TextBlock>
-                            <Grid Grid.Row="1" Margin="3,0,3,3">
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto"/>
-                                    <RowDefinition Height="*"/>
-                                </Grid.RowDefinitions>
-                                <ItemsControl Grid.Row="0" ItemsSource="{Binding WeekdayLabels}" Margin="0,0,0,1">
-                                    <ItemsControl.ItemsPanel>
-                                        <ItemsPanelTemplate>
-                                            <UniformGrid Rows="1" Columns="7"/>
-                                        </ItemsPanelTemplate>
-                                    </ItemsControl.ItemsPanel>
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate>
-                                            <TextBlock Text="{Binding}" FontSize="6" HorizontalAlignment="Center" Foreground="#606060"/>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
-                                <ItemsControl Grid.Row="1" ItemsSource="{Binding Days}">
-                                    <ItemsControl.ItemsPanel>
-                                        <ItemsPanelTemplate>
-                                            <UniformGrid Rows="6" Columns="7"/>
-                                        </ItemsPanelTemplate>
-                                    </ItemsControl.ItemsPanel>
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate>
-                                            <Grid>
-                                                <TextBlock Text="{Binding Day}" FontSize="6"
-                                                           HorizontalAlignment="Center" VerticalAlignment="Center">
-                                                    <TextBlock.Style>
-                                                        <Style TargetType="TextBlock">
-                                                            <Setter Property="Foreground" Value="#808080"/>
-                                                            <Style.Triggers>
-                                                                <DataTrigger Binding="{Binding IsCurrentMonth}" Value="True">
-                                                                    <Setter Property="Foreground">
-                                                                        <Setter.Value>
-                                                                            <SolidColorBrush Color="{Binding DataContext.Payload.TextColor, RelativeSource={RelativeSource AncestorType=ItemsControl}, Converter={StaticResource Hex2Color}, FallbackValue=#202020}"/>
-                                                                        </Setter.Value>
-                                                                    </Setter>
-                                                                </DataTrigger>
-                                                            </Style.Triggers>
-                                                        </Style>
-                                                    </TextBlock.Style>
-                                                </TextBlock>
-                                                <Border HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
-                                                        CornerRadius="3" Margin="1"
-                                                        Background="{Binding DataContext.Payload.TodayColor, RelativeSource={RelativeSource AncestorType=ItemsControl}, Converter={StaticResource Hex2Color}, FallbackValue=#FF6C63FF}">
-                                                    <Border.Style>
-                                                        <Style TargetType="Border">
-                                                            <Setter Property="Visibility" Value="Collapsed"/>
-                                                            <Style.Triggers>
-                                                                <DataTrigger Binding="{Binding IsToday}" Value="True">
-                                                                    <Setter Property="Visibility" Value="Visible"/>
-                                                                </DataTrigger>
-                                                            </Style.Triggers>
-                                                        </Style>
-                                                    </Border.Style>
-                                                </Border>
-                                            </Grid>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
+                            <!-- HideBtn overlay (matches CalendarWidget HideBtn at top-right) -->
+                            <Button Content="─" Width="11" Height="11" FontSize="6" Foreground="#40FFFFFF"
+                                    Background="#10FFFFFF" BorderThickness="0" Cursor="Hand"
+                                    HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,3,4,0" Panel.ZIndex="1">
+                                <Button.Resources>
+                                    <Style TargetType="Border"><Setter Property="CornerRadius" Value="2"/></Style>
+                                </Button.Resources>
+                            </Button>
+                            <!-- Row 0: Month/Year header + nav arrows (matches CalendarWidget Row 0) -->
+                            <Grid Grid.Row="0" Margin="0,2,0,1">
+                                <Button Content="&#x25C0;" Width="11" Height="11" FontSize="6" Background="Transparent"
+                                        BorderThickness="0" Cursor="Hand" HorizontalAlignment="Left" Margin="3,0,0,0"
+                                        Foreground="#AAFFFFFF"/>
+                                <TextBlock Text="{Binding MonthLabel}" FontSize="8" FontWeight="SemiBold"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center">
+                                    <TextBlock.Foreground>
+                                        <SolidColorBrush Color="{Binding Payload.TextColor, Converter={StaticResource Hex2Color}, FallbackValue=#EEFFFFFF}"/>
+                                    </TextBlock.Foreground>
+                                </TextBlock>
+                                <Button Content="&#x25B6;" Width="11" Height="11" FontSize="6" Background="Transparent"
+                                        BorderThickness="0" Cursor="Hand" HorizontalAlignment="Right" Margin="0,0,16,0"
+                                        Foreground="#AAFFFFFF"/>
                             </Grid>
-                            <Border Grid.RowSpan="2" IsHitTestVisible="False">
+                            <!-- Row 1: Today button (matches CalendarWidget TodayBtn) -->
+                            <Button Grid.Row="1" Content="Today" FontSize="6" Foreground="#6C63FF"
+                                    Background="Transparent" BorderBrush="#406C63FF" BorderThickness="1"
+                                    Padding="4,1" Cursor="Hand" HorizontalAlignment="Center" Margin="0,0,0,2"/>
+                            <!-- Row 2: Weekday headers -->
+                            <ItemsControl Grid.Row="2" ItemsSource="{Binding WeekdayLabels}" Margin="0,0,0,1">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <UniformGrid Rows="1" Columns="7"/>
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding}" FontSize="6" HorizontalAlignment="Center" Foreground="#8080A0"/>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <!-- Row 3: Day cells grid (6 rows × 7 cols) -->
+                            <ItemsControl Grid.Row="3" ItemsSource="{Binding Days}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <UniformGrid Rows="6" Columns="7"/>
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid>
+                                            <Border CornerRadius="4" Margin="1" Background="#306C63FF"
+                                                    HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+                                                <Border.Style>
+                                                    <Style TargetType="Border">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsToday}" Value="True">
+                                                                <Setter Property="Visibility" Value="Visible"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Border.Style>
+                                            </Border>
+                                            <TextBlock Text="{Binding Day}" FontSize="6"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Foreground" Value="#808080"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsCurrentMonth}" Value="True">
+                                                                <Setter Property="Foreground">
+                                                                    <Setter.Value>
+                                                                        <SolidColorBrush Color="{Binding DataContext.Payload.TextColor, RelativeSource={RelativeSource AncestorType=ItemsControl}, Converter={StaticResource Hex2Color}, FallbackValue=#202020}"/>
+                                                                    </Setter.Value>
+                                                                </Setter>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <Border Grid.RowSpan="5" IsHitTestVisible="False">
                                 <Border.Background><Binding Path="Payload.GlassColorMode" Converter="{StaticResource GlassMode2Brush}"/></Border.Background>
                                 <Border.Opacity><Binding Path="Payload.GlassTintOpacity" Converter="{StaticResource PercentToOpacity}" FallbackValue="0.7"/></Border.Opacity>
+                            </Border>
+                            <!-- Row 4: Notes panel (matches CalendarWidget NotesPanel — 120/404 ≈ 30% body height) -->
+                            <Border Grid.Row="4" Background="#15FFFFFF" CornerRadius="4" Margin="3,3,3,3" Padding="5,4" MinHeight="70">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="*"/>
+                                    </Grid.RowDefinitions>
+                                    <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,3">
+                                        <TextBlock Text="备注" FontSize="8" Foreground="#AAA0C0" VerticalAlignment="Center"/>
+                                        <Button Content="+" Width="12" Height="12" FontSize="9" Foreground="#6C63FF"
+                                                Background="#20FFFFFF" BorderThickness="0" Cursor="Hand" Margin="5,0,0,0">
+                                            <Button.Resources>
+                                                <Style TargetType="Border"><Setter Property="CornerRadius" Value="3"/></Style>
+                                            </Button.Resources>
+                                        </Button>
+                                    </StackPanel>
+                                    <StackPanel Grid.Row="1">
+                                        <!-- Note item 1 (checked) -->
+                                        <Grid Margin="0,1" Background="Transparent">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Border Grid.Column="0" Width="11" Height="11" CornerRadius="2" BorderBrush="#806C63FF" BorderThickness="1" Background="#306C63FF" Margin="0,0,4,0" VerticalAlignment="Center">
+                                                <TextBlock Text="✓" FontSize="8" Foreground="#6C63FF" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            </Border>
+                                            <TextBlock Grid.Column="1" Text="会议准备" FontSize="8" Foreground="#D0D0E0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock Grid.Column="2" Text="×" FontSize="9" Foreground="#80666688" VerticalAlignment="Center" Margin="3,0,0,0" Cursor="Hand"/>
+                                        </Grid>
+                                        <!-- Note item 2 (unchecked) -->
+                                        <Grid Margin="0,1" Background="Transparent">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Border Grid.Column="0" Width="11" Height="11" CornerRadius="2" BorderBrush="#50FFFFFF" BorderThickness="1" Background="Transparent" Margin="0,0,4,0" VerticalAlignment="Center"/>
+                                            <TextBlock Grid.Column="1" Text="提交周报" FontSize="8" Foreground="#D0D0E0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock Grid.Column="2" Text="×" FontSize="9" Foreground="#80666688" VerticalAlignment="Center" Margin="3,0,0,0" Cursor="Hand"/>
+                                        </Grid>
+                                        <!-- Note item 3 (unchecked, truncated) -->
+                                        <Grid Margin="0,1" Background="Transparent">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Border Grid.Column="0" Width="11" Height="11" CornerRadius="2" BorderBrush="#50FFFFFF" BorderThickness="1" Background="Transparent" Margin="0,0,4,0" VerticalAlignment="Center"/>
+                                            <TextBlock Grid.Column="1" Text="下午茶歇" FontSize="8" Foreground="#D0D0E0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock Grid.Column="2" Text="×" FontSize="9" Foreground="#80666688" VerticalAlignment="Center" Margin="3,0,0,0" Cursor="Hand"/>
+                                        </Grid>
+                                    </StackPanel>
+                                </Grid>
                             </Border>
                         </Grid>
                     </Border>
@@ -443,40 +570,42 @@
                                     </Style>
                                 </Image.Style>
                             </Image>
-                            <!-- Row 0: Title bar — icon + title text + Save/Pin/Hide buttons like the real widget -->
+                            <!-- Row 0: Title bar — title text + Save/Pin/Hide buttons (matches StickyNoteWindow TitleBarBorder) -->
                             <Border Grid.Row="0" CornerRadius="3,3,0,0">
                                 <Border.Background>
-                                    <SolidColorBrush Color="{Binding Payload.TitleBarFillColor, Converter={StaticResource Hex2Color}, FallbackValue=#10FFFFFF}"/>
+                                    <SolidColorBrush Color="{Binding Payload.TitleBarFillColor, Converter={StaticResource Hex2Color}, FallbackValue=#20000000}"/>
                                 </Border.Background>
                                 <Grid ClipToBounds="True">
-                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0,0,0">
-                                        <TextBlock Text="📝" FontSize="9" VerticalAlignment="Center" Margin="0,0,4,0">
-                                            <TextBlock.Foreground>
-                                                <SolidColorBrush Color="{Binding Payload.TitleTextColor, Converter={StaticResource Hex2Color}, FallbackValue=#E0E0E0}"/>
-                                            </TextBlock.Foreground>
-                                        </TextBlock>
-                                        <TextBlock Text="{Binding Payload.Title, FallbackValue=Note}" FontSize="9" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="80">
-                                            <TextBlock.Foreground>
-                                                <SolidColorBrush Color="{Binding Payload.TitleTextColor, Converter={StaticResource Hex2Color}, FallbackValue=#E0E0E0}"/>
-                                            </TextBlock.Foreground>
-                                        </TextBlock>
-                                    </StackPanel>
-                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,4,0" VerticalAlignment="Center">
-                                        <TextBlock Text="💾" FontSize="8" Margin="2,0" Foreground="#80808080"/>
-                                        <TextBlock Text="📌" FontSize="8" Margin="2,0" Foreground="#80808080"/>
-                                        <TextBlock Text="─" FontSize="9" Margin="2,0" Foreground="#80808080"/>
+                                    <TextBlock Text="Note" FontSize="9" VerticalAlignment="Center" Margin="7,0,0,0">
+                                        <TextBlock.Foreground>
+                                            <SolidColorBrush Color="{Binding Payload.TitleTextColor, Converter={StaticResource Hex2Color}, FallbackValue=#E0E0E0}"/>
+                                        </TextBlock.Foreground>
+                                    </TextBlock>
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,3,0" VerticalAlignment="Center">
+                                        <Button Content="💾" Width="14" Height="14" FontSize="7" Background="Transparent" BorderThickness="0" Cursor="Hand" Margin="2,0,0,0" Foreground="#80FFFFFF"/>
+                                        <Button Content="📌" Width="14" Height="14" FontSize="7" Background="Transparent" BorderThickness="0" Cursor="Hand" Margin="2,0,0,0" Foreground="#80FFFFFF"/>
+                                        <Button Content="─" Width="14" Height="14" FontSize="8" Background="Transparent" BorderThickness="0" Cursor="Hand" Margin="2,0,0,0" Foreground="#80FFFFFF"/>
                                     </StackPanel>
                                 </Grid>
                             </Border>
-                            <!-- Row 1: Formatting toolbar (font size + B I U) -->
-                            <Border Grid.Row="1" Background="#10000000" Padding="4,2">
+                            <!-- Row 1: Formatting toolbar — Font Size combo + B/I/U/A buttons (matches StickyNoteWindow formatting toolbar) -->
+                            <Border Grid.Row="1" Background="#10000000" Padding="4,1">
                                 <StackPanel Orientation="Horizontal">
-                                    <Border Width="22" Height="10" CornerRadius="2" Background="#20FFFFFF" Margin="0,0,3,0">
-                                        <TextBlock Text="14" FontSize="7" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#AAA0C0"/>
+                                    <Border Width="20" Height="12" CornerRadius="2" Background="#1E1E36" BorderBrush="#30FFFFFF" BorderThickness="1" Margin="0,0,3,0">
+                                        <TextBlock Text="14" FontSize="7" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#E0E0E0"/>
                                     </Border>
-                                    <TextBlock Text="B" FontSize="8" FontWeight="Bold" Foreground="#D0D0E0" Margin="3,0" VerticalAlignment="Center"/>
-                                    <TextBlock Text="I" FontSize="8" FontStyle="Italic" Foreground="#D0D0E0" Margin="3,0" VerticalAlignment="Center"/>
-                                    <TextBlock Text="U" FontSize="8" TextDecorations="Underline" Foreground="#D0D0E0" Margin="3,0" VerticalAlignment="Center"/>
+                                    <Rectangle Width="1" Fill="#20FFFFFF" Margin="2,1"/>
+                                    <Button Content="B" Width="11" Height="12" FontSize="7" FontWeight="Bold" Background="Transparent" BorderThickness="0" Cursor="Hand" Foreground="#E0E0E0"/>
+                                    <Button Content="I" Width="11" Height="12" FontSize="7" FontStyle="Italic" Background="Transparent" BorderThickness="0" Cursor="Hand" Foreground="#E0E0E0"/>
+                                    <Button Content="U" Width="11" Height="12" FontSize="7" Background="Transparent" BorderThickness="0" Cursor="Hand" Foreground="#E0E0E0">
+                                        <Button.ContentTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="U" FontSize="7" TextDecorations="Underline" Foreground="#E0E0E0"/>
+                                            </DataTemplate>
+                                        </Button.ContentTemplate>
+                                    </Button>
+                                    <Rectangle Width="1" Fill="#20FFFFFF" Margin="2,1"/>
+                                    <Button Content="A" Width="11" Height="12" FontSize="7" FontWeight="Bold" Background="Transparent" BorderThickness="0" Cursor="Hand" Foreground="#E0E0E0"/>
                                 </StackPanel>
                             </Border>
                             <!-- Row 2: Content area (truncated text) -->
@@ -555,16 +684,22 @@
                                                 <SolidColorBrush Color="{Binding Payload.MergedGroupIconColor, Converter={StaticResource Hex2Color}, FallbackValue=#FFFFFF}"/>
                                             </TextBlock.Foreground>
                                         </TextBlock>
-                                        <TextBlock Text="{Binding Payload.MergedGroupName, FallbackValue=Merged Group}" FontSize="8" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="80">
+                                        <TextBlock Text="Merged Group" FontSize="8" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="80">
                                             <TextBlock.Foreground>
                                                 <SolidColorBrush Color="{Binding Payload.MergedGroupTitleTextColor, Converter={StaticResource Hex2Color}, FallbackValue=#FFFFFF}"/>
                                             </TextBlock.Foreground>
                                         </TextBlock>
                                     </StackPanel>
-                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,3,0" Opacity="0.4">
-                                        <Border Width="6" Height="4" CornerRadius="1" Background="#60FFFFFF" Margin="0,0,1,0"/>
-                                        <Border Width="6" Height="4" CornerRadius="1" Background="#60FFFFFF" Margin="0,0,1,0"/>
-                                        <Border Width="6" Height="4" CornerRadius="1" Background="#60FFFFFF"/>
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,3,0" VerticalAlignment="Center">
+                                        <Border Width="11" Height="10" CornerRadius="2" Background="#30FFFFFF" Margin="0,0,2,0">
+                                            <TextBlock Text="+" FontSize="7" FontWeight="Bold" Foreground="#80FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <Border Width="11" Height="10" CornerRadius="2" Background="#30FFFFFF" Margin="0,0,2,0">
+                                            <TextBlock Text="⚙" FontSize="6" Foreground="#80FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <Border Width="11" Height="10" CornerRadius="2" Background="#30FFFFFF">
+                                            <TextBlock Text="─" FontSize="7" Foreground="#80FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-1,0,0"/>
+                                        </Border>
                                     </StackPanel>
                                 </Grid>
                             </Border>
@@ -574,19 +709,13 @@
                                     <Border CornerRadius="2" Background="#30FFFFFF" Padding="4,1" Margin="0,0,2,0">
                                         <StackPanel Orientation="Horizontal">
                                             <TextBlock Text="⊞" FontSize="7" Margin="0,0,2,0" Foreground="#FFFFFF" VerticalAlignment="Center"/>
-                                            <TextBlock Text="Master" FontSize="6" Foreground="#FFFFFF" VerticalAlignment="Center"/>
+                                            <TextBlock Text="Zone1" FontSize="6" Foreground="#FFFFFF" VerticalAlignment="Center"/>
                                         </StackPanel>
                                     </Border>
                                     <Border CornerRadius="2" Background="#10FFFFFF" Padding="4,1" Margin="0,0,2,0">
                                         <StackPanel Orientation="Horizontal">
                                             <TextBlock Text="⊞" FontSize="7" Margin="0,0,2,0" Foreground="#A0FFFFFF" VerticalAlignment="Center"/>
-                                            <TextBlock Text="Sub1" FontSize="6" Foreground="#A0FFFFFF" VerticalAlignment="Center"/>
-                                        </StackPanel>
-                                    </Border>
-                                    <Border CornerRadius="2" Background="#10FFFFFF" Padding="4,1" Margin="0,0,2,0">
-                                        <StackPanel Orientation="Horizontal">
-                                            <TextBlock Text="⊞" FontSize="7" Margin="0,0,2,0" Foreground="#A0FFFFFF" VerticalAlignment="Center"/>
-                                            <TextBlock Text="Sub2" FontSize="6" Foreground="#A0FFFFFF" VerticalAlignment="Center"/>
+                                            <TextBlock Text="Zone 2" FontSize="6" Foreground="#A0FFFFFF" VerticalAlignment="Center"/>
                                         </StackPanel>
                                     </Border>
                                 </StackPanel>
@@ -621,21 +750,15 @@
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
                     <Border Margin="8,8,8,2" ClipToBounds="True" CornerRadius="6"
-                            Background="{Binding Payload.PanelFillColor, Converter={StaticResource Hex2Color}, FallbackValue=#08000000}" BorderThickness="1">
+                            Background="{Binding PanelFillBrush, FallbackValue=#08000000}" BorderThickness="1">
                         <Border.BorderBrush>
-                            <SolidColorBrush Color="{Binding Payload.PanelBorderColor, Converter={StaticResource Hex2Color}, FallbackValue=#30FFFFFF}"/>
+                            <Binding Path="PanelBorderBrush" FallbackValue="#30FFFFFF"/>
                         </Border.BorderBrush>
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="20"/>
                                 <RowDefinition Height="*"/>
                             </Grid.RowDefinitions>
-                            <!-- FillColor backdrop -->
-                            <Rectangle Grid.RowSpan="2" Stretch="Fill" IsHitTestVisible="False">
-                                <Rectangle.Fill>
-                                    <SolidColorBrush Color="{Binding Payload.PanelFillColor, Converter={StaticResource Hex2Color}, FallbackValue=#08000000}"/>
-                                </Rectangle.Fill>
-                            </Rectangle>
                             <!-- Background image -->
                             <Image Grid.RowSpan="2" Source="{Binding Payload.PanelBackgroundImagePath}" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality">
                                 <Image.Style>
@@ -649,77 +772,64 @@
                                     </Style>
                                 </Image.Style>
                             </Image>
-                            <!-- Row 0: Top bar — clock + title + search + toggles + settings (matches PanelWindow.xaml) -->
-                            <Border Grid.Row="0" CornerRadius="3,3,0,0" Background="#10FFFFFF" Padding="4,2">
+                            <!-- Row 0: TopBar — 6 columns matching PanelWindow.TopBar (Clock+Date | Title | Search | Toggle | Import | Settings+Hide) -->
+                            <Border Grid.Row="0" CornerRadius="3,3,0,0" Background="#10FFFFFF" Padding="3,1">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
-                                    <!-- Col 0: clock + date -->
-                                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                                        <TextBlock Text="🕐" FontSize="9" Foreground="#A0FFFFFF" VerticalAlignment="Center"/>
-                                        <TextBlock Text="14:30" FontSize="8" Foreground="#A0FFFFFF" Margin="2,0,0,0" VerticalAlignment="Center"/>
-                                    </StackPanel>
-                                    <!-- Col 2: icon row (toggles / settings) -->
-                                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                                        <Border Width="10" Height="10" CornerRadius="2" Background="#20FFFFFF" Margin="1,0">
-                                            <TextBlock Text="▦" FontSize="7" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#E8E8F0"/>
+                                    <!-- Col 0: Clock (locked to current time 15:42) -->
+                                    <TextBlock Grid.Column="0" Text="14:30" FontSize="6" Foreground="#A0FFFFFF" VerticalAlignment="Center" Margin="0,0,3,0"/>
+                                    <!-- Col 1: Title Panel -->
+                                    <TextBlock Grid.Column="1" Text="Panel" FontSize="6" FontWeight="SemiBold" Foreground="#E8E8F0" VerticalAlignment="Center" Margin="0,0,3,0"/>
+                                    <!-- Col 2: Search bar -->
+                                    <Border Grid.Column="2" Height="11" CornerRadius="5" Background="#15FFFFFF" BorderBrush="#20FFFFFF" BorderThickness="1" VerticalAlignment="Center" Margin="0,0,3,0">
+                                        <TextBlock Text="搜索..." FontSize="5" Foreground="#606080" VerticalAlignment="Center" Margin="4,0,0,0"/>
+                                    </Border>
+                                    <!-- Col 3: Grid/List toggle -->
+                                    <Border Grid.Column="3" Width="11" Height="11" CornerRadius="2" Background="#20FFFFFF" Margin="0,0,2,0">
+                                        <TextBlock Text="▦" FontSize="6" Foreground="#E8E8F0" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <!-- Col 4: Import (+) -->
+                                    <Border Grid.Column="4" Width="11" Height="11" CornerRadius="2" Background="#30FFFFFF" Margin="0,0,2,0">
+                                        <TextBlock Text="+" FontSize="7" FontWeight="Bold" Foreground="#80FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <!-- Col 5: Settings (⚙) + Hide (─) -->
+                                    <StackPanel Grid.Column="5" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Border Width="11" Height="11" CornerRadius="2" Background="#30FFFFFF" Margin="0,0,2,0">
+                                            <TextBlock Text="⚙" FontSize="6" Foreground="#8080A0" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                         </Border>
-                                        <Border Width="10" Height="10" CornerRadius="2" Background="#20FFFFFF" Margin="1,0">
-                                            <TextBlock Text="⚙" FontSize="7" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#8080A0"/>
+                                        <Border Width="11" Height="11" CornerRadius="2" Background="#30FFFFFF">
+                                            <TextBlock Text="─" FontSize="6" Foreground="#8080A0" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                         </Border>
                                     </StackPanel>
                                 </Grid>
                             </Border>
-                            <!-- Row 1: Content area — 2x3 file icon grid (placeholder for the panel content) -->
-                            <UniformGrid Grid.Row="1" Rows="2" Columns="3" Margin="6,4,6,4">
-                                <Border Margin="2" CornerRadius="3" Background="#25FFFFFF">
-                                    <Border.Style>
-                                        <Style TargetType="Border">
-                                            <Setter Property="Visibility" Value="Visible"/>
-                                        </Style>
-                                    </Border.Style>
-                                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                                        <Border Width="14" Height="14" CornerRadius="2" Background="#508080A0" HorizontalAlignment="Center"/>
-                                        <TextBlock Text="项目" FontSize="6" Foreground="#8888A0" HorizontalAlignment="Center" Margin="0,2,0,0"/>
-                                    </StackPanel>
-                                </Border>
-                                <Border Margin="2" CornerRadius="3" Background="#25FFFFFF">
-                                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                                        <Border Width="14" Height="14" CornerRadius="2" Background="#508080A0" HorizontalAlignment="Center"/>
-                                        <TextBlock Text="文档" FontSize="6" Foreground="#8888A0" HorizontalAlignment="Center" Margin="0,2,0,0"/>
-                                    </StackPanel>
-                                </Border>
-                                <Border Margin="2" CornerRadius="3" Background="#25FFFFFF">
-                                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                                        <Border Width="14" Height="14" CornerRadius="2" Background="#508080A0" HorizontalAlignment="Center"/>
-                                        <TextBlock Text="图片" FontSize="6" Foreground="#8888A0" HorizontalAlignment="Center" Margin="0,2,0,0"/>
-                                    </StackPanel>
-                                </Border>
-                                <Border Margin="2" CornerRadius="3" Background="#25FFFFFF">
-                                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                                        <Border Width="14" Height="14" CornerRadius="2" Background="#508080A0" HorizontalAlignment="Center"/>
-                                        <TextBlock Text="视频" FontSize="6" Foreground="#8888A0" HorizontalAlignment="Center" Margin="0,2,0,0"/>
-                                    </StackPanel>
-                                </Border>
-                                <Border Margin="2" CornerRadius="3" Background="#25FFFFFF">
-                                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                                        <Border Width="14" Height="14" CornerRadius="2" Background="#508080A0" HorizontalAlignment="Center"/>
-                                        <TextBlock Text="音频" FontSize="6" Foreground="#8888A0" HorizontalAlignment="Center" Margin="0,2,0,0"/>
-                                    </StackPanel>
-                                </Border>
-                                <Border Margin="2" CornerRadius="3" Background="#25FFFFFF">
-                                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                                        <Border Width="14" Height="14" CornerRadius="2" Background="#508080A0" HorizontalAlignment="Center"/>
-                                        <TextBlock Text="其他" FontSize="6" Foreground="#8888A0" HorizontalAlignment="Center" Margin="0,2,0,0"/>
-                                    </StackPanel>
-                                </Border>
-                            </UniformGrid>
-                            <Border Grid.RowSpan="2" IsHitTestVisible="False">
-                                <Border.Background><Binding Path="Payload.GlassColorMode" Converter="{StaticResource GlassMode2Brush}"/></Border.Background>
-                                <Border.Opacity><Binding Path="Payload.GlassTintOpacity" Converter="{StaticResource PercentToOpacity}" FallbackValue="0.7"/></Border.Opacity>
+                            <!-- Row 1: empty (icon display removed per user request) -->
+                            <Grid Grid.Row="1"/>
+                            <!-- Gradient backdrop (LiquidGlass). Default-collapsed; shown only when
+                                 the preset has no explicit PanelFillColor (i.e. the card uses the
+                                 gradient as its base canvas). Presets with a real FillColor keep
+                                 their picked color exactly — no AuroraCyan hue-shift. -->
+                            <Border Grid.RowSpan="2" IsHitTestVisible="False" Visibility="Collapsed">
+                                <Border.Background>
+                                    <Binding Path="Payload.GlassColorMode" Converter="{StaticResource GlassMode2Brush}"/>
+                                </Border.Background>
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding PanelFillColor}" Value="">
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
                             </Border>
                         </Grid>
                     </Border>
@@ -733,7 +843,8 @@
 
         <local:PresetCardTemplateSelector x:Key="CardSelector"
                 ZoneTemplate="{StaticResource ZoneCardTemplate}"
-                ClockTemplate="{StaticResource ClockCardTemplate}"
+                ClockAnalogTemplate="{StaticResource ClockAnalogCardTemplate}"
+                ClockDigitalTemplate="{StaticResource ClockDigitalCardTemplate}"
                 CalendarTemplate="{StaticResource CalendarCardTemplate}"
                 StickyNoteTemplate="{StaticResource StickyNoteCardTemplate}"
                 MergedGroupTemplate="{StaticResource MergedGroupCardTemplate}"
@@ -769,7 +880,7 @@
                                   ItemTemplateSelector="{StaticResource CardSelector}">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
-                                <local:FanPanel CardWidth="180" CardHeight="220" StepWidth="45" VerticalPadding="60"/>
+                                <local:FanPanel CardWidth="180" CardHeight="290" StepWidth="45" VerticalPadding="60"/>
                             </ItemsPanelTemplate>
                         </ItemsControl.ItemsPanel>
                     </ItemsControl>
