@@ -574,8 +574,9 @@ public partial class StickyNoteWindow : Window
     public void RefreshAppearance(StickyNote? note = null)
     {
         if (note != null) _note = note;
-        if (MainContent.Visibility == Visibility.Visible)
-            ApplyAcrylic();
+        // ponytail: ApplyAcrylic guards on IntPtr.Zero internally — safe to run regardless
+        // of MainContent visibility so live preview reaches the widget even when hidden.
+        ApplyAcrylic();
         ApplyBackgroundImage();
         ApplyStyle();
         ApplyTitleBar();

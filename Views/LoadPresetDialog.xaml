@@ -292,6 +292,12 @@
                                 <Rectangle Width="2" Height="8" Fill="#80FFFFFF" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,3,0"/>
                                 <Rectangle Width="2" Height="8" Fill="#80FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,3"/>
                                 <Rectangle Width="2" Height="8" Fill="#80FFFFFF" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="3,0,0,0"/>
+                                <!-- ponytail: Hand angles are intentionally hardcoded to a 14:30:00 snapshot
+                                     rather than computed per-card-load. Preset cards are static layout
+                                     previews — animating them or reading current time per card would
+                                     cost cycles every 500ms (Card_Loaded fires once) and create a
+                                     distracting flicker across the fan. Add a per-card time read here
+                                     only if the user explicitly asks for "live time on every card". -->
                                 <Line X1="70" Y1="70" X2="70" Y2="38" Stroke="White" StrokeThickness="3.5"
                                       StrokeStartLineCap="Round" StrokeEndLineCap="Round" RenderTransformOrigin="0.5,0.5">
                                     <Line.RenderTransform><RotateTransform Angle="75"/></Line.RenderTransform>
@@ -333,6 +339,11 @@
         </DataTemplate>
 
         <DataTemplate x:Key="CalendarCardTemplate">
+            <!-- ponytail: Calendar card is intentionally taller (290) than CardFrameStyle's
+                 default 220 — the month header + Today button + weekday row + 6×7 day grid
+                 + Notes panel all stack vertically and need the extra ~70px. Other card
+                 kinds (Zone/Clock/etc.) stay at 220 since their content is single-row.
+                 FanPanel below matches CardHeight=290 so this card centers correctly. -->
             <Border Style="{StaticResource CardFrameStyle}" Width="180" Height="290"
                     MouseEnter="Card_MouseEnter"
                     MouseLeave="Card_MouseLeave"
@@ -364,6 +375,9 @@
                                 </Rectangle.Fill>
                             </Rectangle>
                             <Image Grid.RowSpan="5" Source="{Binding Payload.BackgroundImagePath}" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality">
+                                <Image.Opacity>
+                                    <Binding Path="Payload.BackgroundImageOpacity" Converter="{StaticResource PercentToOpacity}" FallbackValue="0.3"/>
+                                </Image.Opacity>
                                 <Image.Style>
                                     <Style TargetType="Image">
                                         <Setter Property="Visibility" Value="Visible"/>
@@ -425,7 +439,8 @@
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
                                         <Grid>
-                                            <Border CornerRadius="4" Margin="1" Background="#306C63FF"
+                                            <Border CornerRadius="4" Margin="1"
+                                                    Background="{Binding DataContext.Payload.TodayColor, RelativeSource={RelativeSource AncestorType=ContentPresenter}, Converter={StaticResource Hex2Color}, FallbackValue=#FF6C63FF}"
                                                     HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
                                                 <Border.Style>
                                                     <Style TargetType="Border">
@@ -447,7 +462,12 @@
                                                             <DataTrigger Binding="{Binding IsCurrentMonth}" Value="True">
                                                                 <Setter Property="Foreground">
                                                                     <Setter.Value>
-                                                                        <SolidColorBrush Color="{Binding DataContext.Payload.TextColor, RelativeSource={RelativeSource AncestorType=ItemsControl}, Converter={StaticResource Hex2Color}, FallbackValue=#202020}"/>
+                                                                        <!-- ponytail: AncestorType=ContentPresenter walks from DayCell up
+                                                                             to the ContentPresenter (whose DataContext is the parent PresetCardItem).
+                                                                             Previous AncestorType=ItemsControl landed on the Days ItemsControl
+                                                                             whose DataContext is the Days collection — binding silently failed
+                                                                             and FallbackValue #202020 was always used. -->
+                                                                        <SolidColorBrush Color="{Binding DataContext.Payload.TextColor, RelativeSource={RelativeSource AncestorType=ContentPresenter}, Converter={StaticResource Hex2Color}, FallbackValue=#202020}"/>
                                                                     </Setter.Value>
                                                                 </Setter>
                                                             </DataTrigger>
@@ -880,6 +900,10 @@
                                   ItemTemplateSelector="{StaticResource CardSelector}">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
+                                <!-- ponytail: CardHeight=290 matches the Calendar card's intentional tall layout
+                 (see CalendarCardTemplate comment above). Non-Calendar cards stay at 220
+                 from CardFrameStyle — FanPanel reserves 290 per slot but smaller cards
+                 only fill what they need, so fan spacing stays consistent. -->
                                 <local:FanPanel CardWidth="180" CardHeight="290" StepWidth="45" VerticalPadding="60"/>
                             </ItemsPanelTemplate>
                         </ItemsControl.ItemsPanel>

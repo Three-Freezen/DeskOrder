@@ -1024,6 +1024,16 @@ public partial class ManagementWindow : Window
 
     void ShowWidgetAppearanceDialog(StickyNote note)
     {
+        // ponytail: always show for preview. If note was hidden, OnLoad collapsed
+        // MainContent and the dialog's RefreshAppearance calls paint into nothing —
+        // user can't see the preview. Cancel branch below restores wasVisible.
+        bool wasVisible = note.IsVisible;
+        if (_notesService?.Windows.ContainsKey(note.Id) != true)
+        {
+            OpenNoteWindow(note);
+        }
+        if (_notesService?.Windows.TryGetValue(note.Id, out var w) == true && w is StickyNoteWindow snwShow)
+            snwShow.ShowNote();
         var dlg = new WidgetSettingsDialog(WidgetSettingsTarget.StickyNote) { Owner = this };
         dlg.LoadFromNote(note);
         if (dlg.ShowDialog() == true && dlg.DialogResultOk)
@@ -1053,10 +1063,32 @@ public partial class ManagementWindow : Window
             RefreshNotesList();
             RefreshAllStateButtons();
         }
+        else
+        {
+            if (note.IsVisible != wasVisible)
+            {
+                note.IsVisible = wasVisible;
+                _notesService?.UpdateNote(note);
+                if (!wasVisible && _notesService?.Windows.TryGetValue(note.Id, out var wHide) == true && wHide is StickyNoteWindow snwHide)
+                    snwHide.HideNote();
+                RefreshNotesList();
+                RefreshAllStateButtons();
+            }
+        }
     }
 
     void ShowClockAppearanceDialog(DesktopClock clock)
     {
+        // ponytail: always show for preview. OnLoad collapses MainContent when the clock
+        // is hidden, so without ShowClock() the dialog's RefreshAppearance paints into a
+        // collapsed window and the user sees nothing. Cancel branch below restores
+        // wasVisible (and calls HideClock when needed), so disk state stays correct.
+        bool wasVisible = clock.IsVisible;
+        if (_widgetService?.GetClockWindow(clock.Id) == null)
+        {
+            OpenClockWindow(clock);
+        }
+        _widgetService?.GetClockWindow(clock.Id)?.ShowClock();
         var dlg = new WidgetSettingsDialog(WidgetSettingsTarget.Clock) { Owner = this };
         dlg.LoadFromClock(clock);
         if (dlg.ShowDialog() == true && dlg.DialogResultOk)
@@ -1085,10 +1117,30 @@ public partial class ManagementWindow : Window
             RefreshClocksList();
             RefreshAllStateButtons();
         }
+        else
+        {
+            // Cancel — restore the pre-dialog visibility if we implicitly flipped it.
+            if (clock.IsVisible != wasVisible)
+            {
+                clock.IsVisible = wasVisible;
+                _widgetService?.UpdateClock(clock);
+                if (!wasVisible) _widgetService?.GetClockWindow(clock.Id)?.HideClock();
+                RefreshClocksList();
+                RefreshAllStateButtons();
+            }
+        }
     }
 
     void ShowCalendarAppearanceDialog(DesktopCalendar cal)
     {
+        // ponytail: see ShowClockAppearanceDialog — same fix. Always show for preview;
+        // Cancel branch below restores wasVisible.
+        bool wasVisible = cal.IsVisible;
+        if (_widgetService?.GetCalendarWindow(cal.Id) == null)
+        {
+            OpenCalendarWindow(cal);
+        }
+        _widgetService?.GetCalendarWindow(cal.Id)?.ShowCalendar();
         var dlg = new WidgetSettingsDialog(WidgetSettingsTarget.Calendar) { Owner = this };
         dlg.LoadFromCalendar(cal);
         if (dlg.ShowDialog() == true && dlg.DialogResultOk)
@@ -1111,6 +1163,17 @@ public partial class ManagementWindow : Window
             _widgetService?.UpdateCalendar(cal);
             RefreshCalendarsList();
             RefreshAllStateButtons();
+        }
+        else
+        {
+            if (cal.IsVisible != wasVisible)
+            {
+                cal.IsVisible = wasVisible;
+                _widgetService?.UpdateCalendar(cal);
+                if (!wasVisible) _widgetService?.GetCalendarWindow(cal.Id)?.HideCalendar();
+                RefreshCalendarsList();
+                RefreshAllStateButtons();
+            }
         }
     }
 
@@ -2853,6 +2916,11 @@ public partial class ManagementWindow : Window
         try
         {
             var config = _zoneManager.GetConfig();
+            // ponytail: same visibility guarantee as Clock/Calendar. Without forcing the
+            // panel visible, preset preview paints on a collapsed window.
+            bool panelWasVisible = _panelService?.Window?.IsVisible == true;
+            if (_panelService?.Window == null) _panelService?.Show(config);
+            else if (panelWasVisible) _panelService?.Show(config);
             var dlg = new WidgetSettingsDialog(WidgetSettingsTarget.Panel) { Owner = this };
             dlg.LoadFromConfig(config);
             if (dlg.ShowDialog() == true && dlg.DialogResultOk)
@@ -2882,6 +2950,11 @@ public partial class ManagementWindow : Window
 
                 // Refresh panel window if open
                 _panelService?.RefreshAppearance();
+            }
+            else if (!panelWasVisible && _panelService?.Window?.IsVisible == true)
+            {
+                // Cancel — restore hidden state if we implicitly showed it.
+                _panelService?.Hide();
             }
         }
         catch (Exception ex)
@@ -3412,8 +3485,10 @@ public partial class ManagementWindow : Window
         };
         _openClockWindows[clock.Id] = window;
         _widgetService!.ClockWindows[clock.Id] = window;
+        // ponytail: no Activate() — Show() brings the widget visible, but stealing focus
+        // races with the upcoming style dialog's ShowDialog(). The widget is a topmost
+        // tool window; its preview paint is what matters, not focus.
         window.Show();
-        window.Activate();
         Dispatcher.BeginInvoke(new Action(() =>
         {
             if (_clockToggleDots.TryGetValue(clock.Id, out var dot))

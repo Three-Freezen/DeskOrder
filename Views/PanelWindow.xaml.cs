@@ -243,8 +243,11 @@ public partial class PanelWindow : Window
     {
         var config = _zoneManager.GetConfig();
         string fillColorStr = config.PanelFillColor;
-        string borderColorStr = config.GlobalBorderColor;
-        double borderThickness = config.GlobalBorderThickness;
+        // Use PanelBorderColor when panel opts out of global appearance (mirrors
+        // ClockWidget/CalendarWidget ApplyAcrylic pattern). Otherwise fall back to
+        // GlobalBorderColor for visual consistency with other global-styled widgets.
+        string borderColorStr = config.PanelUseGlobalAppearance ? config.GlobalBorderColor : config.PanelBorderColor;
+        double borderThickness = config.PanelUseGlobalAppearance ? config.GlobalBorderThickness : config.GlobalBorderThickness;
 
         // Fill
         try

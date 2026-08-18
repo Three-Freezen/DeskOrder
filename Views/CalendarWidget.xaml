@@ -14,7 +14,7 @@
         <Border x:Name="MainContent" Visibility="Visible" ClipToBounds="True" CornerRadius="10">
         <Grid>
         <Border x:Name="CalendarBorder" CornerRadius="10"
-                Background="#F0151530" BorderBrush="#30FFFFFF"
+                Background="Transparent" BorderBrush="#30FFFFFF"
                 BorderThickness="1">
             <Border.ContextMenu>
                 <ContextMenu>
@@ -24,6 +24,12 @@
                 </ContextMenu>
             </Border.ContextMenu>
             <Grid>
+                <!-- ponytail: separate Rectangle for fill color (mirrors ZoneWindow's FillRect).
+                     Setting Border.Background inside a transparent window does not reliably
+                     re-render when reassigned; a dedicated Rectangle child does. -->
+                <Rectangle x:Name="FillRect" RadiusX="10" RadiusY="10"
+                           Fill="#F0151530" IsHitTestVisible="False"/>
+                <Grid>
                 <!-- Background image -->
                 <Border x:Name="CalBgBorder" ClipToBounds="True" IsHitTestVisible="False"
                         HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
@@ -251,14 +257,15 @@
                         </ScrollViewer>
                     </Grid>
                 </Border>
+                </Grid>
+                </Grid>
             </Grid>
-        </Grid>
-            </Border>
+        </Border>
 
-            <!-- Four corner resize grips -->
-            <Border Width="12" Height="12" HorizontalAlignment="Left" VerticalAlignment="Top"
-                    Cursor="SizeNWSE" Background="Transparent"
-                    MouseLeftButtonDown="ResizeGrip_Down" Tag="TL"/>
+        <!-- Four corner resize grips -->
+        <Border Width="12" Height="12" HorizontalAlignment="Left" VerticalAlignment="Top"
+                Cursor="SizeNWSE" Background="Transparent"
+                MouseLeftButtonDown="ResizeGrip_Down" Tag="TL"/>
             <Border Width="12" Height="12" HorizontalAlignment="Right" VerticalAlignment="Top"
                     Cursor="SizeNESW" Background="Transparent"
                     MouseLeftButtonDown="ResizeGrip_Down" Tag="TR"/>

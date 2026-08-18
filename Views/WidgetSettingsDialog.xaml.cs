@@ -62,6 +62,16 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
     public bool DialogResultOk { get; private set; }
     private bool _suppressPreview; // suppress live preview during LoadFrom* initialization
 
+    // FillColor round-trip guard: parsing "#AARRGGBB" through ParseOpacity yields a
+    // 0-100 double; UpdateFillFromOpacity then casts back to 0-255 byte via
+    // `(int)(x/100*255)`. Floating-point + int truncation loses up to 1/255 alpha
+    // per round-trip (e.g. "#08000000" → 3.137% → "#07000000"). Without this guard,
+    // opening the style dialog for Clock/Calendar and clicking Apply (or even just
+    // Cancel in some paths) silently mutates model.FillColor by 1 alpha step even
+    // when the user touched nothing. Only re-derive FillColor when the user actually
+    // interacted with the opacity slider / a preset swatch / the custom picker.
+    private bool _fillColorTouched;
+
     // Model references for live preview
     private DesktopClock? _clockModel;
     private DesktopCalendar? _calModel;
@@ -90,11 +100,17 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
     private string _snapWidgetWidth = "", _snapWidgetHeight = "";
     private string _snapGlobalFillColor = "", _snapGlobalBorderColor = "";
     private double _snapGlobalBorderThickness;
+    // Panel-only: cfg.PanelBorderColor is mutated by ApplyTo during preset preview but is
+    // not the same field as _snapBorderColor (which holds the clock/calendar/note BorderColor).
+    // Kept separately so Cancel can restore the panel border without conflicting with other
+    // widget snapshots.
+    private string _snapPanelBorderColor = "";
+    private string _snapPanelBgImageStretch = "UniformToFill";
 
     // Public getters for caller to read results
     public double ParsedBorderThickness => double.TryParse(BorderThicknessText, out var v) ? v : 1.0;
     public string ParsedBorderColor => BorderColorValue;
-    public string ParsedFillColor => UpdateFillFromOpacity();
+    public string ParsedFillColor => _fillColorTouched ? UpdateFillFromOpacity() : _fillColor;
     public int ParsedGlassBlur => _glassBlurAmount;
     public int ParsedGlassTintOpacity => _glassTintOpacity;
     public int ParsedGlassLuminosity => _glassTintLuminosity;
@@ -224,6 +240,7 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
     public void LoadFromClock(DesktopClock clock, bool resnapshot)
     {
         _suppressPreview = true;
+        _fillColorTouched = false;
         _clockModel = clock;
         UseGlobalAppearance = clock.UseGlobalAppearance;
         BorderThicknessText = clock.BorderThickness.ToString("F1");
@@ -277,6 +294,7 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
     public void LoadFromCalendar(DesktopCalendar cal, bool resnapshot)
     {
         _suppressPreview = true;
+        _fillColorTouched = false;
         _calModel = cal;
         UseGlobalAppearance = cal.UseGlobalAppearance;
         BorderThicknessText = cal.BorderThickness.ToString("F1");
@@ -311,6 +329,7 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
     public void LoadFromNote(StickyNote note, ZoneManager? zoneManager, bool resnapshot)
     {
         _suppressPreview = true;
+        _fillColorTouched = false;
         _noteModel = note;
         _panelZoneManager = zoneManager;
         UseGlobalAppearance = note.UseGlobalAppearance;
@@ -367,6 +386,7 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
     public void LoadFromConfig(AppConfig config, ZoneManager? zoneManager, bool resnapshot)
     {
         _suppressPreview = true;
+        _fillColorTouched = false;
         _panelConfig = config;
         _panelZoneManager = zoneManager;
         UseGlobalAppearance = config.PanelUseGlobalAppearance;
@@ -418,6 +438,9 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         {
             // Snapshot for cancel-revert (see LoadFromClock note about resnapshot).
             _snapFillColor = config.PanelFillColor; _snapBorderColor = config.GlobalBorderColor;
+            // Panel's own border color is mutated by ApplyCardPicked's CopyPanelFields but
+            // is a separate field from GlobalBorderColor — snapshot it so Cancel can restore.
+            _snapPanelBorderColor = config.PanelBorderColor;
             _snapFillOpacity = _fillOpacityPercent; _snapTitleBarFill = _titleBarFill;
             _snapTitleBarOpacity = _titleBarOpacity; _snapButtonOpacity = _buttonOpacity;
             _snapBgImagePath = _bgImagePath; _snapBgOffsetX = _bgOffsetX;
@@ -428,6 +451,7 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
             _snapGlassTintOpacity = _glassTintOpacity; _snapGlassTintLuminosity = _glassTintLuminosity;
             _snapGlassColorMode = _glassColorMode;
             _snapWidgetWidth = config.PanelWidth.ToString("F0"); _snapWidgetHeight = config.PanelHeight.ToString("F0");
+            _snapPanelBgImageStretch = config.PanelBgImageStretch;
             // Snapshot global values for cancel-revert
             _snapGlobalFillColor = config.GlobalFillColor; _snapGlobalBorderColor = config.GlobalBorderColor; _snapGlobalBorderThickness = config.GlobalBorderThickness;
         }
@@ -541,6 +565,7 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         {
             FillOpacityLabel.Text = $"{(int)FillOpacitySlider.Value}%";
             _fillOpacityPercent = FillOpacitySlider.Value;
+            _fillColorTouched = true;
             PushToWidget();
         }
     }
@@ -863,67 +888,125 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         var kind = TargetToKind(_target);
         var snap = BuildCurrentPayload();
         if (snap == null) return;
-        // Mirrors ZoneSettingsDialog.LoadPresetButton_Click:
-        //   onCardPicked   — real-time preview: writes preset → model + live widget (UI untouched)
-        //   onPicked(OK)   — final commit: writes preset → model + dialog UI controls
-        //                    (live widget is already at preset state from onCardPicked)
-        //   Cancel         — restores model + UI from snapshot, then refreshes live widget
+        // ponytail: Mirrors ZoneSettingsDialog.LoadPresetButton_Click exactly — single
+        // RefreshAppearance on click (not three), defensive Refresh+UpdateLayout+Refresh
+        // chain after dialog closes. Earlier triple-refresh + InvalidateVisual were
+        // band-aids; Zone's plain pattern works and we now match it.
+        pickedNeedsUiSync = false;
         var applied = PresetButtonsHelper.OpenLoad(this, kind, snap,
             picked => ApplyPayload(picked),
             record => ApplyCardPicked(record));
+
+        // OK branch — preset preview already mutated the model; sync UI from the
+        // mutated model so the outer Apply pushes the right values.
+        if (applied == true && !pickedNeedsUiSync) ApplyPayload(null);
+
+        // Cancel — restore model from snapshot, then sync UI from restored model.
         if (applied != true)
         {
-            // Cancel — restore model + dialog UI from snapshot, then push to live widget.
+            switch (_target)
+            {
+                case WidgetSettingsTarget.Clock when _clockModel != null && snap is DesktopClock sClock:
+                    CopyClockFields(sClock, _clockModel); break;
+                case WidgetSettingsTarget.Calendar when _calModel != null && snap is DesktopCalendar sCal:
+                    CopyCalendarFields(sCal, _calModel); break;
+                case WidgetSettingsTarget.StickyNote when _noteModel != null && snap is StickyNote sNote:
+                    CopyInto(sNote, _noteModel, _noteExcluded); break;
+                case WidgetSettingsTarget.Panel when _panelConfig != null && snap is PanelPresetConfig sPanel:
+                    CopyPanelFields(sPanel, _panelConfig); break;
+            }
             ApplyPayload(snap);
-            PushToWidget();
         }
-        // OK branch: ApplyPayload(picked) already synced model + UI from the preset.
-        // The live widget was last refreshed by ApplyCardPicked during preview, so no
-        // extra PushToWidget call is needed (and would be wrong — it would read the
-        // freshly-synced UI back into the model, but the UI is now at preset state, so
-        // that would be harmless only by coincidence; better to not duplicate work).
-        // Outer dialog STAYS OPEN so the user can verify and decide Apply / Cancel on
-        // the widget settings themselves. The previous behavior auto-closing via
-        // DialogResult=true was losing the in-dialog verification step.
+
+        // Defensive chain (Zone's lines:250-256) — force final repaint regardless of
+        // which branch ran above. Single Refresh + UpdateLayout + Refresh paints the
+        // final state after all in-flight setter→PushToWidget chains have settled.
+        RefreshLiveFinal();
+    }
+
+    bool pickedNeedsUiSync;
+
+    /// <summary>
+    /// Defensive chain (ZoneSettingsDialog:253-256) — Refresh + UpdateLayout + Refresh
+    /// guarantees the live widget paints the final state after all in-flight
+    /// setter→PushToWidget chains settle, regardless of which branch (OK/Cancel) ran.
+    /// </summary>
+    void RefreshLiveFinal()
+    {
+        var app = Application.Current as App;
+        switch (_target)
+        {
+            case WidgetSettingsTarget.Clock when _clockModel != null:
+                var cWin = app?.GetClockWindow(_clockModel.Id);
+                if (cWin != null) { cWin.RefreshAppearance(_clockModel); cWin.UpdateLayout(); cWin.RefreshAppearance(_clockModel); }
+                break;
+            case WidgetSettingsTarget.Calendar when _calModel != null:
+                var calWin = app?.GetCalendarWindow(_calModel.Id);
+                if (calWin != null) { calWin.RefreshAppearance(_calModel); calWin.UpdateLayout(); calWin.RefreshAppearance(_calModel); }
+                break;
+            case WidgetSettingsTarget.StickyNote when _noteModel != null:
+                if (app?.NotesService?.Windows.TryGetValue(_noteModel.Id, out var nw) == true && nw is StickyNoteWindow snw)
+                    snw.RefreshAppearance(_noteModel);
+                break;
+            case WidgetSettingsTarget.Panel when _panelConfig != null:
+                if (app?.PanelWindow is PanelWindow pw) pw.RefreshAppearance();
+                break;
+        }
     }
 
     /// <summary>
     /// Per-card click hook for the Load Preset dialog. Writes the preset's payload into
-    /// the live model, refreshes the in-dialog controls (which in turn fires the
-    /// setter→PushToWidget chain so the live widget updates too), but never closes this
-    /// dialog or saves config — that's the outer Apply's job.
+    /// the live model and refreshes the live widget — mirrors ZoneSettingsDialog's
+    /// onCardPicked exactly (single Refresh, no triple-refresh band-aid).
     /// </summary>
     void ApplyCardPicked(PresetRecord record)
     {
-        // Direct copy → model + direct refresh of live window. Mirrors
-        // ZoneSettingsDialog / MergedGroupSettingsDialog preview pattern:
-        // dialog controls stay untouched during preview (they only sync on
-        // OK via ApplyPayload in LoadPreset_Click). Passes the model to
-        // RefreshAppearance so the widget reassigns its cached field to
-        // the dialog's fresh reference (KEY FIX pattern from
-        // ZoneWindow.RefreshZone — otherwise OnClocksChanged could have
-        // swapped the widget's _clock to a stale object).
         var app = Application.Current as App;
+        pickedNeedsUiSync = true;
         switch (_target)
         {
             case WidgetSettingsTarget.Clock when _clockModel != null && record is ClockPreset c:
-                CopyInto(c.Clock, _clockModel);
+                CopyClockFields(c.Clock, _clockModel);
+                SyncGlobalAppearanceIfUsed(_clockModel.UseGlobalAppearance, c.Clock.FillColor, c.Clock.BorderColor, c.Clock.BorderThickness);
                 app?.GetClockWindow(_clockModel.Id)?.RefreshAppearance(_clockModel);
                 break;
             case WidgetSettingsTarget.Calendar when _calModel != null && record is CalendarPreset cal:
-                CopyInto(cal.Calendar, _calModel);
+                CopyCalendarFields(cal.Calendar, _calModel);
+                SyncGlobalAppearanceIfUsed(_calModel.UseGlobalAppearance, cal.Calendar.FillColor, cal.Calendar.BorderColor, cal.Calendar.BorderThickness);
                 app?.GetCalendarWindow(_calModel.Id)?.RefreshAppearance(_calModel);
                 break;
             case WidgetSettingsTarget.StickyNote when _noteModel != null && record is StickyNotePreset n:
-                CopyInto(n.Note, _noteModel);
+                CopyInto(n.Note, _noteModel, _noteExcluded);
                 if (app?.NotesService?.Windows.TryGetValue(_noteModel.Id, out var nw) == true && nw is StickyNoteWindow snw)
                     snw.RefreshAppearance(_noteModel);
                 break;
             case WidgetSettingsTarget.Panel when _panelConfig != null && record is PanelPreset p:
-                if (app?.PanelWindow is PanelWindow pw)
-                    pw.RefreshAppearance(p.Config);
+                CopyPanelFields(p.Config, _panelConfig);
+                if (app?.PanelWindow is PanelWindow pw) pw.RefreshAppearance();
                 break;
         }
+    }
+
+    /// <summary>
+    /// ponytail: ApplyAcrylic / ApplyStyle on ClockWidget and CalendarWidget read
+    /// FillColor/BorderColor/BorderThickness from the widget service's GLOBAL config
+    /// when the model has UseGlobalAppearance=true (see ClockWidget.xaml.cs:261-264,
+    /// CalendarWidget.xaml.cs:92-94). CopyClockFields / CopyCalendarFields only update
+    /// the per-widget model — leaving the global config stale — so a preset saved
+    /// with UseGA=true clicks into ApplyCardPicked, mutates the model, but the widget
+    /// keeps reading the OLD GlobalFillColor and visually never changes. PushToWidget
+    /// already handled this for slider tweaks (WidgetSettingsDialog.xaml.cs:855-860);
+    /// preset card clicks did not. Mirror that logic here so per-card preview reaches
+    /// the same global-config branch that PushToWidget keeps in sync.
+    /// </summary>
+    void SyncGlobalAppearanceIfUsed(bool useGlobal, string fillColor, string borderColor, double borderThickness)
+    {
+        if (!useGlobal) return;
+        if (Application.Current is not App gApp || gApp.ManagementWindow?.WidgetService is not { } wSvc) return;
+        var wCfg = wSvc.GetConfig();
+        wCfg.GlobalFillColor = fillColor;
+        wCfg.GlobalBorderColor = borderColor;
+        wCfg.GlobalBorderThickness = borderThickness;
     }
 
     void SavePreset_Click(object s, RoutedEventArgs e)
@@ -953,42 +1036,138 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
         _ => null
     };
 
-    /// <summary>Replace the dialog's model with the picked preset's payload and refresh widgets.</summary>
-    private void ApplyPayload(object picked)
+    /// <summary>Sync the dialog UI from the live model. Called both after OK (model is at preset state via ApplyCardPicked) and after Cancel (model is at snap state via CopyXxxFields restore). Mirrors MergedGroupSettingsDialog.LoadPreset_Click's onPicked = `picked => SyncFromZone()`.</summary>
+    private void ApplyPayload(object? picked)
     {
-        // resnapshot: false — applying a preset must NOT overwrite the original cancel
-        // snapshot (taken when the dialog first opened). Otherwise an outer Cancel after
-        // LoadPreset would revert to the preset's state instead of the pre-preset state.
+        // resnapshot: false — must NOT overwrite the original cancel snapshot (taken when the dialog first opened).
         switch (_target)
         {
-            case WidgetSettingsTarget.Clock when _clockModel != null && picked is DesktopClock c:
-                CopyInto(c, _clockModel);
+            case WidgetSettingsTarget.Clock when _clockModel != null:
                 LoadFromClock(_clockModel, resnapshot: false);
                 break;
-            case WidgetSettingsTarget.Calendar when _calModel != null && picked is DesktopCalendar cal:
-                CopyInto(cal, _calModel);
+            case WidgetSettingsTarget.Calendar when _calModel != null:
                 LoadFromCalendar(_calModel, resnapshot: false);
                 break;
-            case WidgetSettingsTarget.StickyNote when _noteModel != null && picked is StickyNote n:
-                CopyInto(n, _noteModel);
+            case WidgetSettingsTarget.StickyNote when _noteModel != null:
                 LoadFromNote(_noteModel, _panelZoneManager, resnapshot: false);
                 break;
-            case WidgetSettingsTarget.Panel when _panelConfig != null && picked is PanelPresetConfig pcfg:
-                pcfg.ApplyTo(_panelConfig);
+            case WidgetSettingsTarget.Panel when _panelConfig != null:
                 LoadFromConfig(_panelConfig, _panelZoneManager, resnapshot: false);
                 break;
         }
     }
 
-    private static void CopyInto<T>(T src, T dst) where T : class
+    // Ponytail: explicit whitelists mirror ZoneSettingsDialog.CopyZoneFields and
+    // MergedGroupSettingsDialog.CopyMergedGroupFields. Blacklist reflection copying was
+    // fragile (any new user-state field silently copied) and the redundant re-copy in
+    // ApplyPayload was clobbering the UseGA=false restore from ApplyCardPicked.
+    // StickyNote still uses the reflection CopyInto + _noteExcluded below — its preview
+    // path was reported OK by the user and is not part of this refactor.
+    private static readonly HashSet<string> _noteExcluded = new(StringComparer.Ordinal)
+    {
+        nameof(StickyNote.Id),
+        nameof(StickyNote.X), nameof(StickyNote.Y),
+        nameof(StickyNote.Width), nameof(StickyNote.Height),
+        nameof(StickyNote.IsVisible),
+        nameof(StickyNote.Title), nameof(StickyNote.Content), // user data
+        nameof(StickyNote.NoteColor),
+        nameof(StickyNote.FontSize),
+        nameof(StickyNote.PinnedTop),
+        nameof(StickyNote.LastSavePath),
+        nameof(StickyNote.HotkeyEnabled),
+        nameof(StickyNote.HotkeyModifiers),
+        nameof(StickyNote.HotkeyKey),
+        nameof(StickyNote.CustomHotkeys),
+        nameof(StickyNote.CreatedAt), nameof(StickyNote.ModifiedAt),
+    };
+
+    private static void CopyInto<T>(T src, T dst, HashSet<string> excluded) where T : class
     {
         // POCOs in this project expose public mutable properties — assignment is enough.
+        // Used only by StickyNote (Clock/Calendar/Panel now use explicit whitelists above).
         foreach (var prop in typeof(T).GetProperties())
         {
             if (!prop.CanRead || !prop.CanWrite) continue;
             if (prop.GetSetMethod(true) == null) continue;
+            if (excluded.Contains(prop.Name)) continue;
             prop.SetValue(dst, prop.GetValue(src));
         }
+    }
+
+    private static void CopyClockFields(DesktopClock src, DesktopClock dst)
+    {
+        // Pure styling — never copy user-state fields (Id/X/Y/Width/Height/IsVisible/Mode/
+        // ShowSeconds/ShowDate/Use24Hour/TextColor/FontSize/FontFamily/Opacity/AccentColor).
+        // AnalogFillColor + DigitalFillColor ARE copied (style fields, see Models/AppearanceModel.cs:21-22).
+        dst.BorderColor = src.BorderColor;
+        dst.FillColor = src.FillColor;
+        dst.EnableLiquidGlass = src.EnableLiquidGlass;
+        dst.EnableAcrylic = src.EnableAcrylic;     // P3 miss — preset with EnableAcrylic=false needs to actually disable blur on preview
+        dst.GlassBlurAmount = src.GlassBlurAmount;
+        dst.GlassTintOpacity = src.GlassTintOpacity;
+        dst.GlassTintLuminosity = src.GlassTintLuminosity;
+        dst.GlassColorMode = src.GlassColorMode;
+        dst.BackgroundImagePath = src.BackgroundImagePath;
+        dst.BgImageStretch = src.BgImageStretch;   // P3 miss — Zone honors it; harmless for Clock/Calendar but keeps the whitelist in sync with AppearanceModel
+        dst.BgImageZoom = src.BgImageZoom;
+        dst.BgImageOffsetX = src.BgImageOffsetX;
+        dst.BgImageOffsetY = src.BgImageOffsetY;
+        dst.EnableRestoreButton = src.EnableRestoreButton;
+        dst.AnalogFillColor = src.AnalogFillColor;
+        dst.DigitalFillColor = src.DigitalFillColor;
+        dst.BackgroundImageOpacity = src.BackgroundImageOpacity;
+        dst.BorderThickness = src.BorderThickness;
+        dst.UseGlobalAppearance = src.UseGlobalAppearance;
+        dst.DigitalBackgroundImagePath = src.DigitalBackgroundImagePath;
+        dst.DigitalBgImageZoom = src.DigitalBgImageZoom;
+        dst.DigitalBgImageOffsetX = src.DigitalBgImageOffsetX;
+        dst.DigitalBgImageOffsetY = src.DigitalBgImageOffsetY;
+        dst.DigitalBackgroundImageOpacity = src.DigitalBackgroundImageOpacity;
+        dst.DigitalBgImageStretch = src.DigitalBgImageStretch;
+    }
+
+    private static void CopyCalendarFields(DesktopCalendar src, DesktopCalendar dst)
+    {
+        // Pure styling — never copy Id/X/Y/Width/Height/IsVisible/ShowWeekNumbers/
+        // StartOnMonday/Notes/Opacity.
+        dst.BorderColor = src.BorderColor;
+        dst.FillColor = src.FillColor;
+        dst.EnableLiquidGlass = src.EnableLiquidGlass;
+        dst.EnableAcrylic = src.EnableAcrylic;     // P3 miss — same rationale as CopyClockFields
+        dst.GlassBlurAmount = src.GlassBlurAmount;
+        dst.GlassTintOpacity = src.GlassTintOpacity;
+        dst.GlassTintLuminosity = src.GlassTintLuminosity;
+        dst.GlassColorMode = src.GlassColorMode;
+        dst.BackgroundImagePath = src.BackgroundImagePath;
+        dst.BgImageStretch = src.BgImageStretch;
+        dst.BgImageZoom = src.BgImageZoom;
+        dst.BgImageOffsetX = src.BgImageOffsetX;
+        dst.BgImageOffsetY = src.BgImageOffsetY;
+        dst.EnableRestoreButton = src.EnableRestoreButton;
+        dst.BorderThickness = src.BorderThickness;
+        dst.UseGlobalAppearance = src.UseGlobalAppearance;
+        dst.BackgroundImageOpacity = src.BackgroundImageOpacity;
+        dst.TextColor = src.TextColor;
+        dst.TodayColor = src.TodayColor;
+        dst.FontSize = src.FontSize;
+    }
+
+    private static void CopyPanelFields(Models.PanelPresetConfig src, AppConfig dst)
+    {
+        // Pure styling — PanelX/PanelY/PanelWidth/PanelHeight are intentionally NOT
+        // copied: user wants panel position/size preserved when applying a style preset.
+        dst.PanelUseGlobalAppearance = src.PanelUseGlobalAppearance;
+        dst.PanelFillColor = src.PanelFillColor;
+        dst.PanelBorderColor = src.PanelBorderColor;
+        dst.PanelTitleBarFillColor = src.PanelTitleBarFillColor;
+        dst.PanelControlOpacity = src.PanelControlOpacity;
+        dst.PanelBackgroundImagePath = src.PanelBackgroundImagePath;
+        dst.PanelBgImageStretch = src.PanelBgImageStretch;
+        dst.PanelBackgroundImageOpacity = src.PanelBackgroundImageOpacity;
+        dst.PanelBgImageZoom = src.PanelBgImageZoom;
+        dst.PanelBgImageOffsetX = src.PanelBgImageOffsetX;
+        dst.PanelBgImageOffsetY = src.PanelBgImageOffsetY;
+        dst.GlassColorMode = src.GlassColorMode;
     }
 
     // ── Appearance field mappers (P3) ──
@@ -1001,7 +1180,11 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
     void PushAppearanceFields<T>(T model) where T : AppearanceModel
     {
         model.BorderColor = BorderColorValue;
-        model.FillColor = UpdateFillFromOpacity();
+        // Round-trip guard: only re-derive FillColor when the user touched the
+        // opacity slider / a preset / the custom picker. Otherwise pass through
+        // the original hex from LoadFromXxx (already byte-exact). Prevents
+        // "#08000000" → "#07000000" drift on a no-op Apply.
+        model.FillColor = _fillColorTouched ? UpdateFillFromOpacity() : _fillColor;
         model.EnableLiquidGlass = _liquidGlass;
         model.GlassBlurAmount = _glassBlurAmount;
         model.GlassTintOpacity = _glassTintOpacity;
@@ -1117,6 +1300,7 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
 
             case WidgetSettingsTarget.Panel when _panelConfig != null:
                 _panelConfig.PanelFillColor = _snapFillColor; _panelConfig.GlobalBorderColor = _snapBorderColor;
+                _panelConfig.PanelBorderColor = _snapPanelBorderColor;
                 _panelConfig.GlobalBorderThickness = _snapBorderThickness; _panelConfig.PanelUseGlobalAppearance = _snapUseGlobal;
                 _panelConfig.PanelTitleBarFillColor = _snapTitleBarFill; _panelConfig.PanelControlOpacity = _snapButtonOpacity;
                 _panelConfig.PanelBackgroundImagePath = _snapBgImagePath; _panelConfig.PanelBgImageOffsetX = _snapBgOffsetX;
@@ -1125,6 +1309,7 @@ public partial class WidgetSettingsDialog : Window, INotifyPropertyChanged
                 _panelConfig.EnableLiquidGlass = _snapLiquidGlass; _panelConfig.GlassBlurAmount = _snapGlassBlur;
                 _panelConfig.GlassTintOpacity = _snapGlassTintOpacity; _panelConfig.GlassTintLuminosity = _snapGlassTintLuminosity;
                 _panelConfig.GlassColorMode = _snapGlassColorMode;
+                _panelConfig.PanelBgImageStretch = _snapPanelBgImageStretch;
                 // Always restore global values (PushToWidget may have modified them when UseGlobal was toggled)
                 _panelConfig.GlobalFillColor = _snapGlobalFillColor;
                 if (double.TryParse(_snapWidgetWidth, out var pw)) _panelConfig.PanelWidth = pw;

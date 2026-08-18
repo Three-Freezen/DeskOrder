@@ -45,6 +45,12 @@ public partial class ClockWidget : Window
 
         ApplyMode();
         ApplyStyle();
+        // Seed the RefreshAppearance gate with the clock's actual mode so the very
+        // first RefreshAppearance (e.g. style dialog Cancel / Apply round-trip)
+        // doesn't see "Mode differs from default Digital" and re-run ApplyMode —
+        // which would reset Width/Height to the mode's hardcoded defaults and
+        // clobber any user-resized dimensions on Analog clocks.
+        _lastAppliedMode = _clock.Mode;
         UpdateContextMenuLabels();
 
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
@@ -265,11 +271,11 @@ public partial class ClockWidget : Window
             {
                 // Use fillColor directly — its ARGB alpha controls transparency
                 var fillColor = (Color)ColorConverter.ConvertFromString(fillColorStr)!;
-                ClockBorder.Background = new SolidColorBrush(fillColor);
+                FillRect.Fill = new SolidColorBrush(fillColor);   // ponytail: was ClockBorder.Background — see XAML comment
             }
             catch
             {
-                ClockBorder.Background = new SolidColorBrush(Color.FromArgb(0x08, 0x00, 0x00, 0x00));
+                FillRect.Fill = new SolidColorBrush(Color.FromArgb(0x08, 0x00, 0x00, 0x00));
             }
             if (_clock.EnableLiquidGlass)
             {
@@ -282,11 +288,14 @@ public partial class ClockWidget : Window
             AcrylicHelper.DisableBlur(this);
             try
             {
-                ClockBorder.Background = new SolidColorBrush(
+                FillRect.Fill = new SolidColorBrush(
                     (Color)ColorConverter.ConvertFromString(fillColorStr)!);
             }
             catch { }
         }
+        // ponytail: force re-render — FillRect as a child paints more reliably than
+        // Border.Background inside a transparent window with AllowsTransparency=True.
+        FillRect.InvalidateVisual();
     }
 
     // ── Style (border / fill) ──
@@ -308,8 +317,11 @@ public partial class ClockWidget : Window
             _lastAppliedMode = _clock.Mode;
             ApplyMode();
         }
-        if (MainContent.Visibility == Visibility.Visible)
-            ApplyAcrylic();
+        // ponytail: ApplyAcrylic's EnableBlur guards on IntPtr.Zero internally, and
+        // ClockBorder.Background is a managed property — safe to run regardless of
+        // MainContent visibility. Live preview must reach the widget even when hidden,
+        // so when the user later Show()s it the latest colors are already set.
+        ApplyAcrylic();
         ApplyBackgroundImage();
         ApplyDigitalBackgroundImage();
         ApplyStyle();
@@ -327,6 +339,12 @@ public partial class ClockWidget : Window
         }
         catch { }
         ClockBorder.BorderThickness = new Thickness(_clock.BorderThickness);
+        // ponytail: force the Border element itself to re-render. In transparent windows
+        // (AllowsTransparency=True), setting BorderBrush on a Border inside a MainContent
+        // Border subtree sometimes caches the previous Brush until the Border is told to
+        // invalidate directly — InvalidateMeasure+InvalidateVisual clears the cache.
+        ClockBorder.InvalidateMeasure();
+        ClockBorder.InvalidateVisual();
     }
 
     private string _lastDateText = "";

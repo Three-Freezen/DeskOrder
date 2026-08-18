@@ -29,10 +29,17 @@
         <!-- Main content wrapped in Border with rounded corners -->
         <Border x:Name="ClockBorder" CornerRadius="10"
                 BorderBrush="#40FFFFFF" BorderThickness="1"
-                Background="#02000000" Padding="10">
+                Background="Transparent" Padding="0">
             <Grid>
-                <!-- Hide button (top-right) -->
-                <Button x:Name="HideBtn" Content="─" Width="20" Height="20"
+                <!-- ponytail: separate Rectangle for fill color (mirrors ZoneWindow's FillRect).
+                     Setting Border.Background inside a transparent window with AllowsTransparency=True
+                     does NOT reliably re-render — the WPF visual cache holds the old brush. A
+                     dedicated Rectangle child paints reliably when its Fill is reassigned. -->
+                <Rectangle x:Name="FillRect" RadiusX="10" RadiusY="10"
+                           Fill="#02000000" IsHitTestVisible="False"/>
+                <Grid Margin="10">
+                    <!-- Hide button (top-right) -->
+                    <Button x:Name="HideBtn" Content="─" Width="20" Height="20"
                         FontSize="10" Foreground="#60FFFFFF"
                         Background="#01000000" BorderThickness="0"
                         Cursor="Hand" Click="HideBtn_Click"
@@ -142,6 +149,7 @@
                                    FontSize="11" Foreground="#AAFFFFFF"
                                    HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Border>
+                </Grid>
                 </Grid>
             </Grid>
         </Border>

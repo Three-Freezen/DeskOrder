@@ -101,11 +101,11 @@ public partial class CalendarWidget : Window
             {
                 // Use fillColor directly — its ARGB alpha controls transparency
                 var fillColor = (Color)ColorConverter.ConvertFromString(fillColorStr)!;
-                CalendarBorder.Background = new SolidColorBrush(fillColor);
+                FillRect.Fill = new SolidColorBrush(fillColor);   // ponytail: was CalendarBorder.Background — see XAML comment
             }
             catch
             {
-                CalendarBorder.Background = new SolidColorBrush(Color.FromArgb(0x08, 0x15, 0x15, 0x30));
+                FillRect.Fill = new SolidColorBrush(Color.FromArgb(0x08, 0x15, 0x15, 0x30));
             }
         }
         else
@@ -113,11 +113,14 @@ public partial class CalendarWidget : Window
             AcrylicHelper.DisableBlur(this);
             try
             {
-                CalendarBorder.Background = new SolidColorBrush(
+                FillRect.Fill = new SolidColorBrush(
                     (Color)ColorConverter.ConvertFromString(fillColorStr)!);
             }
             catch { }
         }
+        // ponytail: force re-render — FillRect paints more reliably than
+        // Border.Background inside a transparent window.
+        FillRect.InvalidateVisual();
     }
 
     // ── Background image ──
@@ -184,6 +187,12 @@ public partial class CalendarWidget : Window
         }
         catch { }
         CalendarBorder.BorderThickness = new Thickness(_calendar.BorderThickness);
+        // ponytail: force the Border element itself to re-render. In transparent windows
+        // (AllowsTransparency=True), setting BorderBrush on a Border inside a MainContent
+        // Border subtree sometimes caches the previous Brush until the Border is told to
+        // invalidate directly — InvalidateMeasure+InvalidateVisual clears the cache.
+        CalendarBorder.InvalidateMeasure();
+        CalendarBorder.InvalidateVisual();
     }
 
     /// <summary>Refresh all visual styles from the current _calendar model (for live preview).
@@ -196,8 +205,10 @@ public partial class CalendarWidget : Window
         // arrangement) or Notes (dot indicators). Without this the day grid keeps its
         // previous layout even though _calendar has changed.
         _vm?.RebuildCells();
-        if (MainContent.Visibility == Visibility.Visible)
-            ApplyAcrylic();
+        // ponytail: ApplyAcrylic's EnableBlur guards on IntPtr.Zero internally —
+        // safe to run regardless of MainContent visibility so live preview reaches
+        // the widget even when hidden.
+        ApplyAcrylic();
         ApplyBackgroundImage();
         ApplyStyle();
     }
