@@ -59,6 +59,9 @@ public static class NativeMethods
     public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
     [DllImport("user32.dll")]
+    public static extern bool IsWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
     public static extern IntPtr GetDesktopWindow();
 
     [DllImport("user32.dll")]
@@ -207,16 +210,32 @@ public static class NativeMethods
     }
 
     // Pin window to bottom of z-order (above desktop icons, below normal windows)
+    // ponytail: linked-list top tracking. Each call inserts the window just above the
+    // current topmost DesktopZones sibling, so the most-recently active window is
+    // always at the front of the pinned group. A click on any window therefore
+    // promotes it to the top (rather than the old fixed-anchor behavior, which
+    // dropped every clicked window to the bottom of the group).
+    private static IntPtr _topHwnd = IntPtr.Zero;
+
     public static void PinToDesktop(Window window)
     {
         var helper = new WindowInteropHelper(window);
         helper.EnsureHandle();
         var hwnd = helper.Handle;
-        // Find the desktop worker window and place us above it
+
+        // Drop the cached top if it points to a destroyed HWND (e.g. window was closed).
+        if (_topHwnd != IntPtr.Zero && !IsWindow(_topHwnd))
+            _topHwnd = IntPtr.Zero;
+
+        // Already at the top — no-op avoids pointless SetWindowPos jitter on repeat clicks.
+        if (_topHwnd == hwnd) return;
+
+        // Insert just above the previous top, or just above progman if none exists yet.
         var progman = FindWindow("Progman", null);
-        if (progman != IntPtr.Zero)
+        IntPtr insertAfter = _topHwnd != IntPtr.Zero ? _topHwnd : progman;
+        if (insertAfter != IntPtr.Zero)
         {
-            SetWindowPos(hwnd, progman, 0, 0, 0, 0,
+            SetWindowPos(hwnd, insertAfter, 0, 0, 0, 0,
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
         }
         else
@@ -224,6 +243,15 @@ public static class NativeMethods
             SetWindowPos(hwnd, HWND_BOTTOM, 0, 0, 0, 0,
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
         }
+
+        _topHwnd = hwnd;
+    }
+
+    /// <summary>Forget the cached topmost HWND. Call this when the current top window closes
+    /// so the next PinToDesktop call falls back to progman instead of a stale HWND.</summary>
+    public static void ResetPinToDesktopTop()
+    {
+        _topHwnd = IntPtr.Zero;
     }
 
     // Make window click-through in transparent areas

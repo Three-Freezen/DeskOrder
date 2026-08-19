@@ -236,6 +236,12 @@ public partial class ZoneWindow : Window
 
     void Window_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
+        // ponytail: any click on the window promotes to top of the DZ group.
+        // OnActivated is insufficient (it doesn't re-fire on repeat clicks while
+        // the window is already the foreground, so a long-press during overlap
+        // wouldn't re-elevate). This guarantees every click (body, title bar,
+        // items) cycles the linked-list top tracked by PinToDesktop.
+        NativeMethods.PinToDesktop(this);
     }
 
     // ── Resize ──
@@ -954,12 +960,23 @@ public partial class ZoneWindow : Window
     public void RefreshZone(Zone zone)
     {
         _zone = zone; // ← KEY FIX: update the reference
-        _vm.RefreshZone(zone);
+        // ponytail: skip _vm.RefreshZone (Items.Clear/Add). Items don't actually change
+        // in this path — PushToZone/preset-apply only touch style fields, CopyZoneFields
+        // doesn't copy Items. The Clear/Add race with ApplyStyle's ApplyBrushToTree is
+        // the reason item names "stuck on previous color" — WPF defers container
+        // generation to the next layout pass, so the walk runs before new TextBlocks
+        // exist. Actual item add/remove/rename goes through OnZonesChanged which uses
+        // Dispatcher.BeginInvoke (Fix C). Updating VM.Zone keeps its binding consumers
+        // (SourceZoneId et al.) happy without touching the Items collection.
+        _vm.Zone = zone;
         ZoneTitleText.Text = zone.Name;
         SetRestoreIcon();
+        // Rebuild tabs BEFORE ApplyStyle — ApplySubZoneTabTextColorAdaptive walks
+        // SubZoneTabs, and RebuildSubZoneTabs replaces tab children with fresh XAML
+        // defaults (same race as items; tabs are stack-built in code).
+        RebuildSubZoneTabs();
         ApplyStyle();
         UpdateMergedTitle();
-        RebuildSubZoneTabs();
         if (zone.IsVisible) ShowZone(); else ApplyHidden();
     }
 

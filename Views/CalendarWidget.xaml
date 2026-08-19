@@ -8,6 +8,7 @@
         Topmost="False"
         ShowInTaskbar="False"
         SnapsToDevicePixels="True"
+        PreviewMouseLeftButtonDown="Window_PreviewMouseLeftButtonDown"
         Width="300" Height="490">
 
     <Grid>

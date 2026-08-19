@@ -7,7 +7,8 @@
         ResizeMode="CanResize"
         Topmost="False"
         ShowInTaskbar="False"
-        SnapsToDevicePixels="True">
+        SnapsToDevicePixels="True"
+        PreviewMouseLeftButtonDown="Window_PreviewMouseLeftButtonDown">
     <Grid>
         <!-- Main content wrapper -->
         <Border x:Name="MainContent" Visibility="Visible" ClipToBounds="True" CornerRadius="10">

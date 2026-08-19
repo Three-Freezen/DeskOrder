@@ -413,6 +413,14 @@ public partial class CalendarWidget : Window
         try { DragMove(); NativeMethods.PinToDesktop(this); } catch { }
     }
 
+    // ponytail: every click on the calendar promotes it to top of the DZ group.
+    // CalendarWidget has no OnActivated override, so without this preview handler
+    // body clicks would not re-elevate the widget when it's behind another DZ window.
+    void Window_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        NativeMethods.PinToDesktop(this);
+    }
+
     void ResizeGrip_Down(object s, MouseButtonEventArgs e)
     {
         if (s is not Border g || g.Tag is not string tag) return;

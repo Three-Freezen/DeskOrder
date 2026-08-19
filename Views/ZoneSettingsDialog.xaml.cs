@@ -439,6 +439,19 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
         zone.QuickBarMode = _quickBarMode;
         zone.EnableRestoreButton = EnableRestoreButton;
 
+        // ponytail: live preview needs config.Global* synced too. ZoneWindow.ApplyStyle
+        // reads config.GlobalFillColor when UseGlobalAppearance=true; without this write
+        // the preview sits on the stale config value until Apply — but live preview is the
+        // only moment the user can actually see the change. Lift the global write into
+        // the live-preview path; ApplyButton_Click no longer needs its own copy.
+        if (UseGlobalAppearance)
+        {
+            var cfg = _zoneManager.GetConfig();
+            cfg.GlobalFillColor = FillColorValue;
+            cfg.GlobalBorderColor = BorderColorValue;
+            cfg.GlobalBorderThickness = bt;
+        }
+
         // Apply visual changes to the live zone window
         if (_zoneManager.GetZoneWindow(zone.Id) is { } win)
             win.RefreshZone(zone);
@@ -453,11 +466,13 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
         if (!int.TryParse(GridSize, out var gs) || gs < 32 || gs > 256) { MessageBox.Show(_loc["Settings.GridRange"], err); return; }
         if (!double.TryParse(BorderThicknessText, out var bt) || bt < 0.5 || bt > 10) { MessageBox.Show(_loc["Settings.BorderRange"], err); return; }
 
-        // Push final state (already previewed, but ensure consistency)
+        var config = _zoneManager.GetConfig();
+        // Push final state (also writes config.Global* when UseGlobalAppearance=true via
+        // the new branch inside PushToZone — the live-preview path keeps config in sync
+        // as the user types, so by the time we get here Apply is just a persistence step).
         PushToZone();
 
         // Save UseGlobalAppearance to config
-        var config = _zoneManager.GetConfig();
         config.UseGlobalAppearance = UseGlobalAppearance;
         _zoneManager.SaveConfig();
 
