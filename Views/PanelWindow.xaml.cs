@@ -7,6 +7,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Interop;
+using System.Windows.Media.Imaging;
 using DesktopZones.Helpers;
 using DesktopZones.Models;
 using DesktopZones.Services;
@@ -273,6 +274,88 @@ public partial class PanelWindow : Window
             TopBar.Background = new SolidColorBrush(tbColor);
         }
         catch { }
+        ApplyPanelTextColorAdaptive(fillColorStr);
+    }
+
+    /// <summary>TopBar elements adapt to PanelTitleBarFillColor; body (search box,
+    /// zone selector, item list, restore icon) adapt to PanelFillColor.</summary>
+    void ApplyPanelTextColorAdaptive(string panelFill)
+    {
+#if DEBUG
+        var dbgCfg = _zoneManager.GetConfig();
+        System.Diagnostics.Debug.WriteLine(
+            $"[adaptive] PanelWindow: bg={panelFill} bodyAdaptive={dbgCfg.PanelTextColorAdaptive} titleAdaptive={dbgCfg.PanelTitleBarTextColorAdaptive}");
+#endif
+        // ponytail: split try/catch per branch — previously a single catch swallowed
+        // every exception and left the XAML defaults visible. Now each branch logs to
+        // Debug.WriteLine so failures surface in the attached debugger without
+        // breaking the style-apply pipeline.
+        var config = _zoneManager.GetConfig();
+        try
+        {
+            // TopBar (treated as title bar) — PanelTopBar = ClockText / DateText / TitleText / SearchPlaceholder
+            if (config.PanelTitleBarTextColorAdaptive)
+            {
+                // ponytail: PanelTitleBarFillColor is a translucent layer over PanelFillColor,
+                // composite before HSL flip so adaptive picks a contrasting color for the
+                // visible top-bar, not for the bare translucent overlay.
+                var tbBrush = AdaptiveTextColor.ResolveBrushOver(config.PanelTitleBarFillColor, config.PanelFillColor);
+                if (TitleText != null) TitleText.Foreground = tbBrush;
+                if (ClockText != null) ClockText.Foreground = tbBrush;
+                if (DateText != null) DateText.Foreground = tbBrush;
+                if (SearchPlaceholder != null) SearchPlaceholder.Foreground = tbBrush;
+            }
+            else
+            {
+                if (TitleText != null) TitleText.Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0));
+                if (ClockText != null) ClockText.Foreground = new SolidColorBrush(Color.FromArgb(0xA0, 0xFF, 0xFF, 0xFF));
+                if (DateText != null) DateText.Foreground = new SolidColorBrush(Color.FromArgb(0xFF, 0x80, 0x80, 0xA0));
+                if (SearchPlaceholder != null) SearchPlaceholder.Foreground = new SolidColorBrush(Color.FromArgb(0xFF, 0x60, 0x60, 0x80));
+            }
+        }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[adaptive] Panel title bar: {ex.Message}"); }
+        try
+        {
+            // Body — SearchBox / ZoneSelector / item labels (zone headers, item names).
+            // Sample bg image when set.
+            if (config.PanelTextColorAdaptive)
+            {
+                SolidColorBrush bBrush;
+                if (BgImage?.Source is BitmapSource bmp && !string.IsNullOrEmpty(config.PanelBackgroundImagePath))
+                {
+                    bBrush = AdaptiveTextColor.ResolveBrush(AdaptiveTextColor.ResolveTextColorForImage(bmp));
+                }
+                else
+                {
+                    bBrush = AdaptiveTextColor.ResolveBrush(panelFill);
+                }
+                if (SearchBox != null) SearchBox.Foreground = bBrush;
+                // ponytail: ZoneSelector is a ComboBox (control) — user wants it locked at its
+                // system default (black). Don't adapt it; the else branch below sets a hardcoded
+                // neutral when adaptive body is off, which keeps it readable against any bg.
+                // Walk ContentStack children (zone headers + item cards) and re-brush TextBlocks
+                if (ContentStack != null)
+                {
+                    for (int i = 0; i < ContentStack.Children.Count; i++)
+                    {
+                        if (ContentStack.Children[i] is DependencyObject d)
+                            AdaptiveTextColor.ApplyBrushToTree(d, bBrush);
+                    }
+                }
+            }
+            else
+            {
+                if (SearchBox != null) SearchBox.Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0));
+                if (ZoneSelector != null) ZoneSelector.Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0));
+            }
+        }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[adaptive] Panel body: {ex.Message}"); }
+    }
+
+    /// <summary>Re-apply both body and title bar adaptive text colors.</summary>
+    public void RefreshTextColorAdaptive()
+    {
+        ApplyStyle();
     }
 
     public void ApplyBackgroundImage()

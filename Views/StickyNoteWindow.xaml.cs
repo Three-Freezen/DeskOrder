@@ -8,6 +8,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
+using System.Windows.Media.Imaging;
 using DesktopZones.Helpers;
 using DesktopZones.Models;
 using DesktopZones.Services;
@@ -30,6 +31,10 @@ public partial class StickyNoteWindow : Window
     private bool _pendingUnderline;
     private Point _restoreDown;
     public Action? OnStateChanged { get; set; }
+    // ponytail: cached adaptive brush for title bar buttons. Set by ApplyTitleBar when
+    // TitleBarTextColorAdaptive=true; null in non-adaptive mode. Hover/click handlers read
+    // this instead of hardcoded #80FFFFFF so they don't clobber the adaptive color.
+    private SolidColorBrush? _titleBarAdaptiveBrush;
 
     public StickyNoteWindow(StickyNote note, NotesService notesService)
     {
@@ -73,6 +78,7 @@ public partial class StickyNoteWindow : Window
         ApplyBackgroundImage();
         ApplyStyle();
         ApplyTitleBar();
+        RefreshTextColorAdaptive();
     }
 
     private void LoadContent(string content)
@@ -507,15 +513,86 @@ public partial class StickyNoteWindow : Window
             // Apply title bar fill with ARGB alpha controlling background transparency
             var tbColor = (Color)ColorConverter.ConvertFromString(_note.TitleBarFillColor);
             TitleBarBorder.Background = new SolidColorBrush(tbColor);
-            // Apply title text color
-            if (!string.IsNullOrEmpty(_note.TitleTextColor))
+            // Apply title text color — adaptive mode overrides TitleTextColor
+            if (_note.TitleBarTextColorAdaptive)
             {
-                var tc = (Color)ColorConverter.ConvertFromString(_note.TitleTextColor);
-                TitleBox.Foreground = new SolidColorBrush(tc);
-                TitleBox.CaretBrush = new SolidColorBrush(tc);
+                // ponytail: TitleBarFillColor is a translucent layer over the body fill, so
+                // pick the bottom layer (GlobalFillColor if UseGlobal, else FillColor) and
+                // composite before running the adaptive HSL flip — otherwise the algorithm
+                // sees a near-transparent color and produces a contrasting brush against the
+                // wrong background.
+                var cfg = _notesService.GetConfig();
+                string bottom = _note.UseGlobalAppearance ? cfg.GlobalFillColor : _note.FillColor;
+                var brush = AdaptiveTextColor.ResolveBrushOver(_note.TitleBarFillColor, bottom);
+                _titleBarAdaptiveBrush = brush; // cache for Leave/Click handlers
+                TitleBox.Foreground = brush;
+                TitleBox.CaretBrush = brush;
+                // Title bar buttons (SaveBtn/PinBtn/HideBtn live inside TitleBarBorder)
+                if (SaveBtn != null) SaveBtn.Foreground = brush;
+                if (HideBtn != null) HideBtn.Foreground = brush;
+                // PinBtn: pinned color wins when pinned, otherwise adaptive
+                if (PinBtn != null) PinBtn.Foreground = _vm.PinnedTop
+                    ? new SolidColorBrush(Color.FromRgb(0x7C, 0x3A, 0xED))
+                    : brush;
+            }
+            else
+            {
+                _titleBarAdaptiveBrush = null;
+                if (!string.IsNullOrEmpty(_note.TitleTextColor))
+                {
+                    var tc = (Color)ColorConverter.ConvertFromString(_note.TitleTextColor);
+                    TitleBox.Foreground = new SolidColorBrush(tc);
+                    TitleBox.CaretBrush = new SolidColorBrush(tc);
+                }
             }
         }
         catch { }
+    }
+
+    /// <summary>Refresh adaptive text colors (called when toggles change).</summary>
+    public void RefreshTextColorAdaptive()
+    {
+#if DEBUG
+        System.Diagnostics.Debug.WriteLine(
+            $"[adaptive] StickyNote: bg={_note.FillColor} bodyAdaptive={_note.TextColorAdaptive} titleAdaptive={_note.TitleBarTextColorAdaptive}");
+#endif
+        // Body adaptive (toolbar buttons, formatting toolbar). Sample bg image when set.
+        SolidColorBrush bg;
+        if (NoteBgImage?.Source is BitmapSource bmp && !string.IsNullOrEmpty(_note.BackgroundImagePath))
+        {
+            bg = AdaptiveTextColor.ResolveBrush(AdaptiveTextColor.ResolveTextColorForImage(bmp));
+        }
+        else
+        {
+            bg = AdaptiveTextColor.ResolveBrush(_note.FillColor);
+        }
+        if (_note.TextColorAdaptive)
+        {
+            if (BoldBtn != null) BoldBtn.Foreground = bg;
+            if (ItalicBtn != null) ItalicBtn.Foreground = bg;
+            if (UnderlineBtn != null) UnderlineBtn.Foreground = bg;
+            if (FontColorBtn != null) FontColorBtn.Foreground = bg;
+            // ponytail: FontSizeCombo 显示的是当前字号数字（如 "14"），用户明确要求锁定白色，
+            // 不参与自适应——自适应可能把数字推到接近背景色导致看不清。
+            // if (FontSizeCombo != null) FontSizeCombo.Foreground = bg;
+            if (RestoreIconChar != null) RestoreIconChar.Foreground = bg;
+        }
+        else
+        {
+            var def = new SolidColorBrush(Color.FromRgb(0xE0, 0xE0, 0xE0));
+            if (BoldBtn != null) BoldBtn.Foreground = def;
+            if (ItalicBtn != null) ItalicBtn.Foreground = def;
+            if (UnderlineBtn != null) UnderlineBtn.Foreground = def;
+            if (FontColorBtn != null) FontColorBtn.Foreground = def;
+            // ponytail: 同上——字号数字锁定白色，与自适应开关无关。
+            // if (FontSizeCombo != null) FontSizeCombo.Foreground = def;
+            if (RestoreIconChar != null) RestoreIconChar.Foreground = new SolidColorBrush(Color.FromArgb(0xC0, 0xFF, 0xFF, 0xFF));
+        }
+        // 锁定字号数字为纯白，不随 bg/adaptive 变化
+        if (FontSizeCombo != null)
+            FontSizeCombo.Foreground = new SolidColorBrush(Color.FromRgb(0xFF, 0xFF, 0xFF));
+        // Title bar adaptive (its own toggle)
+        ApplyTitleBar();
     }
 
     // ── Background image ──
@@ -580,6 +657,10 @@ public partial class StickyNoteWindow : Window
         ApplyBackgroundImage();
         ApplyStyle();
         ApplyTitleBar();
+        // ponytail: BP-A fix — RefreshAppearance was missing the body adaptive text refresh.
+        // Without this, FillColor changes update the background but the toolbar buttons (Bold,
+        // Italic, Underline, FontColor, FontSizeCombo, RestoreIconChar) keep their old colors.
+        RefreshTextColorAdaptive();
     }
 
     // ── Title bar ──
@@ -612,9 +693,12 @@ public partial class StickyNoteWindow : Window
     void PinBtn_Leave(object s, MouseEventArgs e)
     {
         PinBtn.Background = Brushes.Transparent;
-        PinBtn.Foreground = _vm.PinnedTop
-            ? new SolidColorBrush(Color.FromRgb(0x7C, 0x3A, 0xED))
-            : new SolidColorBrush(Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF));
+        // ponytail: prefer cached adaptive brush; pinned color wins when pinned
+        if (_vm.PinnedTop)
+            PinBtn.Foreground = new SolidColorBrush(Color.FromRgb(0x7C, 0x3A, 0xED));
+        else
+            PinBtn.Foreground = _titleBarAdaptiveBrush
+                ?? new SolidColorBrush(Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF));
     }
 
     void SaveBtn_Enter(object s, MouseEventArgs e)
@@ -626,7 +710,9 @@ public partial class StickyNoteWindow : Window
     void SaveBtn_Leave(object s, MouseEventArgs e)
     {
         SaveBtn.Background = Brushes.Transparent;
-        SaveBtn.Foreground = new SolidColorBrush(Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF));
+        // ponytail: prefer cached adaptive brush so hover→leave cycle doesn't clobber it
+        SaveBtn.Foreground = _titleBarAdaptiveBrush
+            ?? new SolidColorBrush(Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF));
     }
 
     void PinBtn_Click(object s, RoutedEventArgs e)
@@ -634,9 +720,12 @@ public partial class StickyNoteWindow : Window
         _vm.PinnedTop = !_vm.PinnedTop;
         Topmost = _vm.PinnedTop;
         if (!_vm.PinnedTop) NativeMethods.PinToDesktop(this);
-        PinBtn.Foreground = _vm.PinnedTop
-            ? new SolidColorBrush(Color.FromRgb(0x7C, 0x3A, 0xED))
-            : new SolidColorBrush(Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF));
+        // ponytail: same logic as PinBtn_Leave — pinned color wins when pinned, else adaptive/hardcoded
+        if (_vm.PinnedTop)
+            PinBtn.Foreground = new SolidColorBrush(Color.FromRgb(0x7C, 0x3A, 0xED));
+        else
+            PinBtn.Foreground = _titleBarAdaptiveBrush
+                ?? new SolidColorBrush(Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF));
         Save();
     }
 

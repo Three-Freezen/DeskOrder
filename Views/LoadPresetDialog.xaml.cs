@@ -115,19 +115,27 @@ public partial class LoadPresetDialog : Window, INotifyPropertyChanged
 
     private void AutoSelectMatchingMode()
     {
+        // Only auto-select when there's exactly one preset whose stored mode matches
+        // the live clock mode. Multiple matches are ambiguous (e.g. several Digital
+        // presets) — picking the first would silently overwrite the widget model via
+        // onCardPicked without user action, so we leave selection to the user.
+        PresetCardItem? match = null;
         foreach (var item in _items)
         {
             if (item.Payload is DesktopClock c && c.Mode == LiveClockMode)
             {
-                if (PresetList.ItemContainerGenerator.ContainerFromItem(item) is DependencyObject container)
-                {
-                    var card = FindVisualChild<Border>(container);
-                    if (card != null)
-                    {
-                        Card_MouseLeftButtonDown(card, new MouseButtonEventArgs(InputManager.Current.PrimaryMouseDevice, 0, MouseButton.Left));
-                    }
-                }
-                break;
+                if (match != null) return;
+                match = item;
+            }
+        }
+        if (match == null) return;
+
+        if (PresetList.ItemContainerGenerator.ContainerFromItem(match) is DependencyObject container)
+        {
+            var card = FindVisualChild<Border>(container);
+            if (card != null)
+            {
+                Card_MouseLeftButtonDown(card, new MouseButtonEventArgs(InputManager.Current.PrimaryMouseDevice, 0, MouseButton.Left));
             }
         }
     }

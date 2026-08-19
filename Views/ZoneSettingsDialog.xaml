@@ -193,6 +193,18 @@
                     </Grid>
 
                     <!-- 6b. Use Global Appearance toggle -->
+                    <!-- Text color adaptive (top-row checkbox) -->
+                    <CheckBox x:Name="TextAdaptiveBox" Margin="0,4,0,0"
+                              Foreground="{StaticResource T1}" FontSize="13"
+                              Checked="TextAdaptive_Changed" Unchecked="TextAdaptive_Changed">
+                        <TextBlock x:Name="LabelTextAdaptive" Text="文字颜色自适应"/>
+                    </CheckBox>
+                    <!-- Title bar text color adaptive -->
+                    <CheckBox x:Name="TitleBarTextAdaptiveBox" Margin="0,2,0,4"
+                              Foreground="{StaticResource T1}" FontSize="13"
+                              Checked="TitleBarTextAdaptive_Changed" Unchecked="TitleBarTextAdaptive_Changed">
+                        <TextBlock x:Name="LabelTitleBarTextAdaptive" Text="标题栏文字颜色自适应"/>
+                    </CheckBox>
                     <CheckBox x:Name="UseGlobalAppearanceBox" Margin="0,4,0,8"
                               Foreground="{StaticResource T1}" FontSize="13"
                               IsChecked="{Binding UseGlobalAppearance}"

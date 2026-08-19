@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Interop;
 using DesktopZones.Helpers;
 using DesktopZones.Models;
@@ -218,6 +219,11 @@ public partial class ZoneWindow : Window
         {
             _vm.RefreshItems();
             UpdateCanvasSize();
+            // ponytail: Fix C — re-apply adaptive text color after RefreshItems wipes the
+            // brush via the XAML default `#E0FFFFFF` foreground on freshly-generated item
+            // containers. Without this, any OnZonesChanged trigger (rename, delete, etc.)
+            // would silently revert the previously-applied brush on all items.
+            ApplyStyle();
         }), System.Windows.Threading.DispatcherPriority.Normal);
     }
 
@@ -688,10 +694,37 @@ public partial class ZoneWindow : Window
         try { FillRect.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(fillColor)!); } catch { }
         FillRect.RadiusX = FillRect.RadiusY = cornerRadius;
         try { TitleBarBg.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(titleBarFillColor)!); } catch { }
-        // Title text color
-        try { ZoneTitleText.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(titleTextColor)!); } catch { }
-        // Icon color
-        if (!string.IsNullOrEmpty(iconColor))
+        // Pick the right title-bar adaptive flag based on which mode we're rendering in.
+        // Merged-unified and merged-master both render the MergedGroupTitleBar; sub-zone
+        // "Keep original" mode renders the sub-zone's own TitleBar.
+        bool titleBarAdaptive = (useGlobal ? _zone.TitleBarTextColorAdaptive : _zone.TitleBarTextColorAdaptive);
+        if (_zone.MergedSubZoneIds.Count > 0 || _zone.MergedGroupId.HasValue)
+        {
+            // Merged-group mode: always use the MergedGroupTitleBarTextColorAdaptive flag
+            // (we don't honor per-sub-zone adaptive; the merge group is one logical entity).
+            titleBarAdaptive = _zone.MergedGroupTitleBarTextColorAdaptive;
+        }
+        // Title text color — adaptive mode overrides TitleTextColor / MergedGroupTitleTextColor
+        if (titleBarAdaptive)
+        {
+            // ponytail: titleBarFillColor is a translucent overlay over fillColor (already
+            // resolved by the merged-mode branches above). Composite before HSL flip so the
+            // algorithm sees the visible title-bar color, not the bare translucent layer.
+            var tBrush = AdaptiveTextColor.ResolveBrushOver(titleBarFillColor, fillColor);
+            ZoneTitleText.Foreground = tBrush;
+        }
+        else
+        {
+            try { ZoneTitleText.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(titleTextColor)!); } catch { }
+        }
+        // Icon color — adaptive mode overrides iconColor when title bar adaptive is on
+        if (titleBarAdaptive)
+        {
+            var iBrush = AdaptiveTextColor.ResolveBrushOver(titleBarFillColor, fillColor);
+            TitleIconChar.Foreground = iBrush;
+            RestoreIconChar.Foreground = iBrush;
+        }
+        else if (!string.IsNullOrEmpty(iconColor))
         { try { var ic = new SolidColorBrush((Color)ColorConverter.ConvertFromString(iconColor)!); TitleIconChar.Foreground = ic; RestoreIconChar.Foreground = ic; } catch { } }
         ControlPoint.Opacity = Math.Max(0.05, controlOpacity / 100.0);
 
@@ -749,6 +782,81 @@ public partial class ZoneWindow : Window
             catch { BgImage.Opacity = 0; }
         }
         else { BgImage.Source = null; BgImage.Opacity = 0; }
+        // ponytail: BP-B fix — call adaptive text refresh AFTER bg image has loaded so the
+        // image-sample branch sees fresh BgImage.Source. Also pass the already-resolved
+        // effectiveFill so merged-group unified fills take effect on item labels.
+        ApplyItemTextColorAdaptive(fillColor);
+        ApplySubZoneTabTextColorAdaptive();
+    }
+
+    /// <summary>Walk the item template subtree under <see cref="MainContent"/> and apply the
+    /// adaptive text brush. Uses the same <see cref="AdaptiveTextColor.ApplyBrushToTree"/>
+    /// helper PanelWindow does, so behavior is identical across widgets — no special-case
+    /// ItemContainerGenerator timing races. The title bar is brushed separately by
+    /// <see cref="ApplyStyle"/> before this call, so we scope the walk to the ScrollViewer
+    /// subtree that hosts the items to avoid clobbering title bar brushes.
+    /// No-op when <see cref="Zone.TextColorAdaptive"/> is false.
+    /// When the zone has a background image, samples 5 points from it instead of using FillColor.
+    /// Pass <paramref name="effectiveFill"/> when the caller has already resolved it (e.g. merged-group
+    /// unified fill); otherwise we resolve from <see cref="Zone.FillColor"/> or global.</summary>
+    public void ApplyItemTextColorAdaptive(string? effectiveFill = null)
+    {
+#if DEBUG
+        System.Diagnostics.Debug.WriteLine(
+            $"[adaptive] ZoneWindow ({_zone.Name}): bg={effectiveFill ?? ResolveEffectiveBodyFill()} adaptive={_zone.TextColorAdaptive}");
+#endif
+        if (!_zone.TextColorAdaptive) return;
+        string fillColor = effectiveFill ?? ResolveEffectiveBodyFill();
+        SolidColorBrush brush;
+        if (BgImage?.Source is BitmapSource bmp && !string.IsNullOrEmpty(_zone.BackgroundImagePath))
+        {
+            brush = AdaptiveTextColor.ResolveBrush(AdaptiveTextColor.ResolveTextColorForImage(bmp));
+        }
+        else
+        {
+            brush = AdaptiveTextColor.ResolveBrush(fillColor);
+        }
+        // ponytail: walk ItemsHost subtree directly via visual tree, mirroring PanelWindow's
+        // pattern over ContentStack.Children. The previous ContainerFromIndex approach raced
+        // with ItemContainerGenerator status — containers would be null right after RefreshItems
+        // wiped and re-added items, silently dropping every brush assignment. Visual tree walk
+        // picks up whatever containers WPF has realized so far, and ItemsHost never collapses
+        // in zone/MG modes, so no MainContent-visibility guard is needed.
+        if (ItemsHost != null)
+            AdaptiveTextColor.ApplyBrushToTree(ItemsHost, brush);
+    }
+
+    /// <summary>Resolve the effective body fill, mirroring ApplyStyle's merged-group branch:
+    /// MergedGroupFillColor when in unified merged mode, otherwise zone.FillColor or global.</summary>
+    string ResolveEffectiveBodyFill()
+    {
+        var config = _mgr.GetConfig();
+        bool useGlobal = config.UseGlobalAppearance;
+        if (_zone.MergedSubZoneIds.Count > 0 || _zone.MergedGroupId.HasValue)
+        {
+            if (_zone.MergedGroupUseUnifiedFill)
+                return _zone.MergedGroupFillColor;
+        }
+        return useGlobal ? config.GlobalFillColor : _zone.FillColor;
+    }
+
+    /// <summary>Walk the sub-zone tab strip and recolor each tab's text based on the
+    /// merged-group title bar fill. No-op when not in merged mode or adaptive is off.</summary>
+    void ApplySubZoneTabTextColorAdaptive()
+    {
+        if (SubZoneTabs == null) return;
+        if (!_zone.MergedGroupTitleBarTextColorAdaptive) return;
+        // ponytail: composite MergedGroupTitleBarFillColor over MergedGroupFillColor so the
+        // adaptive brush matches the visible tab-bar color, not the bare translucent overlay.
+        var brush = AdaptiveTextColor.ResolveBrushOver(_zone.MergedGroupTitleBarFillColor, _zone.MergedGroupFillColor);
+        AdaptiveTextColor.ApplyBrushToTree(SubZoneTabs, brush);
+    }
+
+    /// <summary>Re-apply both body and title bar adaptive text colors. Called from
+    /// settings dialog live preview when toggles change.</summary>
+    public void RefreshTextColorAdaptive()
+    {
+        ApplyStyle();
     }
 
     void SetRestoreIcon()

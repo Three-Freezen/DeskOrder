@@ -29,6 +29,9 @@ public class StickyNote : AppearanceModel
     public string TitleTextColor { get; set; } = "#E0E0E0";
     // ── Background image (Opacity stays per-model — StickyNote uses 30, Zone uses 40) ──
     public double BackgroundImageOpacity { get; set; } = 30;
+    // ── Title bar text color adaptive ──
+    /// <summary>Auto-pick sticky note title bar text color based on <see cref="TitleBarFillColor"/>.</summary>
+    public bool TitleBarTextColorAdaptive { get; set; } = true;
     // ── Save ──
     public string LastSavePath { get; set; } = "";
     // ── Hotkey ──
@@ -50,6 +53,7 @@ public class StickyNote : AppearanceModel
             BorderThickness = BorderThickness, UseGlobalAppearance = UseGlobalAppearance,
             TitleBarFillColor = TitleBarFillColor, TitleBarOpacity = TitleBarOpacity,
             ControlOpacity = ControlOpacity, TitleTextColor = TitleTextColor,
+            TitleBarTextColorAdaptive = TitleBarTextColorAdaptive,
             BackgroundImageOpacity = BackgroundImageOpacity,
             LastSavePath = LastSavePath,
             HotkeyEnabled = HotkeyEnabled, HotkeyModifiers = HotkeyModifiers,

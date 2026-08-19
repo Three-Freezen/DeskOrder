@@ -135,6 +135,14 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
         IconColorValue = string.IsNullOrEmpty(zone.IconColor) ? "#FFFFFF" : zone.IconColor;
         _useGlobalAppearance = _zoneManager.GetConfig().UseGlobalAppearance;
 
+        // Text color adaptive (top-row checkbox)
+        TextAdaptiveBox.IsChecked = zone.TextColorAdaptive;
+        TitleBarTextAdaptiveBox.IsChecked = zone.TitleBarTextColorAdaptive;
+        TextAdaptiveBox.Checked += (_, _) => TriggerRefreshZoneTextAdaptive();
+        TextAdaptiveBox.Unchecked += (_, _) => TriggerRefreshZoneTextAdaptive();
+        TitleBarTextAdaptiveBox.Checked += (_, _) => TriggerRefreshZoneTextAdaptive();
+        TitleBarTextAdaptiveBox.Unchecked += (_, _) => TriggerRefreshZoneTextAdaptive();
+
         TextColorValue = string.IsNullOrEmpty(zone.TitleTextColor) ? "#A0FFFFFF" : zone.TitleTextColor;
 
         // Stretch unified to UniformToFill — BgStretchCombo removed
@@ -417,6 +425,8 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
         zone.ControlOpacity = CtrlOpacity;
         zone.BackgroundImageOpacity = BgImageOpacityPercent;
         zone.AutoArrange = AutoArrange;
+        zone.TextColorAdaptive = TextAdaptiveBox.IsChecked == true;
+        zone.TitleBarTextColorAdaptive = TitleBarTextAdaptiveBox.IsChecked == true;
         zone.BgImageOffsetX = _bgOffsetX; zone.BgImageOffsetY = _bgOffsetY;
         zone.BgImageZoom = _bgZoomVal;
         zone.IconColor = IconColorValue; zone.TitleTextColor = TextColorValue;
@@ -464,6 +474,8 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
         zone.BorderThickness = _snapshot.BorderThickness; zone.BorderColor = _snapshot.BorderColor;
         zone.FillColor = _snapshot.FillColor; zone.TitleBarFillColor = _snapshot.TitleBarFillColor;
         zone.BackgroundImagePath = _snapshot.BackgroundImagePath; zone.IconChar = _snapshot.IconChar;
+        zone.TextColorAdaptive = _snapshot.TextColorAdaptive;
+        zone.TitleBarTextColorAdaptive = _snapshot.TitleBarTextColorAdaptive;
         zone.ControlOpacity = _snapshot.ControlOpacity;
         zone.BackgroundImageOpacity = _snapshot.BackgroundImageOpacity;
         zone.AutoArrange = _snapshot.AutoArrange;
@@ -490,6 +502,20 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
     void UseGlobal_Changed(object s, RoutedEventArgs e)
     {
         // Defer save to Apply — don't modify config on toggle
+    }
+
+    void TextAdaptive_Changed(object s, RoutedEventArgs e) { /* live preview handled in constructor */ }
+    void TitleBarTextAdaptive_Changed(object s, RoutedEventArgs e) { /* live preview handled in constructor */ }
+
+    void TriggerRefreshZoneTextAdaptive()
+    {
+        if (_suppressPreview) return;
+        // ponytail: BP-E — _editingZone is a clone. Write to ResultZone so the live window
+        // sees the new flag immediately, then refresh.
+        ResultZone.TextColorAdaptive = TextAdaptiveBox.IsChecked == true;
+        ResultZone.TitleBarTextColorAdaptive = TitleBarTextAdaptiveBox.IsChecked == true;
+        // Refresh the live zone window
+        _zoneManager.GetZoneWindow(ResultZone.Id)?.RefreshTextColorAdaptive();
     }
 
     void IconPreset_Click(object s, RoutedEventArgs e) { if (s is Button b && b.Tag is string ic) IconCharText = ic; }

@@ -16,6 +16,8 @@ public class PanelPresetConfig
     public string PanelTitleBarFillColor { get; set; } = "#10FFFFFF";
     public string PanelFillColor { get; set; } = "#08000000";
     public string PanelBorderColor { get; set; } = "#40FFFFFF"; // matches GlobalBorderColor default
+    public bool PanelTextColorAdaptive { get; set; } = true;
+    public bool PanelTitleBarTextColorAdaptive { get; set; } = true;
     public double PanelControlOpacity { get; set; } = 40;
     public string PanelBackgroundImagePath { get; set; } = "";
     public string PanelBgImageStretch { get; set; } = "UniformToFill";
@@ -36,6 +38,8 @@ public class PanelPresetConfig
         PanelTitleBarFillColor = PanelTitleBarFillColor,
         PanelFillColor = PanelFillColor,
         PanelBorderColor = PanelBorderColor,
+        PanelTextColorAdaptive = PanelTextColorAdaptive,
+        PanelTitleBarTextColorAdaptive = PanelTitleBarTextColorAdaptive,
         PanelControlOpacity = PanelControlOpacity,
         PanelBackgroundImagePath = PanelBackgroundImagePath,
         PanelBgImageStretch = PanelBgImageStretch,
@@ -57,6 +61,8 @@ public class PanelPresetConfig
         PanelTitleBarFillColor = cfg.PanelTitleBarFillColor,
         PanelFillColor = cfg.PanelFillColor,
         PanelBorderColor = cfg.PanelBorderColor,
+        PanelTextColorAdaptive = cfg.PanelTextColorAdaptive,
+        PanelTitleBarTextColorAdaptive = cfg.PanelTitleBarTextColorAdaptive,
         PanelControlOpacity = cfg.PanelControlOpacity,
         PanelBackgroundImagePath = cfg.PanelBackgroundImagePath,
         PanelBgImageStretch = cfg.PanelBgImageStretch,
@@ -78,6 +84,8 @@ public class PanelPresetConfig
         cfg.PanelTitleBarFillColor = PanelTitleBarFillColor;
         cfg.PanelFillColor = PanelFillColor;
         cfg.PanelBorderColor = PanelBorderColor;
+        cfg.PanelTextColorAdaptive = PanelTextColorAdaptive;
+        cfg.PanelTitleBarTextColorAdaptive = PanelTitleBarTextColorAdaptive;
         cfg.PanelControlOpacity = PanelControlOpacity;
         cfg.PanelBackgroundImagePath = PanelBackgroundImagePath;
         cfg.PanelBgImageStretch = PanelBgImageStretch;

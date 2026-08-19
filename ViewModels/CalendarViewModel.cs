@@ -46,7 +46,6 @@ public class CalendarViewModel : INotifyPropertyChanged
     {
         Cells.Clear();
         var firstDay = new DateTime(DisplayYear, DisplayMonth, 1);
-        int daysInMonth = DateTime.DaysInMonth(DisplayYear, DisplayMonth);
 
         // DayOfWeek: Sunday=0, Monday=1 ...
         int startOffset = (int)firstDay.DayOfWeek;
@@ -57,18 +56,23 @@ public class CalendarViewModel : INotifyPropertyChanged
 
         var today = DateTime.Today;
 
+        // ponytail: always 6 rows × 7 cols = 42 cells, matching August's format. Months
+        // that would naturally fit in 5 rows still show Row 6 as next-month overflow —
+        // consistent widget height across all months trumps saving a row of dim cells.
         for (int i = 0; i < 42; i++)
         {
-            int dayNum = i - startOffset + 1;
-            bool inMonth = dayNum >= 1 && dayNum <= daysInMonth;
-            var date = new DateTime(DisplayYear, DisplayMonth, Math.Clamp(dayNum, 1, daysInMonth));
-            string dateKey = date.ToString("yyyy-MM-dd");
-            bool isToday = inMonth && date == today;
+            // ponytail: each cell carries a real date (prev/current/next month) instead of a
+            // clamped dayNum. DayNumber + DateKey reflect the cell's actual calendar position.
+            var cellDate = firstDay.AddDays(i - startOffset);
+            bool inMonth = cellDate.Month == DisplayMonth && cellDate.Year == DisplayYear;
+            string dateKey = cellDate.ToString("yyyy-MM-dd");
+            bool isToday = cellDate == today;
             bool hasNotes = false;
             int notePriority = 0;
-            if (inMonth && _calendar.Notes.TryGetValue(dateKey, out var notes) && notes.Count > 0)
+            if (_calendar.Notes.TryGetValue(dateKey, out var notes) && notes.Count > 0)
             {
-                // Only count incomplete notes for the dot indicator
+                // Only count incomplete notes for the dot indicator. Cross-month cells now
+                // also surface their notes (e.g. row-1 "31" = July 31 shows July 31's dots).
                 var incomplete = notes.Where(n => !n.IsCompleted).ToList();
                 hasNotes = incomplete.Count > 0;
                 notePriority = incomplete.Select(n => (int)n.Priority).DefaultIfEmpty(0).Max();
@@ -76,7 +80,7 @@ public class CalendarViewModel : INotifyPropertyChanged
 
             Cells.Add(new CalendarCell
             {
-                DayNumber = dayNum,
+                DayNumber = cellDate.Day,
                 DateKey = dateKey,
                 InMonth = inMonth,
                 IsToday = isToday,

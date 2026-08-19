@@ -37,4 +37,13 @@ public abstract class AppearanceModel
     public double BgImageOffsetX { get; set; } = 0;
     public double BgImageOffsetY { get; set; } = 0;
     public bool EnableRestoreButton { get; set; } = true;
+
+    // ── Text color adaptive ──
+    /// <summary>
+    /// Auto-pick text/icon foreground color based on the widget's effective fill color.
+    /// True = adaptive (overrides user-set TextColor); false = use configured TextColor.
+    /// Default true: existing widgets enable this on first deserialize (C# field init fills
+    /// missing JSON keys). Title bar elements use a separate flag on the subclass.
+    /// </summary>
+    public bool TextColorAdaptive { get; set; } = true;
 }

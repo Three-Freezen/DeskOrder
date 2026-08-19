@@ -5,6 +5,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Effects;
+using System.Windows.Media.Imaging;
 using DesktopZones.Helpers;
 using DesktopZones.Models;
 using DesktopZones.Services;
@@ -36,7 +37,7 @@ public partial class CalendarWidget : Window
 
         Left = calendar.X; Top = calendar.Y;
         Opacity = calendar.Opacity;
-        MinWidth = 260; MinHeight = 340;
+        MinWidth = 260; MinHeight = 460;
 
         _vm.DisplayYear = DateTime.Now.Year;
         _vm.DisplayMonth = DateTime.Now.Month;
@@ -59,6 +60,9 @@ public partial class CalendarWidget : Window
         if (!IsLoaded) return;
         var latest = _widgetService.Calendars.FirstOrDefault(c => c.Id == _calendar.Id);
         if (latest != null) _calendar = latest;
+        // ponytail: always sync FillRect, even when hidden — closes the
+        // "model blue, screen yellow" desync that ShowCalendar used to reveal.
+        SyncFillRect();
         if (MainContent.Visibility == Visibility.Visible)
             ApplyAcrylic();
         ApplyBackgroundImage();
@@ -71,6 +75,10 @@ public partial class CalendarWidget : Window
         NativeMethods.SetToolWindow(this);
         ApplyAcrylic();
         ApplyBackgroundImage();
+        // ponytail: subscribe to day-cell ItemsControl's StatusChanged so adaptive text
+        // auto-recolors whenever WPF finishes generating containers (first show, month
+        // switch, preset load, etc.). Hook must be after Loaded so the visual tree is up.
+        SubscribeDayCellStatusChanged();
         // Set rounded corners LAST after all sizing is complete
         NativeMethods.SetRoundedCorners(this, 10);
         NativeMethods.UpdateRoundedCorners(this, 10);
@@ -86,10 +94,182 @@ public partial class CalendarWidget : Window
 
     // ── Acrylic / frosted glass ──
 
-    void ApplyAcrylic()
+    // ponytail: FillRect sync extracted from ApplyAcrylic so OnCalendarsChanged can
+    // refresh it without requiring a valid HWND (AcrylicHelper.* needs HWND).
+    // Closes the "model blue, screen yellow" desync window when the widget is hidden.
+    void SyncFillRect()
     {
         var config = _widgetService.GetConfig();
         string fillColorStr = _calendar.UseGlobalAppearance ? config.GlobalFillColor : _calendar.FillColor;
+        try
+        {
+            FillRect.Fill = new SolidColorBrush(
+                (Color)ColorConverter.ConvertFromString(fillColorStr)!);
+        }
+        catch { }
+        // ponytail: force re-render — FillRect paints more reliably than
+        // Border.Background inside a transparent window.
+        FillRect.InvalidateVisual();
+        ApplyBodyTextColorAdaptive(fillColorStr);
+    }
+
+    /// <summary>Adaptive text/icon color based on the widget's effective fill. When the
+    /// calendar has a background image, samples 5 points from it instead of using FillColor.</summary>
+    void ApplyBodyTextColorAdaptive(string effectiveFill)
+    {
+#if DEBUG
+        System.Diagnostics.Debug.WriteLine(
+            $"[adaptive] CalendarWidget: bg={effectiveFill} adaptive={_calendar.TextColorAdaptive}");
+#endif
+        if (!_calendar.TextColorAdaptive) return;
+        SolidColorBrush brush;
+        if (CalBgImage?.Source is BitmapSource bmp && !string.IsNullOrEmpty(_calendar.BackgroundImagePath))
+        {
+            brush = AdaptiveTextColor.ResolveBrush(AdaptiveTextColor.ResolveTextColorForImage(bmp));
+        }
+        else
+        {
+            brush = AdaptiveTextColor.ResolveBrush(effectiveFill);
+        }
+        if (MonthTitleText != null) MonthTitleText.Foreground = brush;
+        if (TodayBtn != null) TodayBtn.Foreground = brush;
+        if (HideBtn != null) HideBtn.Foreground = brush;
+        if (RestoreIconChar != null) RestoreIconChar.Foreground = brush;
+        // DOW headers
+        for (int i = 0; i <= 6; i++)
+        {
+            var tb = FindName($"Dow{i}") as TextBlock;
+            if (tb != null) tb.Foreground = brush;
+        }
+        // Day cells (dynamic items inside ItemsControl)
+        ApplyToDayCells(brush);
+    }
+
+    void ApplyToDayCells(System.Windows.Media.Brush brush)
+    {
+        // ponytail: timing race — after RefreshAppearance's RebuildCells, the
+        // ItemContainerGenerator hasn't created containers yet so ContainerFromIndex
+        // returns null and the brush is silently dropped. First try synchronously;
+        // if no containers exist yet, defer to Loaded priority and retry once more.
+        // Subscribes to StatusChanged for ongoing safety (see SubscribeDayCellStatusChanged).
+        bool anyApplied = TryApplyToDayCells(brush);
+        if (!anyApplied)
+        {
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (!TryApplyToDayCells(brush))
+                {
+                    Dispatcher.BeginInvoke(new Action(() => TryApplyToDayCells(brush)),
+                        System.Windows.Threading.DispatcherPriority.Loaded);
+                }
+            }), System.Windows.Threading.DispatcherPriority.Background);
+        }
+    }
+
+    /// <summary>Walk every ItemsControl in MainContent and re-brush its containers. Returns
+    /// true if at least one container was found and brushed; false if all ItemsControls were
+    /// still in GeneratingContainers state.</summary>
+    bool TryApplyToDayCells(System.Windows.Media.Brush brush)
+    {
+        bool anyApplied = false;
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(MainContent); i++)
+        {
+            var ch = VisualTreeHelper.GetChild(MainContent, i);
+            foreach (var ic in EnumerateItemsControls(ch))
+            {
+                if (ic.ItemsSource == null) continue;
+                for (int k = 0; k < ic.Items.Count; k++)
+                {
+                    if (ic.ItemContainerGenerator.ContainerFromIndex(k) is DependencyObject container)
+                    {
+                        ApplyBrushRecursive(container, brush);
+                        anyApplied = true;
+                    }
+                }
+            }
+        }
+        // NotesDateLabel + AddNoteBtn live at calendar-widget level — set directly.
+        if (NotesDateLabel != null) NotesDateLabel.Foreground = brush;
+        if (AddNoteBtn != null) AddNoteBtn.Foreground = brush;
+        return anyApplied;
+    }
+
+    /// <summary>Subscribe to the day-cells ItemsControl's ItemContainerGenerator.StatusChanged
+    /// so that whenever WPF finishes generating containers (after RebuildCells, month-switch,
+    /// preset load, etc.) we re-apply the adaptive brush automatically. Idempotent — safe to
+    /// call from the constructor once the visual tree is up.</summary>
+    void SubscribeDayCellStatusChanged()
+    {
+        foreach (var ic in EnumerateItemsControls(MainContent))
+        {
+            if (ic.ItemsSource == null) continue;
+            ic.ItemContainerGenerator.StatusChanged += DayCellStatus_Changed;
+        }
+    }
+
+    void DayCellStatus_Changed(object? sender, EventArgs e)
+    {
+        if (sender is not ItemContainerGenerator gen) return;
+        if (gen.Status != System.Windows.Controls.Primitives.GeneratorStatus.ContainersGenerated) return;
+        // Containers ready — re-run adaptive to color any cells that were added/regenerated.
+        var config = _widgetService.GetConfig();
+        string fillColorStr = _calendar.UseGlobalAppearance ? config.GlobalFillColor : _calendar.FillColor;
+        ApplyBodyTextColorAdaptive(fillColorStr);
+    }
+
+    static IEnumerable<ItemsControl> EnumerateItemsControls(DependencyObject parent)
+    {
+        if (parent is ItemsControl ic) yield return ic;
+        int n = VisualTreeHelper.GetChildrenCount(parent);
+        for (int i = 0; i < n; i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            foreach (var inner in EnumerateItemsControls(child)) yield return inner;
+        }
+    }
+
+    static void ApplyBrushRecursive(DependencyObject node, System.Windows.Media.Brush brush)
+    {
+        int count = VisualTreeHelper.GetChildrenCount(node);
+        for (int i = 0; i < count; i++)
+        {
+            var child = VisualTreeHelper.GetChild(node, i);
+            if (child is TextBlock tb) tb.Foreground = brush;
+            else if (child is Control c) c.Foreground = brush;
+            ApplyBrushRecursive(child, brush);
+        }
+    }
+
+    /// <summary>Re-apply body text adaptive using the current model+config. Call when the
+    /// adaptive toggle changes (e.g. settings dialog live preview).</summary>
+    public void RefreshTextColorAdaptive()
+    {
+        var config = _widgetService.GetConfig();
+        string fillColorStr = _calendar.UseGlobalAppearance ? config.GlobalFillColor : _calendar.FillColor;
+        if (_calendar.TextColorAdaptive) ApplyBodyTextColorAdaptive(fillColorStr);
+        else ApplyDefaultTextColors();
+    }
+
+    /// <summary>Restore hard-coded / user-configured foregrounds when adaptive is off.</summary>
+    void ApplyDefaultTextColors()
+    {
+        if (MonthTitleText != null) MonthTitleText.Foreground = new SolidColorBrush(Color.FromArgb(0xEE, 0xFF, 0xFF, 0xFF));
+        if (TodayBtn != null) TodayBtn.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#6C63FF")!);
+        if (HideBtn != null) HideBtn.Foreground = new SolidColorBrush(Color.FromArgb(0x40, 0xFF, 0xFF, 0xFF));
+        if (RestoreIconChar != null) RestoreIconChar.Foreground = new SolidColorBrush(Color.FromArgb(0xC0, 0xFF, 0xFF, 0xFF));
+        for (int i = 0; i <= 6; i++)
+        {
+            var tb = FindName($"Dow{i}") as TextBlock;
+            if (tb != null) tb.Foreground = new SolidColorBrush(Color.FromArgb(0xFF, 0x80, 0x80, 0xA0));
+        }
+        ApplyToDayCells(new SolidColorBrush((Color)ColorConverter.ConvertFromString(_calendar.TextColor)!));
+    }
+
+    void ApplyAcrylic()
+    {
+        SyncFillRect();
+
+        var config = _widgetService.GetConfig();
         string borderColorStr = _calendar.UseGlobalAppearance ? config.GlobalBorderColor : _calendar.BorderColor;
         double borderThickness = _calendar.UseGlobalAppearance ? config.GlobalBorderThickness : _calendar.BorderThickness;
 
@@ -97,30 +277,11 @@ public partial class CalendarWidget : Window
         {
             AcrylicHelper.EnableBlur(this, _calendar.GlassBlurAmount, _calendar.GlassTintOpacity,
                 _calendar.GlassTintLuminosity, _calendar.GlassColorMode);
-            try
-            {
-                // Use fillColor directly — its ARGB alpha controls transparency
-                var fillColor = (Color)ColorConverter.ConvertFromString(fillColorStr)!;
-                FillRect.Fill = new SolidColorBrush(fillColor);   // ponytail: was CalendarBorder.Background — see XAML comment
-            }
-            catch
-            {
-                FillRect.Fill = new SolidColorBrush(Color.FromArgb(0x08, 0x15, 0x15, 0x30));
-            }
         }
         else
         {
             AcrylicHelper.DisableBlur(this);
-            try
-            {
-                FillRect.Fill = new SolidColorBrush(
-                    (Color)ColorConverter.ConvertFromString(fillColorStr)!);
-            }
-            catch { }
         }
-        // ponytail: force re-render — FillRect paints more reliably than
-        // Border.Background inside a transparent window.
-        FillRect.InvalidateVisual();
     }
 
     // ── Background image ──
@@ -197,14 +358,17 @@ public partial class CalendarWidget : Window
 
     /// <summary>Refresh all visual styles from the current _calendar model (for live preview).
     /// Accepts an optional <paramref name="calendar"/> to refresh the local reference, mirroring
-    /// ZoneWindow.RefreshZone's "KEY FIX" pattern — see ClockWidget.RefreshAppearance for rationale.</summary>
-    public void RefreshAppearance(DesktopCalendar? calendar = null)
+    /// ZoneWindow.RefreshZone's "KEY FIX" pattern — see ClockWidget.RefreshAppearance for rationale.
+    /// <paramref name="rebuildCells"/> defaults true for backwards compat with callers that don't
+    /// know about the parameter; pass false for pure cosmetic tweaks (FillColor, BorderColor,
+    /// TextColorAdaptive toggle) to avoid the ItemContainerGenerator race window.</summary>
+    public void RefreshAppearance(DesktopCalendar? calendar = null, bool rebuildCells = true)
     {
         if (calendar != null) _calendar = calendar;
         // RebuildCells first: a preset load may change StartOnMonday (Sun-first vs Mon-first
         // arrangement) or Notes (dot indicators). Without this the day grid keeps its
         // previous layout even though _calendar has changed.
-        _vm?.RebuildCells();
+        if (rebuildCells) _vm?.RebuildCells();
         // ponytail: ApplyAcrylic's EnableBlur guards on IntPtr.Zero internally —
         // safe to run regardless of MainContent visibility so live preview reaches
         // the widget even when hidden.
@@ -289,16 +453,17 @@ public partial class CalendarWidget : Window
     {
         if (s is Border b && b.Tag is string dateKey)
         {
-            // Parse date
-            if (DateTime.TryParse(dateKey, out var dt))
+            if (!DateTime.TryParse(dateKey, out var dt)) return;
+            // ponytail: cross-month click jumps to that month (e.g. row-1 "31" → July view).
+            // RebuildDisplay handles title + cell rebuild; SelectDate then targets the day.
+            if (dt.Year != _vm.DisplayYear || dt.Month != _vm.DisplayMonth)
             {
-                // Check if date is in correct month range
-                if (dt.Year == _vm.DisplayYear && dt.Month == _vm.DisplayMonth)
-                {
-                    _vm.SelectDate(dateKey);
-                    NotesDateLabel.Text = (_loc.CurrentLanguage == Services.Language.Chinese ? "备注 - " : "Notes - ") + dateKey;
-                }
+                _vm.DisplayYear = dt.Year;
+                _vm.DisplayMonth = dt.Month;
+                RebuildDisplay();
             }
+            _vm.SelectDate(dateKey);
+            NotesDateLabel.Text = (_loc.CurrentLanguage == Services.Language.Chinese ? "备注 - " : "Notes - ") + dateKey;
         }
         e.Handled = true;
     }
@@ -586,17 +751,44 @@ public partial class CalendarWidget : Window
         Close();
     }
 
-    public void ShowCalendar()
+    /// <summary>Snapshot the currently-displayed fill brush so the style dialog can restore it
+    /// after any path that might have re-synced FillRect to model (e.g. OnLoad's ApplyAcrylic
+    /// on first show, or PushToWidget during live preview that user later cancels).</summary>
+    public System.Windows.Media.Brush? CaptureFillBrush() => FillRect?.Fill;
+
+    /// <summary>Restore a previously captured FillRect brush and force a redraw.</summary>
+    public void RestoreFillBrush(System.Windows.Media.Brush? brush)
+    {
+        if (brush == null || FillRect == null) return;
+        FillRect.Fill = brush;
+        FillRect.InvalidateVisual();
+    }
+
+    public void ShowCalendar(bool skipResync = false)
     {
         if (!IsVisible) Show();
-        ApplyAcrylic();
+        // ponytail: skipResync=true when called from the style dialog (ShowCalendarAppearanceDialog).
+        // Skip BOTH ApplyAcrylic() and UpdateCalendar(_calendar):
+        //   - ApplyAcrylic would read model and write FillRect directly.
+        //   - UpdateCalendar would fire CalendarsChanged → OnCalendarsChanged → SyncFillRect → same result.
+        // Without this, the FillRect "snaps" to model the moment the dialog opens, even though
+        // the user hasn't touched anything. Cancel branch in ShowCalendarAppearanceDialog restores
+        // IsVisible and calls UpdateCalendar, so persistence still happens correctly.
+        if (!skipResync)
+        {
+            ApplyAcrylic();
+            _calendar.IsVisible = true;
+            _widgetService.UpdateCalendar(_calendar);
+        }
+        else
+        {
+            _calendar.IsVisible = true;
+        }
         Left = _calendar.X; Top = _calendar.Y;
         MainContent.Visibility = Visibility.Visible; RestoreButton.Visibility = Visibility.Collapsed;
-        MinWidth = 260; MinHeight = 340;
+        MinWidth = 260; MinHeight = 460;
         Width = _calendar.Width > 260 ? _calendar.Width : 320;
         Height = _calendar.Height > 340 ? _calendar.Height : 440;
-        _calendar.IsVisible = true;
-        _widgetService.UpdateCalendar(_calendar);
         NativeMethods.PinToDesktop(this);
         NativeMethods.SetRoundedCorners(this, 10);
         Topmost = true;

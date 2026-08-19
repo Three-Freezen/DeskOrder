@@ -101,6 +101,15 @@
                         <TextBlock x:Name="LabelQuickBarMode"/>
                     </CheckBox>
 
+                    <!-- 1c. Text color adaptive (top-row checkbox) -->
+                    <CheckBox x:Name="TextAdaptiveBox" Foreground="{StaticResource T1}" FontSize="13" Margin="0,8,0,0">
+                        <TextBlock x:Name="LabelTextAdaptive" Text="文字颜色自适应"/>
+                    </CheckBox>
+                    <!-- 1d. Title bar text color adaptive (merged group) -->
+                    <CheckBox x:Name="TitleBarTextAdaptiveBox" Foreground="{StaticResource T1}" FontSize="13" Margin="0,2,0,0">
+                        <TextBlock x:Name="LabelTitleBarTextAdaptive" Text="标题栏文字颜色自适应"/>
+                    </CheckBox>
+
                     <!-- 2. Zone Name Color -->
                     <TextBlock x:Name="LabelTextColor" Style="{StaticResource DLb}"/>
                     <StackPanel x:Name="TextColorPresets" Orientation="Horizontal" Margin="0,2,0,0">

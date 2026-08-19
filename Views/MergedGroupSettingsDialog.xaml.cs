@@ -15,7 +15,7 @@ namespace DesktopZones.Views;
 public partial class MergedGroupSettingsDialog : Window, INotifyPropertyChanged
 {
     private readonly Zone _zone;
-    private readonly Zone _snapshot; // for cancel-revert
+    private Zone _snapshot; // for cancel-revert — reassigned after LoadPreset Apply to preserve the preset across an outer Cancel
     private readonly ZoneManager _zoneManager;
     private readonly LocalizationService _loc = LocalizationService.Instance;
 
@@ -94,6 +94,10 @@ public partial class MergedGroupSettingsDialog : Window, INotifyPropertyChanged
         UnifiedFillRadio.Checked += (_, _) => PushToZone();
         KeepOriginalRadio.Checked += (_, _) => PushToZone();
 
+        // Text color adaptive (top-row checkbox)
+        TextAdaptiveBox.IsChecked = zone.TextColorAdaptive;
+        TitleBarTextAdaptiveBox.IsChecked = zone.MergedGroupTitleBarTextColorAdaptive;
+
         // Highlight selected colors
         UpdateHighlights();
         UpdateCropBtnState();
@@ -109,6 +113,14 @@ public partial class MergedGroupSettingsDialog : Window, INotifyPropertyChanged
         LiquidGlassToggle.Unchecked += (_, _) => { _liquidGlass = false; UpdateLiquidButton(); PushToZone(); };
         LiquidGlassSettingsBtn.Click += LiquidGlassSettings_Click;
         UpdateLiquidButton();
+
+        // Wire adaptive checkboxes — TextAdaptive + TitleBarTextAdaptive both call PushToZone
+        // which now writes the boolean back to _zone; live preview reaches the window via
+        // the zone manager's RefreshAppearance-style flow (PushToZone → OnZonesChanged → ApplyStyle).
+        TextAdaptiveBox.Checked += (_, _) => PushToZone();
+        TextAdaptiveBox.Unchecked += (_, _) => PushToZone();
+        TitleBarTextAdaptiveBox.Checked += (_, _) => PushToZone();
+        TitleBarTextAdaptiveBox.Unchecked += (_, _) => PushToZone();
 
         // Crop button
         CropBtn.Click += CropBgImage_Click;
@@ -206,6 +218,8 @@ public partial class MergedGroupSettingsDialog : Window, INotifyPropertyChanged
         _zone.MergedGroupControlOpacity = CtrlOpacitySlider.Value;
         _zone.MergedGroupFillColor = GetSelectedFillColor();
         _zone.MergedGroupUseUnifiedFill = UnifiedFillRadio.IsChecked == true;
+        _zone.TextColorAdaptive = TextAdaptiveBox.IsChecked == true;
+        _zone.MergedGroupTitleBarTextColorAdaptive = TitleBarTextAdaptiveBox.IsChecked == true;
 
         _zone.GlassBlurAmount = _glassBlurAmount;
         _zone.GlassTintOpacity = _glassTintOpacity;
@@ -461,6 +475,10 @@ public partial class MergedGroupSettingsDialog : Window, INotifyPropertyChanged
             }
             catch { }
             panel.Children.Add(border);
+            // ponytail: Fix E — without this call the new chip sits in the panel but the
+            // underlying _zone color (e.g., MergedGroupFillColor) is never updated, so the
+            // live zone shows no live preview until the user clicks Apply.
+            PushToZone();
         }
     }
 
@@ -508,7 +526,15 @@ public partial class MergedGroupSettingsDialog : Window, INotifyPropertyChanged
                 // shape for the same reason.
                 _zoneManager.GetZoneWindow(_zone.Id)?.RefreshZone(_zone);
             });
-        if (applied != true)
+        if (applied == true)
+        {
+            // OK — promote _snapshot to current (post-preset) state so a later outer
+            // Cancel reverts to "post-preset" baseline, preserving the preset across
+            // outer Cancel. Mirrors ZoneSettingsDialog._snapshot = ResultZone.Clone()
+            // (line 238) — the preset commit and the outer Cancel are independent.
+            _snapshot = _zone.Clone();
+        }
+        else
         {
             // Cancel — revert _zone from snapshot, sync UI, refresh live window.
             // Skip PushToZone: it reads UI (still pre-preset) and would overwrite
@@ -516,8 +542,16 @@ public partial class MergedGroupSettingsDialog : Window, INotifyPropertyChanged
             // and uses _suppressPush so its setters don't loop back through PushToZone.
             CopyMergedGroupFields(snap, _zone);
             SyncFromZone();
-            _zoneManager.GetZoneWindow(_zone.Id)?.RefreshZone(_zone);
         }
+
+        // Defensive chain (ZoneSettingsDialog:253-256) — Refresh + UpdateLayout + Refresh
+        // guarantees the live window paints the final state after all in-flight
+        // setter→PushToZone→RefreshZone cycles have settled, regardless of which
+        // branch (OK/Cancel) ran above.
+        var win = _zoneManager.GetZoneWindow(_zone.Id);
+        win?.RefreshZone(_zone);
+        win?.UpdateLayout();
+        win?.RefreshZone(_zone);
     }
 
     void SavePreset_Click(object sender, RoutedEventArgs e)
@@ -566,6 +600,8 @@ public partial class MergedGroupSettingsDialog : Window, INotifyPropertyChanged
         _zone.MergedGroupControlOpacity = _snapshot.MergedGroupControlOpacity;
         _zone.MergedGroupFillColor = _snapshot.MergedGroupFillColor;
         _zone.MergedGroupUseUnifiedFill = _snapshot.MergedGroupUseUnifiedFill;
+        _zone.TextColorAdaptive = _snapshot.TextColorAdaptive;
+        _zone.MergedGroupTitleBarTextColorAdaptive = _snapshot.MergedGroupTitleBarTextColorAdaptive;
         _zone.GlassBlurAmount = _snapshot.GlassBlurAmount;
         _zone.GlassTintOpacity = _snapshot.GlassTintOpacity;
         _zone.GlassTintLuminosity = _snapshot.GlassTintLuminosity;

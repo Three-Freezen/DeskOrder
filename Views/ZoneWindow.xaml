@@ -150,7 +150,7 @@
                         <!-- Items (scrollable) -->
                         <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Hidden"
                                       HorizontalScrollBarVisibility="Hidden" Background="Transparent">
-                        <ItemsControl ItemsSource="{Binding Items}">
+                        <ItemsControl x:Name="ItemsHost" ItemsSource="{Binding Items}">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
                                     <Canvas x:Name="ItemCanvas"
@@ -189,16 +189,16 @@
                                                    Stretch="Uniform"
                                                    RenderOptions.BitmapScalingMode="HighQuality"
                                                    HorizontalAlignment="Center"/>
+                                            <!-- ponytail: no DropShadowEffect — hardcoded black shadow
+                                                 would mask the adaptive brush on light bg and bleed into
+                                                 dark bg, making item names look "locked white". Foreground
+                                                 gets re-brushed by ApplyItemTextColorAdaptive via
+                                                 ApplyBrushToTree(ItemsHost, brush). -->
                                             <TextBlock Text="{Binding Name}" FontSize="11"
                                                        Foreground="#E0FFFFFF" TextAlignment="Center"
                                                        TextTrimming="CharacterEllipsis"
                                                        MaxWidth="68" Margin="0,2,0,0"
-                                                       HorizontalAlignment="Center">
-                                                <TextBlock.Effect>
-                                                    <DropShadowEffect BlurRadius="2" ShadowDepth="0"
-                                                                      Color="#AA000000" Opacity="0.8"/>
-                                                </TextBlock.Effect>
-                                            </TextBlock>
+                                                       HorizontalAlignment="Center"/>
                                         </StackPanel>
                                     </Grid>
                                 </DataTemplate>

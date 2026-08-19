@@ -1084,14 +1084,36 @@ public partial class ManagementWindow : Window
         // collapsed window and the user sees nothing. Cancel branch below restores
         // wasVisible (and calls HideClock when needed), so disk state stays correct.
         bool wasVisible = clock.IsVisible;
+
+        // ponytail: capture the currently-displayed fill BEFORE any path that might write
+        // to FillRect.Fill (OnLoad→ApplyAcrylic on first show, RefreshAppearance during
+        // live preview, etc.). Restored after dialog closes so the user's view never
+        // visibly "snaps" to a stale model color just because they opened the dialog.
+        // Apply path's UpdateClock re-syncs via ClocksChanged→SyncFillRect, so Apply still wins.
+        var existingCw = _widgetService?.GetClockWindow(clock.Id) as ClockWidget;
+        var capturedFill = existingCw?.CaptureFillBrush();
+
         if (_widgetService?.GetClockWindow(clock.Id) == null)
         {
-            OpenClockWindow(clock);
+            OpenClockWindow(clock);   // may trigger OnLoad → ApplyAcrylic → FillRect = model
         }
-        _widgetService?.GetClockWindow(clock.Id)?.ShowClock();
+        // Defensive restore: if OnLoad (or anything else) wrote a different color, snap it back
+        // so the user sees no change while the dialog is up.
+        if (capturedFill != null && _widgetService?.GetClockWindow(clock.Id) is ClockWidget cwAfter)
+            cwAfter.RestoreFillBrush(capturedFill);
+
+        _widgetService?.GetClockWindow(clock.Id)?.ShowClock(skipResync: true);
         var dlg = new WidgetSettingsDialog(WidgetSettingsTarget.Clock) { Owner = this };
         dlg.LoadFromClock(clock);
-        if (dlg.ShowDialog() == true && dlg.DialogResultOk)
+        var ok = dlg.ShowDialog();
+
+        // Defensive restore AFTER dialog closes (covers any sync path that ran during the
+        // dialog — e.g. PushToWidget during live preview that user then cancels). Apply's
+        // UpdateClock below re-syncs FillRect via SyncFillRect, so Apply still wins.
+        if (capturedFill != null && _widgetService?.GetClockWindow(clock.Id) is ClockWidget cwAfter2)
+            cwAfter2.RestoreFillBrush(capturedFill);
+
+        if (ok == true && dlg.DialogResultOk)
         {
             clock.BorderThickness = dlg.ParsedBorderThickness;
             clock.BorderColor = dlg.ParsedBorderColor;
@@ -1136,14 +1158,30 @@ public partial class ManagementWindow : Window
         // ponytail: see ShowClockAppearanceDialog — same fix. Always show for preview;
         // Cancel branch below restores wasVisible.
         bool wasVisible = cal.IsVisible;
+
+        // ponytail: capture/restore the FillRect brush across the dialog lifecycle so the
+        // user never sees the widget "snap" to a stale model color just from opening the
+        // dialog. Apply path's UpdateCalendar re-syncs via CalendarsChanged→SyncFillRect,
+        // so Apply still wins. Mirrors ShowClockAppearanceDialog above.
+        var existingCaw = _widgetService?.GetCalendarWindow(cal.Id) as CalendarWidget;
+        var capturedFill = existingCaw?.CaptureFillBrush();
+
         if (_widgetService?.GetCalendarWindow(cal.Id) == null)
         {
             OpenCalendarWindow(cal);
         }
-        _widgetService?.GetCalendarWindow(cal.Id)?.ShowCalendar();
+        if (capturedFill != null && _widgetService?.GetCalendarWindow(cal.Id) is CalendarWidget cawAfter)
+            cawAfter.RestoreFillBrush(capturedFill);
+
+        _widgetService?.GetCalendarWindow(cal.Id)?.ShowCalendar(skipResync: true);
         var dlg = new WidgetSettingsDialog(WidgetSettingsTarget.Calendar) { Owner = this };
         dlg.LoadFromCalendar(cal);
-        if (dlg.ShowDialog() == true && dlg.DialogResultOk)
+        var ok = dlg.ShowDialog();
+
+        if (capturedFill != null && _widgetService?.GetCalendarWindow(cal.Id) is CalendarWidget cawAfter2)
+            cawAfter2.RestoreFillBrush(capturedFill);
+
+        if (ok == true && dlg.DialogResultOk)
         {
             cal.BorderThickness = dlg.ParsedBorderThickness;
             cal.BorderColor = dlg.ParsedBorderColor;

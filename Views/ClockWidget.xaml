@@ -69,20 +69,10 @@
                                    FontSize="48" FontWeight="Light"
                                    FontFamily="Segoe UI"
                                    Foreground="#EEFFFFFF"
-                                   TextAlignment="Center">
-                            <TextBlock.Effect>
-                                <DropShadowEffect BlurRadius="8" ShadowDepth="0"
-                                                  Color="#AA000000" Opacity="0.8"/>
-                            </TextBlock.Effect>
-                        </TextBlock>
+                                   TextAlignment="Center"/>
                         <TextBlock x:Name="DateText" Text="2026-06-10"
                                    FontSize="16" Foreground="#AAFFFFFF"
-                                   TextAlignment="Center" Margin="0,4,0,0">
-                            <TextBlock.Effect>
-                                <DropShadowEffect BlurRadius="4" ShadowDepth="0"
-                                                  Color="#66000000" Opacity="0.7"/>
-                            </TextBlock.Effect>
-                        </TextBlock>
+                                   TextAlignment="Center" Margin="0,4,0,0"/>
                     </StackPanel>
                 </Grid>
 
@@ -91,7 +81,7 @@
                       Width="200" Height="200"
                       HorizontalAlignment="Center" VerticalAlignment="Center">
                     <!-- Clock face background -->
-                    <Ellipse Width="200" Height="200" Fill="#18000000"
+                    <Ellipse x:Name="AnalogFaceEllipse" Width="200" Height="200" Fill="#18000000"
                              Stroke="#40FFFFFF" StrokeThickness="2"/>
 
                     <!-- Custom background image (clipped to clock circle) -->
@@ -140,7 +130,7 @@
                              Margin="0,0,0,0" RenderTransformOrigin="0.5,0.5"/>
 
                     <!-- Date window -->
-                    <Border Width="36" Height="20" CornerRadius="4"
+                    <Border x:Name="DateWindowBorder" Width="36" Height="20" CornerRadius="4"
                             Background="#20FFFFFF" BorderBrush="#40FFFFFF"
                             BorderThickness="0.5"
                             HorizontalAlignment="Right" VerticalAlignment="Center"

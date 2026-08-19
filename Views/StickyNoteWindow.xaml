@@ -73,9 +73,10 @@
                 <!-- Formatting toolbar -->
                 <Border Grid.Row="1" Background="#10000000" Padding="4,2">
                     <StackPanel Orientation="Horizontal">
-                        <!-- Font Size -->
+                        <!-- Font Size — locked white regardless of adaptive: the number itself
+                             (10/12/14/…) is a label, not an icon, and shouldn't compete with bg. -->
                         <ComboBox x:Name="FontSizeCombo" Width="50" Height="22"
-                                   FontSize="11" Foreground="#E0E0E0"
+                                   FontSize="11" Foreground="#FFFFFF"
                                    Background="#1E1E36" BorderBrush="#30FFFFFF"
                                    BorderThickness="1" Padding="2,0"
                                    SelectedIndex="2"
@@ -134,9 +135,11 @@
                             </Button.Resources>
                             <Button.ContentTemplate>
                                 <DataTemplate>
+                                    <!-- ponytail: no Foreground here — explicit local value would
+                                         override the inherited Button.Foreground and block the
+                                         adaptive color refresh. -->
                                     <TextBlock Text="U" FontSize="12"
-                                               TextDecorations="Underline"
-                                               Foreground="#E0E0E0"/>
+                                               TextDecorations="Underline"/>
                                 </DataTemplate>
                             </Button.ContentTemplate>
                         </Button>

@@ -86,6 +86,9 @@
                                 </Rectangle.Fill>
                             </Rectangle>
                             <Image Grid.RowSpan="2" Source="{Binding Payload.BackgroundImagePath}" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality">
+                                <Image.Opacity>
+                                    <Binding Path="Payload.BackgroundImageOpacity" Converter="{StaticResource PercentToOpacity}" FallbackValue="0.3"/>
+                                </Image.Opacity>
                                 <Image.Style>
                                     <Style TargetType="Image">
                                         <Setter Property="Visibility" Value="Visible"/>
@@ -176,12 +179,12 @@
                             <SolidColorBrush Color="{Binding Payload.BorderColor, Converter={StaticResource Hex2Color}}"/>
                         </Border.BorderBrush>
                         <Grid ClipToBounds="True">
-                            <Rectangle Stretch="Fill" IsHitTestVisible="False">
+                            <Rectangle Grid.RowSpan="2" Stretch="Fill" IsHitTestVisible="False">
                                 <Rectangle.Fill>
                                     <SolidColorBrush Color="{Binding Payload.FillColor, Converter={StaticResource Hex2Color}, FallbackValue=#08000000}"/>
                                 </Rectangle.Fill>
                             </Rectangle>
-                            <Image Source="{Binding Payload.DigitalBackgroundImagePath}" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality">
+                            <Image Grid.RowSpan="2" Source="{Binding Payload.DigitalBackgroundImagePath}" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality">
                                 <Image.Opacity>
                                     <Binding Path="Payload.DigitalBackgroundImageOpacity" Converter="{StaticResource PercentToOpacity}" FallbackValue="0.3"/>
                                 </Image.Opacity>
@@ -259,12 +262,12 @@
                             <SolidColorBrush Color="{Binding Payload.BorderColor, Converter={StaticResource Hex2Color}}"/>
                         </Border.BorderBrush>
                         <Grid>
-                            <Rectangle Stretch="Fill" IsHitTestVisible="False">
+                            <Rectangle Grid.RowSpan="2" Stretch="Fill" IsHitTestVisible="False">
                                 <Rectangle.Fill>
                                     <SolidColorBrush Color="{Binding Payload.FillColor, Converter={StaticResource Hex2Color}, FallbackValue=#08000000}"/>
                                 </Rectangle.Fill>
                             </Rectangle>
-                            <Image Source="{Binding Payload.BackgroundImagePath}" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality">
+                            <Image Grid.RowSpan="2" Source="{Binding Payload.BackgroundImagePath}" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality">
                                 <Image.Opacity>
                                     <Binding Path="Payload.BackgroundImageOpacity" Converter="{StaticResource PercentToOpacity}" FallbackValue="0.3"/>
                                 </Image.Opacity>
@@ -579,9 +582,12 @@
                             </Rectangle>
                             <!-- Background image (only when path set) -->
                             <Image Grid.RowSpan="3" Source="{Binding Payload.BackgroundImagePath}" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality">
+                                <Image.Opacity>
+                                    <Binding Path="Payload.BackgroundImageOpacity" Converter="{StaticResource PercentToOpacity}" FallbackValue="0.3"/>
+                                </Image.Opacity>
                                 <Image.Style>
                                     <Style TargetType="Image">
-                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Setter Property="Visibility" Value="Visible"/>
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding Payload.BackgroundImagePath}" Value="">
                                                 <Setter Property="Visibility" Value="Collapsed"/>
@@ -681,6 +687,9 @@
                                 </Rectangle.Fill>
                             </Rectangle>
                             <Image Grid.RowSpan="4" Source="{Binding Payload.MergedGroupBackgroundImagePath}" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality">
+                                <Image.Opacity>
+                                    <Binding Path="Payload.MergedGroupBackgroundImageOpacity" Converter="{StaticResource PercentToOpacity}" FallbackValue="0.3"/>
+                                </Image.Opacity>
                                 <Image.Style>
                                     <Style TargetType="Image">
                                         <Setter Property="Visibility" Value="Visible"/>
@@ -779,11 +788,20 @@
                                 <RowDefinition Height="20"/>
                                 <RowDefinition Height="*"/>
                             </Grid.RowDefinitions>
-                            <!-- Background image -->
+                            <!-- FillColor backdrop (matches Calendar/Zone/MergedGroup/Clock pattern) -->
+                            <Rectangle Grid.RowSpan="2" Stretch="Fill" IsHitTestVisible="False">
+                                <Rectangle.Fill>
+                                    <SolidColorBrush Color="{Binding Payload.PanelFillColor, Converter={StaticResource Hex2Color}, FallbackValue=#08000000}"/>
+                                </Rectangle.Fill>
+                            </Rectangle>
+                            <!-- Background image (only when path set) -->
                             <Image Grid.RowSpan="2" Source="{Binding Payload.PanelBackgroundImagePath}" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality">
+                                <Image.Opacity>
+                                    <Binding Path="Payload.PanelBackgroundImageOpacity" Converter="{StaticResource PercentToOpacity}" FallbackValue="0.3"/>
+                                </Image.Opacity>
                                 <Image.Style>
                                     <Style TargetType="Image">
-                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Setter Property="Visibility" Value="Visible"/>
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding Payload.PanelBackgroundImagePath}" Value="">
                                                 <Setter Property="Visibility" Value="Collapsed"/>

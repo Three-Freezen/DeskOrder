@@ -56,6 +56,12 @@ public class Zone : AppearanceModel
     public double MergedGroupTitleBarOpacity { get; set; } = 6;   // title bar opacity
     public bool MergedGroupUseUnifiedFill { get; set; } = true;   // true=unified fill, false=keep original
     public bool MergedGroupQuickBarMode { get; set; } = false;    // title-bar-less compact mode
+
+    // ── Title bar text color adaptive ──
+    /// <summary>Auto-pick zone title bar text color based on <see cref="TitleBarFillColor"/>.</summary>
+    public bool TitleBarTextColorAdaptive { get; set; } = true;
+    /// <summary>Auto-pick merged-group title bar text color based on <see cref="MergedGroupTitleBarFillColor"/>.</summary>
+    public bool MergedGroupTitleBarTextColorAdaptive { get; set; } = true;
     public string MergedGroupBackgroundImagePath { get; set; } = "";
     public string MergedGroupBgImageStretch { get; set; } = "UniformToFill";
     public double MergedGroupBgImageOffsetX { get; set; } = 0;
@@ -112,6 +118,8 @@ public class Zone : AppearanceModel
             MergedGroupBgImageOffsetY = MergedGroupBgImageOffsetY,
             MergedGroupBgImageZoom = MergedGroupBgImageZoom,
             MergedGroupBackgroundImageOpacity = MergedGroupBackgroundImageOpacity,
+            TitleBarTextColorAdaptive = TitleBarTextColorAdaptive,
+            MergedGroupTitleBarTextColorAdaptive = MergedGroupTitleBarTextColorAdaptive,
             Items = new List<ZoneItem>(Items.ConvertAll(i => i.Clone()))
         };
         // Ponytail: 14 AppearanceModel fields auto-copied via reflection so

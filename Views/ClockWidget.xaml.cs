@@ -6,6 +6,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Shapes;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using DesktopZones.Helpers;
 using DesktopZones.Models;
@@ -73,6 +74,10 @@ public partial class ClockWidget : Window
         // Re-fetch latest clock from collection (UpdateClock replaces the object)
         var latest = _widgetService.Clocks.FirstOrDefault(c => c.Id == _clock.Id);
         if (latest != null) _clock = latest;
+        // ponytail: always sync FillRect, even when hidden — closes the
+        // "model blue, screen yellow" desync that ShowClock used to reveal.
+        // Acrylic blur stays gated on visibility (needs valid HWND).
+        SyncFillRect();
         if (MainContent.Visibility == Visibility.Visible)
             ApplyAcrylic();
         ApplyBackgroundImage();
@@ -190,20 +195,24 @@ public partial class ClockWidget : Window
                 double displayedW = imgW * utfScale;
                 double displayedH = imgH * utfScale;
 
+                // ponytail: Match the analog pattern (AnalogBgClip.Width/Height = image size).
+                // The previous "center in zone (dw x dh)" formula assumed the Border parent was
+                // 320x140 — but DigitalBgBorder uses HorizontalAlignment=Stretch inside an
+                // auto-sized parent chain (Margin=10 Grid → DigitalPanel). In that chain Stretch
+                // doesn't propagate a deterministic size, so the centering math computed a Margin
+                // against a phantom zone, and the Border often ended up 0x0 → image clipped to
+                // nothing by ClipToBounds. Setting Border = image size directly makes the parent
+                // dimension explicit, mirroring AnalogBgClip (Canvas Width=200 Height=200 + code
+                // resizes to displayedW/displayedH at ClockWidget.xaml.cs:148-149).
+                DigitalBgBorder.Width = displayedW;
+                DigitalBgBorder.Height = displayedH;
                 DigitalBgImage.Width = displayedW;
                 DigitalBgImage.Height = displayedH;
 
-                // Position image: center at container center + offset (matches preview positioning)
-                double zoneCenterX = dw / 2;
-                double zoneCenterY = dh / 2;
-                double imgCenterX = displayedW / 2;
-                double imgCenterY = displayedH / 2;
                 double ox = _clock.DigitalBgImageOffsetX;
                 double oy = _clock.DigitalBgImageOffsetY;
 
-                DigitalBgImage.Margin = new Thickness(
-                    zoneCenterX - imgCenterX + ox,
-                    zoneCenterY - imgCenterY + oy, 0, 0);
+                DigitalBgImage.Margin = new Thickness(ox, oy, 0, 0);
                 DigitalBgImage.HorizontalAlignment = HorizontalAlignment.Left;
                 DigitalBgImage.VerticalAlignment = VerticalAlignment.Top;
                 DigitalBgImage.Opacity = Math.Max(0.01, _clock.DigitalBackgroundImageOpacity / 100.0);
@@ -256,10 +265,138 @@ public partial class ClockWidget : Window
 
     // ── Acrylic / frosted glass ──
 
-    void ApplyAcrylic()
+    // ponytail: FillRect sync extracted from ApplyAcrylic so OnClocksChanged can
+    // refresh it without requiring a valid HWND (AcrylicHelper.* needs HWND).
+    // Closes the "model blue, screen yellow" desync window when the widget is hidden.
+    void SyncFillRect()
+    {
+        string fillColorStr = ResolveEffectiveFill();
+        try
+        {
+            FillRect.Fill = new SolidColorBrush(
+                (Color)ColorConverter.ConvertFromString(fillColorStr)!);
+        }
+        catch { }
+        // ponytail: force re-render — FillRect as a child paints more reliably than
+        // Border.Background inside a transparent window with AllowsTransparency=True.
+        FillRect.InvalidateVisual();
+        ApplyBodyTextColorAdaptive(fillColorStr);
+    }
+
+    /// <summary>Pick the fill color for the active widget. Honors <see cref="DesktopClock.UseGlobalAppearance"/>
+    /// by falling back to <see cref="Models.AppConfig.GlobalFillColor"/>. ponytail: previous version
+    /// routed through DigitalFillColor/AnalogFillColor with a "fall back to FillColor when empty"
+    /// branch — but those per-mode fields ship with a non-empty default ("#08000000"), so the fallback
+    /// never fired and changing FillColor in the settings dialog never reached the adaptive path.
+    /// Per-mode fields are dead code (no UI exposes them; preset JSON keeps them at the default value),
+    /// so just use FillColor directly here. Field stays on the model for backward-compat with existing
+    /// preset/serialized data.</summary>
+    string ResolveEffectiveFill()
     {
         var config = _widgetService.GetConfig();
-        string fillColorStr = _clock.UseGlobalAppearance ? config.GlobalFillColor : _clock.FillColor;
+        return _clock.UseGlobalAppearance ? config.GlobalFillColor : _clock.FillColor;
+    }
+
+    /// <summary>Adaptive text/icon color based on the widget's effective fill.
+    /// When <see cref="DesktopClock.TextColorAdaptive"/> is true, overrides the user-set
+    /// TextColor / accent colors so the text stays legible on any background. When the
+    /// analog clock has a face image, samples 5 points from it instead of using FillColor.</summary>
+    void ApplyBodyTextColorAdaptive(string effectiveFill)
+    {
+#if DEBUG
+        System.Diagnostics.Debug.WriteLine(
+            $"[adaptive] ClockWidget: bg={effectiveFill} adaptive={_clock.TextColorAdaptive}");
+#endif
+        if (!_clock.TextColorAdaptive) return;
+        SolidColorBrush brush;
+        // Prefer background-image sampling for the analog face when present.
+        if (ClockBgImage?.Source is BitmapSource bmp && !string.IsNullOrEmpty(_clock.BackgroundImagePath))
+        {
+            brush = AdaptiveTextColor.ResolveBrush(AdaptiveTextColor.ResolveTextColorForImage(bmp));
+        }
+        else
+        {
+            brush = AdaptiveTextColor.ResolveBrush(effectiveFill);
+        }
+        if (TimeText != null) TimeText.Foreground = brush;
+        if (DateText != null) DateText.Foreground = brush;
+        if (AnalogDateText != null) AnalogDateText.Foreground = brush;
+        if (HourHand != null) HourHand.Stroke = brush;
+        if (MinuteHand != null) MinuteHand.Stroke = brush;
+        if (SecondHand != null) SecondHand.Stroke = brush;
+        if (HideBtn != null) HideBtn.Foreground = brush;
+        if (RestoreIconChar != null) RestoreIconChar.Foreground = brush;
+        // Refresh MarkerCanvas tick strokes; the analog dial border too.
+        if (MarkerCanvas != null)
+        {
+            foreach (var child in MarkerCanvas.Children)
+            {
+                if (child is Line ln) ln.Stroke = brush;
+            }
+        }
+        // Outer dial ellipse + center dot
+        if (AnalogPanel != null)
+        {
+            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(AnalogPanel); i++)
+            {
+                var ch = VisualTreeHelper.GetChild(AnalogPanel, i);
+                if (ch is Ellipse el)
+                {
+                    if (el.Width == 200 && el.Height == 200) el.Stroke = brush;
+                    else if (el.Width == 10 && el.Height == 10) el.Fill = brush;
+                }
+            }
+        }
+        // ponytail: analog face background + date-window Border now ride the adaptive brush
+        // instead of staying at hardcoded #18000000 / #20FFFFFF / #40FFFFFF. Tinted to the
+        // adaptive hue at the original alpha so contrast on the hands/ticks is preserved.
+        var c = brush.Color;
+        if (AnalogFaceEllipse != null)
+            AnalogFaceEllipse.Fill = new SolidColorBrush(Color.FromArgb(0x18, c.R, c.G, c.B));
+        if (DateWindowBorder != null)
+        {
+            DateWindowBorder.Background = new SolidColorBrush(Color.FromArgb(0x20, c.R, c.G, c.B));
+            DateWindowBorder.BorderBrush = new SolidColorBrush(Color.FromArgb(0x40, c.R, c.G, c.B));
+        }
+    }
+
+    /// <summary>Re-apply body text adaptive using the current model+config. Call when the
+    /// adaptive toggle changes (e.g. settings dialog live preview) or when switching modes
+    /// (so digital↔analog picks the right per-mode fill).</summary>
+    public void RefreshTextColorAdaptive()
+    {
+        string fillColorStr = ResolveEffectiveFill();
+        if (_clock.TextColorAdaptive) ApplyBodyTextColorAdaptive(fillColorStr);
+        else ApplyDefaultTextColors();
+    }
+
+    /// <summary>Restore hard-coded / user-configured foregrounds when adaptive is off.</summary>
+    void ApplyDefaultTextColors()
+    {
+        if (TimeText != null) TimeText.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(_clock.TextColor)!);
+        if (DateText != null) DateText.Foreground = new SolidColorBrush(Color.FromArgb(0xAA, 0xFF, 0xFF, 0xFF));
+        if (AnalogDateText != null) AnalogDateText.Foreground = new SolidColorBrush(Color.FromArgb(0xAA, 0xFF, 0xFF, 0xFF));
+        if (HourHand != null) HourHand.Stroke = new SolidColorBrush(Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF));
+        if (MinuteHand != null) MinuteHand.Stroke = new SolidColorBrush(Color.FromArgb(0xCC, 0xFF, 0xFF, 0xFF));
+        if (SecondHand != null) SecondHand.Stroke = new SolidColorBrush(Color.FromArgb(0xFF, 0xFF, 0x66, 0x66));
+        if (HideBtn != null) HideBtn.Foreground = new SolidColorBrush(Color.FromArgb(0x60, 0xFF, 0xFF, 0xFF));
+        if (RestoreIconChar != null) RestoreIconChar.Foreground = new SolidColorBrush(Color.FromArgb(0xC0, 0xFF, 0xFF, 0xFF));
+        // ponytail: reset face bg + date window to XAML defaults so toggling adaptive off
+        // doesn't leave the last adaptive tint stuck on these elements.
+        if (AnalogFaceEllipse != null)
+            AnalogFaceEllipse.Fill = new SolidColorBrush(Color.FromArgb(0x18, 0x00, 0x00, 0x00));
+        if (DateWindowBorder != null)
+        {
+            DateWindowBorder.Background = new SolidColorBrush(Color.FromArgb(0x20, 0xFF, 0xFF, 0xFF));
+            DateWindowBorder.BorderBrush = new SolidColorBrush(Color.FromArgb(0x40, 0xFF, 0xFF, 0xFF));
+        }
+    }
+
+    void ApplyAcrylic()
+    {
+        SyncFillRect();
+
+        var config = _widgetService.GetConfig();
         string borderColorStr = _clock.UseGlobalAppearance ? config.GlobalBorderColor : _clock.BorderColor;
         double borderThickness = _clock.UseGlobalAppearance ? config.GlobalBorderThickness : _clock.BorderThickness;
 
@@ -267,16 +404,6 @@ public partial class ClockWidget : Window
         {
             AcrylicHelper.EnableBlur(this, _clock.GlassBlurAmount, _clock.GlassTintOpacity,
                 _clock.GlassTintLuminosity, _clock.GlassColorMode);
-            try
-            {
-                // Use fillColor directly — its ARGB alpha controls transparency
-                var fillColor = (Color)ColorConverter.ConvertFromString(fillColorStr)!;
-                FillRect.Fill = new SolidColorBrush(fillColor);   // ponytail: was ClockBorder.Background — see XAML comment
-            }
-            catch
-            {
-                FillRect.Fill = new SolidColorBrush(Color.FromArgb(0x08, 0x00, 0x00, 0x00));
-            }
             if (_clock.EnableLiquidGlass)
             {
                 ClockBorder.BorderBrush = AcrylicHelper.CreateChromaticBorder();
@@ -286,16 +413,7 @@ public partial class ClockWidget : Window
         else
         {
             AcrylicHelper.DisableBlur(this);
-            try
-            {
-                FillRect.Fill = new SolidColorBrush(
-                    (Color)ColorConverter.ConvertFromString(fillColorStr)!);
-            }
-            catch { }
         }
-        // ponytail: force re-render — FillRect as a child paints more reliably than
-        // Border.Background inside a transparent window with AllowsTransparency=True.
-        FillRect.InvalidateVisual();
     }
 
     // ── Style (border / fill) ──
@@ -496,6 +614,11 @@ public partial class ClockWidget : Window
         GenerateMarkers();
         UpdateContextMenuLabels();
         _widgetService.UpdateClock(_clock);
+        // ponytail: re-apply adaptive using the new mode's fill (Digital vs Analog) so the
+        // brush computed for the previous mode doesn't bleed into the new one. OnClocksChanged
+        // already calls SyncFillRect → ApplyBodyTextColorAdaptive, but doing it here as well
+        // makes the refresh deterministic regardless of WidgetService event ordering.
+        RefreshTextColorAdaptive();
     }
 
     void ToggleSeconds_Click(object s, RoutedEventArgs e)
@@ -551,18 +674,47 @@ public partial class ClockWidget : Window
         e.Handled = true;
     }
 
-    public void ShowClock()
+    /// <summary>Snapshot the currently-displayed fill brush so the style dialog can restore it
+    /// after any path that might have re-synced FillRect to model (e.g. OnLoad's ApplyAcrylic
+    /// on first show, or PushToWidget during live preview that user later cancels).</summary>
+    public System.Windows.Media.Brush? CaptureFillBrush() => FillRect?.Fill;
+
+    /// <summary>Restore a previously captured FillRect brush and force a redraw.</summary>
+    public void RestoreFillBrush(System.Windows.Media.Brush? brush)
+    {
+        if (brush == null || FillRect == null) return;
+        FillRect.Fill = brush;
+        FillRect.InvalidateVisual();
+    }
+
+    public void ShowClock(bool skipResync = false)
     {
         if (!IsVisible) Show();
         ApplyMode();
-        ApplyAcrylic();
+        // ponytail: skipResync=true when called from the style dialog (ShowClockAppearanceDialog).
+        // Skip BOTH ApplyAcrylic() and UpdateClock(_clock):
+        //   - ApplyAcrylic would read model and write FillRect directly.
+        //   - UpdateClock would fire ClocksChanged → OnClocksChanged → SyncFillRect → same result.
+        // Without this, the FillRect "snaps" to model the moment the dialog opens, even though
+        // the user hasn't touched anything. Cancel branch in ShowClockAppearanceDialog restores
+        // IsVisible and calls UpdateClock, so persistence still happens correctly.
+        if (!skipResync)
+        {
+            ApplyAcrylic();
+            _clock.IsVisible = true;
+            _widgetService.UpdateClock(_clock);
+        }
+        else
+        {
+            // In-memory IsVisible flip only — Cancel branch will save it if user backs out,
+            // or the dialog's Apply path will save the new state if user commits.
+            _clock.IsVisible = true;
+        }
         Left = _clock.X; Top = _clock.Y;
         MainContent.Visibility = Visibility.Visible; RestoreButton.Visibility = Visibility.Collapsed;
         MinWidth = 140; MinHeight = 80;
         Width = _clock.Width > 140 ? _clock.Width : 320;
         Height = _clock.Height > 80 ? _clock.Height : 140;
-        _clock.IsVisible = true;
-        _widgetService.UpdateClock(_clock);
         NativeMethods.PinToDesktop(this);
         NativeMethods.SetRoundedCorners(this, 10);
         Topmost = true;

@@ -121,6 +121,24 @@
                     </StackPanel>
 
                     <!-- ══ Common: Use Global Appearance ══ -->
+                    <!-- Text color adaptive (top-row checkbox). Default IsChecked=true so a brand-new dialog
+                         (no LoadFrom* yet) shows checked — matches AppearanceModel.TextColorAdaptive=true
+                         default and avoids the "open settings → checkbox looks unchecked → click Apply
+                         silently writes false back to model" failure mode. -->
+                    <CheckBox x:Name="TextAdaptiveBox" Margin="0,4,0,0"
+                              IsChecked="True"
+                              Foreground="{StaticResource T1}" FontSize="13"
+                              Checked="TextAdaptive_Changed" Unchecked="TextAdaptive_Changed">
+                        <TextBlock x:Name="LabelTextAdaptive" Text="文字颜色自适应"/>
+                    </CheckBox>
+                    <!-- Title bar text color adaptive (only visible when sticky-note target) -->
+                    <CheckBox x:Name="TitleBarTextAdaptiveBox" Margin="0,2,0,4"
+                              Foreground="{StaticResource T1}" FontSize="13"
+                              Visibility="Collapsed"
+                              Checked="TitleBarTextAdaptive_Changed" Unchecked="TitleBarTextAdaptive_Changed">
+                        <TextBlock x:Name="LabelTitleBarTextAdaptive" Text="标题栏文字颜色自适应"/>
+                    </CheckBox>
+                    <!-- ══ Common: Use Global Appearance ══ -->
                     <CheckBox x:Name="UseGlobalAppearanceBox" Margin="0,4,0,8"
                               Foreground="{StaticResource T1}" FontSize="13"
                               IsChecked="{Binding UseGlobalAppearance}"
