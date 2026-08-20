@@ -330,6 +330,7 @@ public partial class ClockWidget : Window
         if (MinuteHand != null) MinuteHand.Stroke = brush;
         if (SecondHand != null) SecondHand.Stroke = brush;
         if (HideBtn != null) HideBtn.Foreground = brush;
+        if (LockBtn != null) LockBtn.Foreground = brush;
         if (RestoreIconChar != null) RestoreIconChar.Foreground = brush;
         // Refresh MarkerCanvas tick strokes; the analog dial border too.
         if (MarkerCanvas != null)
@@ -385,6 +386,7 @@ public partial class ClockWidget : Window
         if (MinuteHand != null) MinuteHand.Stroke = new SolidColorBrush(Color.FromArgb(0xCC, 0xFF, 0xFF, 0xFF));
         if (SecondHand != null) SecondHand.Stroke = new SolidColorBrush(Color.FromArgb(0xFF, 0xFF, 0x66, 0x66));
         if (HideBtn != null) HideBtn.Foreground = new SolidColorBrush(Color.FromArgb(0x60, 0xFF, 0xFF, 0xFF));
+        if (LockBtn != null) LockBtn.Foreground = new SolidColorBrush(Color.FromArgb(0x60, 0xFF, 0xFF, 0xFF));
         if (RestoreIconChar != null) RestoreIconChar.Foreground = new SolidColorBrush(Color.FromArgb(0xC0, 0xFF, 0xFF, 0xFF));
         // ponytail: reset face bg + date window to XAML defaults so toggling adaptive off
         // doesn't leave the last adaptive tint stuck on these elements.
