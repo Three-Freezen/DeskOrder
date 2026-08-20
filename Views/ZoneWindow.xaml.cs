@@ -48,6 +48,11 @@ public partial class ZoneWindow : Window
 
     private Zone _zone;
     private readonly ZoneManager _mgr;
+
+    /// <summary>XAML default foreground of the ControlPoint button labels (LockBtnText /
+    /// EditBtnText / ImportBtnText / HideBtnText). Used to restore them when title-bar
+    /// adaptive is turned back off.</summary>
+    private static readonly SolidColorBrush CtrlLabelDefaultBrush = new(Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF));
     public bool IsMinimized => RestoreButton.Visibility == Visibility.Visible;
     private readonly ZoneViewModel _vm;
     private readonly LocalizationService _loc = LocalizationService.Instance;
@@ -795,14 +800,20 @@ public partial class ZoneWindow : Window
             try { ZoneTitleText.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.TitleTextColor)!); } catch { }
         }
 
-        // Icon — adaptive on → same brush as title; off → resolved IconColor, else fall back to
-        // the resolved title text color (always set by ResolveStyle). No hardcoded white
-        // fallback that could revert to XAML default.
+        // Icon + ControlPoint button labels — adaptive on → same brush as title; off → icons use
+        // the resolved IconColor (falling back to the resolved title text color, always set by
+        // ResolveStyle) and the button labels return to their XAML default #80FFFFFF.
         if (s.TitleBarAdaptive)
         {
             var iBrush = AdaptiveTextColor.ResolveBrushOver(s.TitleBarFillColor, s.FillColor);
             TitleIconChar.Foreground = iBrush;
             RestoreIconChar.Foreground = iBrush;
+            // ponytail: Border has no Foreground property — only the inner TextBlocks can carry
+            // the adaptive brush. Border.Background stays at its hardcoded #30FFFFFF.
+            LockBtnText.Foreground = iBrush;
+            EditBtnText.Foreground = iBrush;
+            ImportBtnText.Foreground = iBrush;
+            HideBtnText.Foreground = iBrush;
         }
         else
         {
@@ -818,6 +829,13 @@ public partial class ZoneWindow : Window
                 TitleIconChar.Foreground = Brushes.Transparent;
                 RestoreIconChar.Foreground = Brushes.Transparent;
             }
+            // ponytail: the adaptive branch above already overwrote these once, so the XAML
+            // default can't come back on its own when the toggle flips off (live preview calls
+            // ApplyStyle again) — restore the hardcoded #80FFFFFF explicitly.
+            LockBtnText.Foreground = CtrlLabelDefaultBrush;
+            EditBtnText.Foreground = CtrlLabelDefaultBrush;
+            ImportBtnText.Foreground = CtrlLabelDefaultBrush;
+            HideBtnText.Foreground = CtrlLabelDefaultBrush;
         }
 
         // Control-point opacity + QuickBar visibility
