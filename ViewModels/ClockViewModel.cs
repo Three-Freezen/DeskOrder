@@ -42,6 +42,22 @@ public class ClockViewModel : INotifyPropertyChanged
     private double _secondAngle;
     public double SecondAngle { get => _secondAngle; set { _secondAngle = value; OnPropertyChanged(); } }
 
+    private bool _isLocked;
+    public bool IsLocked
+    {
+        get => _isLocked;
+        set
+        {
+            if (_isLocked != value)
+            {
+                _isLocked = value;
+                LockChanged?.Invoke(value);
+            }
+        }
+    }
+
+    public event Action<bool>? LockChanged;
+
     public ClockViewModel(DesktopClock clock)
     {
         _clock = clock;

@@ -65,6 +65,10 @@ public partial class ClockWidget : Window
         _langChanged = _ => UpdateContextMenuLabels();
         _loc.LanguageChanged += _langChanged;
         _widgetService.ClocksChanged += OnClocksChanged;
+        // ponytail: subscribe to LockChanged so management UI (or any other source) flipping
+        // this widget's lock state immediately syncs the open window — without this the
+        // open clock stays 🔓 while the model (and management card) shows 🔒.
+        _widgetService.LockChanged += OnServiceLockChanged;
     }
     private Action<Services.Language>? _langChanged;
 
@@ -87,7 +91,7 @@ public partial class ClockWidget : Window
 
     void OnLoad(object s, RoutedEventArgs e)
     {
-        NativeMethods.PinToDesktop(this);
+        if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
         NativeMethods.SetToolWindow(this);
         if (_clock.Mode == ClockDisplayMode.Digital)
             NativeMethods.RemoveThickFrame(this);
@@ -101,6 +105,7 @@ public partial class ClockWidget : Window
         ApplyDigitalBackgroundImage();
         // Set rounded corners LAST after all sizing is complete
         NativeMethods.SetRoundedCorners(this, 10);
+        ApplyLockState();
         if (!_clock.IsVisible) ApplyHidden();
     }
 
@@ -528,6 +533,7 @@ public partial class ClockWidget : Window
     {
         // Skip drag when minimized (restore button is showing)
         if (RestoreButton.Visibility == Visibility.Visible) return;
+        if (_vm?.IsLocked == true) return;
 
         if (e.OriginalSource is DependencyObject src)
         {
@@ -538,7 +544,7 @@ public partial class ClockWidget : Window
                 src = VisualTreeHelper.GetParent(src);
             }
         }
-        try { DragMove(); NativeMethods.PinToDesktop(this); } catch { }
+        try { DragMove(); if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this); } catch { }
     }
 
     static IEnumerable<Border> FindResizeGrips(DependencyObject parent)
@@ -569,7 +575,8 @@ public partial class ClockWidget : Window
 
     void Window_Drag(object s, MouseButtonEventArgs e)
     {
-        try { DragMove(); NativeMethods.PinToDesktop(this); } catch { }
+        if (_vm?.IsLocked == true) return;
+        try { DragMove(); if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this); } catch { }
     }
 
     void Window_PreviewMouseLeftButtonDown(object s, MouseButtonEventArgs e)
@@ -584,7 +591,9 @@ public partial class ClockWidget : Window
         }
         // Allow restore button to handle its own clicks
         if (RestoreButton.Visibility == Visibility.Visible) return;
-        try { DragMove(); NativeMethods.PinToDesktop(this); } catch { }
+        if (_vm?.IsLocked == true) return;
+        // ponytail: OS routes click normally now (drill-through removed).
+        try { DragMove(); } catch { }
     }
 
     void Window_PreviewMouseRightButtonDown(object s, MouseButtonEventArgs e)
@@ -595,6 +604,7 @@ public partial class ClockWidget : Window
     void ResizeGrip_Down(object s, MouseButtonEventArgs e)
     {
         if (s is not Border g || g.Tag is not string tag) return;
+        if (_vm?.IsLocked == true) { e.Handled = true; return; }
         int d = tag switch
         {
             "TL" => HTTOPLEFT,
@@ -658,6 +668,39 @@ public partial class ClockWidget : Window
         e.Handled = true;
     }
 
+    void LockBtn_Click(object s, RoutedEventArgs e)
+    {
+        if (_vm == null) return;
+        // ponytail: sync from model first — if management UI already flipped this widget's
+        // lock state, _vm.IsLocked may be stale (no LockChanged handler fired yet).
+        // Without this, double-clicking the lock button can no-op when model and view drift.
+        _vm.IsLocked = _clock.IsLocked;
+        _vm.IsLocked = !_vm.IsLocked;
+        ApplyLockState();
+        _widgetService?.SetLocked(_clock.Id.ToString(), _vm.IsLocked);
+        _widgetService?.Save();
+    }
+
+    void OnServiceLockChanged(string id, bool locked)
+    {
+        if (id != _clock.Id.ToString()) return;
+        if (_vm.IsLocked == locked) return;
+        _vm.IsLocked = locked;
+        ApplyLockState();
+    }
+
+    // ponytail: ClockWidget corners are anonymous Borders (no x:Name), routed by Tag — so find
+    // them via the existing FindResizeGrips helper instead of GripTL.Visibility etc.
+    void ApplyLockState()
+    {
+        if (_vm == null) return;
+        LockBtn.Content = _vm.IsLocked ? "🔒" : "🔓";
+        var gripVis = _vm.IsLocked ? Visibility.Collapsed : Visibility.Visible;
+        foreach (var grip in FindResizeGrips(this))
+            grip.Visibility = gripVis;
+        if (_vm.IsLocked) NativeMethods.PinBelowProgman(this);
+    }
+
     void Delete_Click(object s, RoutedEventArgs e)
     {
         _timer.Stop();
@@ -715,9 +758,9 @@ public partial class ClockWidget : Window
         MinWidth = 140; MinHeight = 80;
         Width = _clock.Width > 140 ? _clock.Width : 320;
         Height = _clock.Height > 80 ? _clock.Height : 140;
-        NativeMethods.PinToDesktop(this);
+        if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
         NativeMethods.SetRoundedCorners(this, 10);
-        Topmost = true;
+        if (!_vm.IsLocked) Topmost = true;
         Activate();
     }
 
@@ -739,7 +782,7 @@ public partial class ClockWidget : Window
         else
         {
             RestoreButton.Visibility = Visibility.Visible;
-            NativeMethods.PinToDesktop(this);
+            if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
         }
         _clock.IsVisible = false;
         // Update AFTER Hide() to ensure correct state when event fires
@@ -798,6 +841,7 @@ public partial class ClockWidget : Window
         _timer.Stop();
         if (_langChanged != null) _loc.LanguageChanged -= _langChanged;
         _langChanged = null;
+        _widgetService.LockChanged -= OnServiceLockChanged;
         base.OnClosed(e);
     }
 }

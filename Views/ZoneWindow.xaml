@@ -91,6 +91,16 @@
                                             Orientation="Horizontal"
                                             HorizontalAlignment="Right"
                                             Margin="0,0,4,0" Opacity="0.4">
+                                    <Border x:Name="LockBtn" Width="18" Height="16"
+                                            CornerRadius="3" Background="#30FFFFFF"
+                                            Cursor="Hand" Margin="0,0,3,0"
+                                            MouseLeftButtonDown="LockBtn_Click"
+                                            MouseEnter="Ctrl_Enter" MouseLeave="Ctrl_Leave"
+                                            ToolTip="锁定">
+                                        <TextBlock x:Name="LockBtnText" Text="🔓" FontSize="9"
+                                                   Foreground="#80FFFFFF"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
                                     <Border x:Name="ImportBtn" Width="18" Height="16"
                                             CornerRadius="3" Background="#30FFFFFF"
                                             Cursor="Hand" Margin="0,0,3,0"

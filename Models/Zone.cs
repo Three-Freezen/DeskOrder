@@ -15,6 +15,7 @@ public class Zone : AppearanceModel
     public double BorderThickness { get; set; } = 1.5; // Zone-specific default (widgets use 1.0)
     public int CornerRadius { get; set; } = 8;
     public bool IsVisible { get; set; } = true;
+    public bool IsLocked { get; set; } = false;
     public int GridSize { get; set; } = 80;
     public bool SnapToGrid { get; set; } = true;
     public string IconChar { get; set; } = "";
@@ -86,6 +87,7 @@ public class Zone : AppearanceModel
             BorderThickness = BorderThickness,
             CornerRadius = CornerRadius,
             IsVisible = IsVisible,
+            IsLocked = IsLocked,
             GridSize = GridSize,
             SnapToGrid = SnapToGrid,
             IconChar = IconChar,

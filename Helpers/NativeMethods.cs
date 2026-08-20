@@ -20,6 +20,7 @@ public static class NativeMethods
 
     // SetWindowPos
     public static readonly IntPtr HWND_BOTTOM = new(1);
+    public static readonly IntPtr HWND_TOP = IntPtr.Zero; // 0 = HWND_TOP per Win32
     public static readonly IntPtr HWND_TOPMOST = new(-1);
     public static readonly IntPtr HWND_NOTOPMOST = new(-2);
     public const uint SWP_NOMOVE = 0x0002;
@@ -209,49 +210,39 @@ public static class NativeMethods
         SetWindowLong(hwnd, GWL_STYLE, style & ~WS_THICKFRAME);
     }
 
-    // Pin window to bottom of z-order (above desktop icons, below normal windows)
-    // ponytail: linked-list top tracking. Each call inserts the window just above the
-    // current topmost DesktopZones sibling, so the most-recently active window is
-    // always at the front of the pinned group. A click on any window therefore
-    // promotes it to the top (rather than the old fixed-anchor behavior, which
-    // dropped every clicked window to the bottom of the group).
-    private static IntPtr _topHwnd = IntPtr.Zero;
-
+    // ponytail: insert the window at the top of Z-order (HWND_TOP) without
+    // activating it (SWP_NOACTIVATE). Fixes two regressions from removing the
+    // old _topHwnd-linked-list tracking:
+    //   1. Drag-end drop-to-bottom — without an anchor above progman, inserting
+    //      above progman puts the dragged window BELOW every other DZ window
+    //      that already sits above progman. HWND_TOP has no such dependency.
+    //   2. Analog clock click-to-front — AnalogDrag called PinToDesktop after
+    //      DragMove; the same "above progman" anchor dropped it below other DZ
+    //      windows.
+    // SWP_NOACTIVATE preserves whatever window the user is currently focused on
+    // (e.g., WeChat) — the moved DZ window goes to the top of Z-order but does
+    // not become the foreground window.
     public static void PinToDesktop(Window window)
     {
         var helper = new WindowInteropHelper(window);
         helper.EnsureHandle();
         var hwnd = helper.Handle;
-
-        // Drop the cached top if it points to a destroyed HWND (e.g. window was closed).
-        if (_topHwnd != IntPtr.Zero && !IsWindow(_topHwnd))
-            _topHwnd = IntPtr.Zero;
-
-        // Already at the top — no-op avoids pointless SetWindowPos jitter on repeat clicks.
-        if (_topHwnd == hwnd) return;
-
-        // Insert just above the previous top, or just above progman if none exists yet.
-        var progman = FindWindow("Progman", null);
-        IntPtr insertAfter = _topHwnd != IntPtr.Zero ? _topHwnd : progman;
-        if (insertAfter != IntPtr.Zero)
-        {
-            SetWindowPos(hwnd, insertAfter, 0, 0, 0, 0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
-        }
-        else
-        {
-            SetWindowPos(hwnd, HWND_BOTTOM, 0, 0, 0, 0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-        }
-
-        _topHwnd = hwnd;
+        SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
     }
 
-    /// <summary>Forget the cached topmost HWND. Call this when the current top window closes
-    /// so the next PinToDesktop call falls back to progman instead of a stale HWND.</summary>
-    public static void ResetPinToDesktopTop()
+    /// <summary>
+    /// Lock the window at the desktop layer — above the wallpaper (progman) but below all app windows.
+    /// Called once when entering locked state; not on Show/Hide.
+    /// </summary>
+    public static void PinBelowProgman(Window window)
     {
-        _topHwnd = IntPtr.Zero;
+        var helper = new WindowInteropHelper(window);
+        helper.EnsureHandle();
+        var hwnd = helper.Handle;
+        var progman = FindWindow("Progman", null);
+        SetWindowPos(hwnd, progman, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
     }
 
     // Make window click-through in transparent areas

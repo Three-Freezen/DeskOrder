@@ -51,6 +51,9 @@ public partial class CalendarWidget : Window
         _langChanged = _ => ApplyLoc();
         _loc.LanguageChanged += _langChanged;
         _widgetService.CalendarsChanged += OnCalendarsChanged;
+        // ponytail: subscribe to LockChanged so management UI (or any other source) flipping
+        // this widget's lock state immediately syncs the open window.
+        _widgetService.LockChanged += OnServiceLockChanged;
         ApplyLoc();
     }
     private Action<Services.Language>? _langChanged;
@@ -71,7 +74,7 @@ public partial class CalendarWidget : Window
 
     void OnLoad(object s, RoutedEventArgs e)
     {
-        NativeMethods.PinToDesktop(this);
+        if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
         NativeMethods.SetToolWindow(this);
         ApplyAcrylic();
         ApplyBackgroundImage();
@@ -82,6 +85,7 @@ public partial class CalendarWidget : Window
         // Set rounded corners LAST after all sizing is complete
         NativeMethods.SetRoundedCorners(this, 10);
         NativeMethods.UpdateRoundedCorners(this, 10);
+        ApplyLockState();
         if (!_calendar.IsVisible) ApplyHidden();
     }
 
@@ -410,20 +414,17 @@ public partial class CalendarWidget : Window
 
     void Window_Drag(object s, MouseButtonEventArgs e)
     {
-        try { DragMove(); NativeMethods.PinToDesktop(this); } catch { }
+        if (_vm?.IsLocked == true) return;
+        try { DragMove(); if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this); } catch { }
     }
 
-    // ponytail: every click on the calendar promotes it to top of the DZ group.
-    // CalendarWidget has no OnActivated override, so without this preview handler
-    // body clicks would not re-elevate the widget when it's behind another DZ window.
-    void Window_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        NativeMethods.PinToDesktop(this);
-    }
+    // ponytail: OS routes click normally now (no drill-through).
+    void Window_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e) { }
 
     void ResizeGrip_Down(object s, MouseButtonEventArgs e)
     {
         if (s is not Border g || g.Tag is not string tag) return;
+        if (_vm?.IsLocked == true) { e.Handled = true; return; }
         int d = tag switch
         {
             "TL" => HTTOPLEFT,
@@ -753,6 +754,38 @@ public partial class CalendarWidget : Window
         HideCalendar();
     }
 
+    void LockBtn_Click(object s, RoutedEventArgs e)
+    {
+        if (_vm == null) return;
+        // ponytail: sync from model first — guards against double-click no-op when model and
+        // view have drifted (e.g. management card toggled lock state, event arrived out of order).
+        _vm.IsLocked = _calendar.IsLocked;
+        _vm.IsLocked = !_vm.IsLocked;
+        ApplyLockState();
+        _widgetService?.SetLocked(_calendar.Id.ToString(), _vm.IsLocked);
+        _widgetService?.Save();
+    }
+
+    void OnServiceLockChanged(string id, bool locked)
+    {
+        if (id != _calendar.Id.ToString()) return;
+        if (_vm.IsLocked == locked) return;
+        _vm.IsLocked = locked;
+        ApplyLockState();
+    }
+
+    void ApplyLockState()
+    {
+        if (_vm == null) return;
+        LockBtn.Content = _vm.IsLocked ? "🔒" : "🔓";
+        var gripVis = _vm.IsLocked ? Visibility.Collapsed : Visibility.Visible;
+        if (GripTL != null) GripTL.Visibility = gripVis;
+        if (GripTR != null) GripTR.Visibility = gripVis;
+        if (GripBL != null) GripBL.Visibility = gripVis;
+        if (GripBR != null) GripBR.Visibility = gripVis;
+        if (_vm.IsLocked) NativeMethods.PinBelowProgman(this);
+    }
+
     void DeleteCalendar_Click(object s, RoutedEventArgs e)
     {
         _widgetService.DeleteCalendar(_calendar.Id);
@@ -797,9 +830,9 @@ public partial class CalendarWidget : Window
         MinWidth = 260; MinHeight = 460;
         Width = _calendar.Width > 260 ? _calendar.Width : 320;
         Height = _calendar.Height > 340 ? _calendar.Height : 440;
-        NativeMethods.PinToDesktop(this);
+        if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
         NativeMethods.SetRoundedCorners(this, 10);
-        Topmost = true;
+        if (!_vm.IsLocked) Topmost = true;
         Activate();
     }
 
@@ -819,7 +852,7 @@ public partial class CalendarWidget : Window
         else
         {
             RestoreButton.Visibility = Visibility.Visible;
-            NativeMethods.PinToDesktop(this);
+            if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
         }
         _calendar.IsVisible = false;
         // Update AFTER Hide() to ensure correct state when event fires
@@ -877,6 +910,7 @@ public partial class CalendarWidget : Window
     {
         if (_langChanged != null) _loc.LanguageChanged -= _langChanged;
         _langChanged = null;
+        _widgetService.LockChanged -= OnServiceLockChanged;
         _widgetService.UpdateCalendar(_calendar);
         base.OnClosed(e);
     }

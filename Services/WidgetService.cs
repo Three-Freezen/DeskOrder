@@ -16,6 +16,8 @@ public class WidgetService
     public ObservableCollection<DesktopCalendar> Calendars { get; } = new();
     public event Action? ClocksChanged;
     public event Action? CalendarsChanged;
+    /// <summary>Fires when a widget's lock state changes. Args: widgetId (string), isLocked.</summary>
+    public event Action<string, bool>? LockChanged;
 
     /// <summary>Open ClockWidget instances keyed by clock Id (was App._clockWindows before P5).</summary>
     public Dictionary<Guid, ClockWidget> ClockWindows { get; } = new();
@@ -117,5 +119,26 @@ public class WidgetService
             cfg.Clocks = Clocks.ToList();
             cfg.Calendars = Calendars.ToList();
         });
+    }
+
+    // ── Lock ──
+
+    /// <summary>Set locked state for a widget (Clock or Calendar) by string id. Fires LockChanged after state update.</summary>
+    public void SetLocked(string widgetId, bool locked)
+    {
+        if (!Guid.TryParse(widgetId, out var guid)) return;
+        var clock = Clocks.FirstOrDefault(c => c.Id == guid);
+        if (clock != null)
+        {
+            clock.IsLocked = locked;
+            LockChanged?.Invoke(widgetId, locked);
+            return;
+        }
+        var cal = Calendars.FirstOrDefault(c => c.Id == guid);
+        if (cal != null)
+        {
+            cal.IsLocked = locked;
+            LockChanged?.Invoke(widgetId, locked);
+        }
     }
 }

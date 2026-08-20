@@ -43,6 +43,9 @@ public partial class StickyNoteWindow : Window
         _note = note;
         _notesService = notesService;
         _vm = new StickyNoteViewModel(note);
+        // ponytail: VM starts at default false — pull persisted lock state from model so a
+        // reloaded locked note shows 🔒, not 🔓. Matches ZoneWindow ctor pattern.
+        _vm.IsLocked = note.IsLocked;
         DataContext = _vm;
 
         Left = note.X; Top = note.Y;
@@ -64,7 +67,11 @@ public partial class StickyNoteWindow : Window
 
         Loaded += OnLoad;
         _notesService.NotesChanged += OnNotesChanged;
+        // ponytail: subscribe to LockChanged so management UI (or any other source) flipping
+        // this note's lock state immediately syncs the open window.
+        _notesService.LockChanged += OnServiceLockChanged;
 
+        ApplyLockState();
         _initializing = false;
     }
 
@@ -73,12 +80,15 @@ public partial class StickyNoteWindow : Window
         if (!IsLoaded) return;
         var latest = _notesService.Notes.FirstOrDefault(n => n.Id == _note.Id);
         if (latest != null) _note = latest;
+        // ponytail: pull refreshed lock state from model (e.g. when another window unlocked this note)
+        _vm.IsLocked = _note.IsLocked;
         if (MainContent.Visibility == Visibility.Visible)
             ApplyAcrylic();
         ApplyBackgroundImage();
         ApplyStyle();
         ApplyTitleBar();
         RefreshTextColorAdaptive();
+        ApplyLockState();
     }
 
     private void LoadContent(string content)
@@ -362,7 +372,7 @@ public partial class StickyNoteWindow : Window
 
     void OnLoad(object s, RoutedEventArgs e)
     {
-        NativeMethods.PinToDesktop(this);
+        if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
         NativeMethods.SetToolWindow(this);
         ApplyAcrylic();
         ApplyBackgroundImage();
@@ -382,12 +392,14 @@ public partial class StickyNoteWindow : Window
         Left = _note.X; Top = _note.Y;
         MainContent.Visibility = Visibility.Visible; RestoreButton.Visibility = Visibility.Collapsed;
         MinWidth = 180; MinHeight = 120;
-        _note.IsVisible = true; NativeMethods.PinToDesktop(this);
+        _note.IsVisible = true; if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
         NativeMethods.SetRoundedCorners(this, 10);
         _notesService.UpdateNote(_note);
         // Restore dimensions AFTER UpdateNote (which may trigger OnNotesChanged / reference swap)
         Width = savedW; Height = savedH;
-        Topmost = true;
+        // ponytail: locked notes stay below app windows — Topmost would re-pin above them and
+        // defeat PinBelowProgman. PinnedTop notes still get Topmost via the constructor branch.
+        if (!_vm.IsLocked) Topmost = true;
         Activate();
         OnStateChanged?.Invoke();
     }
@@ -408,7 +420,7 @@ public partial class StickyNoteWindow : Window
         else
         {
             RestoreButton.Visibility = Visibility.Visible;
-            NativeMethods.PinToDesktop(this);
+            if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
         }
         _note.IsVisible = false;
         // Update AFTER Hide() to ensure correct state when event fires
@@ -667,20 +679,17 @@ public partial class StickyNoteWindow : Window
 
     void TitleBar_Drag(object s, MouseButtonEventArgs e)
     {
-        try { DragMove(); NativeMethods.PinToDesktop(this); } catch { }
+        if (_vm?.IsLocked == true) return;
+        try { DragMove(); if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this); } catch { }
     }
 
-    // ponytail: every click on the sticky note promotes it to top of the DZ group.
-    // StickyNoteWindow has no OnActivated override, so body clicks would not
-    // re-elevate the note when it's behind another DZ window. Skip when pinned
-    // topmost — Topmost=true already keeps it above everything.
-    void Window_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        if (!Topmost) NativeMethods.PinToDesktop(this);
-    }
+    // ponytail: OS routes click normally now (drill-through removed). Pinned notes
+    // still skip because Topmost=true keeps them above everything.
+    void Window_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e) { }
 
     void ResizeGrip_Down(object s, MouseButtonEventArgs e)
     {
+        if (_vm?.IsLocked == true) return;
         if (s is not Border g || g.Tag is not string tag) return;
         int d = tag switch
         {
@@ -728,7 +737,7 @@ public partial class StickyNoteWindow : Window
     {
         _vm.PinnedTop = !_vm.PinnedTop;
         Topmost = _vm.PinnedTop;
-        if (!_vm.PinnedTop) NativeMethods.PinToDesktop(this);
+        if (!_vm.PinnedTop && _vm.IsLocked != true) NativeMethods.PinToDesktop(this);
         // ponytail: same logic as PinBtn_Leave — pinned color wins when pinned, else adaptive/hardcoded
         if (_vm.PinnedTop)
             PinBtn.Foreground = new SolidColorBrush(Color.FromRgb(0x7C, 0x3A, 0xED));
@@ -741,6 +750,58 @@ public partial class StickyNoteWindow : Window
     void HideBtn_Click(object s, RoutedEventArgs e)
     {
         HideNote();
+    }
+
+    void LockBtn_Click(object s, RoutedEventArgs e)
+    {
+        if (_vm == null) return;
+        // ponytail: sync from model first — guards against double-click no-op when model and
+        // view have drifted (e.g. management card toggled lock state, event arrived out of order).
+        _vm.IsLocked = _note.IsLocked;
+        _vm.IsLocked = !_vm.IsLocked;
+        ApplyLockState();
+        // StickyNote lives in NotesService (not WidgetService), so route through its SetLocked
+        _notesService.SetLocked(_note.Id.ToString(), _vm.IsLocked);
+        Save();
+    }
+
+    void OnServiceLockChanged(string id, bool locked)
+    {
+        if (id != _note.Id.ToString()) return;
+        if (_vm.IsLocked == locked) return;
+        _vm.IsLocked = locked;
+        ApplyLockState();
+    }
+
+    void LockBtn_Enter(object s, MouseEventArgs e)
+    {
+        LockBtn.Background = new SolidColorBrush(Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF));
+        LockBtn.Foreground = Brushes.White;
+    }
+
+    // ponytail: same adaptive-cache pattern as SaveBtn_Leave / PinBtn_Leave — don't clobber adaptive brush
+    void LockBtn_Leave(object s, MouseEventArgs e)
+    {
+        LockBtn.Background = Brushes.Transparent;
+        LockBtn.Foreground = _titleBarAdaptiveBrush
+            ?? new SolidColorBrush(Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF));
+    }
+
+    void ApplyLockState()
+    {
+        if (_vm == null) return;
+        LockBtn.Content = _vm.IsLocked ? "🔒" : "🔓";
+        TitleBarBorder.Cursor = _vm.IsLocked
+            ? System.Windows.Input.Cursors.Arrow
+            : System.Windows.Input.Cursors.SizeAll;
+        var gripVis = _vm.IsLocked ? Visibility.Collapsed : Visibility.Visible;
+        GripTL.Visibility = gripVis;
+        GripTR.Visibility = gripVis;
+        GripBL.Visibility = gripVis;
+        GripBR.Visibility = gripVis;
+        // ponytail: locked notes stay under app windows — pin once at the desktop layer so the
+        // first-time activation places the window correctly even if it's still HWND_TOP from load.
+        if (_vm.IsLocked) NativeMethods.PinBelowProgman(this);
     }
 
     void ToggleRestore_Click(object s, RoutedEventArgs e)
@@ -788,6 +849,7 @@ public partial class StickyNoteWindow : Window
         _vm.Content = SaveContent();
         _vm.ApplyToModel();
         _notesService.UpdateNote(_note);
+        _notesService.LockChanged -= OnServiceLockChanged;
         base.OnClosed(e);
     }
 
@@ -809,7 +871,7 @@ public partial class StickyNoteWindow : Window
         _bringToFrontTimer.Tick += (s, _) =>
         {
             Topmost = false;
-            NativeMethods.PinToDesktop(this);
+            if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
             _bringToFrontTimer?.Stop();
             _bringToFrontTimer = null;
         };

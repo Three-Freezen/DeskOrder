@@ -22,6 +22,8 @@ public class NotesService
 
     public ObservableCollection<StickyNote> Notes { get; } = new();
     public event Action? NotesChanged;
+    /// <summary>Fires when a note's lock state changes. Args: noteId (string), isLocked.</summary>
+    public event Action<string, bool>? LockChanged;
 
     public AppConfig GetConfig() => _appConfig!;
 
@@ -75,5 +77,16 @@ public class NotesService
         {
             cfg.Notes = Notes.ToList();
         });
+    }
+
+    /// <summary>Set locked state for a note by string id. Mirrors WidgetService.SetLocked — no event,
+    /// no disk write. Caller is expected to UpdateNote() right after for persistence.</summary>
+    public void SetLocked(string noteId, bool locked)
+    {
+        if (!Guid.TryParse(noteId, out var guid)) return;
+        var note = Notes.FirstOrDefault(n => n.Id == guid);
+        if (note == null) return;
+        note.IsLocked = locked;
+        LockChanged?.Invoke(noteId, locked);
     }
 }

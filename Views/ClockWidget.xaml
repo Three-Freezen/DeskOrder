@@ -38,6 +38,20 @@
                 <Rectangle x:Name="FillRect" RadiusX="10" RadiusY="10"
                            Fill="#02000000" IsHitTestVisible="False"/>
                 <Grid Margin="10">
+                    <!-- Lock button (top-left, symmetric with HideBtn top-right) -->
+                    <Button x:Name="LockBtn" Content="🔓" Width="20" Height="20"
+                        FontSize="10" Foreground="#60FFFFFF"
+                        Background="#01000000" BorderThickness="0"
+                        Cursor="Hand" Click="LockBtn_Click"
+                        HorizontalAlignment="Left" VerticalAlignment="Top"
+                        Margin="8,4,0,0" Panel.ZIndex="10">
+                    <Button.Resources>
+                        <Style TargetType="Border">
+                            <Setter Property="CornerRadius" Value="4"/>
+                        </Style>
+                    </Button.Resources>
+                </Button>
+
                     <!-- Hide button (top-right) -->
                     <Button x:Name="HideBtn" Content="─" Width="20" Height="20"
                         FontSize="10" Foreground="#60FFFFFF"

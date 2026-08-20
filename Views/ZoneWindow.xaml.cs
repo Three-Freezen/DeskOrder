@@ -61,13 +61,13 @@ public partial class ZoneWindow : Window
     private FrameworkElement? _de;
     private readonly System.Windows.Threading.DispatcherTimer _saveDebounce = new() { Interval = TimeSpan.FromMilliseconds(500) };
     private bool _savePending;
-    private string _resolvedFillColor = "#08000000";
 
     public ZoneWindow(Zone zone, ZoneManager mgr, ShellIconService icons)
     {
         InitializeComponent();
         _zone = zone; _mgr = mgr;
         _vm = new ZoneViewModel(zone, mgr, icons);
+        _vm.IsLocked = zone.IsLocked;
         DataContext = _vm;
         Left = zone.X; Top = zone.Y;
         Width = SanitizeW(zone.Width); Height = SanitizeW(zone.Height);
@@ -84,8 +84,26 @@ public partial class ZoneWindow : Window
         _langChanged = _ => ApplyLoc();
         _loc.LanguageChanged += _langChanged;
         _mgr.ZonesChanged += OnZonesChanged;
+        // ponytail: subscribe to LockChanged so management UI (or any other source) flipping
+        // this zone's lock state immediately syncs the open window.
+        _mgr.LockChanged += OnServiceLockChanged;
+        // ponytail: BP-A — container generation is lazy in WPF. ItemsControl doesn't
+        // realize containers until layout pass runs, which is AFTER ApplyStyle in the
+        // constructor and ShowZone's synchronous Visibility=Visible. Hook the generator's
+        // StatusChanged so ApplyItemTextColorAdaptive fires the moment containers exist,
+        // covering first-open, hide→show, and any subsequent item changes. Constructor
+        // ApplyStyle still runs (it handles fill/border/title-bar which are XAML-static)
+        // but its item walk is a no-op until this fires.
+        ItemsHost.ItemContainerGenerator.StatusChanged += (_, _) =>
+        {
+            if (ItemsHost.ItemContainerGenerator.Status
+                == System.Windows.Controls.Primitives.GeneratorStatus.ContainersGenerated)
+                ApplyItemTextColorAdaptive();
+        };
         if (!_zone.IsVisible) ApplyHidden();
-        RebuildSubZoneTabs();
+        // ponytail: ApplyStyle (line 74) now rebuilds sub-zone tabs internally with the
+        // resolved adaptive brush. No external RebuildSubZoneTabs or
+        // ApplySubZoneTabTextColorAdaptive call needed here.
         if (_zone.MergedSubZoneIds.Count > 0) _vm.SelectedSubZoneId = _zone.Id;
         UpdateMergedTitle();
     }
@@ -119,10 +137,12 @@ public partial class ZoneWindow : Window
 
     void OnLoad(object s, RoutedEventArgs e)
     {
-        NativeMethods.PinToDesktop(this); NativeMethods.SetToolWindow(this);
+        if ((DataContext as ZoneViewModel)?.IsLocked != true) NativeMethods.PinToDesktop(this); NativeMethods.SetToolWindow(this);
         NativeMethods.SetRoundedCorners(this, (int)_zone.CornerRadius);
-        // Re-apply acrylic now that HWND is valid (constructor called ApplyStyle before HWND existed)
-        ApplyAcrylic(_resolvedFillColor);
+        // Re-apply full style now that HWND is valid (constructor's ApplyStyle ran before
+        // HWND existed). ApplyStyle internally calls ApplyAcrylic with the freshly-resolved
+        // colors, so no separate "store-then-restore" workaround is needed.
+        ApplyStyle();
         var hwnd = new WindowInteropHelper(this).Handle;
         int ex = NativeMethods.GetWindowLong(hwnd, NativeMethods.GWL_EXSTYLE);
         NativeMethods.SetWindowLong(hwnd, NativeMethods.GWL_EXSTYLE, ex & ~NativeMethods.WS_EX_APPWINDOW);
@@ -132,6 +152,7 @@ public partial class ZoneWindow : Window
         // Find the Canvas for size updates
         _itemCanvas = FindVisualChild<Canvas>(this);
         UpdateCanvasSize();
+        ApplyLockState();
     }
 
     IntPtr WndProc(IntPtr h, int m, IntPtr w, IntPtr l, ref bool hd)
@@ -154,8 +175,14 @@ public partial class ZoneWindow : Window
         Width = _zone.Width; Height = _zone.Height; Left = _zone.X; Top = _zone.Y;
         MainContent.Visibility = Visibility.Visible; RestoreButton.Visibility = Visibility.Collapsed;
         _zone.IsVisible = true;
-        ApplyStyle();
-        NativeMethods.PinToDesktop(this);
+        // ponytail: BP-A — Visibility=Visible is processed in the next layout pass, so a
+        // synchronous ApplyStyle would walk the visual tree before WPF has re-attached
+        // item containers. Defer to Loaded priority so the brush walk runs after layout,
+        // catching the hide→show path that StatusChanged alone wouldn't fire for (when
+        // containers were already generated, generator status doesn't transition again).
+        Dispatcher.BeginInvoke(new Action(ApplyStyle),
+            System.Windows.Threading.DispatcherPriority.Loaded);
+        if ((DataContext as ZoneViewModel)?.IsLocked != true) NativeMethods.PinToDesktop(this);
         NativeMethods.SetRoundedCorners(this, (int)_zone.CornerRadius);
         _mgr.FireZoneVisibilityChanged(_zone.Id, true);
     }
@@ -181,7 +208,7 @@ public partial class ZoneWindow : Window
         else
         {
             RestoreButton.Visibility = Visibility.Visible;
-            NativeMethods.PinToDesktop(this);
+            if ((DataContext as ZoneViewModel)?.IsLocked != true) NativeMethods.PinToDesktop(this);
         }
         _zone.IsVisible = false;
         _mgr.FireZoneVisibilityChanged(_zone.Id, false);
@@ -205,10 +232,11 @@ public partial class ZoneWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        var h = new WindowInteropHelper(this).Handle;
         _mgr.ZonesChanged -= OnZonesChanged;
+        _mgr.LockChanged -= OnServiceLockChanged;
         if (_src != null) { _src.RemoveHook(WndProc); _src = null; }
         if (_langChanged != null) { _loc.LanguageChanged -= _langChanged; _langChanged = null; }
-        var h = new WindowInteropHelper(this).Handle;
         if (h != IntPtr.Zero) DragAcceptFiles(h, false);
         base.OnClosed(e);
     }
@@ -230,24 +258,30 @@ public partial class ZoneWindow : Window
     // ── Drag: DIRECT handler on title bar ──
 
     void TitleBar_Drag(object s, MouseButtonEventArgs e)
-    { try { ControlPoint.Opacity = 0.6; DragMove(); ControlPoint.Opacity = 0.4; NativeMethods.PinToDesktop(this); } catch { } }
+    {
+        var vm = DataContext as ZoneViewModel;
+        if (vm?.IsLocked == true) return;
+        try { ControlPoint.Opacity = 0.6; DragMove(); ControlPoint.Opacity = 0.4; if (vm?.IsLocked != true) NativeMethods.PinToDesktop(this); } catch { }
+    }
 
     // ── Window-level mouse: resize grips only ──
 
-    void Window_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        // ponytail: any click on the window promotes to top of the DZ group.
-        // OnActivated is insufficient (it doesn't re-fire on repeat clicks while
-        // the window is already the foreground, so a long-press during overlap
-        // wouldn't re-elevate). This guarantees every click (body, title bar,
-        // items) cycles the linked-list top tracked by PinToDesktop.
-        NativeMethods.PinToDesktop(this);
-    }
+    // ponytail: OS routes click normally now (no drill-through).
+    // Kept as a no-op so the XAML handler reference in ZoneWindow.xaml keeps working.
+    void Window_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e) { }
 
     // ── Resize ──
 
     void ResizeGrip_Down(object s, MouseButtonEventArgs e)
-    { if (s is not Border g) return; int d = g == GripTL ? HTTOPLEFT : g == GripTR ? HTTOPRIGHT : g == GripBL ? HTBOTTOMLEFT : HTBOTTOMRIGHT; SendMessage(new WindowInteropHelper(this).Handle, WM_NCLBUTTONDOWN, (IntPtr)d, IntPtr.Zero); NativeMethods.PinToDesktop(this); e.Handled = true; }
+    {
+        var vm = DataContext as ZoneViewModel;
+        if (vm?.IsLocked == true) { e.Handled = true; return; }
+        if (s is not Border gr) return;
+        int d = gr == GripTL ? HTTOPLEFT : gr == GripTR ? HTTOPRIGHT : gr == GripBL ? HTBOTTOMLEFT : HTBOTTOMRIGHT;
+        SendMessage(new WindowInteropHelper(this).Handle, WM_NCLBUTTONDOWN, (IntPtr)d, IntPtr.Zero);
+        if (vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
+        e.Handled = true;
+    }
 
     // ── Import ──
 
@@ -495,12 +529,46 @@ public partial class ZoneWindow : Window
         if (!_restoreDragging) { ShowZone(); _mgr.SaveConfig(); }
     }
 
-    void Restore_Enter(object s, MouseEventArgs e) { RestoreButton.Background = new SolidColorBrush(Color.FromArgb(0xFF, 0x2A, 0x2A, 0x4E)); RestoreIconChar.Foreground = new SolidColorBrush(Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF)); }
-    void Restore_Leave(object s, MouseEventArgs e) { RestoreButton.Background = new SolidColorBrush(Color.FromArgb(0xDD, 0x1A, 0x1A, 0x2E)); if (!string.IsNullOrEmpty(_zone.IconColor)) { try { RestoreIconChar.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(_zone.IconColor)!); } catch { } } }
+    void Restore_Enter(object s, MouseEventArgs e) { RestoreButton.Background = new SolidColorBrush(Color.FromArgb(0xFF, 0x2A, 0x2A, 0x4E)); }
+    void Restore_Leave(object s, MouseEventArgs e) { RestoreButton.Background = new SolidColorBrush(Color.FromArgb(0xDD, 0x1A, 0x1A, 0x2E)); }
 
     void Ctrl_Enter(object s, MouseEventArgs e) { if (s is Border b) b.Background = new SolidColorBrush(Color.FromArgb(0x60, 0xFF, 0xFF, 0xFF)); }
     void Ctrl_Leave(object s, MouseEventArgs e) { if (s is Border b) b.Background = new SolidColorBrush(Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF)); }
     void HideButton_Click(object s, MouseButtonEventArgs e) { HideZone(); e.Handled = true; }
+
+    void LockBtn_Click(object sender, MouseButtonEventArgs e)
+    {
+        e.Handled = true;
+        var vm = DataContext as ZoneViewModel;
+        if (vm == null) return;
+        // ponytail: sync from model first — guards against double-click no-op when model and
+        // view have drifted (e.g. management card toggled lock state, event arrived out of order).
+        vm.IsLocked = vm.Zone.IsLocked;
+        vm.IsLocked = !vm.IsLocked;
+        ApplyLockState();
+        _mgr?.SetLocked(vm.Zone.Id.ToString(), vm.IsLocked);
+        _mgr.SaveConfig();
+    }
+
+    void OnServiceLockChanged(string id, bool locked)
+    {
+        var vm = DataContext as ZoneViewModel;
+        if (vm == null || id != vm.Zone.Id.ToString()) return;
+        if (vm.IsLocked == locked) return;
+        vm.IsLocked = locked;
+        ApplyLockState();
+    }
+
+    void ApplyLockState()
+    {
+        var vm = DataContext as ZoneViewModel;
+        if (vm == null) return;
+        LockBtnText.Text = vm.IsLocked ? "🔒" : "🔓";
+        TitleBarBg.Cursor = vm.IsLocked ? System.Windows.Input.Cursors.Arrow : System.Windows.Input.Cursors.SizeAll;
+        GripTL.Visibility = GripTR.Visibility = GripBL.Visibility = GripBR.Visibility =
+            vm.IsLocked ? Visibility.Collapsed : Visibility.Visible;
+        if (vm.IsLocked) NativeMethods.PinBelowProgman(this);
+    }
 
     void AlignGrid_Click(object s, MouseButtonEventArgs e)
     {
@@ -567,191 +635,219 @@ public partial class ZoneWindow : Window
 
     // ── Style (CRITICAL: updates _zone reference) ──
 
-    public void ApplyStyle()
+    /// <summary>
+    /// Pure-data result of style resolution: every field needed to render a zone window,
+    /// already merged for the current mode (regular / merged-master-unified /
+    /// merged-master-keep-original / merged-subzone-standalone). Decouples "what should we
+    /// render?" from "how do we render it?" — mode branching lives ONLY in
+    /// <see cref="ResolveStyle"/>, UI application lives ONLY in <see cref="ApplyStyle"/>.
+    /// </summary>
+    public record ResolvedZoneStyle(
+        string FillColor,
+        string BorderColor,
+        double BorderThickness,
+        string TitleBarFillColor,
+        string TitleTextColor,
+        string IconColor,
+        double ControlOpacity,
+        int CornerRadius,
+        bool QuickBarMode,
+        bool TitleBarAdaptive,
+        string BgImagePath,
+        string BgImageStretch,
+        double BgImageOffsetX,
+        double BgImageOffsetY,
+        double BgImageZoom,
+        double BgImageOpacity);
+
+    /// <summary>
+    /// Resolve the visual style for the current mode. This is the ONLY place that knows
+    /// about merged-group logic — every other method takes the result and renders blindly.
+    /// Mode precedence (highest first):
+    ///   1. Regular zone                              → _zone.*  (or global when useGlobal)
+    ///   2. Merged master + Unified                   → _zone.MergedGroup*
+    ///   3. Merged master + Keep Original + sub-zone  → selectedSubZone.*
+    ///   4. Merged master + Keep Original + no sub    → _zone.*  (master's own)
+    ///   5. Merged sub-zone standalone + Unified      → _zone.MergedGroup*
+    ///   6. Merged sub-zone standalone + Keep Original → _zone.*
+    /// TitleBarAdaptive MUST follow the same source as the colors it adapts to; otherwise
+    /// adaptive would compute a contrasting color for a different background.
+    /// </summary>
+    ResolvedZoneStyle ResolveStyle()
     {
         var config = _mgr.GetConfig();
         bool useGlobal = config.UseGlobalAppearance;
-        string borderColor = useGlobal ? config.GlobalBorderColor : _zone.BorderColor;
-        string fillColor = useGlobal ? config.GlobalFillColor : _zone.FillColor;
-        double borderThickness = useGlobal ? config.GlobalBorderThickness : _zone.BorderThickness;
 
-        string titleBarFillColor = _zone.TitleBarFillColor;
-        double controlOpacity = _zone.ControlOpacity;
-        int cornerRadius = _zone.CornerRadius;
-        string titleTextColor = _zone.TitleTextColor;
-        string iconColor = _zone.IconColor;
-        bool quickBarMode = _zone.QuickBarMode;
-        string bgImagePath = _zone.BackgroundImagePath;
-        string bgImageStretch = _zone.BgImageStretch;
-        double bgImageOffsetX = _zone.BgImageOffsetX;
-        double bgImageOffsetY = _zone.BgImageOffsetY;
-        double bgImageZoom = _zone.BgImageZoom;
-        double bgImageOpacity = _zone.BackgroundImageOpacity;
+        // Step 1: regular zone defaults.
+        var regular = new ResolvedZoneStyle(
+            FillColor:        useGlobal ? config.GlobalFillColor       : _zone.FillColor,
+            BorderColor:      useGlobal ? config.GlobalBorderColor     : _zone.BorderColor,
+            BorderThickness:  useGlobal ? config.GlobalBorderThickness : _zone.BorderThickness,
+            TitleBarFillColor: _zone.TitleBarFillColor,
+            TitleTextColor:   _zone.TitleTextColor,
+            IconColor:        _zone.IconColor,
+            ControlOpacity:   _zone.ControlOpacity,
+            CornerRadius:     _zone.CornerRadius,
+            QuickBarMode:     _zone.QuickBarMode,
+            TitleBarAdaptive: _zone.TitleBarTextColorAdaptive,
+            BgImagePath:      _zone.BackgroundImagePath,
+            BgImageStretch:   _zone.BgImageStretch,
+            BgImageOffsetX:   _zone.BgImageOffsetX,
+            BgImageOffsetY:   _zone.BgImageOffsetY,
+            BgImageZoom:      _zone.BgImageZoom,
+            BgImageOpacity:   _zone.BackgroundImageOpacity);
 
-        // Handle merged group style
-        if (_zone.MergedSubZoneIds.Count > 0)
+        // Step 2: merged-group override.
+        bool isMerged = _zone.MergedSubZoneIds.Count > 0 || _zone.MergedGroupId.HasValue;
+        if (!isMerged) return regular;
+
+        // Merged + Unified (master or sub-zone standalone) → _zone.MergedGroup*
+        if (_zone.MergedGroupUseUnifiedFill)
         {
-            // This is the master zone of a merged group
-            // Check if there's a selected sub-zone
-            var selectedSubId = _vm?.SelectedSubZoneId;
-            if (selectedSubId.HasValue && selectedSubId.Value != _zone.Id)
+            return regular with
             {
-                // A sub-zone is selected
-                var selectedSubZone = _mgr.Zones.FirstOrDefault(z => z.Id == selectedSubId.Value);
-                if (selectedSubZone != null)
+                FillColor =        _zone.MergedGroupFillColor,
+                BorderColor =      _zone.MergedGroupBorderColor,
+                BorderThickness =  _zone.MergedGroupBorderThickness,
+                TitleBarFillColor = _zone.MergedGroupTitleBarFillColor,
+                TitleTextColor =   _zone.MergedGroupTitleTextColor,
+                IconColor =        _zone.MergedGroupIconColor,
+                ControlOpacity =   _zone.MergedGroupControlOpacity,
+                CornerRadius =     _zone.MergedGroupCornerRadius,
+                QuickBarMode =     _zone.MergedGroupQuickBarMode,
+                TitleBarAdaptive = _zone.MergedGroupTitleBarTextColorAdaptive,
+                BgImagePath =      _zone.MergedGroupBackgroundImagePath,
+                BgImageStretch =   _zone.MergedGroupBgImageStretch,
+                BgImageOffsetX =   _zone.MergedGroupBgImageOffsetX,
+                BgImageOffsetY =   _zone.MergedGroupBgImageOffsetY,
+                BgImageZoom =      _zone.MergedGroupBgImageZoom,
+                BgImageOpacity =   _zone.MergedGroupBackgroundImageOpacity,
+            };
+        }
+
+        // Merged + Keep Original + master + sub-zone selected → selectedSubZone.*
+        bool isMaster = _zone.MergedSubZoneIds.Count > 0;
+        if (isMaster && _vm?.SelectedSubZoneId is Guid selId && selId != _zone.Id)
+        {
+            var sub = _mgr.Zones.FirstOrDefault(z => z.Id == selId);
+            if (sub != null)
+            {
+                return regular with
                 {
-                    if (_zone.MergedGroupUseUnifiedFill)
-                    {
-                        // Unified fill mode: use master's unified settings
-                        fillColor = _zone.MergedGroupFillColor;
-                        borderColor = _zone.MergedGroupBorderColor;
-                        borderThickness = _zone.MergedGroupBorderThickness;
-                        titleBarFillColor = _zone.MergedGroupTitleBarFillColor;
-                        controlOpacity = _zone.MergedGroupControlOpacity;
-                        cornerRadius = _zone.MergedGroupCornerRadius;
-                        titleTextColor = _zone.MergedGroupTitleTextColor;
-                        iconColor = _zone.MergedGroupIconColor;
-                        quickBarMode = _zone.MergedGroupQuickBarMode;
-                        bgImagePath = _zone.MergedGroupBackgroundImagePath;
-                        bgImageStretch = _zone.MergedGroupBgImageStretch;
-                        bgImageOffsetX = _zone.MergedGroupBgImageOffsetX;
-                        bgImageOffsetY = _zone.MergedGroupBgImageOffsetY;
-                        bgImageZoom = _zone.MergedGroupBgImageZoom;
-                        bgImageOpacity = _zone.MergedGroupBackgroundImageOpacity;
-                    }
-                    else
-                    {
-                        // Keep original fill mode: use sub-zone's own settings
-                        fillColor = selectedSubZone.FillColor;
-                        borderColor = selectedSubZone.BorderColor;
-                        borderThickness = selectedSubZone.BorderThickness;
-                        titleBarFillColor = selectedSubZone.TitleBarFillColor;
-                        controlOpacity = selectedSubZone.ControlOpacity;
-                        cornerRadius = selectedSubZone.CornerRadius;
-                        titleTextColor = selectedSubZone.TitleTextColor;
-                        iconColor = selectedSubZone.IconColor;
-                        quickBarMode = selectedSubZone.QuickBarMode;
-                        bgImagePath = selectedSubZone.BackgroundImagePath;
-                        bgImageStretch = selectedSubZone.BgImageStretch;
-                        bgImageOffsetX = selectedSubZone.BgImageOffsetX;
-                        bgImageOffsetY = selectedSubZone.BgImageOffsetY;
-                        bgImageZoom = selectedSubZone.BgImageZoom;
-                        bgImageOpacity = selectedSubZone.BackgroundImageOpacity;
-                    }
-                }
-            }
-            else
-            {
-                // No sub-zone selected (showing master's own items)
-                if (_zone.MergedGroupUseUnifiedFill)
-                {
-                    // Unified fill mode: use master's own unified settings
-                    fillColor = _zone.MergedGroupFillColor;
-                    borderColor = _zone.MergedGroupBorderColor;
-                    borderThickness = _zone.MergedGroupBorderThickness;
-                    titleBarFillColor = _zone.MergedGroupTitleBarFillColor;
-                    controlOpacity = _zone.MergedGroupControlOpacity;
-                    cornerRadius = _zone.MergedGroupCornerRadius;
-                    titleTextColor = _zone.MergedGroupTitleTextColor;
-                    iconColor = _zone.MergedGroupIconColor;
-                    quickBarMode = _zone.MergedGroupQuickBarMode;
-                    bgImagePath = _zone.MergedGroupBackgroundImagePath;
-                    bgImageStretch = _zone.MergedGroupBgImageStretch;
-                    bgImageOffsetX = _zone.MergedGroupBgImageOffsetX;
-                    bgImageOffsetY = _zone.MergedGroupBgImageOffsetY;
-                    bgImageZoom = _zone.MergedGroupBgImageZoom;
-                    bgImageOpacity = _zone.MergedGroupBackgroundImageOpacity;
-                }
-            }
-        }
-        else if (_zone.MergedGroupId.HasValue && _zone.MergedSubZoneIds.Count == 0)
-        {
-            // This is the master zone of a merged group
-            if (_zone.MergedGroupUseUnifiedFill)
-            {
-                // Unified fill mode: use master's own fill settings
-                fillColor = _zone.MergedGroupFillColor;
-                borderColor = _zone.MergedGroupBorderColor;
-                borderThickness = _zone.MergedGroupBorderThickness;
-                titleBarFillColor = _zone.MergedGroupTitleBarFillColor;
-                controlOpacity = _zone.MergedGroupControlOpacity;
-                cornerRadius = _zone.MergedGroupCornerRadius;
-                titleTextColor = _zone.MergedGroupTitleTextColor;
-                iconColor = _zone.MergedGroupIconColor;
-                quickBarMode = _zone.MergedGroupQuickBarMode;
-                bgImagePath = _zone.MergedGroupBackgroundImagePath;
-                bgImageStretch = _zone.MergedGroupBgImageStretch;
-                bgImageOffsetX = _zone.MergedGroupBgImageOffsetX;
-                bgImageOffsetY = _zone.MergedGroupBgImageOffsetY;
-                bgImageZoom = _zone.MergedGroupBgImageZoom;
-                bgImageOpacity = _zone.MergedGroupBackgroundImageOpacity;
+                    FillColor =        sub.FillColor,
+                    BorderColor =      sub.BorderColor,
+                    BorderThickness =  sub.BorderThickness,
+                    TitleBarFillColor = sub.TitleBarFillColor,
+                    TitleTextColor =   sub.TitleTextColor,
+                    IconColor =        sub.IconColor,
+                    ControlOpacity =   sub.ControlOpacity,
+                    CornerRadius =     sub.CornerRadius,
+                    QuickBarMode =     sub.QuickBarMode,
+                    TitleBarAdaptive = sub.TitleBarTextColorAdaptive,
+                    BgImagePath =      sub.BackgroundImagePath,
+                    BgImageStretch =   sub.BgImageStretch,
+                    BgImageOffsetX =   sub.BgImageOffsetX,
+                    BgImageOffsetY =   sub.BgImageOffsetY,
+                    BgImageZoom =      sub.BgImageZoom,
+                    BgImageOpacity =   sub.BackgroundImageOpacity,
+                };
             }
         }
 
-        // Acrylic: pass resolved fillColor so it uses the correct value (not stale config)
-        _resolvedFillColor = fillColor;
-        ApplyAcrylic(fillColor);
+        // Merged + Keep Original + (master's own items OR sub-zone standalone) → _zone.*
+        return regular;
+    }
 
-        // Border: always apply user's border color and thickness (AFTER acrylic to ensure they're not overridden)
-        try { ZoneBorder.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(borderColor)!); } catch { }
-        ZoneBorder.BorderThickness = new Thickness(borderThickness);
-        MainContent.CornerRadius = new CornerRadius(cornerRadius);
-        ZoneBorder.CornerRadius = new CornerRadius(cornerRadius);
-        try { FillRect.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(fillColor)!); } catch { }
-        FillRect.RadiusX = FillRect.RadiusY = cornerRadius;
-        try { TitleBarBg.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(titleBarFillColor)!); } catch { }
-        // Pick the right title-bar adaptive flag based on which mode we're rendering in.
-        // Merged-unified and merged-master both render the MergedGroupTitleBar; sub-zone
-        // "Keep original" mode renders the sub-zone's own TitleBar.
-        bool titleBarAdaptive = (useGlobal ? _zone.TitleBarTextColorAdaptive : _zone.TitleBarTextColorAdaptive);
-        if (_zone.MergedSubZoneIds.Count > 0 || _zone.MergedGroupId.HasValue)
+    /// <summary>
+    /// Apply the resolved style to the window. Pure UI — no mode branching. All decisions
+    /// about which color source to use have already been made by <see cref="ResolveStyle"/>.
+    /// </summary>
+    public void ApplyStyle()
+    {
+        var s = ResolveStyle();
+        // Acrylic
+        ApplyAcrylic(s.FillColor, s.TitleBarFillColor);
+
+        // Borders + corners
+        try { ZoneBorder.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.BorderColor)!); } catch { }
+        ZoneBorder.BorderThickness = new Thickness(s.BorderThickness);
+        MainContent.CornerRadius = new CornerRadius(s.CornerRadius);
+        ZoneBorder.CornerRadius = new CornerRadius(s.CornerRadius);
+
+        // Body fill
+        try { FillRect.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.FillColor)!); } catch { }
+        FillRect.RadiusX = FillRect.RadiusY = s.CornerRadius;
+
+        // Title bar fill
+        try { TitleBarBg.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.TitleBarFillColor)!); } catch { }
+
+        // Title text — adaptive on → composite + HSL flip; off → resolved TitleTextColor
+        if (s.TitleBarAdaptive)
         {
-            // Merged-group mode: always use the MergedGroupTitleBarTextColorAdaptive flag
-            // (we don't honor per-sub-zone adaptive; the merge group is one logical entity).
-            titleBarAdaptive = _zone.MergedGroupTitleBarTextColorAdaptive;
-        }
-        // Title text color — adaptive mode overrides TitleTextColor / MergedGroupTitleTextColor
-        if (titleBarAdaptive)
-        {
-            // ponytail: titleBarFillColor is a translucent overlay over fillColor (already
-            // resolved by the merged-mode branches above). Composite before HSL flip so the
-            // algorithm sees the visible title-bar color, not the bare translucent layer.
-            var tBrush = AdaptiveTextColor.ResolveBrushOver(titleBarFillColor, fillColor);
+            // ponytail: TitleBarFillColor is a translucent overlay over FillColor. Composite
+            // before HSL flip so the algorithm sees the visible title-bar color, not the
+            // bare translucent layer.
+            var tBrush = AdaptiveTextColor.ResolveBrushOver(s.TitleBarFillColor, s.FillColor);
             ZoneTitleText.Foreground = tBrush;
         }
         else
         {
-            try { ZoneTitleText.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(titleTextColor)!); } catch { }
+            try { ZoneTitleText.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.TitleTextColor)!); } catch { }
         }
-        // Icon color — adaptive mode overrides iconColor when title bar adaptive is on
-        if (titleBarAdaptive)
+
+        // Icon — adaptive on → same brush as title; off → resolved IconColor, else fall back to
+        // the resolved title text color (always set by ResolveStyle). No hardcoded white
+        // fallback that could revert to XAML default.
+        if (s.TitleBarAdaptive)
         {
-            var iBrush = AdaptiveTextColor.ResolveBrushOver(titleBarFillColor, fillColor);
+            var iBrush = AdaptiveTextColor.ResolveBrushOver(s.TitleBarFillColor, s.FillColor);
             TitleIconChar.Foreground = iBrush;
             RestoreIconChar.Foreground = iBrush;
         }
-        else if (!string.IsNullOrEmpty(iconColor))
-        { try { var ic = new SolidColorBrush((Color)ColorConverter.ConvertFromString(iconColor)!); TitleIconChar.Foreground = ic; RestoreIconChar.Foreground = ic; } catch { } }
-        ControlPoint.Opacity = Math.Max(0.05, controlOpacity / 100.0);
-
-        // QuickBar mode: hide title bar and control points
-        if (quickBarMode)
-        {
-            TitleBarBg.Visibility = Visibility.Collapsed;
-            ControlPoint.Visibility = Visibility.Collapsed;
-        }
         else
         {
-            TitleBarBg.Visibility = Visibility.Visible;
-            ControlPoint.Visibility = Visibility.Visible;
+            var iconColor = !string.IsNullOrEmpty(s.IconColor) ? s.IconColor : s.TitleTextColor;
+            try
+            {
+                var ic = new SolidColorBrush((Color)ColorConverter.ConvertFromString(iconColor)!);
+                TitleIconChar.Foreground = ic;
+                RestoreIconChar.Foreground = ic;
+            }
+            catch
+            {
+                TitleIconChar.Foreground = Brushes.Transparent;
+                RestoreIconChar.Foreground = Brushes.Transparent;
+            }
         }
-        if (!string.IsNullOrEmpty(bgImagePath) && File.Exists(bgImagePath))
+
+        // Control-point opacity + QuickBar visibility
+        ControlPoint.Opacity = Math.Max(0.05, s.ControlOpacity / 100.0);
+        var vis = s.QuickBarMode ? Visibility.Collapsed : Visibility.Visible;
+        TitleBarBg.Visibility = vis;
+        ControlPoint.Visibility = vis;
+
+        // Background image
+        ApplyBackgroundImage(s);
+
+        // Sub-zone tabs + items — both driven by the resolved style so adaptive decision
+        // is in lockstep with the resolved colors above (no separate "MergedGroup*" flag
+        // check that could fall out of sync).
+        SolidColorBrush? tabAdaptiveBrush = s.TitleBarAdaptive
+            ? AdaptiveTextColor.ResolveBrushOver(s.TitleBarFillColor, s.FillColor)
+            : null;
+        RebuildSubZoneTabs(tabAdaptiveBrush, s.TitleTextColor);
+        ApplyItemTextColorAdaptive(s.FillColor);
+    }
+
+    void ApplyBackgroundImage(ResolvedZoneStyle s)
+    {
+        if (!string.IsNullOrEmpty(s.BgImagePath) && File.Exists(s.BgImagePath))
         {
             try
             {
                 var bi = new System.Windows.Media.Imaging.BitmapImage();
                 bi.BeginInit();
-                bi.UriSource = new Uri(bgImagePath);
+                bi.UriSource = new Uri(s.BgImagePath);
                 bi.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
                 bi.EndInit();
                 BgImage.Source = bi;
@@ -760,39 +856,32 @@ public partial class ZoneWindow : Window
                 var bw = BgImageBorder.ActualWidth > 0 ? BgImageBorder.ActualWidth : _zone.Width;
                 var bh = BgImageBorder.ActualHeight > 0 ? BgImageBorder.ActualHeight : _zone.Height;
 
-                // UniformToFill — fill target area maintaining aspect ratio
                 double imgW = bi.PixelWidth;
                 double imgH = bi.PixelHeight;
-                double utfScale = Math.Max((bw * bgImageZoom) / imgW, (bh * bgImageZoom) / imgH);
+                double utfScale = Math.Max((bw * s.BgImageZoom) / imgW, (bh * s.BgImageZoom) / imgH);
                 double displayedW = imgW * utfScale;
                 double displayedH = imgH * utfScale;
 
                 BgImage.Width = displayedW;
                 BgImage.Height = displayedH;
 
-                // Position image: center at zone center + offset (matches preview positioning)
                 double zoneCenterX = bw / 2;
                 double zoneCenterY = bh / 2;
                 double imgCenterX = displayedW / 2;
                 double imgCenterY = displayedH / 2;
-                double zox = bgImageOffsetX;
-                double zoy = bgImageOffsetY;
+                double zox = s.BgImageOffsetX;
+                double zoy = s.BgImageOffsetY;
 
                 BgImage.Margin = new Thickness(
                     zoneCenterX - imgCenterX + zox,
                     zoneCenterY - imgCenterY + zoy, 0, 0);
                 BgImage.HorizontalAlignment = HorizontalAlignment.Left;
                 BgImage.VerticalAlignment = VerticalAlignment.Top;
-                BgImage.Opacity = Math.Max(0.01, bgImageOpacity / 100.0);
+                BgImage.Opacity = Math.Max(0.01, s.BgImageOpacity / 100.0);
             }
             catch { BgImage.Opacity = 0; }
         }
         else { BgImage.Source = null; BgImage.Opacity = 0; }
-        // ponytail: BP-B fix — call adaptive text refresh AFTER bg image has loaded so the
-        // image-sample branch sees fresh BgImage.Source. Also pass the already-resolved
-        // effectiveFill so merged-group unified fills take effect on item labels.
-        ApplyItemTextColorAdaptive(fillColor);
-        ApplySubZoneTabTextColorAdaptive();
     }
 
     /// <summary>Walk the item template subtree under <see cref="MainContent"/> and apply the
@@ -833,7 +922,8 @@ public partial class ZoneWindow : Window
     }
 
     /// <summary>Resolve the effective body fill, mirroring ApplyStyle's merged-group branch:
-    /// MergedGroupFillColor when in unified merged mode, otherwise zone.FillColor or global.</summary>
+    /// Unified mode → MergedGroupFillColor; Keep Original + sub-zone selected → that
+    /// sub-zone's FillColor; otherwise zone.FillColor or global.</summary>
     string ResolveEffectiveBodyFill()
     {
         var config = _mgr.GetConfig();
@@ -842,20 +932,18 @@ public partial class ZoneWindow : Window
         {
             if (_zone.MergedGroupUseUnifiedFill)
                 return _zone.MergedGroupFillColor;
+            // ponytail: Keep Original + sub-zone selected — the visible body fill is the
+            // sub-zone's FillColor (ApplyStyle sets FillRect.Fill from it), not the master's.
+            // Returning master here made the StatusChanged hook brush items against the
+            // wrong color after any path that re-fires the generator.
+            if (_vm.SelectedSubZoneId.HasValue && _vm.SelectedSubZoneId.Value != _zone.Id)
+            {
+                var subZone = _mgr.Zones.FirstOrDefault(z => z.Id == _vm.SelectedSubZoneId.Value);
+                if (subZone != null)
+                    return useGlobal ? config.GlobalFillColor : subZone.FillColor;
+            }
         }
         return useGlobal ? config.GlobalFillColor : _zone.FillColor;
-    }
-
-    /// <summary>Walk the sub-zone tab strip and recolor each tab's text based on the
-    /// merged-group title bar fill. No-op when not in merged mode or adaptive is off.</summary>
-    void ApplySubZoneTabTextColorAdaptive()
-    {
-        if (SubZoneTabs == null) return;
-        if (!_zone.MergedGroupTitleBarTextColorAdaptive) return;
-        // ponytail: composite MergedGroupTitleBarFillColor over MergedGroupFillColor so the
-        // adaptive brush matches the visible tab-bar color, not the bare translucent overlay.
-        var brush = AdaptiveTextColor.ResolveBrushOver(_zone.MergedGroupTitleBarFillColor, _zone.MergedGroupFillColor);
-        AdaptiveTextColor.ApplyBrushToTree(SubZoneTabs, brush);
     }
 
     /// <summary>Re-apply both body and title bar adaptive text colors. Called from
@@ -902,10 +990,8 @@ public partial class ZoneWindow : Window
     }
 
     // ── Acrylic / frosted glass ──
-    void ApplyAcrylic(string? fillColorOverride = null)
+    void ApplyAcrylic(string fillColor, string titleBarFillColor)
     {
-        string fillColor = fillColorOverride ?? _zone.FillColor;
-
         if (_zone.EnableAcrylic)
         {
             AcrylicHelper.EnableBlur(this, _zone.GlassBlurAmount, _zone.GlassTintOpacity, _zone.GlassTintLuminosity, _zone.GlassColorMode);
@@ -914,11 +1000,11 @@ public partial class ZoneWindow : Window
                 var tint = (Color)ColorConverter.ConvertFromString(fillColor)!;
                 FillRect.Fill = new SolidColorBrush(tint);
                 FillRect.Opacity = 1.0; // Brush alpha from FillColor controls transparency
-                if (TitleBarBg != null && !string.IsNullOrEmpty(_zone.TitleBarFillColor))
+                if (TitleBarBg != null && !string.IsNullOrEmpty(titleBarFillColor))
                 {
                     try
                     {
-                        TitleBarBg.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(_zone.TitleBarFillColor)!);
+                        TitleBarBg.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(titleBarFillColor)!);
                     }
                     catch
                     {
@@ -938,7 +1024,7 @@ public partial class ZoneWindow : Window
             {
                 FillRect.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(fillColor)!);
                 FillRect.Opacity = 1.0;
-                TitleBarBg.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(_zone.TitleBarFillColor)!);
+                TitleBarBg.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(titleBarFillColor)!);
             }
             catch { }
         }
@@ -971,10 +1057,8 @@ public partial class ZoneWindow : Window
         _vm.Zone = zone;
         ZoneTitleText.Text = zone.Name;
         SetRestoreIcon();
-        // Rebuild tabs BEFORE ApplyStyle — ApplySubZoneTabTextColorAdaptive walks
-        // SubZoneTabs, and RebuildSubZoneTabs replaces tab children with fresh XAML
-        // defaults (same race as items; tabs are stack-built in code).
-        RebuildSubZoneTabs();
+        // ponytail: ApplyStyle rebuilds sub-zone tabs internally with the resolved adaptive
+        // brush — no separate RebuildSubZoneTabs call needed here.
         ApplyStyle();
         UpdateMergedTitle();
         if (zone.IsVisible) ShowZone(); else ApplyHidden();
@@ -1010,7 +1094,7 @@ public partial class ZoneWindow : Window
         }
     }
 
-    protected override void OnActivated(EventArgs e) { base.OnActivated(e); if (IsLoaded) NativeMethods.PinToDesktop(this); }
+    protected override void OnActivated(EventArgs e) { base.OnActivated(e); }
 
     // ── Merge support ──
 
@@ -1030,7 +1114,7 @@ public partial class ZoneWindow : Window
         }
     }
 
-    void RebuildSubZoneTabs()
+    void RebuildSubZoneTabs(SolidColorBrush? adaptiveBrush = null, string? titleTextColor = null)
     {
         SubZoneTabs.Children.Clear();
         if (_zone.MergedSubZoneIds.Count == 0)
@@ -1050,21 +1134,40 @@ public partial class ZoneWindow : Window
         if (CtxMergeSep != null) CtxMergeSep.Visibility = Visibility.Visible;
 
         // Master zone tab
-        AddSubZoneTab(_zone.Id, _zone.Name, _zone.IconChar);
+        AddSubZoneTab(_zone.Id, _zone.Name, _zone.IconChar, adaptiveBrush, titleTextColor);
 
         // Sub-zone tabs
         foreach (var subId in _zone.MergedSubZoneIds)
         {
             var sub = _mgr.Zones.FirstOrDefault(z => z.Id == subId);
             if (sub != null)
-                AddSubZoneTab(sub.Id, sub.Name, sub.IconChar);
+                AddSubZoneTab(sub.Id, sub.Name, sub.IconChar, adaptiveBrush, titleTextColor);
         }
     }
 
-    void AddSubZoneTab(Guid zoneId, string name, string iconChar)
+    void AddSubZoneTab(Guid zoneId, string name, string iconChar, SolidColorBrush? adaptiveBrush, string? titleTextColorOverride)
     {
         var cn = _loc.CurrentLanguage == Services.Language.Chinese;
         bool isSelected = _vm.SelectedSubZoneId == zoneId;
+
+        // ponytail: mirror ZoneTitleText resolution exactly — adaptive on → adaptive brush,
+        // adaptive off → resolved titleTextColor (master's MergedGroupTitleTextColor in merged
+        // mode). No hardcoded hex fallback; if override is empty/malformed, fall through to
+        // Transparent so WPF inherits instead of snapping to white.
+        Brush textBrush;
+        if (adaptiveBrush != null)
+        {
+            textBrush = adaptiveBrush;
+        }
+        else if (!string.IsNullOrEmpty(titleTextColorOverride))
+        {
+            try { textBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(titleTextColorOverride)!); }
+            catch { textBrush = Brushes.Transparent; }
+        }
+        else
+        {
+            textBrush = Brushes.Transparent;
+        }
 
         var tab = new Border
         {
@@ -1084,6 +1187,7 @@ public partial class ZoneWindow : Window
             {
                 Text = iconChar,
                 FontSize = 10,
+                Foreground = textBrush,
                 VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(0, 0, 3, 0)
             });
@@ -1093,23 +1197,17 @@ public partial class ZoneWindow : Window
         {
             Text = name,
             FontSize = 10,
+            Foreground = textBrush,
             VerticalAlignment = VerticalAlignment.Center
         });
 
-        // Highlight selected tab
         if (isSelected)
         {
             tab.Background = new SolidColorBrush(Color.FromArgb(0x30, 0x00, 0x00, 0x00));
-            foreach (var child in sp.Children)
-                if (child is TextBlock tb)
-                    tb.Foreground = new SolidColorBrush(Color.FromRgb(0xC8, 0xC8, 0xF0));
         }
         else
         {
             tab.Background = new SolidColorBrush(Color.FromArgb(0x10, 0xFF, 0xFF, 0xFF));
-            foreach (var child in sp.Children)
-                if (child is TextBlock tb)
-                    tb.Foreground = new SolidColorBrush(Color.FromArgb(0xA0, 0xFF, 0xFF, 0xFF));
         }
 
         tab.MouseLeftButtonDown += SubZoneTab_Click;
@@ -1121,9 +1219,10 @@ public partial class ZoneWindow : Window
     {
         if (s is not Border tab || tab.Tag is not Guid zoneId) return;
         _vm.SelectedSubZoneId = zoneId;
-        ApplyStyle(); // Apply style based on selected sub-zone
+        // ponytail: ApplyStyle rebuilds sub-zone tabs internally with the resolved adaptive
+        // brush — no separate RebuildSubZoneTabs / ApplySubZoneTabTextColorAdaptive needed.
+        ApplyStyle(); // Apply style based on selected sub-zone (also rebuilds tabs)
         RearrangeAll(); // Rearrange items for the newly selected sub-zone
         UpdateCanvasSize();
-        RebuildSubZoneTabs(); // refresh tab highlights
     }
 }

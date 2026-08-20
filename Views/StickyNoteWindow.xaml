@@ -51,6 +51,12 @@
                                  LostFocus="TitleBox_LostFocus"
                                  KeyDown="TitleBox_KeyDown"/>
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,4,0">
+                            <Button x:Name="LockBtn" Content="🔓" Width="20" Height="20"
+                                    FontSize="10"
+                                    Background="Transparent" BorderThickness="0"
+                                    Cursor="Hand" Click="LockBtn_Click" Margin="3,0,0,0"
+                                    Foreground="#80FFFFFF"
+                                    MouseEnter="LockBtn_Enter" MouseLeave="LockBtn_Leave"/>
                             <Button x:Name="SaveBtn" Content="💾" Width="20" Height="20"
                                     FontSize="10"
                                     Background="Transparent" BorderThickness="0"
@@ -255,16 +261,16 @@
         </Border>
 
                 <!-- Four corner resize grips -->
-                <Border Width="12" Height="12" HorizontalAlignment="Left" VerticalAlignment="Top"
+                <Border x:Name="GripTL" Width="12" Height="12" HorizontalAlignment="Left" VerticalAlignment="Top"
                         Cursor="SizeNWSE" Background="Transparent"
                         MouseLeftButtonDown="ResizeGrip_Down" Tag="TL"/>
-                <Border Width="12" Height="12" HorizontalAlignment="Right" VerticalAlignment="Top"
+                <Border x:Name="GripTR" Width="12" Height="12" HorizontalAlignment="Right" VerticalAlignment="Top"
                         Cursor="SizeNESW" Background="Transparent"
                         MouseLeftButtonDown="ResizeGrip_Down" Tag="TR"/>
-                <Border Width="12" Height="12" HorizontalAlignment="Left" VerticalAlignment="Bottom"
+                <Border x:Name="GripBL" Width="12" Height="12" HorizontalAlignment="Left" VerticalAlignment="Bottom"
                         Cursor="SizeNESW" Background="Transparent"
                         MouseLeftButtonDown="ResizeGrip_Down" Tag="BL"/>
-                <Border Width="12" Height="12" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                <Border x:Name="GripBR" Width="12" Height="12" HorizontalAlignment="Right" VerticalAlignment="Bottom"
                         Cursor="SizeNWSE" Background="Transparent"
                         MouseLeftButtonDown="ResizeGrip_Down" Tag="BR"/>
             </Grid>

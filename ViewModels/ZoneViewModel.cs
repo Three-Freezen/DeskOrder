@@ -1,3 +1,4 @@
+using System;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
@@ -40,6 +41,22 @@ public class ZoneViewModel : INotifyPropertyChanged
     public bool IsMergedMaster => _zone.MergedSubZoneIds.Count > 0;
 
     public bool ControlPointVisible => IsEditing;
+
+    private bool _isLocked;
+    public bool IsLocked
+    {
+        get => _isLocked;
+        set
+        {
+            if (_isLocked != value)
+            {
+                _isLocked = value;
+                LockChanged?.Invoke(value);
+            }
+        }
+    }
+
+    public event Action<bool>? LockChanged;
 
     public ICommand ToggleVisibilityCommand { get; }
     public ICommand StartEditCommand { get; }

@@ -83,10 +83,12 @@ public partial class ManagementWindow : Window
         _zoneManager.ZonesChanged += RefreshAll;
         _zoneManager.ZonesChanged += RefreshAllStateButtons;
         _zoneManager.ZoneVisibilityChanged += OnZoneVisibilityChanged;
+        _zoneManager.LockChanged += (_, _) => RefreshZonesList();
         if (_notesService != null)
         {
             _notesService.NotesChanged += RefreshAll;
             _notesService.NotesChanged += SyncNoteWindows;
+            _notesService.LockChanged += (_, _) => RefreshNotesList();
         }
         if (_widgetService != null)
         {
@@ -94,6 +96,12 @@ public partial class ManagementWindow : Window
             _widgetService.ClocksChanged += SyncClockWindows;
             _widgetService.CalendarsChanged += RefreshAll;
             _widgetService.CalendarsChanged += SyncCalendarWindows;
+            _widgetService.LockChanged += (_, _) =>
+            {
+                RefreshClocksList();
+                RefreshCalendarsList();
+                RefreshNotesList();
+            };
         }
         Loaded += (_, _) =>
         {
@@ -433,6 +441,32 @@ public partial class ManagementWindow : Window
         settingsBtn.Click += MergedGroupSettings_Click;
         controlsStack.Children.Add(settingsBtn);
 
+        // Lock button (🔓/🔒)
+        var lockBtn = new Button
+        {
+            Content = masterZone.IsLocked ? "🔒" : "🔓",
+            Width = 28,
+            Height = 26,
+            Background = InactiveBg,
+            Foreground = new SolidColorBrush(Color.FromRgb(masterZone.IsLocked ? (byte)0xFF : (byte)0xE8, masterZone.IsLocked ? (byte)0xD1 : (byte)0xE8, masterZone.IsLocked ? (byte)0x66 : (byte)0xF0)),
+            BorderThickness = new Thickness(0),
+            Cursor = Cursors.Hand,
+            FontSize = 11,
+            Tag = masterZone,
+            Margin = new Thickness(0, 0, 3, 0),
+            ToolTip = cn ? "锁定" : "Lock"
+        };
+        lockBtn.Click += (_, _) =>
+        {
+            if (_zoneManager != null)
+            {
+                _zoneManager.SetLocked(masterZone.Id.ToString(), !masterZone.IsLocked);
+                _zoneManager.SaveConfig();
+                RefreshZonesList();
+            }
+        };
+        controlsStack.Children.Add(lockBtn);
+
         Grid.SetColumn(controlsStack, 3);
         mainRow.Children.Add(controlsStack);
 
@@ -681,6 +715,32 @@ public partial class ManagementWindow : Window
         };
         deleteBtn.Click += ZoneDelete_Click;
         controlsStack.Children.Add(deleteBtn);
+
+        // Lock button (🔓/🔒)
+        var lockBtn = new Button
+        {
+            Content = zone.IsLocked ? "🔒" : "🔓",
+            Width = 28,
+            Height = 26,
+            Background = InactiveBg,
+            Foreground = new SolidColorBrush(Color.FromRgb(zone.IsLocked ? (byte)0xFF : (byte)0xE8, zone.IsLocked ? (byte)0xD1 : (byte)0xE8, zone.IsLocked ? (byte)0x66 : (byte)0xF0)),
+            BorderThickness = new Thickness(0),
+            Cursor = Cursors.Hand,
+            FontSize = 11,
+            Tag = zone,
+            Margin = new Thickness(0, 0, 3, 0),
+            ToolTip = cn ? "锁定" : "Lock"
+        };
+        lockBtn.Click += (_, _) =>
+        {
+            if (_zoneManager != null)
+            {
+                _zoneManager.SetLocked(zone.Id.ToString(), !zone.IsLocked);
+                _zoneManager.SaveConfig();
+                RefreshZonesList();
+            }
+        };
+        controlsStack.Children.Add(lockBtn);
 
         Grid.SetColumn(controlsStack, 1);
         grid.Children.Add(controlsStack);
@@ -1896,6 +1956,56 @@ public partial class ManagementWindow : Window
         };
         delBtn.Click += (_, _) => onDelete();
         btns.Children.Add(delBtn);
+
+        // Lock button (🔓/🔒)
+        bool widgetLocked = widget switch
+        {
+            DesktopClock c => c.IsLocked,
+            DesktopCalendar ca => ca.IsLocked,
+            StickyNote n => n.IsLocked,
+            _ => false
+        };
+        var lockBtn = new Button
+        {
+            Content = widgetLocked ? "🔒" : "🔓",
+            Width = 28,
+            Height = 26,
+            Background = InactiveBg,
+            Foreground = new SolidColorBrush(Color.FromRgb(widgetLocked ? (byte)0xFF : (byte)0xE8, widgetLocked ? (byte)0xD1 : (byte)0xE8, widgetLocked ? (byte)0x66 : (byte)0xF0)),
+            BorderThickness = new Thickness(0),
+            Cursor = Cursors.Hand,
+            FontSize = 11,
+            Tag = widget,
+            Margin = new Thickness(0, 0, 3, 0),
+            ToolTip = cn ? "锁定" : "Lock"
+        };
+        lockBtn.Click += (_, _) =>
+        {
+            if (_widgetService == null && _notesService == null) return;
+            string id = widget switch
+            {
+                DesktopClock c => c.Id.ToString(),
+                DesktopCalendar ca => ca.Id.ToString(),
+                StickyNote n => n.Id.ToString(),
+                _ => string.Empty
+            };
+            if (string.IsNullOrEmpty(id)) return;
+            if (widget is StickyNote)
+            {
+                _notesService?.SetLocked(id, !widgetLocked);
+                _notesService?.Save();
+            }
+            else
+            {
+                _widgetService?.SetLocked(id, !widgetLocked);
+                _widgetService?.Save();
+            }
+            if (widget is DesktopClock) RefreshClocksList();
+            else if (widget is DesktopCalendar) RefreshCalendarsList();
+            else if (widget is StickyNote) RefreshNotesList();
+        };
+        btns.Children.Add(lockBtn);
+
         Grid.SetColumn(btns, 1);
         grid.Children.Add(btns);
 

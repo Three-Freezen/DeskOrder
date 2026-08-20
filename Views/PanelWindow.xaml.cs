@@ -274,88 +274,30 @@ public partial class PanelWindow : Window
             TopBar.Background = new SolidColorBrush(tbColor);
         }
         catch { }
-        ApplyPanelTextColorAdaptive(fillColorStr);
+
+        // ponytail: top-bar text adaptive — PanelTopBar = ClockText / DateText / TitleText /
+        // SearchPlaceholder + SearchBox. Mirror ZoneTitleText pattern: adaptive on → adaptive
+        // brush computed from PanelTitleBarFillColor over PanelFillColor (visible top-bar
+        // color); adaptive off → XAML default stays (no hardcoded hex fallback in C#).
+        if (config.PanelTitleBarTextColorAdaptive)
+        {
+            var tbBrush = AdaptiveTextColor.ResolveBrushOver(config.PanelTitleBarFillColor, config.PanelFillColor);
+            if (TitleText != null) TitleText.Foreground = tbBrush;
+            if (ClockText != null) ClockText.Foreground = tbBrush;
+            if (DateText != null) DateText.Foreground = tbBrush;
+            if (SearchPlaceholder != null) SearchPlaceholder.Foreground = tbBrush;
+            if (SearchBox != null) SearchBox.Foreground = tbBrush;
+        }
     }
 
-    /// <summary>TopBar elements adapt to PanelTitleBarFillColor; body (search box,
-    /// zone selector, item list, restore icon) adapt to PanelFillColor.</summary>
-    void ApplyPanelTextColorAdaptive(string panelFill)
-    {
-#if DEBUG
-        var dbgCfg = _zoneManager.GetConfig();
-        System.Diagnostics.Debug.WriteLine(
-            $"[adaptive] PanelWindow: bg={panelFill} bodyAdaptive={dbgCfg.PanelTextColorAdaptive} titleAdaptive={dbgCfg.PanelTitleBarTextColorAdaptive}");
-#endif
-        // ponytail: split try/catch per branch — previously a single catch swallowed
-        // every exception and left the XAML defaults visible. Now each branch logs to
-        // Debug.WriteLine so failures surface in the attached debugger without
-        // breaking the style-apply pipeline.
-        var config = _zoneManager.GetConfig();
-        try
-        {
-            // TopBar (treated as title bar) — PanelTopBar = ClockText / DateText / TitleText / SearchPlaceholder
-            if (config.PanelTitleBarTextColorAdaptive)
-            {
-                // ponytail: PanelTitleBarFillColor is a translucent layer over PanelFillColor,
-                // composite before HSL flip so adaptive picks a contrasting color for the
-                // visible top-bar, not for the bare translucent overlay.
-                var tbBrush = AdaptiveTextColor.ResolveBrushOver(config.PanelTitleBarFillColor, config.PanelFillColor);
-                if (TitleText != null) TitleText.Foreground = tbBrush;
-                if (ClockText != null) ClockText.Foreground = tbBrush;
-                if (DateText != null) DateText.Foreground = tbBrush;
-                if (SearchPlaceholder != null) SearchPlaceholder.Foreground = tbBrush;
-            }
-            else
-            {
-                if (TitleText != null) TitleText.Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0));
-                if (ClockText != null) ClockText.Foreground = new SolidColorBrush(Color.FromArgb(0xA0, 0xFF, 0xFF, 0xFF));
-                if (DateText != null) DateText.Foreground = new SolidColorBrush(Color.FromArgb(0xFF, 0x80, 0x80, 0xA0));
-                if (SearchPlaceholder != null) SearchPlaceholder.Foreground = new SolidColorBrush(Color.FromArgb(0xFF, 0x60, 0x60, 0x80));
-            }
-        }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[adaptive] Panel title bar: {ex.Message}"); }
-        try
-        {
-            // Body — SearchBox / ZoneSelector / item labels (zone headers, item names).
-            // Sample bg image when set.
-            if (config.PanelTextColorAdaptive)
-            {
-                SolidColorBrush bBrush;
-                if (BgImage?.Source is BitmapSource bmp && !string.IsNullOrEmpty(config.PanelBackgroundImagePath))
-                {
-                    bBrush = AdaptiveTextColor.ResolveBrush(AdaptiveTextColor.ResolveTextColorForImage(bmp));
-                }
-                else
-                {
-                    bBrush = AdaptiveTextColor.ResolveBrush(panelFill);
-                }
-                if (SearchBox != null) SearchBox.Foreground = bBrush;
-                // ponytail: ZoneSelector is a ComboBox (control) — user wants it locked at its
-                // system default (black). Don't adapt it; the else branch below sets a hardcoded
-                // neutral when adaptive body is off, which keeps it readable against any bg.
-                // Walk ContentStack children (zone headers + item cards) and re-brush TextBlocks
-                if (ContentStack != null)
-                {
-                    for (int i = 0; i < ContentStack.Children.Count; i++)
-                    {
-                        if (ContentStack.Children[i] is DependencyObject d)
-                            AdaptiveTextColor.ApplyBrushToTree(d, bBrush);
-                    }
-                }
-            }
-            else
-            {
-                if (SearchBox != null) SearchBox.Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0));
-                if (ZoneSelector != null) ZoneSelector.Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0));
-            }
-        }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[adaptive] Panel body: {ex.Message}"); }
-    }
-
-    /// <summary>Re-apply both body and title bar adaptive text colors.</summary>
+    /// <summary>Re-apply full style. Replaces the old RefreshTextColorAdaptive (which only
+    /// re-brushed text); since cards are rebuilt with the correct brush at creation time
+    /// and top-bar XAML defaults stay when adaptive is off, a single ApplyStyle() covers
+    /// the live-preview case from settings dialog.</summary>
     public void RefreshTextColorAdaptive()
     {
         ApplyStyle();
+        RebuildDisplay();
     }
 
     public void ApplyBackgroundImage()
@@ -428,6 +370,24 @@ public partial class PanelWindow : Window
                     ? new[] { _selectedZone }
                     : _zoneManager.Zones.ToArray();
 
+                // ponytail: resolve adaptive brushes ONCE before creating cards, so each
+                // card is built with the correct brush at creation time. No need for a
+                // post-creation re-brush walk (which raced with the BeginInvoke timing).
+                // Mirror ZoneTitleText: adaptive on → computed brush; adaptive off → null
+                // (XAML default stays). Cards still match the title bar's contract.
+                var cfg = _zoneManager.GetConfig();
+                Brush? titleBarBrush = cfg.PanelTitleBarTextColorAdaptive
+                    ? AdaptiveTextColor.ResolveBrushOver(cfg.PanelTitleBarFillColor, cfg.PanelFillColor)
+                    : null;
+                Brush? bodyBrush = null;
+                if (cfg.PanelTextColorAdaptive)
+                {
+                    if (BgImage?.Source is BitmapSource bmp && !string.IsNullOrEmpty(cfg.PanelBackgroundImagePath))
+                        bodyBrush = AdaptiveTextColor.ResolveBrush(AdaptiveTextColor.ResolveTextColorForImage(bmp));
+                    else
+                        bodyBrush = AdaptiveTextColor.ResolveBrush(cfg.PanelFillColor);
+                }
+
                 if (_isGridView)
                 {
                     // Grid view: wrap items in a WrapPanel
@@ -438,7 +398,7 @@ public partial class PanelWindow : Window
                         {
                             if (hasSearch && !FuzzySearchHelper.MatchFuzzy(item.Name, search))
                                 continue;
-                            var card = CreateItemCard(item, zone, isGrid: true);
+                            var card = CreateItemCard(item, zone, isGrid: true, bodyBrush: bodyBrush);
                             wrapPanel.Children.Add(card);
                         }
                     }
@@ -453,7 +413,7 @@ public partial class PanelWindow : Window
                         {
                             if (hasSearch && !FuzzySearchHelper.MatchFuzzy(item.Name, search))
                                 continue;
-                            var card = CreateItemCard(item, zone, isGrid: false);
+                            var card = CreateItemCard(item, zone, isGrid: false, bodyBrush: bodyBrush);
                             ContentStack.Children.Add(card);
                         }
                     }
@@ -463,7 +423,7 @@ public partial class PanelWindow : Window
         }), System.Windows.Threading.DispatcherPriority.Normal);
     }
 
-    Border CreateZoneHeader(Zone zone)
+    Border CreateZoneHeader(Zone zone, Brush? titleBarBrush)
     {
         var card = new Border
         {
@@ -484,28 +444,33 @@ public partial class PanelWindow : Window
             Background = new SolidColorBrush(Color.FromArgb(0x12, 0xFF, 0xFF, 0xFF)),
             Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center
         };
-        iconBorder.Child = new TextBlock
+        // ponytail: mirror ZoneTitleText — adaptive on → titleBarBrush; adaptive off → XAML
+        // default stays (no hardcoded hex fallback). Pass null when adaptive is off.
+        var iconTb = new TextBlock
         {
             Text = string.IsNullOrEmpty(zone.IconChar) ? "⊞" : zone.IconChar,
-            FontSize = 13, Foreground = new SolidColorBrush(Color.FromArgb(0xC0, 0xFF, 0xFF, 0xFF)),
+            FontSize = 13,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center
         };
+        if (titleBarBrush != null) iconTb.Foreground = titleBarBrush;
+        iconBorder.Child = iconTb;
         stack.Children.Add(iconBorder);
 
         // Zone name
-        stack.Children.Add(new TextBlock
+        var nameTb = new TextBlock
         {
             Text = zone.Name, FontSize = 13, FontWeight = FontWeights.SemiBold,
-            Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0)),
             VerticalAlignment = VerticalAlignment.Center
-        });
+        };
+        if (titleBarBrush != null) nameTb.Foreground = titleBarBrush;
+        stack.Children.Add(nameTb);
 
         card.Child = stack;
         return card;
     }
 
-    Border CreateItemCard(ZoneItem item, Zone zone, bool isGrid = true)
+    Border CreateItemCard(ZoneItem item, Zone zone, bool isGrid = true, Brush? bodyBrush = null)
     {
         var card = new Border
         {
@@ -536,15 +501,18 @@ public partial class PanelWindow : Window
             };
             RenderOptions.SetBitmapScalingMode(iconImg, BitmapScalingMode.HighQuality);
             stack.Children.Add(iconImg);
-            stack.Children.Add(new TextBlock
+            // ponytail: mirror ZoneTitleText — adaptive on → bodyBrush; adaptive off → XAML
+            // default stays. No hardcoded hex fallback; caller decides whether to override.
+            var nameTb = new TextBlock
             {
                 Text = item.Name, FontSize = 10,
-                Foreground = new SolidColorBrush(Color.FromRgb(0xC0, 0xC0, 0xD0)),
                 HorizontalAlignment = HorizontalAlignment.Center,
                 TextTrimming = TextTrimming.CharacterEllipsis,
                 TextAlignment = TextAlignment.Center,
                 MaxWidth = 72
-            });
+            };
+            if (bodyBrush != null) nameTb.Foreground = bodyBrush;
+            stack.Children.Add(nameTb);
             card.Child = stack;
         }
         else
@@ -568,10 +536,10 @@ public partial class PanelWindow : Window
             var nameTb = new TextBlock
             {
                 Text = item.Name, FontSize = 12,
-                Foreground = new SolidColorBrush(Color.FromRgb(0xE0, 0xE0, 0xF0)),
                 VerticalAlignment = VerticalAlignment.Center,
                 TextTrimming = TextTrimming.CharacterEllipsis
             };
+            if (bodyBrush != null) nameTb.Foreground = bodyBrush;
             Grid.SetColumn(nameTb, 1);
             grid.Children.Add(nameTb);
             card.Child = grid;

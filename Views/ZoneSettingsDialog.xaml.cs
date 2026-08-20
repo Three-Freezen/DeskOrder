@@ -137,7 +137,14 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
 
         // Text color adaptive (top-row checkbox)
         TextAdaptiveBox.IsChecked = zone.TextColorAdaptive;
-        TitleBarTextAdaptiveBox.IsChecked = zone.TitleBarTextColorAdaptive;
+        // ponytail: when this dialog is opened from a merged-group master, ApplyStyle reads
+        // MergedGroupTitleBarTextColorAdaptive (not TitleBarTextColorAdaptive) — binding the
+        // checkbox to the zone-level flag made the toggle a no-op against the live merged
+        // window. Pick the field the window actually reads so the checkbox reflects and
+        // controls the right state.
+        TitleBarTextAdaptiveBox.IsChecked = IsMergedMaster(zone)
+            ? zone.MergedGroupTitleBarTextColorAdaptive
+            : zone.TitleBarTextColorAdaptive;
         TextAdaptiveBox.Checked += (_, _) => TriggerRefreshZoneTextAdaptive();
         TextAdaptiveBox.Unchecked += (_, _) => TriggerRefreshZoneTextAdaptive();
         TitleBarTextAdaptiveBox.Checked += (_, _) => TriggerRefreshZoneTextAdaptive();
@@ -426,7 +433,12 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
         zone.BackgroundImageOpacity = BgImageOpacityPercent;
         zone.AutoArrange = AutoArrange;
         zone.TextColorAdaptive = TextAdaptiveBox.IsChecked == true;
-        zone.TitleBarTextColorAdaptive = TitleBarTextAdaptiveBox.IsChecked == true;
+        // ponytail: write to the flag ApplyStyle actually reads — MergedGroup* for merged
+        // masters, zone-level for regular zones. See constructor binding comment.
+        if (IsMergedMaster(zone))
+            zone.MergedGroupTitleBarTextColorAdaptive = TitleBarTextAdaptiveBox.IsChecked == true;
+        else
+            zone.TitleBarTextColorAdaptive = TitleBarTextAdaptiveBox.IsChecked == true;
         zone.BgImageOffsetX = _bgOffsetX; zone.BgImageOffsetY = _bgOffsetY;
         zone.BgImageZoom = _bgZoomVal;
         zone.IconColor = IconColorValue; zone.TitleTextColor = TextColorValue;
@@ -528,10 +540,20 @@ public partial class ZoneSettingsDialog : Window, INotifyPropertyChanged
         // ponytail: BP-E — _editingZone is a clone. Write to ResultZone so the live window
         // sees the new flag immediately, then refresh.
         ResultZone.TextColorAdaptive = TextAdaptiveBox.IsChecked == true;
-        ResultZone.TitleBarTextColorAdaptive = TitleBarTextAdaptiveBox.IsChecked == true;
+        // ponytail: write to MergedGroup* for merged masters (ApplyStyle reads that flag),
+        // zone-level for regular zones — see constructor binding comment.
+        if (IsMergedMaster(ResultZone))
+            ResultZone.MergedGroupTitleBarTextColorAdaptive = TitleBarTextAdaptiveBox.IsChecked == true;
+        else
+            ResultZone.TitleBarTextColorAdaptive = TitleBarTextAdaptiveBox.IsChecked == true;
         // Refresh the live zone window
         _zoneManager.GetZoneWindow(ResultZone.Id)?.RefreshTextColorAdaptive();
     }
+
+    /// <summary>True when this dialog is editing a merged-group master. ApplyStyle reads
+    /// MergedGroupTitleBarTextColorAdaptive for these, so the checkbox must mirror that
+    /// flag rather than the zone-level TitleBarTextColorAdaptive.</summary>
+    static bool IsMergedMaster(Zone zone) => zone.MergedSubZoneIds.Count > 0 || zone.MergedGroupId.HasValue;
 
     void IconPreset_Click(object s, RoutedEventArgs e) { if (s is Button b && b.Tag is string ic) IconCharText = ic; }
     // "Pick an image → also clear the fill" was originally baked into the BgImagePath

@@ -18,6 +18,7 @@ public class StickyNote : AppearanceModel
     public string NoteColor { get; set; } = "#30FFF9C4"; // yellow default (legacy, superseded by FillColor)
     public double FontSize { get; set; } = 14;
     public bool IsVisible { get; set; } = true;
+    public bool IsLocked { get; set; } = false;
     public bool PinnedTop { get; set; } = false;
     // ── Appearance (most fields inherited from AppearanceModel) ──
     public double BorderThickness { get; set; } = 1.0;
@@ -49,7 +50,7 @@ public class StickyNote : AppearanceModel
             Id = Id, Title = Title, Content = Content,
             X = X, Y = Y, Width = Width, Height = Height,
             NoteColor = NoteColor, FontSize = FontSize,
-            IsVisible = IsVisible, PinnedTop = PinnedTop,
+            IsVisible = IsVisible, IsLocked = IsLocked, PinnedTop = PinnedTop,
             BorderThickness = BorderThickness, UseGlobalAppearance = UseGlobalAppearance,
             TitleBarFillColor = TitleBarFillColor, TitleBarOpacity = TitleBarOpacity,
             ControlOpacity = ControlOpacity, TitleTextColor = TitleTextColor,
@@ -77,6 +78,7 @@ public class DesktopClock : AppearanceModel
     public double Width { get; set; } = 320;
     public double Height { get; set; } = 140;
     public bool IsVisible { get; set; } = true;
+    public bool IsLocked { get; set; } = false;
     public bool ShowSeconds { get; set; } = true;
     public bool ShowDate { get; set; } = true;
     public bool Use24Hour { get; set; } = true;
@@ -107,6 +109,7 @@ public class DesktopClock : AppearanceModel
         var copy = new DesktopClock
         {
             Id = Id, X = X, Y = Y, Width = Width, Height = Height, IsVisible = IsVisible,
+            IsLocked = IsLocked,
             ShowSeconds = ShowSeconds, ShowDate = ShowDate,
             Use24Hour = Use24Hour, TextColor = TextColor,
             FontSize = FontSize, FontFamily = FontFamily,
@@ -162,6 +165,7 @@ public class DesktopCalendar : AppearanceModel
     public double Width { get; set; } = 320;
     public double Height { get; set; } = 440;
     public bool IsVisible { get; set; } = true;
+    public bool IsLocked { get; set; } = false;
     public bool ShowWeekNumbers { get; set; } = false;
     public bool StartOnMonday { get; set; } = true;
     public string TextColor { get; set; } = "#EEFFFFFF";
@@ -191,6 +195,7 @@ public class DesktopCalendar : AppearanceModel
         var copy = new DesktopCalendar
         {
             Id = Id, X = X, Y = Y, Width = Width, Height = Height, IsVisible = IsVisible,
+            IsLocked = IsLocked,
             ShowWeekNumbers = ShowWeekNumbers, StartOnMonday = StartOnMonday,
             TextColor = TextColor, TodayColor = TodayColor,
             FontSize = FontSize, Opacity = Opacity,

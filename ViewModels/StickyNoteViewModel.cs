@@ -1,3 +1,4 @@
+using System;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using DesktopZones.Models;
@@ -28,6 +29,22 @@ public class StickyNoteViewModel : INotifyPropertyChanged
     private bool _pinnedTop;
     public bool PinnedTop { get => _pinnedTop; set { _pinnedTop = value; OnPropertyChanged(); } }
 
+    private bool _isLocked;
+    public bool IsLocked
+    {
+        get => _isLocked;
+        set
+        {
+            if (_isLocked != value)
+            {
+                _isLocked = value;
+                LockChanged?.Invoke(value);
+            }
+        }
+    }
+
+    public event Action<bool>? LockChanged;
+
     public StickyNoteViewModel(StickyNote note)
     {
         _note = note;
@@ -45,6 +62,7 @@ public class StickyNoteViewModel : INotifyPropertyChanged
         _note.NoteColor = NoteColor;
         _note.FontSize = FontSize;
         _note.PinnedTop = PinnedTop;
+        _note.IsLocked = IsLocked;
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;

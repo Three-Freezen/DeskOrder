@@ -21,6 +21,8 @@ public class ZoneManager
     public event Action? ZonesChanged;
     /// <summary>Fires when a zone's visibility changes (show/hide/close). Args: zoneId, isVisible</summary>
     public event Action<Guid, bool>? ZoneVisibilityChanged;
+    /// <summary>Fires when a zone's lock state changes. Args: zoneId (string), isLocked.</summary>
+    public event Action<string, bool>? LockChanged;
 
     /// <summary>Manually fire ZoneVisibilityChanged (for ZoneWindow internal state changes).</summary>
     public void FireZoneVisibilityChanged(Guid zoneId, bool isVisible)
@@ -464,4 +466,16 @@ public class ZoneManager
     /// <summary>Get all zones in a merged group.</summary>
     public List<Zone> GetMergedGroupZones(Guid groupId)
         => Zones.Where(z => z.MergedGroupId == groupId).ToList();
+
+    // ── Lock ──
+
+    /// <summary>Set locked state for a zone by string id. Fires LockChanged after state update.</summary>
+    public void SetLocked(string zoneId, bool locked)
+    {
+        if (!Guid.TryParse(zoneId, out var guid)) return;
+        var zone = Zones.FirstOrDefault(z => z.Id == guid);
+        if (zone == null) return;
+        zone.IsLocked = locked;
+        LockChanged?.Invoke(zoneId, locked);
+    }
 }

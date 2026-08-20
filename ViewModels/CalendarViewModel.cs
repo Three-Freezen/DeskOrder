@@ -34,6 +34,22 @@ public class CalendarViewModel : INotifyPropertyChanged
 
     public ObservableCollection<CalendarNoteViewModel> SelectedNotes { get; } = new();
 
+    private bool _isLocked;
+    public bool IsLocked
+    {
+        get => _isLocked;
+        set
+        {
+            if (_isLocked != value)
+            {
+                _isLocked = value;
+                LockChanged?.Invoke(value);
+            }
+        }
+    }
+
+    public event Action<bool>? LockChanged;
+
     public CalendarViewModel(DesktopCalendar calendar)
     {
         _calendar = calendar;
