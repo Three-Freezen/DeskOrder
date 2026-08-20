@@ -83,7 +83,7 @@
                 <!-- Month/Year header + nav -->
                 <Grid Grid.Row="0" Margin="0,0,0,4"
                       MouseLeftButtonDown="Window_Drag">
-                    <Button Content="&#x25C0;" Width="24" Height="24" FontSize="10"
+                    <Button x:Name="PrevMonthBtn" Content="&#x25C0;" Width="24" Height="24" FontSize="10"
                             Foreground="#AAFFFFFF" Background="Transparent"
                             BorderThickness="0" Cursor="Hand"
                             HorizontalAlignment="Left" Margin="14,0,0,0"
@@ -93,7 +93,7 @@
                                Foreground="#EEFFFFFF"
                                HorizontalAlignment="Center"
                                VerticalAlignment="Center"/>
-                    <Button Content="&#x25B6;" Width="24" Height="24" FontSize="10"
+                    <Button x:Name="NextMonthBtn" Content="&#x25B6;" Width="24" Height="24" FontSize="10"
                             Foreground="#AAFFFFFF" Background="Transparent"
                             BorderThickness="0" Cursor="Hand"
                             HorizontalAlignment="Right" Margin="0,0,14,0"

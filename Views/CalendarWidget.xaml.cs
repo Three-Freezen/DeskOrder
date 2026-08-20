@@ -135,6 +135,12 @@ public partial class CalendarWidget : Window
         {
             brush = AdaptiveTextColor.ResolveBrush(effectiveFill);
         }
+        // ponytail: month nav arrows + LockBtn + NotesDateLabel now ride the same adaptive
+        // brush as HideBtn (calendar has no separate title-bar adaptive, body toggle covers all)
+        if (LockBtn != null) LockBtn.Foreground = brush;
+        if (PrevMonthBtn != null) PrevMonthBtn.Foreground = brush;
+        if (NextMonthBtn != null) NextMonthBtn.Foreground = brush;
+        if (NotesDateLabel != null) NotesDateLabel.Foreground = brush;
         if (MonthTitleText != null) MonthTitleText.Foreground = brush;
         if (TodayBtn != null) TodayBtn.Foreground = brush;
         if (HideBtn != null) HideBtn.Foreground = brush;
@@ -260,6 +266,12 @@ public partial class CalendarWidget : Window
         if (MonthTitleText != null) MonthTitleText.Foreground = new SolidColorBrush(Color.FromArgb(0xEE, 0xFF, 0xFF, 0xFF));
         if (TodayBtn != null) TodayBtn.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#6C63FF")!);
         if (HideBtn != null) HideBtn.Foreground = new SolidColorBrush(Color.FromArgb(0x40, 0xFF, 0xFF, 0xFF));
+        // ponytail: LockBtn + month nav + NotesDateLabel — restore XAML defaults when adaptive is off
+        if (LockBtn != null) LockBtn.Foreground = new SolidColorBrush(Color.FromArgb(0x40, 0xFF, 0xFF, 0xFF));
+        if (PrevMonthBtn != null) PrevMonthBtn.Foreground = new SolidColorBrush(Color.FromArgb(0xAA, 0xFF, 0xFF, 0xFF));
+        if (NextMonthBtn != null) NextMonthBtn.Foreground = new SolidColorBrush(Color.FromArgb(0xAA, 0xFF, 0xFF, 0xFF));
+        // NotesDateLabel XAML default is "#AAA0C0" — 3-char hex = RGB-only, alpha=0xFF
+        if (NotesDateLabel != null) NotesDateLabel.Foreground = new SolidColorBrush(Color.FromRgb(0xAA, 0xA0, 0xC0));
         if (RestoreIconChar != null) RestoreIconChar.Foreground = new SolidColorBrush(Color.FromArgb(0xC0, 0xFF, 0xFF, 0xFF));
         for (int i = 0; i <= 6; i++)
         {
