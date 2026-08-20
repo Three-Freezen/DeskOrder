@@ -1055,6 +1055,29 @@ public partial class ManagementWindow : Window
         };
         delBtn.Click += (_, _) => DeleteNote(note);
         btns.Children.Add(delBtn);
+
+        // Lock button (🔓/🔒) — matches CreateWidgetCard pattern
+        bool noteLocked = note.IsLocked;
+        var lockBtn = new Button
+        {
+            Content = noteLocked ? "🔒" : "🔓",
+            Width = 28, Height = 26,
+            Background = InactiveBg,
+            Foreground = new SolidColorBrush(Color.FromRgb(noteLocked ? (byte)0xFF : (byte)0xE8, noteLocked ? (byte)0xD1 : (byte)0xE8, noteLocked ? (byte)0x66 : (byte)0xF0)),
+            BorderThickness = new Thickness(0),
+            Cursor = Cursors.Hand,
+            FontSize = 11,
+            Tag = note,
+            Margin = new Thickness(0, 0, 3, 0),
+            ToolTip = cn ? "锁定" : "Lock"
+        };
+        lockBtn.Click += (_, _) =>
+        {
+            _notesService?.SetLocked(note.Id.ToString(), !noteLocked);
+            _notesService?.Save();
+            RefreshNotesList();
+        };
+        btns.Children.Add(lockBtn);
         Grid.SetColumn(btns, 1);
         grid.Children.Add(btns);
 
