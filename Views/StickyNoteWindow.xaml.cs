@@ -546,10 +546,17 @@ public partial class StickyNoteWindow : Window
                 if (PinBtn != null) PinBtn.Foreground = _vm.PinnedTop
                     ? new SolidColorBrush(Color.FromRgb(0x7C, 0x3A, 0xED))
                     : brush;
+                // ponytail: LockBtn rides the adaptive brush (same path as SaveBtn/HideBtn).
+                // Leave handler reads _titleBarAdaptiveBrush so hover→leave cycle doesn't clobber it.
+                if (LockBtn != null) LockBtn.Foreground = brush;
             }
             else
             {
                 _titleBarAdaptiveBrush = null;
+                // ponytail: when adaptive is off, reset LockBtn to its XAML default
+                // (#80FFFFFF) — Leave handler will pick this up via the cache=null fallback.
+                if (LockBtn != null)
+                    LockBtn.Foreground = new SolidColorBrush(Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF));
                 if (!string.IsNullOrEmpty(_note.TitleTextColor))
                 {
                     var tc = (Color)ColorConverter.ConvertFromString(_note.TitleTextColor);
