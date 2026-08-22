@@ -11,10 +11,17 @@ namespace DesktopZones.Helpers;
 
 public enum AppThemeMode { System, Light, Dark }
 
+/// <summary>Effective palette in use at runtime. Differs from <see cref="AppThemeMode"/>
+/// when user is in System mode: System + Windows HC enabled → ResolvedTheme.HighContrast.
+/// </summary>
+public enum ResolvedTheme { Light, Dark, HighContrast }
+
 public static class ThemeService
 {
     static AppThemeMode _current = AppThemeMode.System;
+    static ResolvedTheme _resolved = ResolvedTheme.Dark;
     public static AppThemeMode CurrentMode => _current;
+    public static ResolvedTheme ResolvedMode => _resolved;
 
     public static event Action<AppThemeMode>? Changed;
 
@@ -156,23 +163,36 @@ public static class ThemeService
     public static void Apply(AppThemeMode mode)
     {
         _current = mode;
-        var resolved = mode == AppThemeMode.System ? ResolveSystemTheme() : mode;
-        SwapColors(resolved);
+        _resolved = mode == AppThemeMode.System
+            ? ResolveSystemState()
+            : (mode == AppThemeMode.Light ? ResolvedTheme.Light : ResolvedTheme.Dark);
+        SwapColors(_resolved);
         RepaintBrushes();
         RebindOpenWindows();
         Changed?.Invoke(mode);
     }
 
-    static AppThemeMode ResolveSystemTheme()
+    static ResolvedTheme ResolveSystemState()
     {
+        // 1) High Contrast takes precedence over Light/Dark when both could be set.
+        try
+        {
+            using var hc = Registry.CurrentUser.OpenSubKey(
+                @"Software\Microsoft\Windows\CurrentVersion\Themes\HighContrast");
+            if (hc?.GetValue("Status") is 1) return ResolvedTheme.HighContrast;
+        }
+        catch { /* fall through */ }
+
+        // 2) Otherwise read AppsUseLightTheme.
         try
         {
             using var key = Registry.CurrentUser.OpenSubKey(
                 @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
-            var v = key?.GetValue("AppsUseLightTheme");
-            return v is 0 ? AppThemeMode.Dark : AppThemeMode.Light;
+            return key?.GetValue("AppsUseLightTheme") is 0
+                ? ResolvedTheme.Dark
+                : ResolvedTheme.Light;
         }
-        catch { return AppThemeMode.Dark; }
+        catch { return ResolvedTheme.Dark; }
     }
 
     static void SwapColors(AppThemeMode theme)
