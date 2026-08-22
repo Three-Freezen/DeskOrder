@@ -174,14 +174,15 @@ public static class ThemeService
 
     static ResolvedTheme ResolveSystemState()
     {
-        // 1) High Contrast takes precedence over Light/Dark when both could be set.
-        try
-        {
-            using var hc = Registry.CurrentUser.OpenSubKey(
-                @"Software\Microsoft\Windows\CurrentVersion\Themes\HighContrast");
-            if (hc?.GetValue("Status") is 1) return ResolvedTheme.HighContrast;
-        }
-        catch { /* fall through */ }
+        // 1) High Contrast takes precedence over Light/Dark.
+        //    Use SystemParameters.HighContrast (SPI_GETHIGHCONTRAST wrapper) instead
+        //    of a registry probe — the documented HC flag lives at
+        //    HKCU\Control Panel\Accessibility\HighContrast\Flags as REG_SZ "126"
+        //    (not at HKCU\...\Themes\HighContrast\Status as DWORD), so a registry
+        //    read is unreliable across machines. SystemParameters also raises
+        //    StaticPropertyChanged so StartListeningToSystem gets live toggles
+        //    via the existing UserPreferenceChanged handler — no extra wiring.
+        if (SystemParameters.HighContrast) return ResolvedTheme.HighContrast;
 
         // 2) Otherwise read AppsUseLightTheme.
         try
@@ -195,27 +196,83 @@ public static class ThemeService
         catch { return ResolvedTheme.Dark; }
     }
 
-    static void SwapColors(AppThemeMode theme)
+    static void SwapColors(ResolvedTheme theme)
     {
         var app = Application.Current;
         if (app == null) return;
         var merged = app.Resources.MergedDictionaries;
-        ResourceDictionary? darkDict = null, lightDict = null;
+        ResourceDictionary? darkDict = null, lightDict = null, hcDict = null;
         foreach (var d in merged)
         {
             if (d.Source?.OriginalString.EndsWith("Theme.Colors.Dark.xaml", StringComparison.OrdinalIgnoreCase) == true) darkDict = d;
-            if (d.Source?.OriginalString.EndsWith("Theme.Colors.Light.xaml", StringComparison.OrdinalIgnoreCase) == true) lightDict = d;
+            else if (d.Source?.OriginalString.EndsWith("Theme.Colors.Light.xaml", StringComparison.OrdinalIgnoreCase) == true) lightDict = d;
+            else if (d.Source?.OriginalString.EndsWith("Theme.Colors.HighContrast.xaml", StringComparison.OrdinalIgnoreCase) == true) hcDict = d;
         }
-        if (theme == AppThemeMode.Dark)
+
+        ResourceDictionary? keep = theme switch
         {
-            if (darkDict == null) merged.Insert(0, new ResourceDictionary { Source = new Uri("Resources/Theme.Colors.Dark.xaml", UriKind.Relative) });
-            if (lightDict != null) merged.Remove(lightDict);
-        }
-        else
+            ResolvedTheme.HighContrast => hcDict,
+            ResolvedTheme.Light        => lightDict,
+            _                          => darkDict,
+        };
+
+        foreach (var d in new[] { darkDict, lightDict, hcDict })
         {
-            if (lightDict == null) merged.Insert(0, new ResourceDictionary { Source = new Uri("Resources/Theme.Colors.Light.xaml", UriKind.Relative) });
-            if (darkDict != null) merged.Remove(darkDict);
+            if (d != null && d != keep) merged.Remove(d);
         }
+
+        if (keep == null)
+        {
+            var source = theme == ResolvedTheme.HighContrast
+                ? "Resources/Theme.Colors.HighContrast.xaml"
+                : theme == ResolvedTheme.Light
+                    ? "Resources/Theme.Colors.Light.xaml"
+                    : "Resources/Theme.Colors.Dark.xaml";
+            merged.Insert(0, new ResourceDictionary { Source = new Uri(source, UriKind.Relative) });
+        }
+    }
+
+    static Color? TryReadSystemAccent()
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(
+                @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+            if (key?.GetValue("AccentColor") is int argb)
+            {
+                return Color.FromRgb(
+                    (byte)((argb >> 16) & 0xFF),
+                    (byte)((argb >>  8) & 0xFF),
+                    (byte)( argb        & 0xFF));
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    static bool IsAccentVisible(Color c)
+    {
+        // Relative luminance per WCAG (sRGB linearized). Skip override below ~5% so
+        // black-ish system accents don't hide hover/selection states.
+        double Linear(byte v) { var s = v / 255.0; return s <= 0.03928 ? s / 12.92 : Math.Pow((s + 0.055) / 1.055, 2.4); }
+        var L = 0.2126 * Linear(c.R) + 0.7152 * Linear(c.G) + 0.0722 * Linear(c.B);
+        return L > 0.05;
+    }
+
+    static void ApplySystemAccentIfApplicable()
+    {
+        if (_current != AppThemeMode.System) return;
+        var c = TryReadSystemAccent();
+        if (!c.HasValue || !IsAccentVisible(c.Value)) return;
+        var color = c.Value;
+        var wash = Color.FromArgb(0x33, color.R, color.G, color.B);
+        var brushesDict = Application.Current?.Resources.MergedDictionaries
+            .Cast<ResourceDictionary>()
+            .FirstOrDefault(d => d.Source?.OriginalString.EndsWith("Theme.Brushes.xaml", StringComparison.OrdinalIgnoreCase) == true);
+        if (brushesDict == null) return;
+        brushesDict["Brush.Accent"]       = new SolidColorBrush(color);
+        brushesDict["Brush.Accent.Wash"]  = new SolidColorBrush(wash);
+        brushesDict["Brush.Accent.Solid"] = new SolidColorBrush(color);
     }
 
     /// <summary>
@@ -241,6 +298,7 @@ public static class ThemeService
             if (host == null) continue;
             host[brushKey] = new SolidColorBrush(color);
         }
+        ApplySystemAccentIfApplicable();
     }
 
     /// <summary>
