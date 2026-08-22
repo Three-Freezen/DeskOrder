@@ -1,0 +1,73 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <!-- Switch style: based on CheckBox so IsChecked/Click handlers work as-is. -->
+  <Style x:Key="SwitchStyle" TargetType="CheckBox">
+    <Setter Property="Foreground" Value="{DynamicResource Brush.Text.Primary}"/>
+    <Setter Property="Background" Value="Transparent"/>
+    <Setter Property="Height" Value="20"/>
+    <Setter Property="Width" Value="36"/>
+    <Setter Property="Cursor" Value="Hand"/>
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="CheckBox">
+          <Grid Background="{TemplateBinding Background}"
+                SnapsToDevicePixels="True">
+            <Border x:Name="Track"
+                    Width="36" Height="20"
+                    CornerRadius="10"
+                    Background="{DynamicResource Brush.Bg.Active}">
+              <Border x:Name="Dot"
+                      Width="16" Height="16"
+                      HorizontalAlignment="Left"
+                      VerticalAlignment="Center"
+                      CornerRadius="8"
+                      Background="{DynamicResource Brush.Text.Tertiary}">
+                <Border.RenderTransform>
+                  <TranslateTransform x:Name="DotTransform" X="2"/>
+                </Border.RenderTransform>
+              </Border>
+            </Border>
+          </Grid>
+
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsChecked" Value="True">
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="DotTransform"
+                                     Storyboard.TargetProperty="X"
+                                     To="18" Duration="0:0:0.16"/>
+                    <ColorAnimation Storyboard.TargetName="Track"
+                                    Storyboard.TargetProperty="Background.Color"
+                                    To="{DynamicResource Color.Accent}"
+                                    Duration="0:0:0.16"/>
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="DotTransform"
+                                     Storyboard.TargetProperty="X"
+                                     To="2" Duration="0:0:0.16"/>
+                    <ColorAnimation Storyboard.TargetName="Track"
+                                    Storyboard.TargetProperty="Background.Color"
+                                    To="{DynamicResource Color.Bg.Active}"
+                                    Duration="0:0:0.16"/>
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
+              <Setter TargetName="Dot" Property="Background" Value="#FFFFFF"/>
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter TargetName="Track" Property="Opacity" Value="0.5"/>
+              <Setter Property="Cursor" Value="Arrow"/>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+</ResourceDictionary>

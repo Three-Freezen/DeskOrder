@@ -14,6 +14,13 @@ namespace DesktopZones.Helpers;
 /// Uses DwmEnableBlurBehindWindow + SetWindowCompositionAttribute.
 /// Liquid Glass system inspired by ZenDesktop: 3 sliders (blur, tint, luminosity) + color presets.
 /// </summary>
+/// <summary>Result of a blur/composition P/Invoke. <c>Error</c> is null on success.</summary>
+public readonly record struct BlurResult(bool Success, string? Error)
+{
+    public static BlurResult Ok { get; } = new(true, null);
+    public static BlurResult Fail(string err) => new(false, err);
+}
+
 public static class AcrylicHelper
 {
     // ── DWM Blur Behind (works with layered/transparent windows) ──
@@ -130,9 +137,68 @@ public static class AcrylicHelper
                 return (uint)colorization;
             }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[AcrylicHelper] DwmGetColorizationColor: {ex}");
+        }
         // Fallback: purple accent
         return 0xFF_7C_3A_ED;
+    }
+
+    /// <summary>DWM blur-behind toggle. Logs + returns Fail on P/Invoke exception.</summary>
+    private static BlurResult TryBlurBehind(IntPtr hwnd, bool enable)
+    {
+        try
+        {
+            var bb = new DWM_BLURBEHIND
+            {
+                dwFlags = DWM_BB_ENABLE,
+                fEnable = enable,
+                hRgnBlur = IntPtr.Zero
+            };
+            DwmEnableBlurBehindWindow(hwnd, ref bb);
+            return BlurResult.Ok;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[AcrylicHelper] DwmEnableBlurBehindWindow(enable={enable}): {ex}");
+            return BlurResult.Fail(ex.Message);
+        }
+    }
+
+    /// <summary>Win10+ accent policy. Logs + returns Fail on P/Invoke exception.</summary>
+    private static BlurResult TrySetAccent(IntPtr hwnd, int accentState, int accentFlags, int gradientColor)
+    {
+        var ptr = IntPtr.Zero;
+        try
+        {
+            var accent = new AccentPolicy
+            {
+                AccentState = accentState,
+                AccentFlags = accentFlags,
+                GradientColor = gradientColor,
+                AnimationId = 0
+            };
+            ptr = Marshal.AllocHGlobal(Marshal.SizeOf(accent));
+            Marshal.StructureToPtr(accent, ptr, false);
+            var data = new WindowCompositionAttributeData
+            {
+                Attribute = 19, // WCA_ACCENT_POLICY
+                SizeOfData = Marshal.SizeOf(accent),
+                Data = ptr
+            };
+            SetWindowCompositionAttribute(hwnd, ref data);
+            return BlurResult.Ok;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[AcrylicHelper] SetWindowCompositionAttribute(state={accentState}): {ex}");
+            return BlurResult.Fail(ex.Message);
+        }
+        finally
+        {
+            if (ptr != IntPtr.Zero) Marshal.FreeHGlobal(ptr);
+        }
     }
 
     /// <summary>
@@ -191,20 +257,25 @@ public static class AcrylicHelper
     /// <param name="tintOpacity">Tint alpha 0-100%.</param>
     /// <param name="tintLuminosity">Color brightness 0-150%.</param>
     /// <param name="colorMode">Color preset name (Default, Accent, GlassWhite, etc.).</param>
-    public static void EnableBlur(Window window, int blurAmount, int tintOpacity, int tintLuminosity, string colorMode)
+    public static BlurResult EnableBlur(Window window, int blurAmount, int tintOpacity, int tintLuminosity, string colorMode)
     {
         var hwnd = new WindowInteropHelper(window).Handle;
-        if (hwnd == IntPtr.Zero) return;
+        if (hwnd == IntPtr.Zero) return BlurResult.Fail("Window handle not created yet");
 
         // Check DWM is on
         bool dwmOn = true;
-        try { DwmIsCompositionEnabled(out dwmOn); } catch { }
-        if (!dwmOn) return;
+        try { DwmIsCompositionEnabled(out dwmOn); }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[AcrylicHelper] DwmIsCompositionEnabled: {ex}");
+            return BlurResult.Fail(ex.Message);
+        }
+        if (!dwmOn) return BlurResult.Fail("DWM composition is disabled");
 
         if (blurAmount <= 0)
         {
             DisableBlur(window);
-            return;
+            return BlurResult.Ok;
         }
 
         // Calculate gradient color from color mode + tint settings
@@ -214,88 +285,27 @@ public static class AcrylicHelper
         int accentFlags = (Math.Clamp(blurAmount, 1, 60) << 8) | 0x100;
 
         // Primary: DWM Blur Behind (works with AllowsTransparency)
-        try
-        {
-            var bb = new DWM_BLURBEHIND
-            {
-                dwFlags = DWM_BB_ENABLE,
-                fEnable = true,
-                hRgnBlur = IntPtr.Zero
-            };
-            DwmEnableBlurBehindWindow(hwnd, ref bb);
-        }
-        catch { /* fallback */ }
+        var primary = TryBlurBehind(hwnd, true);
 
         // Secondary: Win10+ acrylic accent for stronger / varied effect
-        var accentPtr2 = IntPtr.Zero;
-        try
-        {
-            var accent = new AccentPolicy
-            {
-                AccentState = ACCENT_ENABLE_ACRYLICBLURBEHIND,
-                AccentFlags = accentFlags,
-                GradientColor = gradientColor,
-                AnimationId = 0
-            };
-            accentPtr2 = Marshal.AllocHGlobal(Marshal.SizeOf(accent));
-            Marshal.StructureToPtr(accent, accentPtr2, false);
-            var data = new WindowCompositionAttributeData
-            {
-                Attribute = 19, // WCA_ACCENT_POLICY
-                SizeOfData = Marshal.SizeOf(accent),
-                Data = accentPtr2
-            };
-            SetWindowCompositionAttribute(hwnd, ref data);
-        }
-        catch { /* optional enhancement */ }
-        finally
-        {
-            if (accentPtr2 != IntPtr.Zero) Marshal.FreeHGlobal(accentPtr2);
-        }
+        var secondary = TrySetAccent(hwnd, ACCENT_ENABLE_ACRYLICBLURBEHIND, accentFlags, gradientColor);
+
+        // Blur is considered enabled if either path worked.
+        if (primary.Success || secondary.Success) return BlurResult.Ok;
+        return BlurResult.Fail(primary.Error ?? secondary.Error ?? "unknown");
     }
 
     /// <summary>Disable blur on a window.</summary>
-    public static void DisableBlur(Window window)
+    public static BlurResult DisableBlur(Window window)
     {
         var hwnd = new WindowInteropHelper(window).Handle;
-        if (hwnd == IntPtr.Zero) return;
+        if (hwnd == IntPtr.Zero) return BlurResult.Fail("Window handle not created yet");
 
-        try
-        {
-            var bb = new DWM_BLURBEHIND
-            {
-                dwFlags = DWM_BB_ENABLE,
-                fEnable = false
-            };
-            DwmEnableBlurBehindWindow(hwnd, ref bb);
-        }
-        catch { }
+        var primary = TryBlurBehind(hwnd, false);
+        var secondary = TrySetAccent(hwnd, ACCENT_DISABLED, 0, 0);
 
-        var accentPtr = IntPtr.Zero;
-        try
-        {
-            var accent = new AccentPolicy
-            {
-                AccentState = ACCENT_DISABLED,
-                AccentFlags = 0,
-                GradientColor = 0,
-                AnimationId = 0
-            };
-            accentPtr = Marshal.AllocHGlobal(Marshal.SizeOf(accent));
-            Marshal.StructureToPtr(accent, accentPtr, false);
-            var data = new WindowCompositionAttributeData
-            {
-                Attribute = 19,
-                SizeOfData = Marshal.SizeOf(accent),
-                Data = accentPtr
-            };
-            SetWindowCompositionAttribute(hwnd, ref data);
-        }
-        catch { }
-        finally
-        {
-            if (accentPtr != IntPtr.Zero) Marshal.FreeHGlobal(accentPtr);
-        }
+        if (primary.Success || secondary.Success) return BlurResult.Ok;
+        return BlurResult.Fail(primary.Error ?? secondary.Error ?? "unknown");
     }
 
     /// <summary>
@@ -353,11 +363,11 @@ public static class AcrylicHelper
 
         var dlgBg = new Border
         {
-            Background = new SolidColorBrush(Color.FromRgb(0x10, 0x11, 0x1A)),
             CornerRadius = new CornerRadius(10),
-            BorderBrush = new SolidColorBrush(Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF)),
             BorderThickness = new Thickness(1)
         };
+        dlgBg.SetResourceReference(System.Windows.Controls.Border.BackgroundProperty, "Brush.Bg.Chrome");
+        dlgBg.SetResourceReference(System.Windows.Controls.Border.BorderBrushProperty, "Brush.Border.Subtle");
 
         var rootGrid = new Grid();
         rootGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // title bar
@@ -367,33 +377,34 @@ public static class AcrylicHelper
         // Custom title bar
         var titleBar = new Border
         {
-            Background = new SolidColorBrush(Color.FromRgb(0x10, 0x11, 0x1A)),
             CornerRadius = new CornerRadius(10, 10, 0, 0),
             Padding = new Thickness(12, 8, 12, 8),
             Cursor = System.Windows.Input.Cursors.SizeAll
         };
+        titleBar.SetResourceReference(System.Windows.Controls.Border.BackgroundProperty, "Brush.Bg.Chrome");
         titleBar.MouseLeftButtonDown += (_, _) => { try { dlg.DragMove(); } catch { } };
 
         var titlePanel = new System.Windows.Controls.StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal };
-        titlePanel.Children.Add(new System.Windows.Controls.TextBlock
+        var titleText = new System.Windows.Controls.TextBlock
         {
             Text = $"💧 {title}",
             FontSize = 14, FontWeight = FontWeights.SemiBold,
-            Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0)),
             VerticalAlignment = VerticalAlignment.Center
-        });
+        };
+        titleText.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "Brush.Text.Primary");
+        titlePanel.Children.Add(titleText);
 
         var closeBtn = new System.Windows.Controls.Button
         {
             Content = "✕", Width = 28, Height = 28,
             FontSize = 12, Cursor = System.Windows.Input.Cursors.Hand,
             Background = Brushes.Transparent,
-            Foreground = new SolidColorBrush(Color.FromRgb(0x80, 0x80, 0xA0)),
             BorderThickness = new Thickness(0),
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(0, 0, 0, 0)
         };
+        closeBtn.SetResourceReference(System.Windows.Controls.Control.ForegroundProperty, "Brush.Text.Secondary");
         closeBtn.Click += (_, _) => dlg.Close();
 
         var titleRow = new System.Windows.Controls.Grid();
@@ -428,12 +439,11 @@ public static class AcrylicHelper
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // buttons
 
-        var t1 = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0));
-        var t2 = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0xA0));
-        var accent = new SolidColorBrush(Color.FromRgb(0x7C, 0x3A, 0xED));
-        var ibg = new SolidColorBrush(Color.FromArgb(0x0A, 0xFF, 0xFF, 0xFF));
-        var ibd = new SolidColorBrush(Color.FromArgb(0x15, 0xFF, 0xFF, 0xFF));
-        var muted = new SolidColorBrush(Color.FromRgb(0x1E, 0x1E, 0x36));
+        var t1 = (Brush)Application.Current.FindResource("Brush.Text.Primary");
+        var t2 = (Brush)Application.Current.FindResource("Brush.Text.Secondary");
+        var accent = (Brush)Application.Current.FindResource("Brush.Accent.Solid");
+        var ibg = (Brush)Application.Current.FindResource("Brush.Bg.Input");
+        var ibd = (Brush)Application.Current.FindResource("Brush.Border.Subtle");
 
         int row = 0;
 
@@ -483,7 +493,9 @@ public static class AcrylicHelper
         });
         var presetCombo = ComboBoxHelper.Create(width: 220, fontSize: 12,
             margin: new Thickness(8, 0, 0, 0));
-        presetCombo.Foreground = System.Windows.Media.Brushes.White;
+        // ponytail: implicit Style from Controls/ComboBox.xaml sets Foreground to
+        // {DynamicResource Brush.Text.Primary} — leave it alone, don't bypass with a
+        // local brush reference (which would freeze the brush and skip theme follow).
         int selectedIdx = 0;
         for (int i = 0; i < ColorPresetNames.Count; i++)
         {
@@ -506,10 +518,10 @@ public static class AcrylicHelper
                 ? "模糊半径=0 关闭效果 | 亮度100%=原始色彩 | 预设决定基础色调"
                 : "Blur=0 disables | Luminosity 100%=original | Preset selects base tint",
             FontSize = 9,
-            Foreground = new SolidColorBrush(Color.FromRgb(0x60, 0x60, 0x80)),
             Margin = new Thickness(0, 4, 0, 0),
             TextWrapping = TextWrapping.Wrap
         };
+        hintTb.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "Brush.Text.Tertiary");
         Grid.SetRow(hintTb, row++);
         grid.Children.Add(hintTb);
 
@@ -618,11 +630,14 @@ public static class AcrylicHelper
         return grid;
     }
 
-    /// <summary>Backward-compat stub: calls the new liquid glass EnableBlur with sensible defaults.</summary>
+    /// <summary>Backward-compat overload: delegates to <see cref="EnableBlur(Window, int, int, int, string)"/> with liquid glass defaults.</summary>
     [Obsolete("Use EnableBlur(window, blurAmount, tintOpacity, tintLuminosity, colorMode) instead.")]
-    public static void EnableBlur(Window window, int __unused) { }
+    public static void EnableBlur(Window window, int __unused)
+    {
+        EnableBlur(window, 18, 50, 100, "Default");
+    }
 
-    /// <summary>Backward-compat stub.</summary>
+    /// <summary>Backward-compat wrapper: calls <see cref="EnableBlur(Window, int, int, int, string)"/> with default parameters. The hex argument is ignored; use the 5-arg overload to pass a color.</summary>
     public static void EnableAcrylicFromHex(Window window, string argbHex)
     {
         EnableBlur(window, 18, 50, 100, "Default");

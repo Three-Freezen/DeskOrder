@@ -187,6 +187,47 @@ public static class NativeMethods
     [DllImport("user32.dll")]
     public static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 
+    // ── Folder browser (Vista+ IFileOpenDialog is preferred; this is for legacy callers) ──
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    public static extern IntPtr SHBrowseForFolderW(ref BROWSEINFOW b);
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    public static extern bool SHGetPathFromIDListW(IntPtr p, System.Text.StringBuilder s);
+
+    [DllImport("ole32.dll")]
+    public static extern void CoTaskMemFree(IntPtr p);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct BROWSEINFOW
+    {
+        public IntPtr hwndOwner;
+        public IntPtr pidlRoot;
+        public IntPtr pszDisplayName;
+        [MarshalAs(UnmanagedType.LPWStr)] public string lpszTitle;
+        public uint ulFlags;
+        public IntPtr lpfn;
+        public IntPtr lParam;
+        public int iImage;
+    }
+
+    // ── Win32 file drop (for transparent-window fallback) ──
+    public const int WM_DROPFILES = 0x0233;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct POINT { public int x; public int y; }
+
+    [DllImport("shell32.dll")]
+    public static extern void DragAcceptFiles(IntPtr h, bool a);
+
+    [DllImport("shell32.dll")]
+    public static extern void DragFinish(IntPtr h);
+
+    [DllImport("shell32.dll")]
+    public static extern uint DragQueryFile(IntPtr h, uint i, System.Text.StringBuilder? f, uint c);
+
+    [DllImport("shell32.dll")]
+    public static extern bool DragQueryPoint(IntPtr h, out POINT p);
+
     // Extract icon from file
     [DllImport("shell32.dll")]
     public static extern int ExtractIconEx(string lpszFile, int nIconIndex,

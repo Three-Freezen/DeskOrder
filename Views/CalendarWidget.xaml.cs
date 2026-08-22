@@ -10,6 +10,7 @@ using DesktopZones.Helpers;
 using DesktopZones.Models;
 using DesktopZones.Services;
 using DesktopZones.ViewModels;
+using DesktopZones.Views.Components;
 
 namespace DesktopZones.Views;
 
@@ -26,6 +27,12 @@ public partial class CalendarWidget : Window
     private readonly WidgetService _widgetService;
     private readonly CalendarViewModel _vm;
     private readonly LocalizationService _loc = LocalizationService.Instance;
+    private HoverExpandBehavior? _hover;
+    // ponytail: track generators we subscribed to in SubscribeDayCellStatusChanged so
+    // OnClosed can detach without keeping a parallel list. IDisposable pattern: WPF event
+    // -= requires the same delegate reference, but DayCellStatus_Changed is a shared
+    // method — so we just remember the generator object and detach the method.
+    private readonly List<ItemContainerGenerator> _subscribedDayCellGenerators = new();
 
     public CalendarWidget(DesktopCalendar calendar, WidgetService widgetService)
     {
@@ -55,6 +62,16 @@ public partial class CalendarWidget : Window
         // this widget's lock state immediately syncs the open window.
         _widgetService.LockChanged += OnServiceLockChanged;
         ApplyLoc();
+        // ponytail: hover-expand (Task 14d). Wired after InitializeComponent and
+        // before any user interaction can occur.
+        _hover = new HoverExpandBehavior(this, RestoreButton, MainContent, ToggleExpandBtn,
+            () => _calendar.HoverExpandAnimation,
+            () => _calendar.HoverExpandSpeed,
+            () => _calendar.HoverExpandOrigin)
+        { IsEnabled = _calendar.EnableRestoreButton };
+        // ponytail: bug fix — see ZoneWindow ctor. Window.Show() (OpenCalendarWindow /
+        // --spawn-widget) bypasses ShowCalendar, so SnapToExpanded never runs.
+        if (_calendar.IsVisible) _hover.SnapToExpanded();
     }
     private Action<Services.Language>? _langChanged;
 
@@ -214,7 +231,17 @@ public partial class CalendarWidget : Window
         {
             if (ic.ItemsSource == null) continue;
             ic.ItemContainerGenerator.StatusChanged += DayCellStatus_Changed;
+            _subscribedDayCellGenerators.Add(ic.ItemContainerGenerator);
         }
+    }
+
+    void UnsubscribeDayCellStatusChanged()
+    {
+        foreach (var gen in _subscribedDayCellGenerators)
+        {
+            gen.StatusChanged -= DayCellStatus_Changed;
+        }
+        _subscribedDayCellGenerators.Clear();
     }
 
     void DayCellStatus_Changed(object? sender, EventArgs e)
@@ -291,8 +318,10 @@ public partial class CalendarWidget : Window
 
         if (_calendar.EnableAcrylic)
         {
-            AcrylicHelper.EnableBlur(this, _calendar.GlassBlurAmount, _calendar.GlassTintOpacity,
+            var blurResult = AcrylicHelper.EnableBlur(this, _calendar.GlassBlurAmount, _calendar.GlassTintOpacity,
                 _calendar.GlassTintLuminosity, _calendar.GlassColorMode);
+            if (!blurResult.Success)
+                System.Diagnostics.Debug.WriteLine($"[CalendarWidget] EnableBlur failed: {blurResult.Error}");
         }
         else
         {
@@ -312,7 +341,9 @@ public partial class CalendarWidget : Window
                 bi.BeginInit();
                 bi.UriSource = new Uri(_calendar.BackgroundImagePath);
                 bi.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+                bi.DecodePixelWidth = 1920;
                 bi.EndInit();
+                bi.Freeze();
                 CalBgImage.Source = bi;
                 CalBgImage.Stretch = Stretch.UniformToFill;
                 double cw = CalBgBorder.ActualWidth > 0 ? CalBgBorder.ActualWidth : 300;
@@ -391,6 +422,7 @@ public partial class CalendarWidget : Window
         ApplyAcrylic();
         ApplyBackgroundImage();
         ApplyStyle();
+        _hover?.SetEnabled(_calendar.EnableRestoreButton);
     }
 
     void ApplyLoc()
@@ -804,6 +836,13 @@ public partial class CalendarWidget : Window
         Close();
     }
 
+    void ToggleExpandBtn_Click(object s, RoutedEventArgs e)
+    {
+        // ponytail: hover-expand toggle button routes to the property window (spec §7.2).
+        PropertyWindowService.OpenOrFocus(_calendar);
+        e.Handled = true;
+    }
+
     /// <summary>Snapshot the currently-displayed fill brush so the style dialog can restore it
     /// after any path that might have re-synced FillRect to model (e.g. OnLoad's ApplyAcrylic
     /// on first show, or PushToWidget during live preview that user later cancels).</summary>
@@ -820,13 +859,12 @@ public partial class CalendarWidget : Window
     public void ShowCalendar(bool skipResync = false)
     {
         if (!IsVisible) Show();
-        // ponytail: skipResync=true when called from the style dialog (ShowCalendarAppearanceDialog).
+        // ponytail: skipResync=true when called from the property window (was the style dialog).
         // Skip BOTH ApplyAcrylic() and UpdateCalendar(_calendar):
         //   - ApplyAcrylic would read model and write FillRect directly.
         //   - UpdateCalendar would fire CalendarsChanged → OnCalendarsChanged → SyncFillRect → same result.
-        // Without this, the FillRect "snaps" to model the moment the dialog opens, even though
-        // the user hasn't touched anything. Cancel branch in ShowCalendarAppearanceDialog restores
-        // IsVisible and calls UpdateCalendar, so persistence still happens correctly.
+        // Without this, the FillRect "snaps" to model the moment the property window opens, even
+        // though the user hasn't touched anything.
         if (!skipResync)
         {
             ApplyAcrylic();
@@ -839,6 +877,7 @@ public partial class CalendarWidget : Window
         }
         Left = _calendar.X; Top = _calendar.Y;
         MainContent.Visibility = Visibility.Visible; RestoreButton.Visibility = Visibility.Collapsed;
+        _hover?.SnapToExpanded();
         MinWidth = 260; MinHeight = 460;
         Width = _calendar.Width > 260 ? _calendar.Width : 320;
         Height = _calendar.Height > 340 ? _calendar.Height : 440;
@@ -851,23 +890,22 @@ public partial class CalendarWidget : Window
     public void HideCalendar()
     {
         _calendar.X = Left; _calendar.Y = Top; _calendar.Width = Width; _calendar.Height = Height;
-        // Always disable blur and clean up state before hiding
         AcrylicHelper.DisableBlur(this);
-        MainContent.Visibility = Visibility.Collapsed;
-        MinWidth = 36; MinHeight = 36;
-        Width = 36; Height = 36;
         NativeMethods.DisableRoundedCorners(this);
         if (!_calendar.EnableRestoreButton)
         {
+            MainContent.Visibility = Visibility.Collapsed;
+            MinWidth = 36; MinHeight = 36;
+            Width = 36; Height = 36;
             Hide();
         }
         else
         {
-            RestoreButton.Visibility = Visibility.Visible;
+            // ponytail: minimized — let HoverExpandBehavior handle visibility/scale
             if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
+            _hover?.CollapseAnimated();
         }
         _calendar.IsVisible = false;
-        // Update AFTER Hide() to ensure correct state when event fires
         _widgetService.UpdateCalendar(_calendar);
     }
 
@@ -875,16 +913,17 @@ public partial class CalendarWidget : Window
     {
         AcrylicHelper.DisableBlur(this);
         NativeMethods.DisableRoundedCorners(this);
-        MainContent.Visibility = Visibility.Collapsed;
-        MinWidth = 36; MinHeight = 36;
-        Width = 36; Height = 36;
         if (!_calendar.EnableRestoreButton)
         {
+            MainContent.Visibility = Visibility.Collapsed;
+            MinWidth = 36; MinHeight = 36;
+            Width = 36; Height = 36;
             Hide();
         }
         else
         {
-            RestoreButton.Visibility = Visibility.Visible;
+            // ponytail: minimized — window stays at full size, content collapses
+            _hover?.SnapToCollapsed();
         }
     }
 
@@ -912,7 +951,7 @@ public partial class CalendarWidget : Window
     void Restore_MouseUp(object s, MouseButtonEventArgs e)
     {
         RestoreButton.ReleaseMouseCapture();
-        if (!_restoreDragging) { ShowCalendar(); _widgetService.UpdateCalendar(_calendar); }
+        if (!_restoreDragging) { _hover?.ExpandAnimated(permanent: true); _widgetService.UpdateCalendar(_calendar); }
     }
 
     void Restore_Enter(object s, MouseEventArgs e) { RestoreButton.Background = new SolidColorBrush(Color.FromArgb(0xFF, 0x2A, 0x2A, 0x4E)); }
@@ -920,10 +959,12 @@ public partial class CalendarWidget : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        UnsubscribeDayCellStatusChanged();
         if (_langChanged != null) _loc.LanguageChanged -= _langChanged;
         _langChanged = null;
         _widgetService.LockChanged -= OnServiceLockChanged;
         _widgetService.UpdateCalendar(_calendar);
+        _hover?.Dispose();
         base.OnClosed(e);
     }
 }

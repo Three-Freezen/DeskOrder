@@ -1,0 +1,34 @@
+<UserControl x:Class="DesktopZones.Views.Pages.PanelPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:components="clr-namespace:DesktopZones.Views.Components">
+  <DockPanel>
+    <Border DockPanel.Dock="Top" Padding="20,16,20,8">
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto"/>
+          <ColumnDefinition Width="*"/>
+          <ColumnDefinition Width="Auto"/>
+        </Grid.ColumnDefinitions>
+        <StackPanel Grid.Column="0" Orientation="Horizontal">
+          <TextBlock Text="面板" FontSize="16" FontWeight="SemiBold"
+                     Foreground="{DynamicResource Brush.Text.Primary}" VerticalAlignment="Center"/>
+          <TextBlock x:Name="CountLabel" Margin="8,0,0,0" FontSize="11"
+                     FontFamily="Cascadia Code, Consolas, monospace"
+                     Foreground="{DynamicResource Brush.Text.Tertiary}" VerticalAlignment="Center"/>
+        </StackPanel>
+        <Button Grid.Column="2" Content="切换面板" Click="Toggle_Click" Cursor="Hand"
+                Background="{DynamicResource Brush.Accent.Solid}"
+                Foreground="{DynamicResource Brush.Accent.On}" FontWeight="SemiBold"
+                Padding="14,6" BorderThickness="0"/>
+      </Grid>
+    </Border>
+    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="20,0,20,12">
+      <ItemsControl x:Name="ListHost">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate><StackPanel/></ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+      </ItemsControl>
+    </ScrollViewer>
+  </DockPanel>
+</UserControl>

@@ -13,13 +13,16 @@
         Background="Transparent">
 
     <Window.Resources>
-        <SolidColorBrush x:Key="Bg" Color="#E610111A"/>
-        <SolidColorBrush x:Key="Acc" Color="#7C3AED"/>
-        <SolidColorBrush x:Key="T1" Color="#E8E8F0"/>
-        <SolidColorBrush x:Key="T2" Color="#8888A0"/>
-        <SolidColorBrush x:Key="T3" Color="#606080"/>
-        <SolidColorBrush x:Key="IBg" Color="#0AFFFFFF"/>
-        <SolidColorBrush x:Key="IBd" Color="#15FFFFFF"/>
+        <!-- Chrome brush aliases (point at global Brush.* tokens). Kept under the legacy
+             keys so per-card DataTemplate references still resolve while inheriting the
+             theme-aware colors. -->
+        <SolidColorBrush x:Key="Bg"  Color="{DynamicResource Color.Bg.Chrome}"/>
+        <SolidColorBrush x:Key="Acc" Color="{DynamicResource Color.Accent.Solid}"/>
+        <SolidColorBrush x:Key="T1"  Color="{DynamicResource Color.Text.Primary}"/>
+        <SolidColorBrush x:Key="T2"  Color="{DynamicResource Color.Text.Secondary}"/>
+        <SolidColorBrush x:Key="T3"  Color="{DynamicResource Color.Text.Tertiary}"/>
+        <SolidColorBrush x:Key="IBg" Color="{DynamicResource Color.Bg.Input}"/>
+        <SolidColorBrush x:Key="IBd" Color="{DynamicResource Color.Border.Subtle}"/>
 
         <!-- Shared card preview backing: same gradient every card uses as its base canvas
              (matches the gradient placeholder ZoneCard originally drew on top of FillColor).
@@ -668,11 +671,11 @@
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
                     <Border Margin="8,8,8,2" ClipToBounds="True"
-                            CornerRadius="{Binding Payload.MergedGroupCornerRadius}"
-                            BorderThickness="{Binding Payload.MergedGroupBorderThickness}"
-                            Background="{Binding Payload.MergedGroupFillColor, Converter={StaticResource Hex2Color}, FallbackValue=#08000000}">
+                            CornerRadius="{Binding Payload.MergedGroupStyle.CornerRadius}"
+                            BorderThickness="{Binding Payload.MergedGroupStyle.BorderThickness}"
+                            Background="{Binding Payload.MergedGroupStyle.FillColor, Converter={StaticResource Hex2Color}, FallbackValue=#08000000}">
                         <Border.BorderBrush>
-                            <SolidColorBrush Color="{Binding Payload.MergedGroupBorderColor, Converter={StaticResource Hex2Color}}"/>
+                            <SolidColorBrush Color="{Binding Payload.MergedGroupStyle.BorderColor, Converter={StaticResource Hex2Color}}"/>
                         </Border.BorderBrush>
                         <Grid>
                             <Grid.RowDefinitions>
@@ -683,18 +686,18 @@
                             </Grid.RowDefinitions>
                             <Rectangle Grid.RowSpan="4" Stretch="Fill" IsHitTestVisible="False">
                                 <Rectangle.Fill>
-                                    <SolidColorBrush Color="{Binding Payload.MergedGroupFillColor, Converter={StaticResource Hex2Color}, FallbackValue=#08000000}"/>
+                                    <SolidColorBrush Color="{Binding Payload.MergedGroupStyle.FillColor, Converter={StaticResource Hex2Color}, FallbackValue=#08000000}"/>
                                 </Rectangle.Fill>
                             </Rectangle>
-                            <Image Grid.RowSpan="4" Source="{Binding Payload.MergedGroupBackgroundImagePath}" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality">
+                            <Image Grid.RowSpan="4" Source="{Binding Payload.MergedGroupStyle.BackgroundImagePath}" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality">
                                 <Image.Opacity>
-                                    <Binding Path="Payload.MergedGroupBackgroundImageOpacity" Converter="{StaticResource PercentToOpacity}" FallbackValue="0.3"/>
+                                    <Binding Path="Payload.MergedGroupStyle.BackgroundImageOpacity" Converter="{StaticResource PercentToOpacity}" FallbackValue="0.3"/>
                                 </Image.Opacity>
                                 <Image.Style>
                                     <Style TargetType="Image">
                                         <Setter Property="Visibility" Value="Visible"/>
                                         <Style.Triggers>
-                                            <DataTrigger Binding="{Binding Payload.MergedGroupBackgroundImagePath}" Value="">
+                                            <DataTrigger Binding="{Binding Payload.MergedGroupStyle.BackgroundImagePath}" Value="">
                                                 <Setter Property="Visibility" Value="Collapsed"/>
                                             </DataTrigger>
                                         </Style.Triggers>
@@ -704,18 +707,18 @@
                             <!-- Row 0: Title bar (matches ZoneWindow TitleBarBg Height=24 scaled to 14) -->
                             <Border Grid.Row="0" CornerRadius="3,3,0,0">
                                 <Border.Background>
-                                    <SolidColorBrush Color="{Binding Payload.MergedGroupTitleBarFillColor, Converter={StaticResource Hex2Color}, FallbackValue=#FF7C3AED}"/>
+                                    <SolidColorBrush Color="{Binding Payload.MergedGroupStyle.TitleBarFillColor, Converter={StaticResource Hex2Color}, FallbackValue=#FF7C3AED}"/>
                                 </Border.Background>
                                 <Grid ClipToBounds="True">
                                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="3,0,0,0">
                                         <TextBlock Text="⊞" FontSize="9" VerticalAlignment="Center" Margin="0,0,3,0">
                                             <TextBlock.Foreground>
-                                                <SolidColorBrush Color="{Binding Payload.MergedGroupIconColor, Converter={StaticResource Hex2Color}, FallbackValue=#FFFFFF}"/>
+                                                <SolidColorBrush Color="{Binding Payload.MergedGroupStyle.IconColor, Converter={StaticResource Hex2Color}, FallbackValue=#FFFFFF}"/>
                                             </TextBlock.Foreground>
                                         </TextBlock>
                                         <TextBlock Text="Merged Group" FontSize="8" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="80">
                                             <TextBlock.Foreground>
-                                                <SolidColorBrush Color="{Binding Payload.MergedGroupTitleTextColor, Converter={StaticResource Hex2Color}, FallbackValue=#FFFFFF}"/>
+                                                <SolidColorBrush Color="{Binding Payload.MergedGroupStyle.TitleTextColor, Converter={StaticResource Hex2Color}, FallbackValue=#FFFFFF}"/>
                                             </TextBlock.Foreground>
                                         </TextBlock>
                                     </StackPanel>

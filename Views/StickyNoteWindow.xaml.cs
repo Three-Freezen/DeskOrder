@@ -13,6 +13,7 @@ using DesktopZones.Helpers;
 using DesktopZones.Models;
 using DesktopZones.Services;
 using DesktopZones.ViewModels;
+using DesktopZones.Views.Components;
 
 namespace DesktopZones.Views;
 
@@ -23,6 +24,14 @@ public partial class StickyNoteWindow : Window
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+    // ponytail: frozen hover brushes — same color on every mouse-over.
+    private static readonly SolidColorBrush RestoreHoverBrush = Freeze(new(Color.FromArgb(0xFF, 0x2A, 0x2A, 0x4E)));
+    private static readonly SolidColorBrush RestoreIdleBrush  = Freeze(new(Color.FromArgb(0xDD, 0x1A, 0x1A, 0x2E)));
+    private static readonly SolidColorBrush PinHoverBrush     = Freeze(new(Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF)));
+    private static readonly SolidColorBrush LockHoverBrush    = Freeze(new(Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF)));
+    static SolidColorBrush Freeze(SolidColorBrush b) { b.Freeze(); return b; }
+
     private StickyNote _note;
     private readonly NotesService _notesService;
     private StickyNoteViewModel _vm;
@@ -35,6 +44,7 @@ public partial class StickyNoteWindow : Window
     // TitleBarTextColorAdaptive=true; null in non-adaptive mode. Hover/click handlers read
     // this instead of hardcoded #80FFFFFF so they don't clobber the adaptive color.
     private SolidColorBrush? _titleBarAdaptiveBrush;
+    private HoverExpandBehavior? _hover;
 
     public StickyNoteWindow(StickyNote note, NotesService notesService)
     {
@@ -73,6 +83,17 @@ public partial class StickyNoteWindow : Window
 
         ApplyLockState();
         _initializing = false;
+        // ponytail: hover-expand (Task 14d). Wired after InitializeComponent and
+        // before any user interaction can occur.
+        _hover = new HoverExpandBehavior(this, RestoreButton, MainContent, ToggleExpandBtn,
+            () => _note.HoverExpandAnimation,
+            () => _note.HoverExpandSpeed,
+            () => _note.HoverExpandOrigin)
+        { IsEnabled = _note.EnableRestoreButton };
+        // ponytail: bug fix — see ZoneWindow ctor. ShowNoteFromService / OpenNoteWindow
+        // call window.Show() without going through the equivalent of ShowZone, so
+        // SnapToExpanded never runs.
+        if (_note.IsVisible) _hover.SnapToExpanded();
     }
 
     void OnNotesChanged()
@@ -141,7 +162,16 @@ public partial class StickyNoteWindow : Window
     {
         if (!string.IsNullOrEmpty(_note.LastSavePath) && File.Exists(_note.LastSavePath))
         {
-            File.WriteAllText(_note.LastSavePath, SaveFormatted(), System.Text.Encoding.UTF8);
+            try
+            {
+                File.WriteAllText(_note.LastSavePath, SaveFormatted(), System.Text.Encoding.UTF8);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"{LocalizationService.Instance["Note.SaveFailed"]}\n{ex.Message}",
+                    LocalizationService.Instance["Note.SaveFailed.Title"],
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
         }
         else
         {
@@ -165,9 +195,18 @@ public partial class StickyNoteWindow : Window
         };
         if (dlg.ShowDialog() == true)
         {
-            _note.LastSavePath = dlg.FileName;
-            File.WriteAllText(dlg.FileName, SaveFormatted(), System.Text.Encoding.UTF8);
-            Save();
+            try
+            {
+                File.WriteAllText(dlg.FileName, SaveFormatted(), System.Text.Encoding.UTF8);
+                _note.LastSavePath = dlg.FileName; // ponytail: only on success
+                Save();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"{LocalizationService.Instance["Note.SaveFailed"]}\n{ex.Message}",
+                    LocalizationService.Instance["Note.SaveFailed.Title"],
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
         }
     }
 
@@ -184,10 +223,19 @@ public partial class StickyNoteWindow : Window
         };
         if (dlg.ShowDialog() == true)
         {
-            string content = File.ReadAllText(dlg.FileName, System.Text.Encoding.UTF8);
-            LoadFormatted(content);
-            _note.LastSavePath = dlg.FileName;
-            Save();
+            try
+            {
+                string content = File.ReadAllText(dlg.FileName, System.Text.Encoding.UTF8);
+                LoadFormatted(content);
+                _note.LastSavePath = dlg.FileName;
+                Save();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"{LocalizationService.Instance["Note.OpenFailed"]}\n{ex.Message}",
+                    LocalizationService.Instance["Note.OpenFailed.Title"],
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
         }
     }
 
@@ -391,6 +439,7 @@ public partial class StickyNoteWindow : Window
         ApplyAcrylic();
         Left = _note.X; Top = _note.Y;
         MainContent.Visibility = Visibility.Visible; RestoreButton.Visibility = Visibility.Collapsed;
+        _hover?.SnapToExpanded();
         MinWidth = 180; MinHeight = 120;
         _note.IsVisible = true; if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
         NativeMethods.SetRoundedCorners(this, 10);
@@ -407,23 +456,22 @@ public partial class StickyNoteWindow : Window
     public void HideNote()
     {
         _note.X = Left; _note.Y = Top; _note.Width = Width; _note.Height = Height;
-        // Always disable blur and clean up state before hiding
         AcrylicHelper.DisableBlur(this);
-        MainContent.Visibility = Visibility.Collapsed;
-        MinWidth = 36; MinHeight = 36;
-        Width = 36; Height = 36;
         NativeMethods.DisableRoundedCorners(this);
         if (!_note.EnableRestoreButton)
         {
+            MainContent.Visibility = Visibility.Collapsed;
+            MinWidth = 36; MinHeight = 36;
+            Width = 36; Height = 36;
             Hide();
         }
         else
         {
-            RestoreButton.Visibility = Visibility.Visible;
+            // ponytail: minimized — let HoverExpandBehavior handle visibility/scale
             if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
+            _hover?.CollapseAnimated();
         }
         _note.IsVisible = false;
-        // Update AFTER Hide() to ensure correct state when event fires
         _notesService.UpdateNote(_note);
         OnStateChanged?.Invoke();
     }
@@ -432,16 +480,17 @@ public partial class StickyNoteWindow : Window
     {
         AcrylicHelper.DisableBlur(this);
         NativeMethods.DisableRoundedCorners(this);
-        MainContent.Visibility = Visibility.Collapsed;
-        MinWidth = 36; MinHeight = 36;
-        Width = 36; Height = 36;
         if (!_note.EnableRestoreButton)
         {
+            MainContent.Visibility = Visibility.Collapsed;
+            MinWidth = 36; MinHeight = 36;
+            Width = 36; Height = 36;
             Hide();
         }
         else
         {
-            RestoreButton.Visibility = Visibility.Visible;
+            // ponytail: minimized — window stays at full size, content collapses
+            _hover?.SnapToCollapsed();
         }
     }
 
@@ -469,11 +518,11 @@ public partial class StickyNoteWindow : Window
     void Restore_MouseUp(object s, MouseButtonEventArgs e)
     {
         RestoreButton.ReleaseMouseCapture();
-        ShowNote();
+        _hover?.ExpandAnimated(permanent: true);
     }
 
-    void Restore_Enter(object s, MouseEventArgs e) { RestoreButton.Background = new SolidColorBrush(Color.FromArgb(0xFF, 0x2A, 0x2A, 0x4E)); }
-    void Restore_Leave(object s, MouseEventArgs e) { RestoreButton.Background = new SolidColorBrush(Color.FromArgb(0xDD, 0x1A, 0x1A, 0x2E)); }
+    void Restore_Enter(object s, MouseEventArgs e) { RestoreButton.Background = RestoreHoverBrush; }
+    void Restore_Leave(object s, MouseEventArgs e) { RestoreButton.Background = RestoreIdleBrush; }
 
     // ── Acrylic / frosted glass ──
 
@@ -486,8 +535,10 @@ public partial class StickyNoteWindow : Window
 
         if (_note.EnableAcrylic)
         {
-            AcrylicHelper.EnableBlur(this, _note.GlassBlurAmount, _note.GlassTintOpacity,
+            var blurResult = AcrylicHelper.EnableBlur(this, _note.GlassBlurAmount, _note.GlassTintOpacity,
                 _note.GlassTintLuminosity, _note.GlassColorMode);
+            if (!blurResult.Success)
+                System.Diagnostics.Debug.WriteLine($"[StickyNoteWindow] EnableBlur failed: {blurResult.Error}");
             try
             {
                 // Use fillColor directly — its ARGB alpha controls transparency
@@ -525,7 +576,17 @@ public partial class StickyNoteWindow : Window
             // Apply title bar fill with ARGB alpha controlling background transparency
             var tbColor = (Color)ColorConverter.ConvertFromString(_note.TitleBarFillColor);
             TitleBarBorder.Background = new SolidColorBrush(tbColor);
-            // Apply title text color — adaptive mode overrides TitleTextColor
+            // ponytail: TitleBox 始终用用户设置的 TitleTextColor,不受 TitleBarTextColorAdaptive 开关影响。
+            // 自适应只控制标题栏按钮(SaveBtn/PinBtn/HideBtn/LockBtn)——它们没有"用户设置的颜色"概念,
+            // 必须根据背景自动算对比色。标题文字本身是用户主动选的颜色,直接生效即可。
+            if (!string.IsNullOrEmpty(_note.TitleTextColor))
+            {
+                var tc = (Color)ColorConverter.ConvertFromString(_note.TitleTextColor);
+                var titleBrush = new SolidColorBrush(tc);
+                TitleBox.Foreground = titleBrush;
+                TitleBox.CaretBrush = titleBrush;
+            }
+            // Adaptive mode only drives button colors
             if (_note.TitleBarTextColorAdaptive)
             {
                 // ponytail: TitleBarFillColor is a translucent layer over the body fill, so
@@ -537,8 +598,6 @@ public partial class StickyNoteWindow : Window
                 string bottom = _note.UseGlobalAppearance ? cfg.GlobalFillColor : _note.FillColor;
                 var brush = AdaptiveTextColor.ResolveBrushOver(_note.TitleBarFillColor, bottom);
                 _titleBarAdaptiveBrush = brush; // cache for Leave/Click handlers
-                TitleBox.Foreground = brush;
-                TitleBox.CaretBrush = brush;
                 // Title bar buttons (SaveBtn/PinBtn/HideBtn live inside TitleBarBorder)
                 if (SaveBtn != null) SaveBtn.Foreground = brush;
                 if (HideBtn != null) HideBtn.Foreground = brush;
@@ -557,12 +616,6 @@ public partial class StickyNoteWindow : Window
                 // (#80FFFFFF) — Leave handler will pick this up via the cache=null fallback.
                 if (LockBtn != null)
                     LockBtn.Foreground = new SolidColorBrush(Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF));
-                if (!string.IsNullOrEmpty(_note.TitleTextColor))
-                {
-                    var tc = (Color)ColorConverter.ConvertFromString(_note.TitleTextColor);
-                    TitleBox.Foreground = new SolidColorBrush(tc);
-                    TitleBox.CaretBrush = new SolidColorBrush(tc);
-                }
             }
         }
         catch { }
@@ -626,7 +679,9 @@ public partial class StickyNoteWindow : Window
                 bi.BeginInit();
                 bi.UriSource = new Uri(_note.BackgroundImagePath);
                 bi.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+                bi.DecodePixelWidth = 1920;
                 bi.EndInit();
+                bi.Freeze();
                 NoteBgImage.Source = bi;
                 NoteBgImage.Stretch = Stretch.UniformToFill;
                 double nw = NoteBgBorder.ActualWidth > 0 ? NoteBgBorder.ActualWidth : Width;
@@ -680,6 +735,7 @@ public partial class StickyNoteWindow : Window
         // Without this, FillColor changes update the background but the toolbar buttons (Bold,
         // Italic, Underline, FontColor, FontSizeCombo, RestoreIconChar) keep their old colors.
         RefreshTextColorAdaptive();
+        _hover?.SetEnabled(_note.EnableRestoreButton);
     }
 
     // ── Title bar ──
@@ -711,7 +767,7 @@ public partial class StickyNoteWindow : Window
 
     void PinBtn_Enter(object s, MouseEventArgs e)
     {
-        PinBtn.Background = new SolidColorBrush(Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF));
+        PinBtn.Background = PinHoverBrush;
         PinBtn.Foreground = Brushes.White;
     }
 
@@ -782,7 +838,7 @@ public partial class StickyNoteWindow : Window
 
     void LockBtn_Enter(object s, MouseEventArgs e)
     {
-        LockBtn.Background = new SolidColorBrush(Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF));
+        LockBtn.Background = LockHoverBrush;
         LockBtn.Foreground = Brushes.White;
     }
 
@@ -827,6 +883,13 @@ public partial class StickyNoteWindow : Window
         Close();
     }
 
+    void ToggleExpandBtn_Click(object s, RoutedEventArgs e)
+    {
+        // ponytail: hover-expand toggle button routes to the property window (spec §7.2).
+        PropertyWindowService.OpenOrFocus(_note);
+        e.Handled = true;
+    }
+
     void TitleBox_LostFocus(object s, RoutedEventArgs e)
     {
         _vm.Title = TitleBox.Text;
@@ -857,6 +920,8 @@ public partial class StickyNoteWindow : Window
         _vm.ApplyToModel();
         _notesService.UpdateNote(_note);
         _notesService.LockChanged -= OnServiceLockChanged;
+        _notesService.NotesChanged -= OnNotesChanged;
+        _hover?.Dispose();
         base.OnClosed(e);
     }
 

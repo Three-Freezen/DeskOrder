@@ -45,6 +45,17 @@ public partial class App : System.Windows.Application
 
     private void Application_Startup(object sender, StartupEventArgs e)
     {
+        // ponytail: capture all Debug.WriteLine output to a file so we can post-mortem
+        // hover-expand behavior without attaching a debugger.
+        try
+        {
+            var tracePath = @"D:\BS\he_debug.log";
+            var tw = new System.IO.StreamWriter(tracePath, append: true) { AutoFlush = true };
+            System.Diagnostics.Trace.Listeners.Add(new System.Diagnostics.TextWriterTraceListener(tw));
+            System.Diagnostics.Trace.AutoFlush = true;
+        }
+        catch { }
+
         // Single-instance check
         _mutex = new Mutex(true, "DeskOrder_SingleInstance", out bool createdNew);
         if (!createdNew)
@@ -57,12 +68,26 @@ public partial class App : System.Windows.Application
         DispatcherUnhandledException += (s, args) =>
         {
             System.Diagnostics.Debug.WriteLine($"[DeskOrder] Unhandled: {args.Exception}");
-            MessageBox.Show($"Unhandled error:\n{args.Exception.Message}\n\n{args.Exception.StackTrace}",
-                "DeskOrder Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            var ex = args.Exception;
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"Outer: {ex.GetType().FullName}");
+            for (int i = 0; ex != null && i < 8; i++)
+            {
+                sb.AppendLine($"[{i}] {ex.GetType().FullName}: {ex.Message}");
+                ex = ex.InnerException;
+            }
+            sb.AppendLine("--- Stack ---");
+            sb.AppendLine(args.Exception.StackTrace);
+            MessageBox.Show(sb.ToString(), "DeskOrder Error", MessageBoxButton.OK, MessageBoxImage.Error);
             args.Handled = true;
         };
 
+        // Apply runtime theme: load config first so the persisted ThemeMode wins
+        // over the OS default on startup. Without this the user picks Dark, restarts,
+        // and the window reverts to whatever the OS happens to be set to.
         _configService = new ConfigService();
+        ThemeService.Apply(ParseThemeMode(_configService.Load().ThemeMode));
+        ThemeService.StartListeningToSystem();
         _zoneManager = new ZoneManager(_configService);
         _notesService = new NotesService(_configService);
         _widgetService = new WidgetService(_configService);
@@ -118,13 +143,14 @@ public partial class App : System.Windows.Application
         RefreshNoteHotkeys();
 
         // Register panel hotkey
-        if (config.PanelHotkeyEnabled && _mainHwnd != IntPtr.Zero)
+        if (config.PanelHotkey.PanelHotkeyEnabled && _mainHwnd != IntPtr.Zero)
         {
-            bool ok = NativeMethods.RegisterHotKey(_mainHwnd, HOTKEY_ID_PANEL, (uint)config.PanelHotkeyModifiers, (uint)config.PanelHotkeyKey);
+            bool ok = NativeMethods.RegisterHotKey(_mainHwnd, HOTKEY_ID_PANEL, (uint)config.PanelHotkey.PanelHotkeyModifiers, (uint)config.PanelHotkey.PanelHotkeyKey);
             if (!ok)
             {
                 // Hotkey registration failed — likely conflict with another app or system shortcut
-                System.Diagnostics.Debug.WriteLine($"[DeskOrder] Failed to register panel hotkey: 0x{config.PanelHotkeyModifiers:X}+0x{config.PanelHotkeyKey:X}");
+                System.Diagnostics.Debug.WriteLine($"[DeskOrder] Failed to register panel hotkey: 0x{config.PanelHotkey.PanelHotkeyModifiers:X}+0x{config.PanelHotkey.PanelHotkeyKey:X}");
+                _trayIcon?.ShowBalloonTip("快捷键注册失败", $"另一程序可能占用：{config.PanelHotkey.PanelHotkeyModifiers}+{config.PanelHotkey.PanelHotkeyKey}");
             }
         }
 
@@ -148,6 +174,41 @@ public partial class App : System.Windows.Application
                 // Use ShowDialog so ApplyButton_Click's DialogResult=true path works
                 // (otherwise setting DialogResult on a non-modal Window throws).
                 new LoadPresetDialog(svc, _widgetService) { Owner = null }.ShowDialog();
+            }), DispatcherPriority.Background);
+            return;
+        }
+
+        // ── Debug: --test-dialogs instantiates every secondary Window so a crash in
+        //    any of them surfaces through DispatcherUnhandledException. Each dialog is
+        //    wrapped in its own try/catch so the first failure doesn't mask the rest —
+        //    run once, report which title in the error dialog is the first to fail. ──
+        if (e.Args.Any(a => a == "--test-dialogs"))
+        {
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                void TryDialog(string name, Action open)
+                {
+                    try { open(); }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[test-dialogs] {name} FAILED: {ex}");
+                        // Wrap and re-throw on the dispatcher so the global handler
+                        // (which writes the inner-exception chain to a MessageBox) sees it.
+                        Dispatcher.BeginInvoke(new Action(() =>
+                        {
+                            throw new InvalidOperationException($"--test-dialogs: {name} failed", ex);
+                        }));
+                    }
+                }
+                TryDialog("ColorPickerDialog", () => new ColorPickerDialog("FF8800").ShowDialog());
+                TryDialog("EmojiPickerDialog", () => new EmojiPickerDialog().ShowDialog());
+                TryDialog("RenameDialog",      () => new RenameDialog("test").ShowDialog());
+                TryDialog("SavePresetDialog",  () => new SavePresetDialog(
+                    PresetService.For(PresetKind.Zone), new Zone { Name = "test" }) { Owner = null }.ShowDialog());
+                TryDialog("LoadPresetDialog",  () => new LoadPresetDialog(
+                    PresetService.For(PresetKind.Zone), _widgetService) { Owner = null }.ShowDialog());
+                MessageBox.Show("All dialogs tested. Check the error dialog above for any failures.",
+                    "--test-dialogs", MessageBoxButton.OK, MessageBoxImage.Information);
             }), DispatcherPriority.Background);
             return;
         }
@@ -331,6 +392,10 @@ public partial class App : System.Windows.Application
                     _noteIdToHotkeyId[note.Id] = nextId;
                     nextId++;
                 }
+                else
+                {
+                    System.Diagnostics.Debug.WriteLine($"[DeskOrder] Failed to register note hotkey {note.Id}: {note.HotkeyModifiers}+{note.HotkeyKey}");
+                }
             }
         }
     }
@@ -400,6 +465,7 @@ public partial class App : System.Windows.Application
         _trayIcon.Exit -= TrayExit;
 
         _trayIcon.LeftClick += TrayLeftClick;
+        _trayIcon.NotifyError += msg => _trayIcon?.ShowBalloonTip("托盘图标错误", msg);
         _trayIcon.DoubleClick += TrayDoubleClick;
         _trayIcon.ShowAllZones += TrayShowAll;
         _trayIcon.HideAllZones += TrayHideAll;
@@ -590,4 +656,11 @@ public partial class App : System.Windows.Application
         _zoneManager?.Shutdown();
         _trayIcon?.Dispose();
     }
+
+    static AppThemeMode ParseThemeMode(string? s) => s switch
+    {
+        "Light" => AppThemeMode.Light,
+        "Dark"  => AppThemeMode.Dark,
+        _       => AppThemeMode.System,
+    };
 }

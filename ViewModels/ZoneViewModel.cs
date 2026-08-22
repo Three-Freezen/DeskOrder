@@ -38,7 +38,7 @@ public class ZoneViewModel : INotifyPropertyChanged
         set { _selectedSubZoneId = value; OnPropertyChanged(); RefreshMergedItems(); }
     }
 
-    public bool IsMergedMaster => _zone.MergedSubZoneIds.Count > 0;
+    public bool IsMergedMaster => _zone.MergedGroupMembership.SubZoneIds.Count > 0;
 
     public bool ControlPointVisible => IsEditing;
 
@@ -164,9 +164,9 @@ public class ZoneViewModel : INotifyPropertyChanged
     {
         // Search across all merged zones
         ZoneItem? item = _zone.Items.Find(i => i.Id == itemId);
-        if (item == null && _zone.MergedSubZoneIds.Count > 0)
+        if (item == null && _zone.MergedGroupMembership.SubZoneIds.Count > 0)
         {
-            foreach (var subId in _zone.MergedSubZoneIds)
+            foreach (var subId in _zone.MergedGroupMembership.SubZoneIds)
             {
                 var sub = _zoneManager.Zones.FirstOrDefault(z => z.Id == subId);
                 if (sub != null)

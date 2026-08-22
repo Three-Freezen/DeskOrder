@@ -1,0 +1,20 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- ═══════════════════════════════════════════
+         Motion timings & splines (spec §4.1 / §4.3)
+         Used by Storyboards across pages and controls.
+         ═══════════════════════════════════════════ -->
+
+    <!-- Durations (ms) -->
+    <Duration x:Key="Motion.Fast">0:0:0.10</Duration>
+    <Duration x:Key="Motion.Normal">0:0:0.20</Duration>
+    <Duration x:Key="Motion.Exit">0:0:0.16</Duration>
+
+    <!-- Splines — standard ease-out (decel) and accent-flavored -->
+    <!-- Motion.StandardSpline is an IEasingFunction (consumed by DoubleAnimation.EasingFunction);
+         the others are KeySpline values (consumed by SplineDoubleKeyFrame.KeySpline in code-behind). -->
+    <CubicEase x:Key="Motion.StandardSpline" EasingMode="EaseOut"/>
+    <KeySpline x:Key="Motion.AccentSpline">0.2 0 0 1</KeySpline>
+    <KeySpline x:Key="Motion.DecelSpline">0 0 0.2 1</KeySpline>
+</ResourceDictionary>

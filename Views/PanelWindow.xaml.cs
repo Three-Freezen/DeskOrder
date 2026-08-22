@@ -22,22 +22,11 @@ public partial class PanelWindow : Window
     const uint WM_NCLBUTTONDOWN = 0x00A1;
     const int HTTOPLEFT = 13, HTTOPRIGHT = 14, HTBOTTOMLEFT = 16, HTBOTTOMRIGHT = 17;
 
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode)] static extern IntPtr SHBrowseForFolderW(ref BROWSEINFOW b);
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode)] static extern bool SHGetPathFromIDListW(IntPtr p, System.Text.StringBuilder s);
-    [DllImport("ole32.dll")] static extern void CoTaskMemFree(IntPtr p);
-
-    [StructLayout(LayoutKind.Sequential)]
-    struct BROWSEINFOW
-    {
-        public IntPtr hwndOwner;
-        public IntPtr pidlRoot;
-        public IntPtr pszDisplayName;
-        [MarshalAs(UnmanagedType.LPWStr)] public string lpszTitle;
-        public uint ulFlags;
-        public IntPtr lpfn;
-        public IntPtr lParam;
-        public int iImage;
-    }
+    // ponytail: frozen hover brushes — same color on every mouse-over.
+    private static readonly SolidColorBrush CtrlHoverBrush = Freeze(new(Color.FromArgb(0x60, 0xFF, 0xFF, 0xFF)));
+    private static readonly SolidColorBrush CtrlIdleBrush  = Freeze(new(Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF)));
+    private static readonly SolidColorBrush ItemHoverBrush = Freeze(new(Color.FromArgb(0x10, 0xFF, 0xFF, 0xFF)));
+    static SolidColorBrush Freeze(SolidColorBrush b) { b.Freeze(); return b; }
 
     private readonly ZoneManager _zoneManager;
     private readonly ConfigService _configService;
@@ -55,9 +44,9 @@ public partial class PanelWindow : Window
         _configService = configService;
 
         var config = configService.Load();
-        if (config.PanelX > 0 || config.PanelY > 0)
+        if (config.Panel.PanelX > 0 || config.Panel.PanelY > 0)
         {
-            Left = config.PanelX; Top = config.PanelY;
+            Left = config.Panel.PanelX; Top = config.Panel.PanelY;
         }
         else
         {
@@ -65,8 +54,8 @@ public partial class PanelWindow : Window
             Left = wa.Right - 400;
             Top = wa.Top + 60;
         }
-        Width = config.PanelWidth > 200 ? config.PanelWidth : 800;
-        Height = config.PanelHeight > 200 ? config.PanelHeight : 450;
+        Width = config.Panel.PanelWidth > 200 ? config.Panel.PanelWidth : 800;
+        Height = config.Panel.PanelHeight > 200 ? config.Panel.PanelHeight : 450;
 
         _zoneManager.ZonesChanged += RebuildDisplay;
         Loaded += OnLoad;
@@ -150,37 +139,7 @@ public partial class PanelWindow : Window
 
     void SettingsBtn_Click(object s, MouseButtonEventArgs e)
     {
-        var config = _zoneManager.GetConfig();
-        var dlg = new WidgetSettingsDialog(WidgetSettingsTarget.Panel) { Owner = this };
-        dlg.LoadFromConfig(config, _zoneManager);
-        if (dlg.ShowDialog() == true && dlg.DialogResultOk)
-        {
-            config.PanelWidth = dlg.ParsedWidth;
-            config.PanelHeight = dlg.ParsedHeight;
-            config.GlobalBorderThickness = dlg.ParsedBorderThickness;
-            config.GlobalBorderColor = dlg.ParsedBorderColor;
-            config.PanelFillColor = dlg.ParsedFillColor;
-            config.PanelUseGlobalAppearance = dlg.ParsedUseGlobalAppearance;
-            config.GlassBlurAmount = dlg.ParsedGlassBlur;
-            config.GlassTintOpacity = dlg.ParsedGlassTintOpacity;
-            config.GlassTintLuminosity = dlg.ParsedGlassLuminosity;
-            config.GlassColorMode = dlg.ParsedGlassColorMode;
-            config.EnableLiquidGlass = dlg.ParsedLiquidGlass;
-            config.PanelTitleBarFillColor = dlg.ParsedTitleBarFill;
-            config.PanelControlOpacity = dlg.ParsedButtonOpacity;
-
-            // Panel background image
-            config.PanelBackgroundImagePath = dlg.ParsedBgImagePath;
-            config.PanelBgImageOffsetX = dlg.ParsedBgOffsetX;
-            config.PanelBgImageOffsetY = dlg.ParsedBgOffsetY;
-            config.PanelBgImageZoom = dlg.ParsedBgZoom;
-            config.PanelBackgroundImageOpacity = dlg.ParsedBgOpacity;
-
-            _configService.Save(config);
-            ApplyAcrylic();
-            ApplyStyle();
-            ApplyBackgroundImage();
-        }
+        PropertyWindowService.OpenOrFocus(_zoneManager.GetConfig());
         e?.Handled = true;
     }
 
@@ -201,15 +160,15 @@ public partial class PanelWindow : Window
     void SavePosition(object? _, EventArgs __)
     {
         var config = _configService.Load();
-        config.PanelX = Left;
-        config.PanelY = Top;
-        config.PanelWidth = Width;
-        config.PanelHeight = Height;
+        config.Panel.PanelX = Left;
+        config.Panel.PanelY = Top;
+        config.Panel.PanelWidth = Width;
+        config.Panel.PanelHeight = Height;
         _configService.Save(config);
-        _zoneManager.GetConfig().PanelX = Left;
-        _zoneManager.GetConfig().PanelY = Top;
-        _zoneManager.GetConfig().PanelWidth = Width;
-        _zoneManager.GetConfig().PanelHeight = Height;
+        _zoneManager.GetConfig().Panel.PanelX = Left;
+        _zoneManager.GetConfig().Panel.PanelY = Top;
+        _zoneManager.GetConfig().Panel.PanelWidth = Width;
+        _zoneManager.GetConfig().Panel.PanelHeight = Height;
     }
 
     // ── Acrylic ──
@@ -228,11 +187,13 @@ public partial class PanelWindow : Window
     public void ApplyAcrylic()
     {
         var config = _zoneManager.GetConfig();
-        string fillColorStr = config.PanelFillColor;
+        string fillColorStr = config.Panel.PanelFillColor;
 
         if (config.EnableLiquidGlass || config.GlassBlurAmount > 0)
         {
-            AcrylicHelper.EnableBlur(this, config.GlassBlurAmount, config.GlassTintOpacity, config.GlassTintLuminosity, config.GlassColorMode);
+            var blurResult = AcrylicHelper.EnableBlur(this, config.GlassBlurAmount, config.GlassTintOpacity, config.GlassTintLuminosity, config.GlassColorMode);
+            if (!blurResult.Success)
+                System.Diagnostics.Debug.WriteLine($"[PanelWindow] EnableBlur failed: {blurResult.Error}");
         }
         else
         {
@@ -243,12 +204,12 @@ public partial class PanelWindow : Window
     public void ApplyStyle()
     {
         var config = _zoneManager.GetConfig();
-        string fillColorStr = config.PanelFillColor;
+        string fillColorStr = config.Panel.PanelFillColor;
         // Use PanelBorderColor when panel opts out of global appearance (mirrors
         // ClockWidget/CalendarWidget ApplyAcrylic pattern). Otherwise fall back to
         // GlobalBorderColor for visual consistency with other global-styled widgets.
-        string borderColorStr = config.PanelUseGlobalAppearance ? config.GlobalBorderColor : config.PanelBorderColor;
-        double borderThickness = config.PanelUseGlobalAppearance ? config.GlobalBorderThickness : config.GlobalBorderThickness;
+        string borderColorStr = config.Panel.PanelUseGlobalAppearance ? config.GlobalBorderColor : config.Panel.PanelBorderColor;
+        double borderThickness = config.Panel.PanelUseGlobalAppearance ? config.GlobalBorderThickness : config.GlobalBorderThickness;
 
         // Fill
         try
@@ -270,7 +231,7 @@ public partial class PanelWindow : Window
         // Title bar fill
         try
         {
-            var tbColor = (Color)ColorConverter.ConvertFromString(config.PanelTitleBarFillColor);
+            var tbColor = (Color)ColorConverter.ConvertFromString(config.Panel.PanelTitleBarFillColor);
             TopBar.Background = new SolidColorBrush(tbColor);
         }
         catch { }
@@ -279,9 +240,9 @@ public partial class PanelWindow : Window
         // SearchPlaceholder + SearchBox. Mirror ZoneTitleText pattern: adaptive on → adaptive
         // brush computed from PanelTitleBarFillColor over PanelFillColor (visible top-bar
         // color); adaptive off → XAML default stays (no hardcoded hex fallback in C#).
-        if (config.PanelTitleBarTextColorAdaptive)
+        if (config.Panel.PanelTitleBarTextColorAdaptive)
         {
-            var tbBrush = AdaptiveTextColor.ResolveBrushOver(config.PanelTitleBarFillColor, config.PanelFillColor);
+            var tbBrush = AdaptiveTextColor.ResolveBrushOver(config.Panel.PanelTitleBarFillColor, config.Panel.PanelFillColor);
             if (TitleText != null) TitleText.Foreground = tbBrush;
             if (ClockText != null) ClockText.Foreground = tbBrush;
             if (DateText != null) DateText.Foreground = tbBrush;
@@ -305,13 +266,15 @@ public partial class PanelWindow : Window
         try
         {
             var config = _zoneManager.GetConfig();
-            if (!string.IsNullOrEmpty(config.PanelBackgroundImagePath) && System.IO.File.Exists(config.PanelBackgroundImagePath))
+            if (!string.IsNullOrEmpty(config.Panel.PanelBackgroundImagePath) && System.IO.File.Exists(config.Panel.PanelBackgroundImagePath))
             {
                 var bi = new System.Windows.Media.Imaging.BitmapImage();
                 bi.BeginInit();
-                bi.UriSource = new Uri(config.PanelBackgroundImagePath);
+                bi.UriSource = new Uri(config.Panel.PanelBackgroundImagePath);
                 bi.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+                bi.DecodePixelWidth = 1920;
                 bi.EndInit();
+                bi.Freeze();
                 BgImage.Source = bi;
                 BgImage.Stretch = Stretch.UniformToFill;
 
@@ -321,7 +284,7 @@ public partial class PanelWindow : Window
                 // UniformToFill — fill target area maintaining aspect ratio
                 double imgW = bi.PixelWidth;
                 double imgH = bi.PixelHeight;
-                double utfScale = Math.Max((bw * config.PanelBgImageZoom) / imgW, (bh * config.PanelBgImageZoom) / imgH);
+                double utfScale = Math.Max((bw * config.Panel.PanelBgImageZoom) / imgW, (bh * config.Panel.PanelBgImageZoom) / imgH);
                 double displayedW = imgW * utfScale;
                 double displayedH = imgH * utfScale;
 
@@ -333,15 +296,15 @@ public partial class PanelWindow : Window
                 double zoneCenterY = bh / 2;
                 double imgCenterX = displayedW / 2;
                 double imgCenterY = displayedH / 2;
-                double ox = config.PanelBgImageOffsetX;
-                double oy = config.PanelBgImageOffsetY;
+                double ox = config.Panel.PanelBgImageOffsetX;
+                double oy = config.Panel.PanelBgImageOffsetY;
 
                 BgImage.Margin = new Thickness(
                     zoneCenterX - imgCenterX + ox,
                     zoneCenterY - imgCenterY + oy, 0, 0);
                 BgImage.HorizontalAlignment = HorizontalAlignment.Left;
                 BgImage.VerticalAlignment = VerticalAlignment.Top;
-                BgImage.Opacity = Math.Max(0.01, config.PanelBackgroundImageOpacity / 100.0);
+                BgImage.Opacity = Math.Max(0.01, config.Panel.PanelBackgroundImageOpacity / 100.0);
             }
             else
             {
@@ -376,16 +339,16 @@ public partial class PanelWindow : Window
                 // Mirror ZoneTitleText: adaptive on → computed brush; adaptive off → null
                 // (XAML default stays). Cards still match the title bar's contract.
                 var cfg = _zoneManager.GetConfig();
-                Brush? titleBarBrush = cfg.PanelTitleBarTextColorAdaptive
-                    ? AdaptiveTextColor.ResolveBrushOver(cfg.PanelTitleBarFillColor, cfg.PanelFillColor)
+                Brush? titleBarBrush = cfg.Panel.PanelTitleBarTextColorAdaptive
+                    ? AdaptiveTextColor.ResolveBrushOver(cfg.Panel.PanelTitleBarFillColor, cfg.Panel.PanelFillColor)
                     : null;
                 Brush? bodyBrush = null;
-                if (cfg.PanelTextColorAdaptive)
+                if (cfg.Panel.PanelTextColorAdaptive)
                 {
-                    if (BgImage?.Source is BitmapSource bmp && !string.IsNullOrEmpty(cfg.PanelBackgroundImagePath))
+                    if (BgImage?.Source is BitmapSource bmp && !string.IsNullOrEmpty(cfg.Panel.PanelBackgroundImagePath))
                         bodyBrush = AdaptiveTextColor.ResolveBrush(AdaptiveTextColor.ResolveTextColorForImage(bmp));
                     else
-                        bodyBrush = AdaptiveTextColor.ResolveBrush(cfg.PanelFillColor);
+                        bodyBrush = AdaptiveTextColor.ResolveBrush(cfg.Panel.PanelFillColor);
                 }
 
                 if (_isGridView)
@@ -554,7 +517,11 @@ public partial class PanelWindow : Window
         var openItem = new MenuItem { Header = _loc["Item.Open"] };
         openItem.Click += (_, _) =>
         {
-            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = item.TargetPath, UseShellExecute = true }); } catch { }
+            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = item.TargetPath, UseShellExecute = true }); }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"{_loc["Item.FailedToOpen"]}\n{ex.Message}", _loc["Item.FailedToOpen.Title"], MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
         };
         menu.Items.Add(openItem);
 
@@ -605,7 +572,11 @@ public partial class PanelWindow : Window
         {
             if (s is Border b && b.Tag is (ZoneItem item, _))
             {
-                try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = item.TargetPath, UseShellExecute = true }); } catch { }
+                try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = item.TargetPath, UseShellExecute = true }); }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"{_loc["Item.FailedToOpen"]}\n{ex.Message}", _loc["Item.FailedToOpen.Title"], MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
                 e.Handled = true;
             }
         }
@@ -623,7 +594,7 @@ public partial class PanelWindow : Window
     void Item_Enter(object s, MouseEventArgs e)
     {
         if (s is Border b)
-            b.Background = new SolidColorBrush(Color.FromArgb(0x10, 0xFF, 0xFF, 0xFF));
+            b.Background = ItemHoverBrush;
     }
 
     void Item_Leave(object s, MouseEventArgs e)
@@ -642,18 +613,18 @@ public partial class PanelWindow : Window
         {
             var h = new WindowInteropHelper(this); h.EnsureHandle();
             displayBuf = Marshal.AllocHGlobal(520);
-            var bi = new BROWSEINFOW
+            var bi = new NativeMethods.BROWSEINFOW
             {
                 hwndOwner = h.Handle,
                 pszDisplayName = displayBuf,
                 lpszTitle = "Select Parent Folder",
                 ulFlags = 0x40
             };
-            pidl = SHBrowseForFolderW(ref bi);
+            pidl = NativeMethods.SHBrowseForFolderW(ref bi);
             if (pidl != IntPtr.Zero)
             {
                 var sb = new System.Text.StringBuilder(260);
-                if (SHGetPathFromIDListW(pidl, sb))
+                if (NativeMethods.SHGetPathFromIDListW(pidl, sb))
                 {
                     string parentPath = sb.ToString();
                     string folderName = Microsoft.VisualBasic.Interaction.InputBox(
@@ -671,7 +642,7 @@ public partial class PanelWindow : Window
         finally
         {
             if (displayBuf != IntPtr.Zero) Marshal.FreeHGlobal(displayBuf);
-            if (pidl != IntPtr.Zero) CoTaskMemFree(pidl);
+            if (pidl != IntPtr.Zero) NativeMethods.CoTaskMemFree(pidl);
         }
     }
 
@@ -842,18 +813,18 @@ public partial class PanelWindow : Window
         {
             var h = new WindowInteropHelper(this); h.EnsureHandle();
             displayBuf = Marshal.AllocHGlobal(520);
-            var bi = new BROWSEINFOW
+            var bi = new NativeMethods.BROWSEINFOW
             {
                 hwndOwner = h.Handle,
                 pszDisplayName = displayBuf,
                 lpszTitle = _loc.CurrentLanguage == Services.Language.Chinese ? "选择文件夹" : "Select Folder",
                 ulFlags = 0x40
             };
-            pidl = SHBrowseForFolderW(ref bi);
+            pidl = NativeMethods.SHBrowseForFolderW(ref bi);
             if (pidl != IntPtr.Zero)
             {
                 var sb = new System.Text.StringBuilder(260);
-                if (SHGetPathFromIDListW(pidl, sb) && Directory.Exists(sb.ToString()))
+                if (NativeMethods.SHGetPathFromIDListW(pidl, sb) && Directory.Exists(sb.ToString()))
                 {
                     ImportFilesToZone(targetZone, new[] { sb.ToString() });
                 }
@@ -863,7 +834,7 @@ public partial class PanelWindow : Window
         finally
         {
             if (displayBuf != IntPtr.Zero) Marshal.FreeHGlobal(displayBuf);
-            if (pidl != IntPtr.Zero) CoTaskMemFree(pidl);
+            if (pidl != IntPtr.Zero) NativeMethods.CoTaskMemFree(pidl);
         }
     }
 
@@ -1089,7 +1060,7 @@ public partial class PanelWindow : Window
     {
         SavePosition(null, EventArgs.Empty);
         var config = _configService.Load();
-        config.PanelEnabled = false;
+        config.Panel.PanelEnabled = false;
         _configService.Save(config);
         Close();
         e?.Handled = true;
@@ -1097,22 +1068,23 @@ public partial class PanelWindow : Window
 
     void Ctrl_Enter(object s, MouseEventArgs e)
     {
-        if (s is Border b) b.Background = new SolidColorBrush(Color.FromArgb(0x60, 0xFF, 0xFF, 0xFF));
+        if (s is Border b) b.Background = CtrlHoverBrush;
     }
 
     void Ctrl_Leave(object s, MouseEventArgs e)
     {
-        if (s is Border b) b.Background = new SolidColorBrush(Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF));
+        if (s is Border b) b.Background = CtrlIdleBrush;
     }
 
     protected override void OnClosed(EventArgs e)
     {
+        _clockTimer?.Stop();
         if (_langChanged != null) { _loc.LanguageChanged -= _langChanged; _langChanged = null; }
         _zoneManager.ZonesChanged -= RebuildDisplay;
         SavePosition(null, EventArgs.Empty);
         // Clear the enabled flag so it doesn't auto-restore on next launch
         var config = _configService.Load();
-        config.PanelEnabled = false;
+        config.Panel.PanelEnabled = false;
         _configService.Save(config);
         base.OnClosed(e);
     }

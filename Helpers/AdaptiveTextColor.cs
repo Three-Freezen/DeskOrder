@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
@@ -118,16 +117,11 @@ public static class AdaptiveTextColor
     }
 
     /// <summary>Sample 5 points (4 corners + center), average them, then run HSL flip.
-    /// Half-transparent pixels are premultiplied so transparent areas don't bias toward "white".
-    /// Result is cached by the image's full path (or Uri) so repeated calls within the same
-    /// image reuse the work.</summary>
+    /// Half-transparent pixels are premultiplied so transparent areas don't bias toward "white".</summary>
     public static Color ResolveTextColorForImage(BitmapSource image)
     {
         if (image == null || image.PixelWidth <= 0 || image.PixelHeight <= 0)
             return Color.FromRgb(0x22, 0x22, 0x2A);
-
-        var cacheKey = image is BitmapImage bi ? (bi.UriSource?.ToString() ?? bi.ToString()) : image.ToString();
-        if (_imageCache.TryGetValue(cacheKey, out var cached)) return cached;
 
         int w = image.PixelWidth;
         int h = image.PixelHeight;
@@ -158,16 +152,15 @@ public static class AdaptiveTextColor
             (byte)Math.Clamp(r / count, 0, 255),
             (byte)Math.Clamp(g / count, 0, 255),
             (byte)Math.Clamp(b / count, 0, 255));
-        var resolved = ResolveTextColor(avg);
-
-        // Cache with bounded size (LRU-ish: just clear when too big)
-        if (_imageCache.Count > 32) _imageCache.Clear();
-        _imageCache[cacheKey] = resolved;
-        return resolved;
+        // ponytail: no cache here — BitmapSource has no stable hash (Equals uses reference),
+        // and BitmapImage.ToString/UriSource are non-deterministic across decodes. Callers
+        // already memoize via the owning Zone's BackgroundImagePath, so the per-sample work
+        // only runs when the image actually changes. Add when profiling shows hot path.
+        return ResolveTextColor(avg);
     }
 
-    /// <summary>Clear the image-sample cache. Call when images are reloaded from disk.</summary>
-    public static void ClearImageCache() => _imageCache.Clear();
+    /// <summary>No-op kept for API compatibility — see <see cref="ResolveTextColorForImage"/>.</summary>
+    public static void ClearImageCache() { }
 
     /// <summary>Walk the visual tree under <paramref name="root"/> and re-brush every
     /// <see cref="TextBlock"/> foreground + every <see cref="Control"/> foreground. Used by
@@ -183,8 +176,6 @@ public static class AdaptiveTextColor
             ApplyBrushToTree(VisualTreeHelper.GetChild(root, i), brush);
         }
     }
-
-    static readonly Dictionary<string, Color> _imageCache = new();
 
     static Color GetPixel(BitmapSource src, int x, int y)
     {

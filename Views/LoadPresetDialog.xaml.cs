@@ -370,7 +370,15 @@ public partial class LoadPresetDialog : Window, INotifyPropertyChanged
             MessageBoxImage.Warning);
         if (confirm != MessageBoxResult.OK) return;
 
-        _service.Delete(preset.Id);
+        if (!_service.Delete(preset.Id))
+        {
+            MessageBox.Show(
+                _loc.Get("Preset.DeleteFailedMessage", preset.Name),
+                _loc["Preset.DeleteFailedTitle"],
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            return;
+        }
 
         if (_selectedCard?.DataContext == ci)
         {

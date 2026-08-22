@@ -7,6 +7,21 @@
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
                 <ResourceDictionary Source="Resources/Theme.xaml"/>
+                <ResourceDictionary Source="Resources/Motion.xaml"/>
+                <ResourceDictionary Source="Resources/Theme.Colors.Light.xaml"/>
+                <ResourceDictionary Source="Resources/Theme.Colors.Dark.xaml"/>
+                <ResourceDictionary Source="Resources/Theme.Brushes.xaml"/>
+                <ResourceDictionary Source="Resources/Icons.xaml"/>
+                <ResourceDictionary Source="Resources/Controls/CheckBox.xaml"/>
+                <ResourceDictionary Source="Resources/Controls/RadioButton.xaml"/>
+                <ResourceDictionary Source="Resources/Controls/ToggleSwitch.xaml"/>
+                <ResourceDictionary Source="Resources/Controls/TextBox.xaml"/>
+                <ResourceDictionary Source="Resources/Controls/Slider.xaml"/>
+                <ResourceDictionary Source="Resources/Controls/ComboBox.xaml"/>
+                <ResourceDictionary Source="Resources/Controls/ContextMenu.xaml"/>
+                <ResourceDictionary Source="Resources/Controls/ToolTip.xaml"/>
+                <ResourceDictionary Source="Resources/Controls/ScrollBar.xaml"/>
+                <ResourceDictionary Source="Resources/Controls/SegmentedControl.xaml"/>
             </ResourceDictionary.MergedDictionaries>
         </ResourceDictionary>
     </Application.Resources>

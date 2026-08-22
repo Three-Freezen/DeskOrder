@@ -1,0 +1,17 @@
+<UserControl x:Class="DesktopZones.Views.Components.Segmented"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Border Background="{DynamicResource Brush.Bg.Input}"
+          BorderBrush="{DynamicResource Brush.Border.Default}"
+          BorderThickness="1"
+          CornerRadius="4"
+          Padding="0">
+    <ItemsControl x:Name="ItemsHost">
+      <ItemsControl.ItemsPanel>
+        <ItemsPanelTemplate>
+          <StackPanel Orientation="Horizontal"/>
+        </ItemsPanelTemplate>
+      </ItemsControl.ItemsPanel>
+    </ItemsControl>
+  </Border>
+</UserControl>

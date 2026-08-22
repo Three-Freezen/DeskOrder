@@ -28,6 +28,11 @@ public class PanelPresetConfig
     /// <summary>GlassColorMode inherited from global AppConfig — included in preset so the panel preview card can render the same iridescence.</summary>
     public string GlassColorMode { get; set; } = "Default";
 
+    // ── Hover expand (panel excluded from auto-expand per spec §7.2; speed is the only knob) ──
+    public double HoverExpandSpeed { get; set; } = 1.0;
+    /// <summary>Panel never has a restore button (spec §7.2 removed it). Default false; migration forces false.</summary>
+    public bool EnableRestoreButton { get; set; } = false;
+
     public PanelPresetConfig Clone() => new()
     {
         PanelUseGlobalAppearance = PanelUseGlobalAppearance,
@@ -47,52 +52,57 @@ public class PanelPresetConfig
         PanelBgImageZoom = PanelBgImageZoom,
         PanelBgImageOffsetX = PanelBgImageOffsetX,
         PanelBgImageOffsetY = PanelBgImageOffsetY,
-        GlassColorMode = GlassColorMode
+        GlassColorMode = GlassColorMode,
+        HoverExpandSpeed = HoverExpandSpeed,
+        EnableRestoreButton = EnableRestoreButton
     };
 
-    /// <summary>Snapshot the relevant Panel* fields off an AppConfig instance.</summary>
+    /// <summary>Snapshot the Panel POCO off an AppConfig instance (ponytail: reads from Panel POCO instead of 19 loose fields).</summary>
     public static PanelPresetConfig FromConfig(AppConfig cfg) => new()
     {
-        PanelUseGlobalAppearance = cfg.PanelUseGlobalAppearance,
-        PanelX = cfg.PanelX,
-        PanelY = cfg.PanelY,
-        PanelWidth = cfg.PanelWidth,
-        PanelHeight = cfg.PanelHeight,
-        PanelTitleBarFillColor = cfg.PanelTitleBarFillColor,
-        PanelFillColor = cfg.PanelFillColor,
-        PanelBorderColor = cfg.PanelBorderColor,
-        PanelTextColorAdaptive = cfg.PanelTextColorAdaptive,
-        PanelTitleBarTextColorAdaptive = cfg.PanelTitleBarTextColorAdaptive,
-        PanelControlOpacity = cfg.PanelControlOpacity,
-        PanelBackgroundImagePath = cfg.PanelBackgroundImagePath,
-        PanelBgImageStretch = cfg.PanelBgImageStretch,
-        PanelBackgroundImageOpacity = cfg.PanelBackgroundImageOpacity,
-        PanelBgImageZoom = cfg.PanelBgImageZoom,
-        PanelBgImageOffsetX = cfg.PanelBgImageOffsetX,
-        PanelBgImageOffsetY = cfg.PanelBgImageOffsetY,
-        GlassColorMode = cfg.GlassColorMode
+        PanelUseGlobalAppearance = cfg.Panel.PanelUseGlobalAppearance,
+        PanelX = cfg.Panel.PanelX,
+        PanelY = cfg.Panel.PanelY,
+        PanelWidth = cfg.Panel.PanelWidth,
+        PanelHeight = cfg.Panel.PanelHeight,
+        PanelTitleBarFillColor = cfg.Panel.PanelTitleBarFillColor,
+        PanelFillColor = cfg.Panel.PanelFillColor,
+        PanelBorderColor = cfg.Panel.PanelBorderColor,
+        PanelTextColorAdaptive = cfg.Panel.PanelTextColorAdaptive,
+        PanelTitleBarTextColorAdaptive = cfg.Panel.PanelTitleBarTextColorAdaptive,
+        PanelControlOpacity = cfg.Panel.PanelControlOpacity,
+        PanelBackgroundImagePath = cfg.Panel.PanelBackgroundImagePath,
+        PanelBgImageStretch = cfg.Panel.PanelBgImageStretch,
+        PanelBackgroundImageOpacity = cfg.Panel.PanelBackgroundImageOpacity,
+        PanelBgImageZoom = cfg.Panel.PanelBgImageZoom,
+        PanelBgImageOffsetX = cfg.Panel.PanelBgImageOffsetX,
+        PanelBgImageOffsetY = cfg.Panel.PanelBgImageOffsetY,
+        GlassColorMode = cfg.GlassColorMode,
+        HoverExpandSpeed = cfg.Panel.PanelHoverExpandSpeed,
+        EnableRestoreButton = false
     };
 
-    /// <summary>Apply this preset's fields back to a target AppConfig. Caller is responsible for Save() + repaint.</summary>
+    /// <summary>Apply this preset's fields back to a target AppConfig's Panel POCO. Caller is responsible for Save() + repaint.</summary>
     public void ApplyTo(AppConfig cfg)
     {
-        cfg.PanelUseGlobalAppearance = PanelUseGlobalAppearance;
-        cfg.PanelX = PanelX;
-        cfg.PanelY = PanelY;
-        cfg.PanelWidth = PanelWidth;
-        cfg.PanelHeight = PanelHeight;
-        cfg.PanelTitleBarFillColor = PanelTitleBarFillColor;
-        cfg.PanelFillColor = PanelFillColor;
-        cfg.PanelBorderColor = PanelBorderColor;
-        cfg.PanelTextColorAdaptive = PanelTextColorAdaptive;
-        cfg.PanelTitleBarTextColorAdaptive = PanelTitleBarTextColorAdaptive;
-        cfg.PanelControlOpacity = PanelControlOpacity;
-        cfg.PanelBackgroundImagePath = PanelBackgroundImagePath;
-        cfg.PanelBgImageStretch = PanelBgImageStretch;
-        cfg.PanelBackgroundImageOpacity = PanelBackgroundImageOpacity;
-        cfg.PanelBgImageZoom = PanelBgImageZoom;
-        cfg.PanelBgImageOffsetX = PanelBgImageOffsetX;
-        cfg.PanelBgImageOffsetY = PanelBgImageOffsetY;
+        cfg.Panel.PanelUseGlobalAppearance = PanelUseGlobalAppearance;
+        cfg.Panel.PanelX = PanelX;
+        cfg.Panel.PanelY = PanelY;
+        cfg.Panel.PanelWidth = PanelWidth;
+        cfg.Panel.PanelHeight = PanelHeight;
+        cfg.Panel.PanelTitleBarFillColor = PanelTitleBarFillColor;
+        cfg.Panel.PanelFillColor = PanelFillColor;
+        cfg.Panel.PanelBorderColor = PanelBorderColor;
+        cfg.Panel.PanelTextColorAdaptive = PanelTextColorAdaptive;
+        cfg.Panel.PanelTitleBarTextColorAdaptive = PanelTitleBarTextColorAdaptive;
+        cfg.Panel.PanelControlOpacity = PanelControlOpacity;
+        cfg.Panel.PanelBackgroundImagePath = PanelBackgroundImagePath;
+        cfg.Panel.PanelBgImageStretch = PanelBgImageStretch;
+        cfg.Panel.PanelBackgroundImageOpacity = PanelBackgroundImageOpacity;
+        cfg.Panel.PanelBgImageZoom = PanelBgImageZoom;
+        cfg.Panel.PanelBgImageOffsetX = PanelBgImageOffsetX;
+        cfg.Panel.PanelBgImageOffsetY = PanelBgImageOffsetY;
         cfg.GlassColorMode = GlassColorMode;
+        cfg.Panel.PanelHoverExpandSpeed = HoverExpandSpeed;
     }
 }

@@ -1,0 +1,39 @@
+<UserControl x:Class="DesktopZones.Views.Components.ColorSwatchButton"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:DesktopZones.Views.Components"
+             Width="24" Height="24">
+  <UserControl.Resources>
+    <local:HexToBrushConverter x:Key="HexToBrushConverter"/>
+  </UserControl.Resources>
+  <Grid>
+    <Button x:Name="PART_Button" Width="24" Height="24"
+            Background="{Binding CurrentColor, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource HexToBrushConverter}}"
+            BorderBrush="{DynamicResource Brush.Border.Default}" BorderThickness="1"
+            Click="PART_Button_Click" Cursor="Hand">
+      <Button.Resources>
+        <Style TargetType="Border"><Setter Property="CornerRadius" Value="4"/></Style>
+      </Button.Resources>
+    </Button>
+    <Popup x:Name="PART_Popup" Placement="Bottom" StaysOpen="False"
+           AllowsTransparency="True" PopupAnimation="None"
+           HorizontalOffset="-100">
+      <Border Background="{DynamicResource Brush.Bg.Surface}"
+              BorderBrush="{DynamicResource Brush.Border.Default}" BorderThickness="1"
+              CornerRadius="6" Padding="6" MinWidth="220">
+        <StackPanel>
+          <TextBlock Text="预设" FontSize="11" FontWeight="SemiBold"
+                     Foreground="{DynamicResource Brush.Text.Tertiary}" Margin="4,2,0,4"/>
+          <UniformGrid x:Name="Swatches" Columns="6" Rows="2"/>
+          <Separator Margin="0,4" Background="{DynamicResource Brush.Border.Subtle}"/>
+          <Button Content="自定义..." Click="Custom_Click"
+                  Background="{DynamicResource Brush.Bg.Input}"
+                  Foreground="{DynamicResource Brush.Text.Primary}"
+                  BorderBrush="{DynamicResource Brush.Border.Default}"
+                  BorderThickness="1"
+                  HorizontalAlignment="Stretch" Padding="8,6" Cursor="Hand"/>
+        </StackPanel>
+      </Border>
+    </Popup>
+  </Grid>
+</UserControl>

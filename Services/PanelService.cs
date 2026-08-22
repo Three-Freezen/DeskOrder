@@ -33,7 +33,7 @@ public class PanelService
     public event Action? WindowClosed;
 
     /// <summary>Lazy-creates the panel window and shows it. No-op if already open.
-    /// Persists <c>PanelEnabled = true</c> in config so the panel reopens on next launch.</summary>
+    /// Persists <c>Panel.PanelEnabled = true</c> in config so the panel reopens on next launch.</summary>
     public void Show(AppConfig cfg)
     {
         if (_window != null)
@@ -41,7 +41,7 @@ public class PanelService
             if (!_window.IsVisible) _window.Show();
             return;
         }
-        cfg.PanelEnabled = true;
+        cfg.Panel.PanelEnabled = true;
         _configService.Save(cfg);
         _window = new PanelWindow(_zoneManager, _configService);
         _window.Closed += (_, _) =>

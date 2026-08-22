@@ -1,79 +1,138 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-    <!-- ═══════════════════════════════════════════ -->
-    <!-- Color Palette                                -->
-    <!-- ═══════════════════════════════════════════ -->
-    <SolidColorBrush x:Key="BgPrimary" Color="#F01A1A2E"/>
-    <SolidColorBrush x:Key="BgSecondary" Color="#252540"/>
-    <SolidColorBrush x:Key="BgCard" Color="#2A2A3E"/>
-    <SolidColorBrush x:Key="AccentPurple" Color="#6C63FF"/>
-    <SolidColorBrush x:Key="AccentGreen" Color="#4CAF50"/>
-    <SolidColorBrush x:Key="AccentRed" Color="#FF5252"/>
-    <SolidColorBrush x:Key="TextPrimary" Color="#E8E8F0"/>
-    <SolidColorBrush x:Key="TextSecondary" Color="#8888A0"/>
-    <SolidColorBrush x:Key="BorderSubtle" Color="#30FFFFFF"/>
+    <!-- ═══════════════════════════════════════════
+         中性灰主题（对齐 HTML 原型 #1C1C1C）
+         原蓝紫底 (#0D1B2A) → 中性灰 (#1C1C1C)
+         原蓝紫表面 (#142B40 / #1B3A5C) → 中性灰 (#252525 / #2D2D2D)
+         蓝青品牌色 (#4CC2FF) 保留
+         ═══════════════════════════════════════════ -->
+    <!-- Hex is fine here: ThemeService.RepaintBrushes explicitly SetValue's each
+         brush's Color after a dictionary swap, because WPF does NOT auto-refresh
+         already-created SolidColorBrush.Color when a same-named MergedDictionaries
+         entry is removed. Initial hex just decides the very first paint. -->
+    <SolidColorBrush x:Key="BgApp" Color="#1C1C1C"/>
+    <SolidColorBrush x:Key="BgSurface" Color="#252525"/>
+    <SolidColorBrush x:Key="BgElevated" Color="#2D2D2D"/>
+    <SolidColorBrush x:Key="BgHover" Color="#2F2F2F"/>
+    <SolidColorBrush x:Key="BgSelected" Color="#383838"/>
+    <SolidColorBrush x:Key="Line" Color="#383838"/>
+    <SolidColorBrush x:Key="LineStrong" Color="#4A4A4A"/>
+    <SolidColorBrush x:Key="BrandCyan" Color="#4CC2FF"/>
+    <SolidColorBrush x:Key="BrandCyanDeep" Color="#0097A7"/>
+    <SolidColorBrush x:Key="BrandBlue" Color="#1565C0"/>
+    <SolidColorBrush x:Key="BrandBlueMid" Color="#1E88E5"/>
+    <SolidColorBrush x:Key="T1" Color="#ECECEC"/>
+    <SolidColorBrush x:Key="T2" Color="#B5B5B5"/>
+    <SolidColorBrush x:Key="T3" Color="#808080"/>
+    <SolidColorBrush x:Key="TDisabled" Color="#5A5A5A"/>
+    <SolidColorBrush x:Key="IBg" Color="#2D2D2D"/>
+    <SolidColorBrush x:Key="IBgSolid" Color="#2D2D2D"/>
+    <SolidColorBrush x:Key="IBd" Color="#4A4A4A"/>
+    <SolidColorBrush x:Key="Success" Color="#4CAF50"/>
+    <SolidColorBrush x:Key="Warning" Color="#FFB300"/>
+    <SolidColorBrush x:Key="Danger" Color="#FF5252"/>
+    <SolidColorBrush x:Key="DangerSoft" Color="#FF7B7B"/>
 
-    <!-- ═══════════════════════════════════════════ -->
-    <!-- Dark ComboBox Template                       -->
-    <!-- ═══════════════════════════════════════════ -->
+    <SolidColorBrush x:Key="AccentBrush" Color="#4CC2FF"/>
+    <SolidColorBrush x:Key="AccentSoft" Color="#264CC2FF"/>
+    <SolidColorBrush x:Key="AccentLine" Color="#734CC2FF"/>
+
+    <!-- B3/C4: 卡片/图标/状态色（被 Pages/*.cs 通过 ThemeBrushes 静态访问） -->
+    <SolidColorBrush x:Key="CardBg" Color="#252525"/>
+    <SolidColorBrush x:Key="CardBorder" Color="#383838"/>
+    <SolidColorBrush x:Key="IconBg" Color="#2D2D2D"/>
+    <SolidColorBrush x:Key="IconBgSubtle" Color="#383838"/>
+    <SolidColorBrush x:Key="IconFg" Color="#B5B5B5"/>
+    <SolidColorBrush x:Key="HoverOverlay" Color="#2F2F2F"/>
+    <SolidColorBrush x:Key="SubTextFg" Color="#B5B5B5"/>
+    <SolidColorBrush x:Key="MutedTextFg" Color="#808080"/>
+    <SolidColorBrush x:Key="DimTextFg" Color="#808080"/>
+    <SolidColorBrush x:Key="SuccessBrush" Color="#5BD06E"/>
+    <SolidColorBrush x:Key="DangerBrush" Color="#FF7B7B"/>
+    <SolidColorBrush x:Key="DangerBrushStrong" Color="#FF8B8B"/>
+    <SolidColorBrush x:Key="WarnFg" Color="#FFD166"/>
+    <SolidColorBrush x:Key="InactiveBtnBg" Color="#2D2D2D"/>
+    <SolidColorBrush x:Key="DisabledTextFg" Color="#5A5A5A"/>
+
+    <Style x:Key="DTb" TargetType="TextBox">
+        <Setter Property="Background" Value="{StaticResource IBg}"/>
+        <Setter Property="Foreground" Value="{StaticResource T1}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource IBd}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="8,6"/>
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="CaretBrush" Value="{StaticResource T1}"/>
+    </Style>
+    <Style x:Key="DLb" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource T2}"/>
+        <Setter Property="FontSize" Value="11"/>
+        <Setter Property="Margin" Value="0,8,0,4"/>
+    </Style>
+
+    <!-- Dark ComboBox -->
     <ControlTemplate x:Key="DarkComboTemplate" TargetType="ComboBox">
         <Grid>
-            <ToggleButton x:Name="Toggle" Focusable="false"
-                          IsChecked="{Binding Path=IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
-                          ClickMode="Press">
+            <ToggleButton x:Name="ToggleButton"
+                    Background="{StaticResource IBg}" BorderBrush="{StaticResource IBd}"
+                    BorderThickness="1" Foreground="{StaticResource T1}"
+                    IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                    ClickMode="Press">
                 <ToggleButton.Template>
                     <ControlTemplate TargetType="ToggleButton">
-                        <Border Background="#E610111A" CornerRadius="4"
-                                BorderBrush="#30FFFFFF" BorderThickness="1">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="4" Padding="6,4">
                             <Grid>
-                                <TextBlock Text="▼" FontSize="8"
-                                           Foreground="#8080A0"
-                                           HorizontalAlignment="Right"
-                                           VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                <Path x:Name="Arrow" Data="M0,0L4,4L8,0" Fill="{StaticResource T2}"
+                                        HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,4,0"/>
                             </Grid>
                         </Border>
                     </ControlTemplate>
                 </ToggleButton.Template>
             </ToggleButton>
-            <ContentPresenter x:Name="ContentSite" Margin="8,4,24,4"
-                              Content="{TemplateBinding SelectionBoxItem}"
-                              ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
-                              VerticalAlignment="Center" HorizontalAlignment="Left"
-                              IsHitTestVisible="False"/>
-            <Popup x:Name="Popup" Placement="Bottom"
-                   IsOpen="{TemplateBinding IsDropDownOpen}"
-                   AllowsTransparency="True" Focusable="False"
-                   PopupAnimation="Slide">
-                <Border Background="#E610111A" BorderBrush="#40FFFFFF"
-                        BorderThickness="1" CornerRadius="4"
-                        MaxHeight="{TemplateBinding MaxDropDownHeight}"
-                        MinWidth="{TemplateBinding ActualWidth}">
-                    <ScrollViewer>
-                        <ItemsPresenter/>
-                    </ScrollViewer>
+            <ContentPresenter x:Name="ContentSite" Content="{TemplateBinding SelectionBoxItem}"
+                    ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" Margin="8,4,20,4"
+                    VerticalAlignment="Center" HorizontalAlignment="Left" IsHitTestVisible="False"/>
+            <Popup x:Name="Popup" Placement="Bottom" IsOpen="{TemplateBinding IsDropDownOpen}"
+                    AllowsTransparency="True" Focusable="False" PopupAnimation="Slide">
+                <Border x:Name="DropDownBorder" Background="{StaticResource IBgSolid}"
+                        BorderBrush="{StaticResource IBd}" BorderThickness="1" CornerRadius="4"
+                        MaxHeight="{TemplateBinding MaxDropDownHeight}" MinWidth="{TemplateBinding ActualWidth}">
+                    <ScrollViewer><ItemsPresenter/></ScrollViewer>
                 </Border>
             </Popup>
         </Grid>
     </ControlTemplate>
+    <Style x:Key="DarkCombo" TargetType="ComboBox">
+        <Setter Property="Template" Value="{StaticResource DarkComboTemplate}"/>
+        <Setter Property="Background" Value="{StaticResource IBg}"/>
+        <Setter Property="Foreground" Value="{StaticResource T1}"/>
+        <Setter Property="FontSize" Value="12"/>
+    </Style>
+    <Style TargetType="ComboBoxItem">
+        <Setter Property="Background" Value="{StaticResource IBg}"/>
+        <Setter Property="Foreground" Value="{StaticResource T1}"/>
+    </Style>
 
-    <!-- ═══════════════════════════════════════════ -->
-    <!-- Control Styles                               -->
-    <!-- ═══════════════════════════════════════════ -->
+    <!-- ═══════════════════════════════════════════
+         Control Styles
+         ═══════════════════════════════════════════ -->
 
-    <!-- Primary button (purple accent) -->
+    <!-- Primary button (蓝青渐变) -->
     <Style x:Key="PrimaryButton" TargetType="Button">
-        <Setter Property="Background" Value="#6C63FF"/>
-        <Setter Property="Foreground" Value="White"/>
+        <Setter Property="Background" Value="{StaticResource BrandCyan}"/>
+        <Setter Property="Foreground" Value="#001A2C"/>
         <Setter Property="BorderThickness" Value="0"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="FontSize" Value="12"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="Padding" Value="16,8"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Border Background="{TemplateBinding Background}"
-                            CornerRadius="6" Padding="{TemplateBinding Padding}">
+                            CornerRadius="4" Padding="{TemplateBinding Padding}">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Border>
                 </ControlTemplate>
@@ -81,10 +140,10 @@
         </Setter>
     </Style>
 
-    <!-- Secondary button (subtle) -->
+    <!-- Secondary button (半透明) -->
     <Style x:Key="SecondaryButton" TargetType="Button">
-        <Setter Property="Background" Value="#30FFFFFF"/>
-        <Setter Property="Foreground" Value="#E8E8F0"/>
+        <Setter Property="Background" Value="{StaticResource IBg}"/>
+        <Setter Property="Foreground" Value="{StaticResource T1}"/>
         <Setter Property="BorderThickness" Value="0"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="FontSize" Value="12"/>
@@ -102,36 +161,20 @@
     </Style>
 
     <!-- Dark TextBox -->
-    <Style x:Key="DarkTextBox" TargetType="TextBox">
-        <Setter Property="Background" Value="#1AFFFFFF"/>
-        <Setter Property="Foreground" Value="#E0E0F0"/>
-        <Setter Property="BorderBrush" Value="#30FFFFFF"/>
-        <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="CaretBrush" Value="#E0E0F0"/>
-        <Setter Property="FontSize" Value="12"/>
-        <Setter Property="Padding" Value="8,4"/>
-    </Style>
+    <Style x:Key="DarkTextBox" TargetType="TextBox" BasedOn="{StaticResource DTb}"/>
 
     <!-- Dark CheckBox -->
     <Style x:Key="DarkCheckBox" TargetType="CheckBox">
-        <Setter Property="Foreground" Value="#8888A0"/>
+        <Setter Property="Foreground" Value="{StaticResource T2}"/>
         <Setter Property="FontSize" Value="11"/>
     </Style>
 
-    <!-- ═══════════════════════════════════════════ -->
-    <!-- Dark ComboBox Style (reusable)               -->
-    <!-- ═══════════════════════════════════════════ -->
-    <Style x:Key="DarkComboStyle" TargetType="ComboBox">
-        <Setter Property="Template" Value="{StaticResource DarkComboTemplate}"/>
-        <Setter Property="Background" Value="#1AFFFFFF"/>
-        <Setter Property="Foreground" Value="#E0E0F0"/>
-        <Setter Property="BorderThickness" Value="0"/>
-        <Setter Property="FontSize" Value="12"/>
-    </Style>
+    <!-- Dark ComboBox Style (reusable) -->
+    <Style x:Key="DarkComboStyle" TargetType="ComboBox" BasedOn="{StaticResource DarkCombo}"/>
 
     <Style x:Key="DarkComboItemStyle" TargetType="ComboBoxItem">
-        <Setter Property="Background" Value="Transparent"/>
-        <Setter Property="Foreground" Value="#E0E0F0"/>
+        <Setter Property="Background" Value="{StaticResource IBg}"/>
+        <Setter Property="Foreground" Value="{StaticResource T1}"/>
         <Setter Property="Padding" Value="8,4,8,4"/>
         <Setter Property="Template">
             <Setter.Value>
@@ -146,15 +189,73 @@
                                 <Condition Property="IsMouseOver" Value="True"/>
                                 <Condition Property="IsSelected" Value="False"/>
                             </MultiTrigger.Conditions>
-                            <Setter TargetName="Bd" Property="Background" Value="#306C63FF"/>
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Bg.Hover}"/>
                         </MultiTrigger>
                         <MultiTrigger>
                             <MultiTrigger.Conditions>
                                 <Condition Property="IsMouseOver" Value="True"/>
                                 <Condition Property="IsSelected" Value="True"/>
                             </MultiTrigger.Conditions>
-                            <Setter TargetName="Bd" Property="Background" Value="#506C63FF"/>
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Bg.Hover}"/>
                         </MultiTrigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ponytail: implicit Button style for chrome/icon buttons (min/max/close, theme switcher,
+         PropertyPanel undock/collapse, page sort buttons, …). Replaces the WPF default template
+         whose hover shows a system-colored chrome (the "blue hover" the user reported). The hover
+         gray-overlay only fires when the button's Background is literally Transparent — primary
+         buttons (Background = Brush.Accent*) keep their blue on hover. Explicit
+         Style="{StaticResource PrimaryButton}" / SecondaryButton / DarkCombo overrides this. -->
+    <Style TargetType="Button">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Padding" Value="0"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="4"
+                            Padding="{TemplateBinding Padding}"
+                            SnapsToDevicePixels="True">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <!-- Chrome buttons (Background == Transparent): gray bg overlay on hover.
+                             Bg change is gated on Transparent to avoid clobbering primary blue buttons
+                             (OkBtn, "+ 新建…") that own their own brush. -->
+                        <MultiDataTrigger>
+                            <MultiDataTrigger.Conditions>
+                                <Condition Binding="{Binding IsMouseOver, RelativeSource={RelativeSource Self}}" Value="True"/>
+                                <Condition Binding="{Binding Background, RelativeSource={RelativeSource Self}}" Value="{x:Static Brushes.Transparent}"/>
+                            </MultiDataTrigger.Conditions>
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Bg.Hover}"/>
+                        </MultiDataTrigger>
+                        <MultiDataTrigger>
+                            <MultiDataTrigger.Conditions>
+                                <Condition Binding="{Binding IsPressed, RelativeSource={RelativeSource Self}}" Value="True"/>
+                                <Condition Binding="{Binding Background, RelativeSource={RelativeSource Self}}" Value="{x:Static Brushes.Transparent}"/>
+                            </MultiDataTrigger.Conditions>
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Bg.Active}"/>
+                        </MultiDataTrigger>
+                        <!-- All buttons: text brightens on hover (T2/Tertiary/inherited → T1 Primary).
+                             Matches SidebarNav left-side hover. For chrome buttons the Path Stroke is
+                             bound to Button.Foreground so the icon follows. -->
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.Text.Primary}"/>
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Brush.Border.Strong}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.5"/>
+                            <Setter Property="Cursor" Value="Arrow"/>
+                        </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>

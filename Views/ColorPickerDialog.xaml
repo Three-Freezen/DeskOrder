@@ -9,18 +9,14 @@
         Background="Transparent">
 
     <Window.Resources>
-        <SolidColorBrush x:Key="BgBrush" Color="#F01A1A2E"/>
-        <SolidColorBrush x:Key="AccentBrush" Color="#6C63FF"/>
-        <SolidColorBrush x:Key="TextPrimary" Color="#E8E8F0"/>
-        <SolidColorBrush x:Key="TextSecondary" Color="#8888A0"/>
         <Style x:Key="SliderStyle" TargetType="Slider">
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="Height" Value="24"/>
         </Style>
     </Window.Resources>
 
-    <Border Background="{StaticResource BgBrush}" CornerRadius="12"
-            BorderBrush="#30FFFFFF" BorderThickness="1"
+    <Border Background="{DynamicResource Brush.Bg.Chrome}" CornerRadius="12"
+            BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1"
             MouseLeftButtonDown="TitleBar_Down">
         <Grid Margin="16">
             <Grid.RowDefinitions>
@@ -35,11 +31,11 @@
 
             <!-- Title -->
             <TextBlock x:Name="TitleLabel" Text="Pick Color" FontSize="14" FontWeight="SemiBold"
-                       Foreground="{StaticResource TextPrimary}" Margin="0,4,0,12"/>
+                       Foreground="{DynamicResource Brush.Text.Primary}" Margin="0,4,0,12"/>
 
             <!-- Preview -->
             <Border x:Name="ColorPreview" Grid.Row="1" Height="40" CornerRadius="6"
-                    BorderBrush="#40FFFFFF" BorderThickness="1" Margin="0,0,0,8"/>
+                    BorderBrush="{DynamicResource Brush.Border.Default}" BorderThickness="1" Margin="0,0,0,8"/>
 
             <!-- Hex input -->
             <Grid Grid.Row="2" Margin="0,0,0,8">
@@ -47,11 +43,11 @@
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
-                <TextBlock Text="#" Foreground="{StaticResource TextSecondary}"
+                <TextBlock Text="#" Foreground="{DynamicResource Brush.Text.Secondary}"
                            FontSize="14" VerticalAlignment="Center" Margin="0,0,6,0"/>
                 <TextBox x:Name="HexBox" Grid.Column="1" Text="FFFFFF"
-                         FontSize="14" Foreground="{StaticResource TextPrimary}"
-                         Background="#1E1E36" BorderBrush="#404060"
+                         FontSize="14" Foreground="{DynamicResource Brush.Text.Primary}"
+                         Background="{DynamicResource Brush.Bg.Input}" BorderBrush="{DynamicResource Brush.Border.Default}"
                          BorderThickness="1" Padding="8,4"
                          MaxLength="6" TextChanged="HexBox_Changed"/>
             </Grid>
@@ -63,12 +59,15 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="36"/>
                 </Grid.ColumnDefinitions>
+                <!-- ponytail: channel label colors stay hardcoded — they encode the R/G/B
+                     channel meaning (red/green/blue), not chrome; recoloring them to
+                     Danger/Success/Accent would mislabel the controls. -->
                 <TextBlock Text="R" Foreground="#FF6666" FontWeight="Bold" VerticalAlignment="Center"/>
                 <Slider x:Name="SliderR" Grid.Column="1" Minimum="0" Maximum="255"
                         Style="{StaticResource SliderStyle}" ValueChanged="Slider_Changed"/>
                 <TextBox x:Name="ValR" Grid.Column="2" Text="255" Width="32"
-                         Foreground="{StaticResource TextPrimary}"
-                         Background="#1E1E36" BorderBrush="#404060"
+                         Foreground="{DynamicResource Brush.Text.Primary}"
+                         Background="{DynamicResource Brush.Bg.Input}" BorderBrush="{DynamicResource Brush.Border.Default}"
                          BorderThickness="1" Padding="2" FontSize="11"
                          TextChanged="ValR_Changed"/>
             </Grid>
@@ -84,8 +83,8 @@
                 <Slider x:Name="SliderG" Grid.Column="1" Minimum="0" Maximum="255"
                         Style="{StaticResource SliderStyle}" ValueChanged="Slider_Changed"/>
                 <TextBox x:Name="ValG" Grid.Column="2" Text="255" Width="32"
-                         Foreground="{StaticResource TextPrimary}"
-                         Background="#1E1E36" BorderBrush="#404060"
+                         Foreground="{DynamicResource Brush.Text.Primary}"
+                         Background="{DynamicResource Brush.Bg.Input}" BorderBrush="{DynamicResource Brush.Border.Default}"
                          BorderThickness="1" Padding="2" FontSize="11"
                          TextChanged="ValG_Changed"/>
             </Grid>
@@ -101,8 +100,8 @@
                 <Slider x:Name="SliderB" Grid.Column="1" Minimum="0" Maximum="255"
                         Style="{StaticResource SliderStyle}" ValueChanged="Slider_Changed"/>
                 <TextBox x:Name="ValB" Grid.Column="2" Text="255" Width="32"
-                         Foreground="{StaticResource TextPrimary}"
-                         Background="#1E1E36" BorderBrush="#404060"
+                         Foreground="{DynamicResource Brush.Text.Primary}"
+                         Background="{DynamicResource Brush.Bg.Input}" BorderBrush="{DynamicResource Brush.Border.Default}"
                          BorderThickness="1" Padding="2" FontSize="11"
                          TextChanged="ValB_Changed"/>
             </Grid>
@@ -110,14 +109,14 @@
             <!-- Buttons -->
             <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right">
                 <Button x:Name="CancelBtn" Content="Cancel" Background="Transparent"
-                        Foreground="{StaticResource TextSecondary}"
-                        BorderBrush="#404060" BorderThickness="1"
+                        Foreground="{DynamicResource Brush.Text.Secondary}"
+                        BorderBrush="{DynamicResource Brush.Border.Default}" BorderThickness="1"
                         Padding="16,6" Cursor="Hand" FontSize="12"
                         Click="Cancel_Click">
                     <Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="4"/></Style></Button.Resources>
                 </Button>
                 <Button x:Name="OkBtn" Content="OK"
-                        Background="{StaticResource AccentBrush}" Foreground="White"
+                        Background="{DynamicResource Brush.Accent.Solid}" Foreground="{DynamicResource Brush.Accent.On}"
                         BorderThickness="0" Padding="16,6" Margin="8,0,0,0"
                         Cursor="Hand" FontSize="12" FontWeight="SemiBold"
                         Click="Ok_Click">

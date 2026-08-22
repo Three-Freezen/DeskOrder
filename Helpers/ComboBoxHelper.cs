@@ -4,7 +4,16 @@ using System.Windows.Controls;
 namespace DesktopZones.Helpers;
 
 /// <summary>
-/// Creates dark-themed ComboBoxes by referencing styles from Theme.xaml.
+/// Lightweight ComboBox factory. The implicit <see cref="ComboBox"/> /
+/// <see cref="ComboBoxItem"/> styles in <c>Resources/Controls/ComboBox.xaml</c>
+/// already provide the theme-aware template, PART_Popup, hover/selected
+/// triggers, and DynamicResource bindings — so this helper just constructs
+/// the ComboBox with a few layout knobs and lets the implicit style do
+/// the rest. The previous implementation overrode those styles with the
+/// legacy <c>DarkComboTemplate</c> / <c>DarkComboItemStyle</c> from
+/// Theme.xaml (which lacked PART_Popup and used StaticResource), causing
+/// the dropdown to render in a default chrome that didn't follow theme
+/// switching.
 /// </summary>
 public static class ComboBoxHelper
 {
@@ -19,24 +28,13 @@ public static class ComboBoxHelper
         };
         if (width > 0) combo.Width = width;
         if (height > 0) combo.Height = height;
-        ApplyDarkTheme(combo);
+        // ponytail: implicit Style from Controls/ComboBox.xaml handles theming — see class doc.
         if (fontSize != 12) combo.FontSize = fontSize;
         return combo;
     }
 
-    /// <summary>Apply dark theme to an existing ComboBox.</summary>
-    public static void ApplyDarkTheme(ComboBox combo)
-    {
-        var app = Application.Current;
-        if (app == null) return;
-
-        var template = app.TryFindResource("DarkComboTemplate") as ControlTemplate;
-        var itemStyle = app.TryFindResource("DarkComboItemStyle") as Style;
-
-        if (template != null) combo.Template = template;
-        if (itemStyle != null) combo.ItemContainerStyle = itemStyle;
-        // Foreground for the selected item text in the closed state
-        combo.Foreground = new System.Windows.Media.SolidColorBrush(
-            System.Windows.Media.Color.FromRgb(0xE0, 0xE0, 0xF0));
-    }
+    /// <summary>No-op kept for caller compatibility. The implicit ComboBox style
+    /// (see class doc) already provides PART_Popup, theme-following brushes,
+    /// and hover/selected triggers.</summary>
+    public static void ApplyDarkTheme(ComboBox combo) { }
 }

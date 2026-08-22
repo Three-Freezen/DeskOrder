@@ -13,8 +13,8 @@ public class NotesService
     private AppConfig? _appConfig;
 
     /// <summary>Open StickyNoteWindow instances keyed by note Id. Owned by this service
-    /// (was App._noteWindows before P5). Public so App.xaml.cs and WidgetSettingsDialog
-    /// can read/write through the service.</summary>
+    /// (was App._noteWindows before P5). Public so App.xaml.cs can read/write through
+    /// the service.</summary>
     public Dictionary<Guid, StickyNoteWindow> Windows { get; } = new();
 
     public StickyNoteWindow? GetWindow(Guid id)

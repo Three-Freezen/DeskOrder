@@ -18,6 +18,18 @@
         Drop="Window_Drop">
 
     <Grid>
+        <!-- ponytail: hover-expand toggle (Task 14d). Stays visible while collapsed,
+             hides once the content is expanded. PropertyWindowService is the
+             spec-mandated click target so any instance can be configured here. -->
+        <Button x:Name="ToggleExpandBtn" Width="24" Height="24" Margin="4,4,0,0"
+                HorizontalAlignment="Left" VerticalAlignment="Top"
+                Panel.ZIndex="100" Cursor="Hand"
+                Background="Transparent" BorderThickness="0" Click="ToggleExpandBtn_Click">
+            <Path Width="14" Height="14" StrokeThickness="1.5" StrokeLineJoin="Round"
+                  Stroke="{DynamicResource Brush.Text.Tertiary}"
+                  Data="{StaticResource Icon.Panel}"/>
+        </Button>
+
         <!-- FULL ZONE -->
         <Border x:Name="MainContent" Visibility="Visible" ClipToBounds="True" CornerRadius="8">
             <Grid>

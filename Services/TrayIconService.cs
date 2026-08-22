@@ -68,6 +68,9 @@ public class TrayIconService : IDisposable
     public event Action? ManageZones;
     public event Action? Exit;
 
+    /// <summary>Raised when a Shell_NotifyIcon call fails. Payload is a short diagnostic message.</summary>
+    public event Action<string>? NotifyError;
+
     public TrayIconService(Icon icon, string tooltip = "DeskOrder")
     {
         _icon = icon;
@@ -96,7 +99,11 @@ public class TrayIconService : IDisposable
             hIcon = _icon.Handle,
             szTip = tooltip
         };
-        Shell_NotifyIcon(NIM_ADD, ref nid);
+        if (!Shell_NotifyIcon(NIM_ADD, ref nid))
+        {
+            System.Diagnostics.Debug.WriteLine("[TrayIconService] NIM_ADD failed: False");
+            NotifyError?.Invoke("Shell_NotifyIcon(NIM_ADD) failed — tray icon unavailable");
+        }
     }
 
     public void UpdateTooltip(string tooltip)
@@ -109,7 +116,8 @@ public class TrayIconService : IDisposable
             uFlags = NIF_TIP,
             szTip = tooltip
         };
-        Shell_NotifyIcon(NIM_MODIFY, ref nid);
+        if (!Shell_NotifyIcon(NIM_MODIFY, ref nid))
+            System.Diagnostics.Debug.WriteLine("[TrayIconService] NIM_MODIFY (tooltip) failed: False");
     }
 
     private const int NIF_INFO = 0x00000010;
@@ -128,7 +136,8 @@ public class TrayIconService : IDisposable
             dwInfoFlags = NIIF_INFO,
             uVersion = 3
         };
-        Shell_NotifyIcon(NIM_MODIFY, ref nid);
+        if (!Shell_NotifyIcon(NIM_MODIFY, ref nid))
+            System.Diagnostics.Debug.WriteLine("[TrayIconService] NIM_MODIFY (balloon) failed: False");
     }
 
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -238,7 +247,8 @@ public class TrayIconService : IDisposable
         if (_isCreated)
         {
             var nid = new NOTIFYICONDATA { cbSize = Marshal.SizeOf(typeof(NOTIFYICONDATA)), hWnd = _hWnd, uID = 1 };
-            Shell_NotifyIcon(NIM_DELETE, ref nid);
+            if (!Shell_NotifyIcon(NIM_DELETE, ref nid))
+                System.Diagnostics.Debug.WriteLine("[TrayIconService] NIM_DELETE failed: False");
             _isCreated = false;
         }
         _icon?.Dispose();

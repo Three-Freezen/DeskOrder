@@ -1,0 +1,29 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <SolidColorBrush x:Key="Brush.Bg.Base"             Color="{DynamicResource Color.Bg.Base}"/>
+  <SolidColorBrush x:Key="Brush.Bg.Chrome"           Color="{DynamicResource Color.Bg.Chrome}"/>
+  <SolidColorBrush x:Key="Brush.Bg.Surface"          Color="{DynamicResource Color.Bg.Surface}"/>
+  <SolidColorBrush x:Key="Brush.Bg.Hover"            Color="{DynamicResource Color.Bg.Hover}"/>
+  <SolidColorBrush x:Key="Brush.Bg.Active"           Color="{DynamicResource Color.Bg.Active}"/>
+  <SolidColorBrush x:Key="Brush.Bg.Input"            Color="{DynamicResource Color.Bg.Input}"/>
+  <SolidColorBrush x:Key="Brush.Border.Subtle"       Color="{DynamicResource Color.Border.Subtle}"/>
+  <SolidColorBrush x:Key="Brush.Border.Default"      Color="{DynamicResource Color.Border.Default}"/>
+  <SolidColorBrush x:Key="Brush.Border.Strong"       Color="{DynamicResource Color.Border.Strong}"/>
+  <SolidColorBrush x:Key="Brush.Text.Primary"        Color="{DynamicResource Color.Text.Primary}"/>
+  <SolidColorBrush x:Key="Brush.Text.Secondary"      Color="{DynamicResource Color.Text.Secondary}"/>
+  <SolidColorBrush x:Key="Brush.Text.Tertiary"       Color="{DynamicResource Color.Text.Tertiary}"/>
+  <SolidColorBrush x:Key="Brush.Text.Disabled"       Color="{DynamicResource Color.Text.Disabled}"/>
+  <SolidColorBrush x:Key="Brush.Accent"              Color="{DynamicResource Color.Accent}"/>
+  <SolidColorBrush x:Key="Brush.Accent.Wash"         Color="{DynamicResource Color.Accent.Wash}"/>
+  <SolidColorBrush x:Key="Brush.Accent.Solid"        Color="{DynamicResource Color.Accent.Solid}"/>
+  <SolidColorBrush x:Key="Brush.Accent.Solid.Hover"  Color="{DynamicResource Color.Accent.Solid.Hover}"/>
+  <SolidColorBrush x:Key="Brush.Accent.Solid.Press"  Color="{DynamicResource Color.Accent.Solid.Press}"/>
+  <SolidColorBrush x:Key="Brush.Accent.On"           Color="{DynamicResource Color.Accent.On}"/>
+  <SolidColorBrush x:Key="Brush.Accent.2"            Color="{DynamicResource Color.Accent.2}"/>
+  <SolidColorBrush x:Key="Brush.Success"             Color="{DynamicResource Color.Success}"/>
+  <SolidColorBrush x:Key="Brush.Warning"             Color="{DynamicResource Color.Warning}"/>
+  <SolidColorBrush x:Key="Brush.Danger"              Color="{DynamicResource Color.Danger}"/>
+  <SolidColorBrush x:Key="Brush.Danger.Solid"        Color="{DynamicResource Color.Danger.Solid}"/>
+  <SolidColorBrush x:Key="Brush.Danger.Wash"         Color="{DynamicResource Color.Danger.Wash}"/>
+  <SolidColorBrush x:Key="Brush.Close.Hover"         Color="{DynamicResource Color.Close.Hover}"/>
+</ResourceDictionary>

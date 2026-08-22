@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace DesktopZones.Models;
@@ -25,7 +26,6 @@ public class Zone : AppearanceModel
     public bool AutoArrange { get; set; } = true;
     public string IconColor { get; set; } = "";              // emoji tint color
     public string TitleTextColor { get; set; } = "#A0FFFFFF";
-    public ZoneType ZoneType { get; set; } = ZoneType.Normal;
     public bool QuickBarMode { get; set; } = false;             // Title-bar-less compact mode
     private List<ZoneItem> _items = new();
     public List<ZoneItem> Items
@@ -34,41 +34,22 @@ public class Zone : AppearanceModel
         set => _items = value ?? new();
     }
 
-    // ── Merge / group ──
-    public Guid? MergedGroupId { get; set; } = null;              // non-null = part of a merged group
-    private List<Guid> _mergedSubZoneIds = new();
-    public List<Guid> MergedSubZoneIds
-    {
-        get => _mergedSubZoneIds;
-        set => _mergedSubZoneIds = value ?? new();
-    }
-    public string MergedGroupName { get; set; } = "";             // combined display name
-    public string MergedGroupIcon { get; set; } = "";             // combined icon
+    // ── Merge / group (group identity + style overrides; lifted out of Zone
+    //    to flatten the god class — see bug report item #14) ──
+    public MergedGroupMembership MergedGroupMembership { get; set; } = new();
+    public MergedGroupStyle MergedGroupStyle { get; set; } = new();
 
-    // ── Merged Group Style Settings ──
-    public string MergedGroupBorderColor { get; set; } = "#40FFFFFF";
-    public double MergedGroupBorderThickness { get; set; } = 1.5;
-    public int MergedGroupCornerRadius { get; set; } = 8;
-    public string MergedGroupFillColor { get; set; } = "#08000000";
-    public string MergedGroupTitleBarFillColor { get; set; } = "#10FFFFFF";
-    public string MergedGroupTitleTextColor { get; set; } = "#A0FFFFFF";
-    public string MergedGroupIconColor { get; set; } = "";        // emoji tint color
-    public double MergedGroupControlOpacity { get; set; } = 40;
-    public double MergedGroupTitleBarOpacity { get; set; } = 6;   // title bar opacity
-    public bool MergedGroupUseUnifiedFill { get; set; } = true;   // true=unified fill, false=keep original
-    public bool MergedGroupQuickBarMode { get; set; } = false;    // title-bar-less compact mode
+    /// <summary>
+    /// Captures unknown JSON fields. Used by <c>PresetService</c> for one-time
+    /// migration of legacy flat MergedGroup* fields into MergedGroupStyle /
+    /// MergedGroupMembership. Cleared after migration.
+    /// </summary>
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; set; }
 
     // ── Title bar text color adaptive ──
     /// <summary>Auto-pick zone title bar text color based on <see cref="TitleBarFillColor"/>.</summary>
     public bool TitleBarTextColorAdaptive { get; set; } = true;
-    /// <summary>Auto-pick merged-group title bar text color based on <see cref="MergedGroupTitleBarFillColor"/>.</summary>
-    public bool MergedGroupTitleBarTextColorAdaptive { get; set; } = true;
-    public string MergedGroupBackgroundImagePath { get; set; } = "";
-    public string MergedGroupBgImageStretch { get; set; } = "UniformToFill";
-    public double MergedGroupBgImageOffsetX { get; set; } = 0;
-    public double MergedGroupBgImageOffsetY { get; set; } = 0;
-    public double MergedGroupBgImageZoom { get; set; } = 1.0;
-    public double MergedGroupBackgroundImageOpacity { get; set; } = 40;
 
     // Display state — not persisted
     [JsonIgnore]
@@ -97,31 +78,36 @@ public class Zone : AppearanceModel
             AutoArrange = AutoArrange,
             IconColor = IconColor,
             TitleTextColor = TitleTextColor,
-            ZoneType = ZoneType,
             QuickBarMode = QuickBarMode,
-            MergedGroupId = MergedGroupId,
-            MergedSubZoneIds = new List<Guid>(MergedSubZoneIds),
-            MergedGroupName = MergedGroupName,
-            MergedGroupIcon = MergedGroupIcon,
-            MergedGroupBorderColor = MergedGroupBorderColor,
-            MergedGroupBorderThickness = MergedGroupBorderThickness,
-            MergedGroupCornerRadius = MergedGroupCornerRadius,
-            MergedGroupFillColor = MergedGroupFillColor,
-            MergedGroupTitleBarFillColor = MergedGroupTitleBarFillColor,
-            MergedGroupTitleTextColor = MergedGroupTitleTextColor,
-            MergedGroupIconColor = MergedGroupIconColor,
-            MergedGroupControlOpacity = MergedGroupControlOpacity,
-            MergedGroupTitleBarOpacity = MergedGroupTitleBarOpacity,
-            MergedGroupUseUnifiedFill = MergedGroupUseUnifiedFill,
-            MergedGroupQuickBarMode = MergedGroupQuickBarMode,
-            MergedGroupBackgroundImagePath = MergedGroupBackgroundImagePath,
-            MergedGroupBgImageStretch = MergedGroupBgImageStretch,
-            MergedGroupBgImageOffsetX = MergedGroupBgImageOffsetX,
-            MergedGroupBgImageOffsetY = MergedGroupBgImageOffsetY,
-            MergedGroupBgImageZoom = MergedGroupBgImageZoom,
-            MergedGroupBackgroundImageOpacity = MergedGroupBackgroundImageOpacity,
+            MergedGroupMembership = new MergedGroupMembership
+            {
+                GroupId = MergedGroupMembership.GroupId,
+                SubZoneIds = new List<Guid>(MergedGroupMembership.SubZoneIds),
+                DisplayName = MergedGroupMembership.DisplayName,
+                Icon = MergedGroupMembership.Icon,
+            },
+            MergedGroupStyle = new MergedGroupStyle
+            {
+                BorderColor = MergedGroupStyle.BorderColor,
+                BorderThickness = MergedGroupStyle.BorderThickness,
+                CornerRadius = MergedGroupStyle.CornerRadius,
+                FillColor = MergedGroupStyle.FillColor,
+                TitleBarFillColor = MergedGroupStyle.TitleBarFillColor,
+                TitleTextColor = MergedGroupStyle.TitleTextColor,
+                IconColor = MergedGroupStyle.IconColor,
+                ControlOpacity = MergedGroupStyle.ControlOpacity,
+                TitleBarOpacity = MergedGroupStyle.TitleBarOpacity,
+                UseUnifiedFill = MergedGroupStyle.UseUnifiedFill,
+                QuickBarMode = MergedGroupStyle.QuickBarMode,
+                TitleBarTextColorAdaptive = MergedGroupStyle.TitleBarTextColorAdaptive,
+                BackgroundImagePath = MergedGroupStyle.BackgroundImagePath,
+                BgImageStretch = MergedGroupStyle.BgImageStretch,
+                BgImageOffsetX = MergedGroupStyle.BgImageOffsetX,
+                BgImageOffsetY = MergedGroupStyle.BgImageOffsetY,
+                BgImageZoom = MergedGroupStyle.BgImageZoom,
+                BackgroundImageOpacity = MergedGroupStyle.BackgroundImageOpacity,
+            },
             TitleBarTextColorAdaptive = TitleBarTextColorAdaptive,
-            MergedGroupTitleBarTextColorAdaptive = MergedGroupTitleBarTextColorAdaptive,
             Items = new List<ZoneItem>(Items.ConvertAll(i => i.Clone()))
         };
         // Ponytail: 14 AppearanceModel fields auto-copied via reflection so

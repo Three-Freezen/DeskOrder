@@ -10,16 +10,8 @@
         AllowsTransparency="True"
         Background="Transparent">
 
-    <Window.Resources>
-        <SolidColorBrush x:Key="Bg" Color="#E610111A"/>
-        <SolidColorBrush x:Key="Acc" Color="#7C3AED"/>
-        <SolidColorBrush x:Key="T1" Color="#E8E8F0"/>
-        <SolidColorBrush x:Key="T2" Color="#8888A0"/>
-        <SolidColorBrush x:Key="IBg" Color="#0AFFFFFF"/>
-        <SolidColorBrush x:Key="IBd" Color="#15FFFFFF"/>
-    </Window.Resources>
-
-    <Border Background="{StaticResource Bg}" CornerRadius="12" BorderBrush="#15FFFFFF" BorderThickness="1">
+    <Border Background="{DynamicResource Brush.Bg.Chrome}" CornerRadius="12"
+            BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1">
         <Border.Effect>
             <DropShadowEffect BlurRadius="24" ShadowDepth="0" Color="#AA000000" Opacity="0.6"/>
         </Border.Effect>
@@ -33,19 +25,19 @@
             <!-- Title -->
             <TextBlock x:Name="DialogTitle" Text="覆盖预设"
                        FontSize="15" FontWeight="SemiBold"
-                       Foreground="{StaticResource T1}" Margin="0,0,0,8"/>
+                       Foreground="{DynamicResource Brush.Text.Primary}" Margin="0,0,0,8"/>
 
             <!-- Prompt -->
             <TextBlock x:Name="PromptText" Grid.Row="1"
-                       Foreground="{StaticResource T2}" FontSize="13"
+                       Foreground="{DynamicResource Brush.Text.Secondary}" FontSize="13"
                        TextWrapping="Wrap" VerticalAlignment="Center"
                        LineHeight="22"/>
 
             <!-- Buttons -->
             <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
                 <Button x:Name="CancelButton" Content="取消"
-                        Background="#15FFFFFF" Foreground="{StaticResource T2}"
-                        BorderBrush="{StaticResource IBd}" BorderThickness="1"
+                        Background="{DynamicResource Brush.Bg.Surface}" Foreground="{DynamicResource Brush.Text.Secondary}"
+                        BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1"
                         Padding="20,8" Cursor="Hand" FontSize="12"
                         Click="CancelButton_Click">
                     <Button.Resources>
@@ -55,7 +47,7 @@
                     </Button.Resources>
                 </Button>
                 <Button x:Name="OverwriteButton" Content="覆盖"
-                        Background="{StaticResource Acc}" Foreground="White"
+                        Background="{DynamicResource Brush.Accent.Solid}" Foreground="{DynamicResource Brush.Accent.On}"
                         BorderThickness="0" Padding="20,8" Margin="8,0,0,0"
                         Cursor="Hand" FontSize="12" FontWeight="SemiBold"
                         IsDefault="True"

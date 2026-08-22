@@ -1,271 +1,116 @@
 <Window x:Class="DesktopZones.Views.ManagementWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="DeskOrder" Width="680" Height="620"
-        MinWidth="540" MinHeight="480"
+        xmlns:components="clr-namespace:DesktopZones.Views.Components"
+        Title="DeskOrder" Width="1100" Height="680"
+        MinWidth="940" MinHeight="600"
         WindowStartupLocation="CenterScreen"
         ResizeMode="CanResizeWithGrip"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent">
+  <Border Background="{DynamicResource Brush.Bg.Base}" CornerRadius="10"
+          BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1">
+    <Border.Effect>
+      <DropShadowEffect BlurRadius="24" ShadowDepth="0" Color="Black" Opacity="0.45"/>
+    </Border.Effect>
+    <Grid>
+      <Grid.RowDefinitions>
+        <RowDefinition Height="40"/>
+        <RowDefinition Height="*"/>
+        <RowDefinition Height="28"/>
+      </Grid.RowDefinitions>
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="216"/>
+        <ColumnDefinition Width="*"/>
+        <ColumnDefinition x:Name="RightCol" Width="0"/>
+      </Grid.ColumnDefinitions>
 
-    <Window.Resources>
-        <SolidColorBrush x:Key="BgBrush" Color="#E610111A"/>
-        <SolidColorBrush x:Key="CardBrush" Color="#18FFFFFF"/>
-        <SolidColorBrush x:Key="CardBorder" Color="#10FFFFFF"/>
-        <SolidColorBrush x:Key="AccentBrush" Color="#7C3AED"/>
-        <SolidColorBrush x:Key="TextPrimary" Color="#E8E8F0"/>
-        <SolidColorBrush x:Key="TextSecondary" Color="#8888A0"/>
-        <SolidColorBrush x:Key="TextMuted" Color="#606080"/>
-        <SolidColorBrush x:Key="DangerBrush" Color="#FF5555"/>
-        <SolidColorBrush x:Key="ActiveBrush" Color="#7C3AED"/>
-        <SolidColorBrush x:Key="InactiveBrush" Color="#20FFFFFF"/>
-        <SolidColorBrush x:Key="InputBg" Color="#0AFFFFFF"/>
-        <SolidColorBrush x:Key="InputBorder" Color="#15FFFFFF"/>
-    </Window.Resources>
-
-    <Border Background="{StaticResource BgBrush}" CornerRadius="12"
-            BorderBrush="#15FFFFFF" BorderThickness="1">
-        <Border.Effect>
-            <DropShadowEffect BlurRadius="24" ShadowDepth="0" Color="#AA000000" Opacity="0.6"/>
-        </Border.Effect>
+      <!-- Title bar -->
+      <Border Grid.Row="0" Grid.ColumnSpan="3"
+              Background="{DynamicResource Brush.Bg.Chrome}"
+              BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="0,0,0,1"
+              MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
         <Grid>
-            <Grid.RowDefinitions>
-                <RowDefinition Height="42"/>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="*"/>
-                <RowDefinition Height="Auto"/>
-            </Grid.RowDefinitions>
-
-            <!-- Title bar -->
-            <Border Grid.Row="0" Background="#08FFFFFF" CornerRadius="12,12,0,0"
-                    MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
-                <Grid>
-                    <TextBlock x:Name="TitleText" Text="DeskOrder"
-                               FontSize="14" FontWeight="SemiBold"
-                               Foreground="{StaticResource TextPrimary}"
-                               VerticalAlignment="Center" Margin="16,0,0,0"/>
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,6,0">
-                        <Button x:Name="LangToggleBtn" Width="38" Height="28"
-                                Foreground="{StaticResource TextSecondary}"
-                                Background="Transparent" BorderThickness="0"
-                                Click="LangToggle_Click" Cursor="Hand" FontSize="11"
-                                ToolTip="Language / 语言">中/EN</Button>
-                        <Button Content="-" Width="34" Height="28"
-                                Foreground="{StaticResource TextSecondary}"
-                                Background="Transparent" BorderThickness="0"
-                                Click="MinimizeButton_Click" Cursor="Hand" FontSize="14"/>
-                        <Button Content="X" Width="34" Height="28"
-                                Foreground="{StaticResource TextSecondary}"
-                                Background="Transparent" BorderThickness="0"
-                                Click="CloseButton_Click" Cursor="Hand" FontSize="12"/>
-                    </StackPanel>
-                </Grid>
-            </Border>
-
-            <!-- Global action bar -->
-            <Border Grid.Row="1" Margin="16,10,16,6" Padding="10,8"
-                    Background="{StaticResource CardBrush}" CornerRadius="8"
-                    BorderBrush="{StaticResource CardBorder}" BorderThickness="1">
-                <WrapPanel>
-                    <Button x:Name="BtnShowAll"
-                            Width="80" Height="28"
-                            Background="{StaticResource InactiveBrush}" Foreground="{StaticResource TextPrimary}"
-                            BorderThickness="1" BorderBrush="#20FFFFFF"
-                            Cursor="Hand" FontSize="11"
-                            Click="BtnShowAll_Click" Margin="0,0,4,4">
-                        <Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="4"/></Style></Button.Resources>
-                    </Button>
-                    <Button x:Name="BtnMinAll"
-                            Width="80" Height="28"
-                            Background="{StaticResource InactiveBrush}" Foreground="{StaticResource TextPrimary}"
-                            BorderThickness="1" BorderBrush="#20FFFFFF"
-                            Cursor="Hand" FontSize="11"
-                            Click="BtnHideAll_Click" Margin="0,0,4,4">
-                        <Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="4"/></Style></Button.Resources>
-                    </Button>
-                    <Button x:Name="BtnFullHideAll"
-                            Width="80" Height="28"
-                            Background="#20FF5555" Foreground="#FF8888"
-                            BorderThickness="1" BorderBrush="#20FFFFFF"
-                            Cursor="Hand" FontSize="11"
-                            Click="BtnFullHideAll_Click" Margin="0,0,4,4">
-                        <Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="4"/></Style></Button.Resources>
-                    </Button>
-
-                </WrapPanel>
-            </Border>
-
-            <!-- Main content area -->
-            <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Hidden" Margin="16,0,16,8">
-                <StackPanel>
-                    <TextBlock x:Name="EmptyStateText" Text="No zones created yet."
-                               Foreground="{StaticResource TextSecondary}"
-                               FontSize="13" TextAlignment="Center"
-                               Margin="0,40,0,40" Visibility="Visible"/>
-
-                    <!-- Zones section -->
-                    <Border x:Name="ZonesSection" Visibility="Collapsed" Margin="0,0,0,8">
-                        <StackPanel>
-                            <TextBlock x:Name="ZonesHeader" Text="ZONES"
-                                       FontSize="11" FontWeight="SemiBold"
-                                       Foreground="{StaticResource TextMuted}"
-                                       Margin="0,0,0,6"/>
-                            <StackPanel x:Name="ZonesStack"/>
-                        </StackPanel>
-                    </Border>
-
-                    <!-- Notes section -->
-                    <Border x:Name="NotesSection" Visibility="Collapsed" Margin="0,0,0,8">
-                        <StackPanel>
-                            <TextBlock x:Name="NotesHeader" Text="NOTES"
-                                       FontSize="11" FontWeight="SemiBold"
-                                       Foreground="{StaticResource TextMuted}"
-                                       Margin="0,0,0,6"/>
-                            <StackPanel x:Name="NotesStack"/>
-                        </StackPanel>
-                    </Border>
-
-                    <!-- Clocks section -->
-                    <Border x:Name="ClocksSection" Visibility="Collapsed" Margin="0,0,0,8">
-                        <StackPanel>
-                            <TextBlock x:Name="ClocksHeader" Text="CLOCKS"
-                                       FontSize="11" FontWeight="SemiBold"
-                                       Foreground="{StaticResource TextMuted}"
-                                       Margin="0,0,0,6"/>
-                            <StackPanel x:Name="ClocksStack"/>
-                        </StackPanel>
-                    </Border>
-
-                    <!-- Calendars section -->
-                    <Border x:Name="CalendarsSection" Visibility="Collapsed" Margin="0,0,0,8">
-                        <StackPanel>
-                            <TextBlock x:Name="CalendarHeader" Text="CALENDARS"
-                                       FontSize="11" FontWeight="SemiBold"
-                                       Foreground="{StaticResource TextMuted}"
-                                       Margin="0,0,0,6"/>
-                            <StackPanel x:Name="CalendarsStack"/>
-                        </StackPanel>
-                    </Border>
-
-                    <!-- Panel Section -->
-                    <Border x:Name="PanelSection" Visibility="Collapsed" Margin="0,0,0,18">
-                        <StackPanel>
-                            <TextBlock x:Name="PanelHeader" Text="PANEL" FontSize="11" FontWeight="SemiBold"
-                                       Foreground="{StaticResource TextMuted}"
-                                       Margin="0,0,0,6"/>
-                            <Border Background="#18FFFFFF" CornerRadius="8" Padding="12"
-                                    BorderBrush="#10FFFFFF" BorderThickness="1">
-                                <StackPanel>
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto"/>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <!-- Status icon + panel name left -->
-                                        <StackPanel Orientation="Horizontal" Grid.Column="0"
-                                                    VerticalAlignment="Center" Margin="0,0,8,0">
-                                            <StackPanel Orientation="Horizontal" Cursor="Hand"
-                                                        MouseLeftButtonDown="PanelToggle_Click">
-                                                <TextBlock x:Name="PanelToggleIcon" Text="📋" FontSize="14"
-                                                           VerticalAlignment="Center" Margin="0,0,6,0"/>
-                                                <TextBlock x:Name="PanelNameLabel" Text="面板" FontSize="13"
-                                                           Foreground="{StaticResource TextPrimary}"
-                                                           VerticalAlignment="Center"/>
-                                            </StackPanel>
-                                            <Border x:Name="PanelSettingsBtn" Width="22" Height="22"
-                                                    CornerRadius="4" Background="Transparent"
-                                                    Cursor="Hand" Margin="6,0,0,0"
-                                                    MouseLeftButtonDown="PanelSettingsBtn_Click">
-                                                <TextBlock Text="⚙" FontSize="11" Foreground="#8080A0"
-                                                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                            </Border>
-                                        </StackPanel>
-                                        <!-- Hotkey -->
-                                        <StackPanel Orientation="Horizontal" Grid.Column="1" VerticalAlignment="Center">
-                                            <TextBlock Text="Hotkey:" FontSize="11" Foreground="{StaticResource TextSecondary}"
-                                                       VerticalAlignment="Center" Margin="0,0,6,0"/>
-                                            <TextBlock x:Name="PanelHotkeyText" Text="None" FontSize="11"
-                                                       Foreground="#7C3AED" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                            <Button x:Name="PanelHotkeyBtn" Content="切换" Width="40" Height="22"
-                                                    FontSize="10" Background="#18FFFFFF" Foreground="{StaticResource TextSecondary}"
-                                                    BorderThickness="0" Cursor="Hand"
-                                                    Click="PanelHotkeySet_Click"/>
-                                        </StackPanel>
-                                        <!-- Toggle switch right -->
-                                        <Border x:Name="PanelToggleBorder" Width="40" Height="20"
-                                                CornerRadius="10" Background="#30FFFFFF"
-                                                Cursor="Hand" Grid.Column="2"
-                                                MouseLeftButtonDown="PanelToggle_Click">
-                                            <Border x:Name="PanelToggleDot" Width="16" Height="16"
-                                                    CornerRadius="8" Background="#FF4444"
-                                                    HorizontalAlignment="Left" Margin="2,0,0,0"
-                                                    VerticalAlignment="Center"/>
-                                        </Border>
-                                    </Grid>
-                                </StackPanel>
-                            </Border>
-                        </StackPanel>
-                    </Border>
-                </StackPanel>
-            </ScrollViewer>
-
-            <!-- Bottom action bar -->
-            <Border Grid.Row="3" Background="#08FFFFFF" CornerRadius="0,0,12,12" Padding="16,10">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <CheckBox IsChecked="{Binding StartWithWindows}"
-                              VerticalAlignment="Center" Margin="0,0,6,0">
-                        <TextBlock x:Name="StartWithWindowsLabel" Text="Start with Windows"
-                                   Foreground="{StaticResource TextSecondary}" FontSize="11"/>
-                    </CheckBox>
-                    <StackPanel Grid.Column="2" Orientation="Horizontal">
-                        <Button x:Name="NewPanelBtn" Content="📋"
-                                Background="#207C3AED" Foreground="White"
-                                BorderThickness="0" Width="30" Height="30"
-                                Cursor="Hand" FontSize="14"
-                                Margin="0,0,2,0"
-                                Click="NewPanel_Click" ToolTip="New Panel">
-                            <Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="6"/></Style></Button.Resources>
-                        </Button>
-                        <Button x:Name="NewZoneButton" Content="⊞"
-                                Background="#18FFFFFF" Foreground="#E8E8F0"
-                                BorderThickness="1" BorderBrush="#20FFFFFF"
-                                Width="30" Height="30"
-                                Cursor="Hand" FontSize="14"
-                                Margin="0,0,3,0"
-                                Click="NewZone_Click">
-                            <Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="6"/></Style></Button.Resources>
-                        </Button>
-                        <Button x:Name="NewNoteBtn" Content="📝"
-                                Background="#204CAF50" Foreground="White"
-                                BorderThickness="0" Width="30" Height="30"
-                                Cursor="Hand" FontSize="14"
-                                Margin="0,0,2,0"
-                                Click="NewNote_Click" ToolTip="New Note">
-                            <Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="6"/></Style></Button.Resources>
-                        </Button>
-                        <Button x:Name="NewClockBtn" Content="🕐"
-                                Background="#20FF9800" Foreground="White"
-                                BorderThickness="0" Width="30" Height="30"
-                                Cursor="Hand" FontSize="14"
-                                Margin="0,0,2,0"
-                                Click="NewClock_Click" ToolTip="New Clock">
-                            <Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="6"/></Style></Button.Resources>
-                        </Button>
-                        <Button x:Name="NewCalendarBtn" Content="📅"
-                                Background="#202196F3" Foreground="White"
-                                BorderThickness="0" Width="30" Height="30"
-                                Cursor="Hand" FontSize="14"
-                                Click="NewCalendar_Click" ToolTip="New Calendar">
-                            <Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="6"/></Style></Button.Resources>
-                        </Button>
-                    </StackPanel>
-                </Grid>
-            </Border>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto"/>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="Auto"/>
+          </Grid.ColumnDefinitions>
+          <StackPanel Grid.Column="0" Orientation="Horizontal" Margin="12,0">
+            <Path Width="16" Height="16" Margin="0,0,8,0" Stretch="Uniform"
+                  Stroke="{DynamicResource Brush.Accent}" StrokeThickness="1.6"
+                  StrokeLineJoin="Round"
+                  Data="{StaticResource Icon.Zones}" VerticalAlignment="Center"/>
+            <TextBlock Text="DeskOrder" FontSize="13" FontWeight="SemiBold"
+                       Foreground="{DynamicResource Brush.Text.Primary}" VerticalAlignment="Center"/>
+          </StackPanel>
+          <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0">
+            <TextBlock x:Name="CrumbSection" Text="分区" FontSize="12"
+                       Foreground="{DynamicResource Brush.Text.Secondary}" VerticalAlignment="Center"/>
+            <TextBlock Text="/" FontSize="11" Margin="6,0"
+                       FontFamily="Cascadia Code, Consolas, monospace"
+                       Foreground="{DynamicResource Brush.Text.Tertiary}" VerticalAlignment="Center"/>
+            <TextBlock x:Name="CrumbCurrent" Text="工作区" FontSize="12"
+                       Foreground="{DynamicResource Brush.Text.Primary}" VerticalAlignment="Center"/>
+          </StackPanel>
+          <StackPanel Grid.Column="2" Orientation="Horizontal">
+            <Button Width="46" Height="40" Background="Transparent" BorderThickness="0" Cursor="Hand"
+                    Click="MinimizeButton_Click" ToolTip="最小化">
+              <Path Width="10" Height="10"
+                    Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.2"
+                    StrokeLineJoin="Round"
+                    Data="{StaticResource Icon.Minimize}"/>
+            </Button>
+            <Button x:Name="MaxBtn" Width="46" Height="40" Background="Transparent" BorderThickness="0" Cursor="Hand"
+                    Click="MaxBtn_Click" ToolTip="最大化">
+              <Path Width="10" Height="10"
+                    Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.2"
+                    StrokeLineJoin="Round"
+                    Data="{StaticResource Icon.Maximize}"/>
+            </Button>
+            <Button Width="46" Height="40" Background="Transparent" BorderThickness="0" Cursor="Hand"
+                    Click="CloseButton_Click" ToolTip="关闭">
+              <Path Width="10" Height="10"
+                    Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.2"
+                    StrokeLineJoin="Round"
+                    Data="{StaticResource Icon.Close}"/>
+            </Button>
+          </StackPanel>
         </Grid>
-    </Border>
+      </Border>
+
+      <!-- Sidebar -->
+      <components:SidebarNav Grid.Row="1" Grid.Column="0" x:Name="SideNav"/>
+
+      <!-- Content -->
+      <ContentControl Grid.Row="1" Grid.Column="1" x:Name="MainContent" Margin="0"/>
+
+      <!-- PropertyPanel (docked) -->
+      <components:PropertyPanel Grid.Row="1" Grid.Column="2" x:Name="DockedPanel"
+                                Margin="0" Visibility="Collapsed"/>
+
+      <!-- Status bar -->
+      <Border Grid.Row="2" Grid.ColumnSpan="3"
+              Background="{DynamicResource Brush.Bg.Chrome}"
+              BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="0,1,0,0"
+              Padding="16,0">
+        <Grid>
+          <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+            <Ellipse Width="6" Height="6" Margin="0,0,6,0"
+                     Fill="{DynamicResource Brush.Success}" VerticalAlignment="Center"/>
+            <TextBlock x:Name="StatusText" Text="就绪" FontSize="11"
+                       Foreground="{DynamicResource Brush.Text.Secondary}" VerticalAlignment="Center"/>
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+            <Button x:Name="ThemeBtn" Width="24" Height="24" Background="Transparent" BorderThickness="0"
+                    Cursor="Hand" ToolTip="切换主题" Click="ThemeBtn_Click">
+              <Path x:Name="ThemeIcon" Width="14" Height="14" StrokeThickness="1.5"
+                    Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeLineJoin="Round"/>
+            </Button>
+            <TextBlock x:Name="ThemeLabel" Text="深色" FontSize="11" Margin="6,0,0,0"
+                       Foreground="{DynamicResource Brush.Text.Tertiary}" VerticalAlignment="Center"/>
+          </StackPanel>
+        </Grid>
+      </Border>
+    </Grid>
+  </Border>
 </Window>

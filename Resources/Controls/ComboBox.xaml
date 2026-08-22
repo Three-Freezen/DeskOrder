@@ -1,0 +1,186 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <!-- ═══════════════════════════════════════════
+       ComboBox — spec §5.2
+       Closed: 32px high, 4px corner radius, bg.input, 1px border.default
+       Open:   border.accent, chevron rotated 180°
+       Popup:  bg.surface, 1px border.default, 6px corner radius,
+               AllowsTransparency=True, PopupAnimation=None
+       ═══════════════════════════════════════════ -->
+
+  <Style TargetType="ComboBox">
+    <Setter Property="Background" Value="{DynamicResource Brush.Bg.Input}"/>
+    <Setter Property="Foreground" Value="{DynamicResource Brush.Text.Primary}"/>
+    <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border.Default}"/>
+    <Setter Property="BorderThickness" Value="1"/>
+    <Setter Property="FontSize" Value="12"/>
+    <Setter Property="MinHeight" Value="32"/>
+    <Setter Property="Padding" Value="10,4,28,4"/>
+    <Setter Property="HorizontalContentAlignment" Value="Left"/>
+    <Setter Property="VerticalContentAlignment" Value="Center"/>
+    <Setter Property="Cursor" Value="Hand"/>
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ComboBox">
+          <Grid SnapsToDevicePixels="True">
+            <Border x:Name="Bd"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="4">
+              <Grid>
+                <ContentPresenter x:Name="ContentSite"
+                                  Content="{TemplateBinding SelectionBoxItem}"
+                                  ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                  Margin="{TemplateBinding Padding}"
+                                  HorizontalAlignment="Left"
+                                  VerticalAlignment="Center"
+                                  IsHitTestVisible="False"/>
+                <!-- Chevron: reserved 28px right gutter, 12x12 icon -->
+                <ToggleButton x:Name="ToggleButton"
+                              Width="28" Height="32"
+                              HorizontalAlignment="Right"
+                              Focusable="False"
+                              IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                              ClickMode="Press">
+                  <ToggleButton.Template>
+                    <ControlTemplate TargetType="ToggleButton">
+                      <Grid Background="Transparent">
+                        <Path x:Name="Chevron"
+                              Width="12" Height="12"
+                              HorizontalAlignment="Center"
+                              VerticalAlignment="Center"
+                              Stretch="Uniform"
+                              Stroke="{DynamicResource Brush.Text.Secondary}"
+                              StrokeThickness="1.5"
+                              StrokeLineJoin="Round"
+                              StrokeStartLineCap="Round"
+                              StrokeEndLineCap="Round"
+                              Data="{StaticResource Icon.ChevronDown}"/>
+                      </Grid>
+                      <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                          <Setter TargetName="Chevron" Property="RenderTransform">
+                            <Setter.Value>
+                              <RotateTransform Angle="180"/>
+                            </Setter.Value>
+                          </Setter>
+                        </Trigger>
+                      </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                  </ToggleButton.Template>
+                </ToggleButton>
+              </Grid>
+            </Border>
+
+            <!-- Drop-down popup -->
+            <Popup x:Name="PART_Popup"
+                   Placement="Bottom"
+                   IsOpen="{TemplateBinding IsDropDownOpen}"
+                   AllowsTransparency="True"
+                   Focusable="False"
+                   PopupAnimation="None"
+                   HorizontalOffset="0"
+                   VerticalOffset="2">
+              <Border x:Name="DropDownBorder"
+                      Background="{DynamicResource Brush.Bg.Surface}"
+                      BorderBrush="{DynamicResource Brush.Border.Default}"
+                      BorderThickness="1"
+                      CornerRadius="6"
+                      MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}"
+                      MaxHeight="280">
+                <ScrollViewer Padding="0,4" CanContentScroll="True">
+                  <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained"/>
+                </ScrollViewer>
+              </Border>
+            </Popup>
+          </Grid>
+
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Brush.Border.Strong}"/>
+            </Trigger>
+            <Trigger Property="IsDropDownOpen" Value="True">
+              <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Brush.Accent}"/>
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Bg.Base}"/>
+              <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Brush.Border.Subtle}"/>
+              <Setter Property="Foreground" Value="{DynamicResource Brush.Text.Disabled}"/>
+              <Setter Property="Cursor" Value="Arrow"/>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!-- ComboBoxItem — 32px high, hover bg.hover, selected accent.wash + check icon -->
+  <Style TargetType="ComboBoxItem">
+    <Setter Property="Background" Value="Transparent"/>
+    <Setter Property="Foreground" Value="{DynamicResource Brush.Text.Primary}"/>
+    <Setter Property="FontSize" Value="12"/>
+    <Setter Property="MinHeight" Value="32"/>
+    <Setter Property="Margin" Value="4,2"/>
+    <Setter Property="Padding" Value="0"/>
+    <Setter Property="Cursor" Value="Hand"/>
+    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ComboBoxItem">
+          <Border x:Name="Bd"
+                  Background="{TemplateBinding Background}"
+                  CornerRadius="4"
+                  Padding="10,0"
+                  SnapsToDevicePixels="True">
+            <Grid>
+              <ContentPresenter HorizontalAlignment="Left"
+                                VerticalAlignment="Center"
+                                Margin="0,0,20,0"/>
+              <!-- Check icon: visible only when selected -->
+              <Path x:Name="Check"
+                    Width="16" Height="16"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Center"
+                    Stretch="Uniform"
+                    Stroke="{DynamicResource Brush.Accent}"
+                    StrokeThickness="1.5"
+                    StrokeLineJoin="Round"
+                    StrokeStartLineCap="Round"
+                    StrokeEndLineCap="Round"
+                    Data="{StaticResource Icon.Check}"
+                    Visibility="Collapsed"/>
+            </Grid>
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Bg.Hover}"/>
+            </Trigger>
+            <Trigger Property="IsSelected" Value="True">
+              <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Accent.Wash}"/>
+              <Setter TargetName="Check" Property="Visibility" Value="Visible"/>
+            </Trigger>
+            <!-- Selected + hovered: brighten wash (40% alpha) -->
+            <MultiTrigger>
+              <MultiTrigger.Conditions>
+                <Condition Property="IsSelected" Value="True"/>
+                <Condition Property="IsMouseOver" Value="True"/>
+              </MultiTrigger.Conditions>
+              <Setter TargetName="Bd" Property="Background">
+                <Setter.Value>
+                  <SolidColorBrush Color="{DynamicResource Color.Accent}" Opacity="0.40"/>
+                </Setter.Value>
+              </Setter>
+            </MultiTrigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter Property="Foreground" Value="{DynamicResource Brush.Text.Disabled}"/>
+              <Setter Property="Cursor" Value="Arrow"/>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+</ResourceDictionary>

@@ -70,10 +70,10 @@ public class ZoneManager
         if (toDelete == null) return;
 
         // If this zone is part of a merged group, disband it first
-        if (toDelete.MergedGroupId.HasValue)
+        if (toDelete.MergedGroupMembership.GroupId.HasValue)
         {
-            if (toDelete.MergedSubZoneIds.Count > 0)
-                DisbandMergedGroup(toDelete.MergedGroupId.Value);
+            if (toDelete.MergedGroupMembership.SubZoneIds.Count > 0)
+                DisbandMergedGroup(toDelete.MergedGroupMembership.GroupId.Value);
             else
                 RemoveFromMergedGroup(zoneId);
         }
@@ -100,9 +100,9 @@ public class ZoneManager
     public void ShowZone(Zone zone)
     {
         // If this zone is a sub-zone of a merged group, show the master instead
-        if (zone.MergedGroupId.HasValue && zone.MergedSubZoneIds.Count == 0)
+        if (zone.MergedGroupMembership.GroupId.HasValue && zone.MergedGroupMembership.SubZoneIds.Count == 0)
         {
-            var master = Zones.FirstOrDefault(z => z.MergedGroupId == zone.MergedGroupId && z.MergedSubZoneIds.Count > 0);
+            var master = Zones.FirstOrDefault(z => z.MergedGroupMembership.GroupId == zone.MergedGroupMembership.GroupId && z.MergedGroupMembership.SubZoneIds.Count > 0);
             if (master != null)
             {
                 master.IsVisible = true;
@@ -174,7 +174,7 @@ public class ZoneManager
             foreach (var zone in Zones)
             {
                 // Skip sub-zones that belong to a merged group (handled by master)
-                if (zone.MergedGroupId.HasValue && zone.MergedSubZoneIds.Count == 0)
+                if (zone.MergedGroupMembership.GroupId.HasValue && zone.MergedGroupMembership.SubZoneIds.Count == 0)
                     continue;
                 ShowZone(zone);
             }
@@ -349,27 +349,27 @@ public class ZoneManager
         Guid groupId;
         Zone master;
 
-        if (zoneA.MergedGroupId.HasValue)
+        if (zoneA.MergedGroupMembership.GroupId.HasValue)
         {
-            groupId = zoneA.MergedGroupId.Value;
-            master = Zones.FirstOrDefault(z => z.MergedGroupId == groupId && z.MergedSubZoneIds.Count > 0)
+            groupId = zoneA.MergedGroupMembership.GroupId.Value;
+            master = Zones.FirstOrDefault(z => z.MergedGroupMembership.GroupId == groupId && z.MergedGroupMembership.SubZoneIds.Count > 0)
                      ?? zoneA;
         }
         else
         {
             groupId = Guid.NewGuid();
             master = zoneA;
-            zoneA.MergedGroupId = groupId;
+            zoneA.MergedGroupMembership.GroupId = groupId;
         }
 
         // If zoneB is already in a merged group, remove it first
-        if (zoneB.MergedGroupId.HasValue)
+        if (zoneB.MergedGroupMembership.GroupId.HasValue)
             RemoveFromMergedGroup(zoneB.Id);
 
-        zoneB.MergedGroupId = groupId;
-        master.MergedSubZoneIds.Add(zoneB.Id);
-        master.MergedGroupName = BuildMergedGroupName(master);
-        zoneB.MergedGroupName = master.MergedGroupName;
+        zoneB.MergedGroupMembership.GroupId = groupId;
+        master.MergedGroupMembership.SubZoneIds.Add(zoneB.Id);
+        master.MergedGroupMembership.DisplayName = BuildMergedGroupName(master);
+        zoneB.MergedGroupMembership.DisplayName = master.MergedGroupMembership.DisplayName;
 
         // Hide sub-zone window
         FullHideZone(zoneB.Id);
@@ -388,11 +388,11 @@ public class ZoneManager
     /// <summary>Disband all zones in a merged group.</summary>
     public void DisbandMergedGroup(Guid groupId)
     {
-        var members = Zones.Where(z => z.MergedGroupId == groupId).ToList();
+        var members = Zones.Where(z => z.MergedGroupMembership.GroupId == groupId).ToList();
         // Close the master window first
         foreach (var z in members)
         {
-            if (z.MergedSubZoneIds.Count > 0 && _zoneWindows.TryGetValue(z.Id, out var win))
+            if (z.MergedGroupMembership.SubZoneIds.Count > 0 && _zoneWindows.TryGetValue(z.Id, out var win))
             {
                 z.Width = win.Width; z.Height = win.Height; z.X = win.Left; z.Y = win.Top;
                 win.Close();
@@ -402,10 +402,10 @@ public class ZoneManager
         // Clear merge fields on all members
         foreach (var z in members)
         {
-            z.MergedGroupId = null;
-            z.MergedSubZoneIds.Clear();
-            z.MergedGroupName = "";
-            z.MergedGroupIcon = "";
+            z.MergedGroupMembership.GroupId = null;
+            z.MergedGroupMembership.SubZoneIds.Clear();
+            z.MergedGroupMembership.DisplayName = "";
+            z.MergedGroupMembership.Icon = "";
         }
         // Re-show individual windows
         foreach (var z in members)
@@ -420,33 +420,33 @@ public class ZoneManager
     public void RemoveFromMergedGroup(Guid zoneId)
     {
         var zone = Zones.FirstOrDefault(z => z.Id == zoneId);
-        if (zone == null || !zone.MergedGroupId.HasValue) return;
+        if (zone == null || !zone.MergedGroupMembership.GroupId.HasValue) return;
 
-        var groupId = zone.MergedGroupId.Value;
-        var master = Zones.FirstOrDefault(z => z.MergedGroupId == groupId && z.MergedSubZoneIds.Count > 0);
+        var groupId = zone.MergedGroupMembership.GroupId.Value;
+        var master = Zones.FirstOrDefault(z => z.MergedGroupMembership.GroupId == groupId && z.MergedGroupMembership.SubZoneIds.Count > 0);
         if (master != null)
         {
-            master.MergedSubZoneIds.Remove(zoneId);
-            if (master.MergedSubZoneIds.Count == 0)
+            master.MergedGroupMembership.SubZoneIds.Remove(zoneId);
+            if (master.MergedGroupMembership.SubZoneIds.Count == 0)
             {
                 // Only master remains — clear its merge state
-                master.MergedGroupId = null;
-                master.MergedGroupName = "";
-                master.MergedGroupIcon = "";
+                master.MergedGroupMembership.GroupId = null;
+                master.MergedGroupMembership.DisplayName = "";
+                master.MergedGroupMembership.Icon = "";
                 if (_zoneWindows.TryGetValue(master.Id, out var win))
                     win.RefreshZone(master);
             }
             else
             {
-                master.MergedGroupName = BuildMergedGroupName(master);
+                master.MergedGroupMembership.DisplayName = BuildMergedGroupName(master);
                 if (_zoneWindows.TryGetValue(master.Id, out var win))
                     win.RefreshZone(master);
             }
         }
 
-        zone.MergedGroupId = null;
-        zone.MergedGroupName = "";
-        zone.MergedGroupIcon = "";
+        zone.MergedGroupMembership.GroupId = null;
+        zone.MergedGroupMembership.DisplayName = "";
+        zone.MergedGroupMembership.Icon = "";
 
         SaveConfig();
         ZonesChanged?.Invoke();
@@ -455,7 +455,7 @@ public class ZoneManager
     private string BuildMergedGroupName(Zone master)
     {
         var names = new List<string> { master.Name };
-        foreach (var subId in master.MergedSubZoneIds)
+        foreach (var subId in master.MergedGroupMembership.SubZoneIds)
         {
             var sub = Zones.FirstOrDefault(z => z.Id == subId);
             if (sub != null) names.Add(sub.Name);
@@ -465,7 +465,7 @@ public class ZoneManager
 
     /// <summary>Get all zones in a merged group.</summary>
     public List<Zone> GetMergedGroupZones(Guid groupId)
-        => Zones.Where(z => z.MergedGroupId == groupId).ToList();
+        => Zones.Where(z => z.MergedGroupMembership.GroupId == groupId).ToList();
 
     // ── Lock ──
 

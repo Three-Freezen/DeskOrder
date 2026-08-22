@@ -12,6 +12,7 @@ using DesktopZones.Helpers;
 using DesktopZones.Models;
 using DesktopZones.Services;
 using DesktopZones.ViewModels;
+using DesktopZones.Views.Components;
 
 namespace DesktopZones.Views;
 
@@ -27,9 +28,15 @@ public partial class ClockWidget : Window
     private readonly ClockViewModel _vm;
     private readonly DispatcherTimer _timer;
     private readonly LocalizationService _loc = LocalizationService.Instance;
+    private HoverExpandBehavior? _hover;
 
     private bool _restoreDragging;
     private Point _restoreDown;
+
+    // ponytail: frozen hover brushes — same color on every mouse-over.
+    private static readonly SolidColorBrush RestoreHoverBrush = Freeze(new(Color.FromArgb(0xFF, 0x2A, 0x2A, 0x4E)));
+    private static readonly SolidColorBrush RestoreIdleBrush  = Freeze(new(Color.FromArgb(0xDD, 0x1A, 0x1A, 0x2E)));
+    static SolidColorBrush Freeze(SolidColorBrush b) { b.Freeze(); return b; }
 
     public ClockWidget(DesktopClock clock, WidgetService widgetService)
     {
@@ -69,6 +76,19 @@ public partial class ClockWidget : Window
         // this widget's lock state immediately syncs the open window — without this the
         // open clock stays 🔓 while the model (and management card) shows 🔒.
         _widgetService.LockChanged += OnServiceLockChanged;
+        // ponytail: hover-expand (Task 14d). Wired after InitializeComponent and
+        // before any user interaction can occur.
+        _hover = new HoverExpandBehavior(this, RestoreButton, MainContent, ToggleExpandBtn,
+            () => _clock.HoverExpandAnimation,
+            () => _clock.HoverExpandSpeed,
+            () => _clock.HoverExpandOrigin)
+        { IsEnabled = _clock.EnableRestoreButton };
+        // ponytail: bug fix — see ZoneWindow ctor for full rationale. Window.Show()
+        // (called by OpenClockWindow / --spawn-widget) doesn't route through
+        // ShowClock, so SnapToExpanded never fires and HideClock → CollapseAnimated
+        // early-returns. Mirror the existing "if !IsVisible ApplyHidden()" symmetry
+        // by snapping expanded when visible at construction.
+        if (_clock.IsVisible) _hover.SnapToExpanded();
     }
     private Action<Services.Language>? _langChanged;
 
@@ -129,7 +149,9 @@ public partial class ClockWidget : Window
                 bi.BeginInit();
                 bi.UriSource = new Uri(_clock.BackgroundImagePath);
                 bi.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+                bi.DecodePixelWidth = 1920;
                 bi.EndInit();
+                bi.Freeze();
                 ClockBgImage.Source = bi;
                 ClockBgImage.Stretch = Stretch.UniformToFill;
 
@@ -187,7 +209,9 @@ public partial class ClockWidget : Window
                 bi.BeginInit();
                 bi.UriSource = new Uri(_clock.DigitalBackgroundImagePath);
                 bi.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+                bi.DecodePixelWidth = 1920;
                 bi.EndInit();
+                bi.Freeze();
                 DigitalBgImage.Source = bi;
                 DigitalBgImage.Stretch = Stretch.UniformToFill;
 
@@ -409,8 +433,10 @@ public partial class ClockWidget : Window
 
         if (_clock.EnableAcrylic)
         {
-            AcrylicHelper.EnableBlur(this, _clock.GlassBlurAmount, _clock.GlassTintOpacity,
+            var blurResult = AcrylicHelper.EnableBlur(this, _clock.GlassBlurAmount, _clock.GlassTintOpacity,
                 _clock.GlassTintLuminosity, _clock.GlassColorMode);
+            if (!blurResult.Success)
+                System.Diagnostics.Debug.WriteLine($"[ClockWidget] EnableBlur failed: {blurResult.Error}");
             if (_clock.EnableLiquidGlass)
             {
                 ClockBorder.BorderBrush = AcrylicHelper.CreateChromaticBorder();
@@ -450,6 +476,7 @@ public partial class ClockWidget : Window
         ApplyBackgroundImage();
         ApplyDigitalBackgroundImage();
         ApplyStyle();
+        _hover?.SetEnabled(_clock.EnableRestoreButton);
     }
 
     private ClockDisplayMode _lastAppliedMode = ClockDisplayMode.Digital;
@@ -710,6 +737,13 @@ public partial class ClockWidget : Window
         Close();
     }
 
+    void ToggleExpandBtn_Click(object s, RoutedEventArgs e)
+    {
+        // ponytail: hover-expand toggle button routes to the property window (spec §7.2).
+        PropertyWindowService.OpenOrFocus(_clock);
+        e.Handled = true;
+    }
+
     protected override void OnMouseWheel(MouseWheelEventArgs e)
     {
         double delta = e.Delta > 0 ? 0.05 : -0.05;
@@ -736,13 +770,12 @@ public partial class ClockWidget : Window
     {
         if (!IsVisible) Show();
         ApplyMode();
-        // ponytail: skipResync=true when called from the style dialog (ShowClockAppearanceDialog).
+        // ponytail: skipResync=true when called from the property window (was the style dialog).
         // Skip BOTH ApplyAcrylic() and UpdateClock(_clock):
         //   - ApplyAcrylic would read model and write FillRect directly.
         //   - UpdateClock would fire ClocksChanged → OnClocksChanged → SyncFillRect → same result.
-        // Without this, the FillRect "snaps" to model the moment the dialog opens, even though
-        // the user hasn't touched anything. Cancel branch in ShowClockAppearanceDialog restores
-        // IsVisible and calls UpdateClock, so persistence still happens correctly.
+        // Without this, the FillRect "snaps" to model the moment the property window opens, even
+        // though the user hasn't touched anything.
         if (!skipResync)
         {
             ApplyAcrylic();
@@ -757,6 +790,7 @@ public partial class ClockWidget : Window
         }
         Left = _clock.X; Top = _clock.Y;
         MainContent.Visibility = Visibility.Visible; RestoreButton.Visibility = Visibility.Collapsed;
+        _hover?.SnapToExpanded();
         MinWidth = 140; MinHeight = 80;
         Width = _clock.Width > 140 ? _clock.Width : 320;
         Height = _clock.Height > 80 ? _clock.Height : 140;
@@ -768,23 +802,27 @@ public partial class ClockWidget : Window
 
     public void HideClock()
     {
-        System.IO.File.AppendAllText("D:\\mimo\\DesktopZones\\debug_clock.log",
-            $"[{DateTime.Now:HH:mm:ss.fff}] HideClock: EnableRestore={_clock.EnableRestoreButton}, W={Width}, H={Height}\n");
+#if DEBUG
+        // ponytail: verbose HideClock trace for diagnosing widget-minimize regressions.
+        // Writes to repo-relative debug_clock.log so reviewers can grep without absolute paths.
+        try { System.IO.File.AppendAllText("debug_clock.log",
+            $"[{DateTime.Now:HH:mm:ss.fff}] HideClock: EnableRestore={_clock.EnableRestoreButton}, W={Width}, H={Height}\n"); } catch { }
+#endif
         _clock.X = Left; _clock.Y = Top; _clock.Width = Width; _clock.Height = Height;
-        // Always disable blur and clean up state before hiding
         AcrylicHelper.DisableBlur(this);
-        MainContent.Visibility = Visibility.Collapsed;
-        MinWidth = 36; MinHeight = 36;
-        Width = 36; Height = 36;
         NativeMethods.DisableRoundedCorners(this);
         if (!_clock.EnableRestoreButton)
         {
+            MainContent.Visibility = Visibility.Collapsed;
+            MinWidth = 36; MinHeight = 36;
+            Width = 36; Height = 36;
             Hide();
         }
         else
         {
-            RestoreButton.Visibility = Visibility.Visible;
+            // ponytail: minimized — window stays at full size, content collapses with animation
             if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
+            _hover?.CollapseAnimated();
         }
         _clock.IsVisible = false;
         // Update AFTER Hide() to ensure correct state when event fires
@@ -795,16 +833,17 @@ public partial class ClockWidget : Window
     {
         AcrylicHelper.DisableBlur(this);
         NativeMethods.DisableRoundedCorners(this);
-        MainContent.Visibility = Visibility.Collapsed;
-        MinWidth = 36; MinHeight = 36;
-        Width = 36; Height = 36;
         if (!_clock.EnableRestoreButton)
         {
+            MainContent.Visibility = Visibility.Collapsed;
+            MinWidth = 36; MinHeight = 36;
+            Width = 36; Height = 36;
             Hide();
         }
         else
         {
-            RestoreButton.Visibility = Visibility.Visible;
+            // ponytail: minimized — window stays at full size, content collapses with animation
+            _hover?.SnapToCollapsed();
         }
     }
 
@@ -832,11 +871,11 @@ public partial class ClockWidget : Window
     void Restore_MouseUp(object s, MouseButtonEventArgs e)
     {
         RestoreButton.ReleaseMouseCapture();
-        if (!_restoreDragging) { ShowClock(); _widgetService.UpdateClock(_clock); }
+        if (!_restoreDragging) { _hover?.ExpandAnimated(permanent: true); _widgetService.UpdateClock(_clock); }
     }
 
-    void Restore_Enter(object s, MouseEventArgs e) { RestoreButton.Background = new SolidColorBrush(Color.FromArgb(0xFF, 0x2A, 0x2A, 0x4E)); }
-    void Restore_Leave(object s, MouseEventArgs e) { RestoreButton.Background = new SolidColorBrush(Color.FromArgb(0xDD, 0x1A, 0x1A, 0x2E)); }
+    void Restore_Enter(object s, MouseEventArgs e) { RestoreButton.Background = RestoreHoverBrush; }
+    void Restore_Leave(object s, MouseEventArgs e) { RestoreButton.Background = RestoreIdleBrush; }
 
     protected override void OnClosed(EventArgs e)
     {
@@ -844,6 +883,7 @@ public partial class ClockWidget : Window
         if (_langChanged != null) _loc.LanguageChanged -= _langChanged;
         _langChanged = null;
         _widgetService.LockChanged -= OnServiceLockChanged;
+        _hover?.Dispose();
         base.OnClosed(e);
     }
 }

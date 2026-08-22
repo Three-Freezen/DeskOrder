@@ -15,7 +15,7 @@ public class LocalizationService : INotifyPropertyChanged
     private readonly Dictionary<string, Dictionary<Language, string>> _strings = new()
     {
         ["App.Title"] = new() { [Language.Chinese] = "DeskOrder", [Language.English] = "DeskOrder" },
-        ["App.TrayTooltip"] = new() { [Language.Chinese] = "DeskOrder - 秩序桌面", [Language.English] = "DeskOrder - Desktop Order" },
+        ["App.TrayTooltip"] = new() { [Language.Chinese] = "DeskOrder", [Language.English] = "DeskOrder" },
 
         ["Tray.ShowAll"] = new() { [Language.Chinese] = "显示所有分区", [Language.English] = "Show All Zones" },
         ["Tray.HideAll"] = new() { [Language.Chinese] = "隐藏所有分区", [Language.English] = "Hide All Zones" },
@@ -39,13 +39,18 @@ public class LocalizationService : INotifyPropertyChanged
         ["Zone.DragHint"] = new() { [Language.Chinese] = "拖拽此处移动分区", [Language.English] = "Drag to move zone" },
 
         ["Item.Open"] = new() { [Language.Chinese] = "打开", [Language.English] = "Open" },
+        ["Item.FailedToOpen"] = new() { [Language.Chinese] = "无法打开该文件", [Language.English] = "Could not open the file" },
+        ["Item.FailedToOpen.Title"] = new() { [Language.Chinese] = "打开失败", [Language.English] = "Open Failed" },
+        ["Note.SaveFailed"] = new() { [Language.Chinese] = "保存便签失败", [Language.English] = "Could not save note" },
+        ["Note.SaveFailed.Title"] = new() { [Language.Chinese] = "保存失败", [Language.English] = "Save Failed" },
+        ["Note.OpenFailed"] = new() { [Language.Chinese] = "打开文件失败", [Language.English] = "Could not open file" },
+        ["Note.OpenFailed.Title"] = new() { [Language.Chinese] = "打开失败", [Language.English] = "Open Failed" },
         ["Item.OpenLocation"] = new() { [Language.Chinese] = "打开文件位置", [Language.English] = "Open File Location" },
         ["Item.Rename"] = new() { [Language.Chinese] = "重命名", [Language.English] = "Rename" },
         ["Item.Delete"] = new() { [Language.Chinese] = "删除", [Language.English] = "Delete" },
-        ["Item.FailedToOpen"] = new() { [Language.Chinese] = "无法打开", [Language.English] = "Failed to open" },
 
-        ["Manage.Title"] = new() { [Language.Chinese] = "DeskOrder - 管理分区", [Language.English] = "DeskOrder - Manage Zones" },
-        ["Manage.EmptyHint"] = new() { [Language.Chinese] = "还没有分区。点击「+ 新建分区」开始使用。", [Language.English] = "No zones created yet. Click '+ New Zone' to get started." },
+        ["Manage.Title"] = new() { [Language.Chinese] = "DeskOrder", [Language.English] = "DeskOrder" },
+        ["Manage.EmptyHint"] = new() { [Language.Chinese] = "还没有分区", [Language.English] = "No zones yet" },
         ["Manage.Items"] = new() { [Language.Chinese] = "项目", [Language.English] = "Items" },
         ["Manage.StartWithWindows"] = new() { [Language.Chinese] = "开机启动", [Language.English] = "Start with Windows" },
         ["Manage.NewZone"] = new() { [Language.Chinese] = "+ 新建分区", [Language.English] = "+ New Zone" },
@@ -217,7 +222,31 @@ public class LocalizationService : INotifyPropertyChanged
         ["Panel.Hotkey"] = new() { [Language.Chinese] = "面板快捷键", [Language.English] = "Panel Hotkey" },
         ["Panel.HotkeyDisabled"] = new() { [Language.Chinese] = "未设置", [Language.English] = "None" },
 
-        // ── Image Crop Preview ──
+        // ── Motion Settings Dialog ──
+        ["Motion.Title"] = new() { [Language.Chinese] = "动效设置", [Language.English] = "Motion" },
+        ["Motion.HoverAutoExpand"] = new() { [Language.Chinese] = "悬停自动展开", [Language.English] = "Hover Auto-Expand" },
+        ["Motion.HoverAutoExpandHint"] = new() { [Language.Chinese] = "关闭时不展开（开关控制区仍有）", [Language.English] = "When off, zones stay collapsed (toggle zone still works)" },
+        ["Motion.AnimationKind"] = new() { [Language.Chinese] = "展开动画", [Language.English] = "Animation Kind" },
+        ["Motion.AnimationKindHint"] = new() { [Language.Chinese] = "鼠标悬停触发的展开效果类型", [Language.English] = "Effect when mouse hovers over a collapsed zone" },
+        ["Motion.Speed"] = new() { [Language.Chinese] = "动画速度", [Language.English] = "Animation Speed" },
+        ["Motion.SpeedHint"] = new() { [Language.Chinese] = "0.5 = 慢，2.0 = 快", [Language.English] = "0.5 = slow, 2.0 = fast" },
+        ["Motion.Animation.ScaleExpand"] = new() { [Language.Chinese] = "缩放展开", [Language.English] = "Scale" },
+        ["Motion.Animation.Fade"] = new() { [Language.Chinese] = "淡入淡出", [Language.English] = "Fade" },
+        ["Motion.Animation.BounceExpand"] = new() { [Language.Chinese] = "弹性", [Language.English] = "Bounce" },
+        ["Motion.Animation.DirectionalExpand"] = new() { [Language.Chinese] = "定向", [Language.English] = "Directional" },
+        ["Motion.Animation.VerticalExpand"] = new() { [Language.Chinese] = "纵向", [Language.English] = "Vertical" },
+        ["Motion.Animation.None"] = new() { [Language.Chinese] = "无", [Language.English] = "None" },
+        ["Motion.UnknownAnimation"] = new() { [Language.Chinese] = "请选择展开动画", [Language.English] = "Please select an animation kind" },
+        ["Motion.Origin"] = new() { [Language.Chinese] = "动效原点", [Language.English] = "Origin" },
+        ["Motion.OriginHint"] = new() { [Language.Chinese] = "展开从按钮的哪个位置开始", [Language.English] = "Where the expansion starts from" },
+        ["Motion.Origin.ButtonCenter"] = new() { [Language.Chinese] = "四周展开", [Language.English] = "From Center" },
+        ["Motion.Origin.ButtonCorner"] = new() { [Language.Chinese] = "按钮作为分区左上角", [Language.English] = "Button as Top-Left" },
+
+        // ── Common buttons ──
+        ["Common.Cancel"] = new() { [Language.Chinese] = "取消", [Language.English] = "Cancel" },
+        ["Common.Save"] = new() { [Language.Chinese] = "保存", [Language.English] = "Save" },
+
+// ── Image Crop Preview ──
         ["CropPreview.Title"] = new() { [Language.Chinese] = "图片裁剪预览", [Language.English] = "Image Crop Preview" },
         ["CropPreview.Confirm"] = new() { [Language.Chinese] = "确认", [Language.English] = "Confirm" },
         ["CropPreview.Cancel"] = new() { [Language.Chinese] = "取消", [Language.English] = "Cancel" },
@@ -256,6 +285,8 @@ public class LocalizationService : INotifyPropertyChanged
         ["Preset.DeleteMenuItem"] = new() { [Language.Chinese] = "删除此预设", [Language.English] = "Delete Preset" },
         ["Preset.DeleteConfirmTitle"] = new() { [Language.Chinese] = "删除预设", [Language.English] = "Delete Preset" },
         ["Preset.DeleteConfirmMessage"] = new() { [Language.Chinese] = "确定要删除预设 \"{0}\" 吗？\n此操作不可撤销。", [Language.English] = "Delete preset \"{0}\"?\nThis cannot be undone." },
+        ["Preset.DeleteFailedTitle"] = new() { [Language.Chinese] = "删除失败", [Language.English] = "Delete Failed" },
+        ["Preset.DeleteFailedMessage"] = new() { [Language.Chinese] = "无法删除预设 \"{0}\"。文件可能正在被其他程序使用或权限不足。", [Language.English] = "Could not delete preset \"{0}\". The file may be in use or access was denied." },
     };
 
     private Language _currentLanguage = Language.Chinese;

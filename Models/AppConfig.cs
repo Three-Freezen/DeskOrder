@@ -1,4 +1,7 @@
+using System;
 using System.Collections.Generic;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace DesktopZones.Models;
 
@@ -13,6 +16,16 @@ public class AppConfig
     public bool StartWithWindows { get; set; } = false;
     public bool StartMinimized { get; set; } = true;
     public bool ShowAllOnStartup { get; set; } = true;
+
+    // ── Theme selection (three-valued; replaces ambiguous single `Theme`) ──
+    /// <summary>"System" / "Light" / "Dark". Defaults to "System" so existing configs fall back to OS preference.</summary>
+    public string ThemeMode { get; set; } = "System";
+
+    // Legacy single-value theme field — kept [Obsolete] + [JsonIgnore] so old
+    // config files still parse (the value lands in ExtensionData and is dropped
+    // silently; ThemeMode is the live field). Do not reference in new code.
+    [Obsolete("Use ThemeMode instead")]
+    [JsonIgnore]
     public string Theme { get; set; } = "default";
 
     // ── Language ──
@@ -23,6 +36,8 @@ public class AppConfig
     public string GlobalFillColor { get; set; } = "#08000000";
     public double GlobalBorderThickness { get; set; } = 1.5;
     public bool UseGlobalAppearance { get; set; } = true;
+    /// <summary>Spec §7.1 #1: global → per-instance migration completed. Set true after first migration run; never unset.</summary>
+    public bool GlobalAppearanceMigrated { get; set; } = false;
     // ── Liquid Glass (ZenDesktop-style) ──
     public bool EnableLiquidGlass { get; set; } = true;
     public int GlassBlurAmount { get; set; } = 18;       // 0-60, default 18 = ZenDesktop standard
@@ -30,31 +45,12 @@ public class AppConfig
     public int GlassTintLuminosity { get; set; } = 100;   // 0-150%
     public string GlassColorMode { get; set; } = "Default"; // color preset name
 
-    // ── Panel ──
-    public bool PanelUseGlobalAppearance { get; set; } = true;
-    public bool PanelEnabled { get; set; } = false;
-    public double PanelX { get; set; }
-    public double PanelY { get; set; }
-    public double PanelWidth { get; set; } = 340;
-    public double PanelHeight { get; set; } = 500;
-    public string PanelTitleBarFillColor { get; set; } = "#10FFFFFF";
-    public string PanelFillColor { get; set; } = "#08000000";
-    public bool PanelTextColorAdaptive { get; set; } = true;
-    public bool PanelTitleBarTextColorAdaptive { get; set; } = true;
-    public string PanelBorderColor { get; set; } = "#40FFFFFF";
-    public double PanelControlOpacity { get; set; } = 40;
-    // ── Panel Background Image ──
-    public string PanelBackgroundImagePath { get; set; } = "";
-    public string PanelBgImageStretch { get; set; } = "UniformToFill";
-    public double PanelBackgroundImageOpacity { get; set; } = 30;
-    public double PanelBgImageZoom { get; set; } = 1.0;
-    public double PanelBgImageOffsetX { get; set; } = 0;
-    public double PanelBgImageOffsetY { get; set; } = 0;
-
-    // ── Panel Hotkey ──
-    public bool PanelHotkeyEnabled { get; set; } = false;
-    public int PanelHotkeyModifiers { get; set; } = 0x0006; // MOD_CONTROL | MOD_SHIFT
-    public int PanelHotkeyKey { get; set; } = 0x50; // 'P'
+    // ── Panel (POCOs, was 19 inline fields) ──
+    public PanelConfig Panel { get; set; } = new();
+    public PanelHotkeyConfig PanelHotkey { get; set; } = new();
+    /// <summary>Orphan: user-added extra hotkeys (not the primary toggle).
+    /// Stays on AppConfig because it is rarely touched and the primary hotkey
+    /// state lives in <see cref="PanelHotkey"/>.</summary>
     public List<CustomHotkey> PanelCustomHotkeys { get; set; } = new();
 
     // ── Widgets ──
@@ -76,6 +72,22 @@ public class AppConfig
         get => _calendars;
         set => _calendars = value ?? new();
     }
+
+    // ── Property window (per-instance design system, spec §7.1 #6) ──
+    public double PropertyWindowX { get; set; } = double.NaN;
+    public double PropertyWindowY { get; set; } = double.NaN;
+    public double PropertyWindowWidth { get; set; } = 360;
+    public double PropertyWindowHeight { get; set; } = 600;
+    public bool PropertyWindowTopmost { get; set; } = true;
+    public bool PropertyPanelCollapsed { get; set; } = false;
+
+    /// <summary>
+    /// Captures top-level JSON fields with no matching property — used by
+    /// <c>ConfigService</c> for one-time migration of legacy flat Panel* fields
+    /// into the new nested <see cref="Panel"/> POCO. Cleared after migration.
+    /// </summary>
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; set; }
 }
 
 public class CustomHotkey

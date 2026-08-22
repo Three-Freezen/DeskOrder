@@ -5,81 +5,13 @@
         MinWidth="600" MinHeight="450"
         WindowStartupLocation="CenterOwner" ResizeMode="CanResize"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent">
-    
-    <Window.Resources>
-        <SolidColorBrush x:Key="Bg" Color="#E610111A"/>
-        <SolidColorBrush x:Key="Acc" Color="#7C3AED"/>
-        <SolidColorBrush x:Key="T1" Color="#E8E8F0"/>
-        <SolidColorBrush x:Key="T2" Color="#8888A0"/>
-        <SolidColorBrush x:Key="T3" Color="#606080"/>
-        <SolidColorBrush x:Key="IBg" Color="#0AFFFFFF"/>
-        <SolidColorBrush x:Key="IBd" Color="#15FFFFFF"/>
-        
-        <Style x:Key="DTb" TargetType="TextBox">
-            <Setter Property="Background" Value="{StaticResource IBg}"/>
-            <Setter Property="Foreground" Value="{StaticResource T1}"/>
-            <Setter Property="BorderBrush" Value="{StaticResource IBd}"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="Padding" Value="8,6"/>
-            <Setter Property="FontSize" Value="13"/>
-        </Style>
-        <Style x:Key="DLb" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource T2}"/>
-            <Setter Property="FontSize" Value="11"/>
-            <Setter Property="Margin" Value="0,8,0,4"/>
-        </Style>
-        
-        <ControlTemplate x:Key="DarkComboTemplate" TargetType="ComboBox">
-            <Grid>
-                <ToggleButton x:Name="ToggleButton"
-                    Background="{StaticResource IBg}" BorderBrush="{StaticResource IBd}"
-                    BorderThickness="1" Foreground="{StaticResource T1}"
-                    IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
-                    ClickMode="Press">
-                    <ToggleButton.Template>
-                        <ControlTemplate TargetType="ToggleButton">
-                            <Border Background="{TemplateBinding Background}"
-                                    BorderBrush="{TemplateBinding BorderBrush}"
-                                    BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="4" Padding="6,4">
-                                <Grid>
-                                    <Path x:Name="Arrow" Data="M0,0L4,4L8,0" Fill="{StaticResource T2}"
-                                        HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,4,0"/>
-                                </Grid>
-                            </Border>
-                        </ControlTemplate>
-                    </ToggleButton.Template>
-                </ToggleButton>
-                <ContentPresenter x:Name="ContentSite" Content="{TemplateBinding SelectionBoxItem}"
-                    ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" Margin="8,4,20,4"
-                    VerticalAlignment="Center" HorizontalAlignment="Left" IsHitTestVisible="False"/>
-                <Popup x:Name="Popup" Placement="Bottom" IsOpen="{TemplateBinding IsDropDownOpen}"
-                    AllowsTransparency="True" Focusable="False" PopupAnimation="Slide">
-                    <Border x:Name="DropDownBorder" Background="{StaticResource IBg}"
-                            BorderBrush="{StaticResource IBd}" BorderThickness="1" CornerRadius="4"
-                            MaxHeight="{TemplateBinding MaxDropDownHeight}" MinWidth="{TemplateBinding ActualWidth}">
-                        <ScrollViewer><ItemsPresenter/></ScrollViewer>
-                    </Border>
-                </Popup>
-            </Grid>
-        </ControlTemplate>
-        <Style x:Key="DarkCombo" TargetType="ComboBox">
-            <Setter Property="Template" Value="{StaticResource DarkComboTemplate}"/>
-            <Setter Property="Background" Value="{StaticResource IBg}"/>
-            <Setter Property="Foreground" Value="{StaticResource T1}"/>
-            <Setter Property="FontSize" Value="12"/>
-        </Style>
-        <Style TargetType="ComboBoxItem">
-            <Setter Property="Background" Value="{StaticResource IBg}"/>
-            <Setter Property="Foreground" Value="{StaticResource T1}"/>
-        </Style>
-    </Window.Resources>
 
-    <Border Background="{StaticResource Bg}" CornerRadius="12" 
-            BorderBrush="#15FFFFFF" BorderThickness="1">
+    <Border Background="{DynamicResource Brush.Bg.Chrome}" CornerRadius="12"
+            BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1">
         <Border.Effect>
             <DropShadowEffect BlurRadius="24" ShadowDepth="0" Color="#AA000000" Opacity="0.6"/>
         </Border.Effect>
-        
+
         <Grid Margin="18">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>  <!-- Title bar -->
@@ -94,36 +26,36 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                
-                <TextBlock x:Name="DialogTitle" Text="Image Crop Preview" 
-                           FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource T1}"/>
-                
+
+                <TextBlock x:Name="DialogTitle" Text="Image Crop Preview"
+                           FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource Brush.Text.Primary}"/>
+
                 <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
-                    <TextBlock x:Name="OffsetDisplay" Foreground="{StaticResource T2}" 
+                    <TextBlock x:Name="OffsetDisplay" Foreground="{DynamicResource Brush.Text.Secondary}"
                                FontSize="12" VerticalAlignment="Center"/>
-                    <TextBlock Text=" | " Foreground="{StaticResource T2}" Margin="4,0"/>
-                    <TextBlock x:Name="ZoomDisplay" Foreground="{StaticResource T2}" 
+                    <TextBlock Text=" | " Foreground="{DynamicResource Brush.Text.Secondary}" Margin="4,0"/>
+                    <TextBlock x:Name="ZoomDisplay" Foreground="{DynamicResource Brush.Text.Secondary}"
                                FontSize="12" VerticalAlignment="Center"/>
                 </StackPanel>
             </Grid>
 
             <!-- Preview Area -->
-            <Border Grid.Row="1" Background="#08FFFFFF" CornerRadius="8" 
-                    BorderBrush="{StaticResource IBd}" BorderThickness="1"
+            <Border Grid.Row="1" Background="{DynamicResource Brush.Bg.Surface}" CornerRadius="8"
+                    BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1"
                     ClipToBounds="True" x:Name="PreviewBorder"
                     MouseWheel="PreviewBorder_MouseWheel"
                     MouseLeftButtonDown="PreviewBorder_MouseLeftButtonDown"
                     MouseLeftButtonUp="PreviewBorder_MouseLeftButtonUp"
                     MouseMove="PreviewBorder_MouseMove"
                     SizeChanged="PreviewBorder_SizeChanged">
-                
+
                 <Grid x:Name="PreviewGrid">
                     <!-- Zone outline (dashed border showing target dimensions) -->
-                    <Border x:Name="ZoneOutline" BorderBrush="#7C3AED"
+                    <Border x:Name="ZoneOutline" BorderBrush="{DynamicResource Brush.Accent.Solid}"
                             BorderThickness="2"
                             HorizontalAlignment="Center" VerticalAlignment="Center"
                             Background="Transparent" IsHitTestVisible="False"/>
-                    <Ellipse x:Name="ZoneOutlineEllipse" Stroke="#7C3AED"
+                    <Ellipse x:Name="ZoneOutlineEllipse" Stroke="{DynamicResource Brush.Accent.Solid}"
                              StrokeThickness="2"
                              HorizontalAlignment="Center" VerticalAlignment="Center"
                              Fill="Transparent" IsHitTestVisible="False"
@@ -158,57 +90,59 @@
                     <ColumnDefinition Width="120"/>
                 </Grid.ColumnDefinitions>
 
-                <!-- Zoom slider -->
+                <!-- BgZoom slider: zoom of the background image (formerly ZoomSlider).
+                     Slider-only UI — adjusts CropImage transform but does not bind to Zone. -->
                 <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="12,0,0,0">
-                    <TextBlock x:Name="LabelZoom" Text="Zoom:" Foreground="{StaticResource T2}" FontSize="11"/>
+                    <TextBlock x:Name="LabelZoom" Text="Zoom:" Foreground="{DynamicResource Brush.Text.Secondary}" FontSize="11"/>
                     <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                        <Slider x:Name="ZoomSlider" Width="150" Minimum="0.01" Maximum="10.0"
+                        <Slider x:Name="BgZoom" Width="150" Minimum="0.01" Maximum="10.0"
                                 TickFrequency="0.1" Value="1.0"
-                                ValueChanged="ZoomSlider_ValueChanged"/>
+                                ValueChanged="BgZoom_ValueChanged"/>
                         <TextBlock x:Name="ZoomValueText" Text="1.0x"
-                                   Foreground="{StaticResource T1}" FontSize="12"
+                                   Foreground="{DynamicResource Brush.Text.Primary}" FontSize="12"
                                    Width="40" TextAlignment="Right" VerticalAlignment="Center"/>
                     </StackPanel>
                 </StackPanel>
 
-                <!-- Opacity slider -->
+                <!-- BgOpacity slider: opacity of the background image (formerly OpacitySlider).
+                     Slider-only UI — adjusts CropImage opacity but does not bind to Zone. -->
                 <StackPanel Grid.Column="2" VerticalAlignment="Center">
-                    <TextBlock x:Name="LabelOpacity" Text="Opacity:" Foreground="{StaticResource T2}" FontSize="11"/>
+                    <TextBlock x:Name="LabelOpacity" Text="Opacity:" Foreground="{DynamicResource Brush.Text.Secondary}" FontSize="11"/>
                     <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                        <Slider x:Name="OpacitySlider" Width="80" Minimum="5" Maximum="100"
+                        <Slider x:Name="BgOpacity" Width="80" Minimum="5" Maximum="100"
                                 TickFrequency="5" Value="40"
-                                ValueChanged="OpacitySlider_ValueChanged"/>
+                                ValueChanged="BgOpacity_ValueChanged"/>
                         <TextBlock x:Name="OpacityValueText" Text="40%"
-                                   Foreground="{StaticResource T1}" FontSize="12"
+                                   Foreground="{DynamicResource Brush.Text.Primary}" FontSize="12"
                                    Width="36" TextAlignment="Right" VerticalAlignment="Center"/>
                     </StackPanel>
                 </StackPanel>
             </Grid>
 
             <!-- Buttons -->
-            <StackPanel Grid.Row="3" Orientation="Horizontal" 
+            <StackPanel Grid.Row="3" Orientation="Horizontal"
                         HorizontalAlignment="Right" Margin="0,12,0,0">
-                <Button x:Name="ResetButton" Content="Reset" 
-                        Background="#15FFFFFF" Foreground="{StaticResource T2}" 
-                        BorderBrush="{StaticResource IBd}" BorderThickness="1" 
+                <Button x:Name="ResetButton" Content="Reset"
+                        Background="{DynamicResource Brush.Bg.Surface}" Foreground="{DynamicResource Brush.Text.Secondary}"
+                        BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1"
                         Padding="16,8" Cursor="Hand" FontSize="12"
                         Click="ResetButton_Click">
                     <Button.Resources>
                         <Style TargetType="Border"><Setter Property="CornerRadius" Value="4"/></Style>
                     </Button.Resources>
                 </Button>
-                <Button x:Name="CancelButton" Content="Cancel" 
-                        Background="#15FFFFFF" Foreground="{StaticResource T2}" 
-                        BorderBrush="{StaticResource IBd}" BorderThickness="1" 
+                <Button x:Name="CancelButton" Content="Cancel"
+                        Background="{DynamicResource Brush.Bg.Surface}" Foreground="{DynamicResource Brush.Text.Secondary}"
+                        BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1"
                         Padding="20,8" Margin="8,0,0,0" Cursor="Hand" FontSize="12"
                         Click="CancelButton_Click">
                     <Button.Resources>
                         <Style TargetType="Border"><Setter Property="CornerRadius" Value="4"/></Style>
                     </Button.Resources>
                 </Button>
-                <Button x:Name="ConfirmButton" Content="Confirm" 
-                        Background="{StaticResource Acc}" Foreground="White" 
-                        BorderThickness="0" Padding="20,8" Margin="8,0,0,0" 
+                <Button x:Name="ConfirmButton" Content="Confirm"
+                        Background="{DynamicResource Brush.Accent.Solid}" Foreground="{DynamicResource Brush.Accent.On}"
+                        BorderThickness="0" Padding="20,8" Margin="8,0,0,0"
                         Cursor="Hand" FontSize="12" FontWeight="SemiBold"
                         Click="ConfirmButton_Click">
                     <Button.Resources>

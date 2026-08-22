@@ -102,7 +102,7 @@ public class PresetService
                         PresetKind.Clock => JsonSerializer.Deserialize<ClockPreset>(text, Opts),
                         PresetKind.Calendar => JsonSerializer.Deserialize<CalendarPreset>(text, Opts),
                         PresetKind.StickyNote => JsonSerializer.Deserialize<StickyNotePreset>(text, Opts),
-                        PresetKind.MergedGroup => JsonSerializer.Deserialize<MergedGroupPreset>(text, Opts),
+                        PresetKind.MergedGroup => MigrateMergedGroupPreset(JsonSerializer.Deserialize<MergedGroupPreset>(text, Opts)),
                         PresetKind.Panel => JsonSerializer.Deserialize<PanelPreset>(text, Opts),
                         _ => JsonSerializer.Deserialize<ZonePreset>(text, Opts)
                     };
@@ -114,6 +114,86 @@ public class PresetService
         // Legacy Zone preset (no Kind field). The pre-v5 schema is exactly the
         // ZonePreset shape, so deserialize as ZonePreset directly.
         return JsonSerializer.Deserialize<ZonePreset>(text, Opts);
+    }
+
+    // ── One-time migration of legacy MergedGroup* flat fields ──
+    // ponytail: lift legacy MergedGroup flat fields to nested POCO schema; remove after one release cycle
+    // Old presets store MergedGroupBorderColor / MergedSubZoneIds / … at the
+    // Zone level. After the refactor (MergedGroupStyle + MergedGroupMembership
+    // POCOs) System.Text.Json drops them into Zone.ExtensionData. Lift them
+    // back into the nested POCOs once, then clear ExtensionData so subsequent
+    // saves don't rewrite the stale flat keys.
+    private static MergedGroupPreset? MigrateMergedGroupPreset(MergedGroupPreset? p)
+    {
+        if (p == null) return null;
+        var d = p.Zone.ExtensionData;
+        if (d == null || d.Count == 0) return p;
+
+        var s = p.Zone.MergedGroupStyle;
+        var m = p.Zone.MergedGroupMembership;
+        bool any = false;
+
+        void MoveString(string key, Action<string> setter)
+        {
+            if (!d.TryGetValue(key, out var el) || el.ValueKind != JsonValueKind.String) return;
+            setter(el.GetString() ?? "");
+            d.Remove(key); any = true;
+        }
+        void MoveDouble(string key, Action<double> setter)
+        {
+            if (!d.TryGetValue(key, out var el)) return;
+            try { setter(el.GetDouble()); d.Remove(key); any = true; } catch { }
+        }
+        void MoveInt(string key, Action<int> setter)
+        {
+            if (!d.TryGetValue(key, out var el)) return;
+            try { setter(el.GetInt32()); d.Remove(key); any = true; } catch { }
+        }
+        void MoveBool(string key, Action<bool> setter)
+        {
+            if (!d.TryGetValue(key, out var el)) return;
+            try { setter(el.GetBoolean()); d.Remove(key); any = true; } catch { }
+        }
+
+        // Style
+        MoveString("MergedGroupBorderColor",                v => s.BorderColor = v);
+        MoveDouble("MergedGroupBorderThickness",            v => s.BorderThickness = v);
+        MoveInt   ("MergedGroupCornerRadius",               v => s.CornerRadius = v);
+        MoveString("MergedGroupFillColor",                  v => s.FillColor = v);
+        MoveString("MergedGroupTitleBarFillColor",          v => s.TitleBarFillColor = v);
+        MoveString("MergedGroupTitleTextColor",             v => s.TitleTextColor = v);
+        MoveString("MergedGroupIconColor",                  v => s.IconColor = v);
+        MoveDouble("MergedGroupControlOpacity",             v => s.ControlOpacity = v);
+        MoveDouble("MergedGroupTitleBarOpacity",            v => s.TitleBarOpacity = v);
+        MoveBool  ("MergedGroupUseUnifiedFill",             v => s.UseUnifiedFill = v);
+        MoveBool  ("MergedGroupQuickBarMode",               v => s.QuickBarMode = v);
+        MoveBool  ("MergedGroupTitleBarTextColorAdaptive",  v => s.TitleBarTextColorAdaptive = v);
+        MoveString("MergedGroupBackgroundImagePath",        v => s.BackgroundImagePath = v);
+        MoveString("MergedGroupBgImageStretch",             v => s.BgImageStretch = v);
+        MoveDouble("MergedGroupBgImageOffsetX",             v => s.BgImageOffsetX = v);
+        MoveDouble("MergedGroupBgImageOffsetY",             v => s.BgImageOffsetY = v);
+        MoveDouble("MergedGroupBgImageZoom",                v => s.BgImageZoom = v);
+        MoveDouble("MergedGroupBackgroundImageOpacity",     v => s.BackgroundImageOpacity = v);
+
+        // Membership
+        if (d.TryGetValue("MergedGroupId", out var idEl))
+        {
+            m.GroupId = idEl.ValueKind == JsonValueKind.Null ? (Guid?)null : idEl.TryGetGuid(out var g) ? g : (Guid?)null;
+            d.Remove("MergedGroupId"); any = true;
+        }
+        if (d.TryGetValue("MergedSubZoneIds", out var idsEl))
+        {
+            var ids = new List<Guid>();
+            foreach (var item in idsEl.EnumerateArray())
+                if (item.ValueKind == JsonValueKind.String && Guid.TryParse(item.GetString(), out var g)) ids.Add(g);
+            m.SubZoneIds = ids;
+            d.Remove("MergedSubZoneIds"); any = true;
+        }
+        MoveString("MergedGroupName", v => m.DisplayName = v);
+        MoveString("MergedGroupIcon", v => m.Icon = v);
+
+        if (any) p.Zone.ExtensionData = d.Count > 0 ? d : null;
+        return p;
     }
 
     // ── Save / Delete ──
@@ -201,11 +281,21 @@ public class PresetService
         return new StickyNotePreset { Id = id, Name = name, CreatedAt = createdAt, Note = clone };
     }
 
-    /// <summary>Deletes a preset by Id. No-op if not found.</summary>
-    public void Delete(Guid id)
+    /// <summary>Deletes a preset by Id. Returns true on success, false if the file was missing or could not be deleted.</summary>
+    public bool Delete(Guid id)
     {
         var path = Path.Combine(_folder, $"{id}.json");
-        try { if (File.Exists(path)) File.Delete(path); } catch { }
+        try
+        {
+            if (!File.Exists(path)) return false;
+            File.Delete(path);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[PresetService] Delete failed for {path}: {ex}");
+            return false;
+        }
     }
 
     /// <summary>Extract the typed payload out of a preset record. Caller casts as needed.</summary>

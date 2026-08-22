@@ -4,8 +4,8 @@
         Title="Rename" Width="320" Height="140"
         WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent">
-    <Border Background="#F01A1A2E" CornerRadius="10"
-            BorderBrush="#30FFFFFF" BorderThickness="1">
+    <Border Background="{DynamicResource Brush.Bg.Chrome}" CornerRadius="10"
+            BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1">
         <Grid Margin="16">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
@@ -13,22 +13,22 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
             <TextBlock x:Name="TitleLabel" Text="Rename" FontSize="13" FontWeight="SemiBold"
-                       Foreground="#E8E8F0" Margin="0,4,0,10"/>
+                       Foreground="{DynamicResource Brush.Text.Primary}" Margin="0,4,0,10"/>
             <TextBox x:Name="NameInput" Grid.Row="1"
-                     Background="#1E1E36" Foreground="#E8E8F0"
-                     BorderBrush="#404060" BorderThickness="1"
+                     Background="{DynamicResource Brush.Bg.Input}" Foreground="{DynamicResource Brush.Text.Primary}"
+                     BorderBrush="{DynamicResource Brush.Border.Default}" BorderThickness="1"
                      Padding="8,6" FontSize="13"
                      KeyDown="NameInput_KeyDown"/>
             <StackPanel Grid.Row="2" Orientation="Horizontal"
                         HorizontalAlignment="Right" Margin="0,12,0,0">
                 <Button x:Name="CancelBtn" Content="Cancel"
-                        Background="Transparent" Foreground="#8888A0"
-                        BorderBrush="#404060" BorderThickness="1"
+                        Background="Transparent" Foreground="{DynamicResource Brush.Text.Secondary}"
+                        BorderBrush="{DynamicResource Brush.Border.Default}" BorderThickness="1"
                         Padding="14,6" Cursor="Hand" Click="Cancel_Click">
                     <Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="4"/></Style></Button.Resources>
                 </Button>
                 <Button x:Name="OkBtn" Content="OK"
-                        Background="#6C63FF" Foreground="White"
+                        Background="{DynamicResource Brush.Accent}" Foreground="White"
                         BorderThickness="0" Padding="14,6" Margin="8,0,0,0"
                         Cursor="Hand" Click="Ok_Click">
                     <Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="4"/></Style></Button.Resources>

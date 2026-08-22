@@ -1,4 +1,5 @@
 using System;
+using System.Text.Json.Serialization;
 
 namespace DesktopZones.Models;
 
@@ -46,4 +47,34 @@ public abstract class AppearanceModel
     /// missing JSON keys). Title bar elements use a separate flag on the subclass.
     /// </summary>
     public bool TextColorAdaptive { get; set; } = true;
+
+    // ── Hover restore animation (per-instance, spec §7.1 #2) ──
+    // ponytail: Driven by EnableRestoreButton (above) — no separate toggle.
+    // Hover the RestoreButton (1 s) or click it to animate the zone content
+    // back in; cursor leaves the expanded window for 3 s and it collapses
+    // again (unless triggered by click, which is permanent).
+    // PanelPresetConfig declares only HoverExpandSpeed (see spec §7.2).
+    public HoverExpandAnimationKind HoverExpandAnimation { get; set; } = HoverExpandAnimationKind.ScaleExpand;
+    public double HoverExpandSpeed { get; set; } = 1.0;
+    /// <summary>
+    /// ponytail: Anchor point for the restore animation — see <see cref="HoverExpandOrigin"/>.
+    /// Default ButtonCenter keeps the original radial-from-button look.
+    /// </summary>
+    public HoverExpandOrigin HoverExpandOrigin { get; set; } = HoverExpandOrigin.ButtonCenter;
+
+    // ponytail: 2026-08-21 — Live notification for hover-expand settings changes.
+    // PropertyPanel.OpenMotionDialog mutates HoverExpand{Animation,Origin,Speed} on
+    // the model and raises this event after Save(). Live HoverExpandBehavior
+    // instances subscribe in their widget's ctor and call SetEnabled(...) which
+    // re-runs ApplyOrigin + NormalizeFor so the next expand uses the new values.
+    // Without this event the live behaviour kept its ctor-time origin/kind and
+    // silently ignored dialog changes (BUG: ButtonCorner never took effect;
+    // switching kind left stale Scale=0 → 36×36 ghost).
+    [field: JsonIgnore]
+    public event Action? HoverExpandSettingsChanged;
+
+    /// <summary>Internal raise so external mutation sites (PropertyPanel) don't need
+    /// to know the event exists. Call after Save() to notify live behaviours.</summary>
+    internal void RaiseHoverExpandSettingsChanged()
+        => HoverExpandSettingsChanged?.Invoke();
 }

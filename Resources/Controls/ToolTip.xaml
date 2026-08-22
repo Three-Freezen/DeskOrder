@@ -1,0 +1,35 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <!-- ═══════════════════════════════════════════
+       ToolTip — spec §5.3
+       bg.chrome, 1px border.default, 4px corner radius,
+       padding 8,4, text 11pt text.secondary, no shadow, delay 500ms
+       ═══════════════════════════════════════════ -->
+
+  <Style TargetType="ToolTip">
+    <Setter Property="Background" Value="{DynamicResource Brush.Bg.Chrome}"/>
+    <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border.Default}"/>
+    <Setter Property="BorderThickness" Value="1"/>
+    <Setter Property="Padding" Value="8,4"/>
+    <Setter Property="FontSize" Value="11"/>
+    <Setter Property="Foreground" Value="{DynamicResource Brush.Text.Secondary}"/>
+    <Setter Property="ToolTipService.InitialShowDelay" Value="500"/>
+    <Setter Property="ToolTipService.ShowDuration" Value="5000"/>
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ToolTip">
+          <Border Background="{TemplateBinding Background}"
+                  BorderBrush="{TemplateBinding BorderBrush}"
+                  BorderThickness="{TemplateBinding BorderThickness}"
+                  CornerRadius="4"
+                  Padding="{TemplateBinding Padding}"
+                  SnapsToDevicePixels="True">
+            <ContentPresenter TextElement.Foreground="{TemplateBinding Foreground}"/>
+          </Border>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+</ResourceDictionary>

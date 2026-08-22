@@ -100,8 +100,7 @@ public partial class SavePresetDialog : Window
         }
     }
 
-    /// <summary>Briefly flash the "saved" hint. Used to live here only on ZoneSettingsDialog;
-    /// moved into the dialog itself so every caller benefits from the same UX.</summary>
+    /// <summary>Briefly flash the "saved" hint so every caller benefits from the same UX.</summary>
     void ShowSavedHint()
     {
         SavedHint.Visibility = Visibility.Visible;
@@ -113,6 +112,13 @@ public partial class SavePresetDialog : Window
             _savedHintTimer!.Stop();
         };
         _savedHintTimer.Start();
+    }
+
+    protected override void OnClosed(System.EventArgs e)
+    {
+        _savedHintTimer?.Stop();
+        _savedHintTimer = null;
+        base.OnClosed(e);
     }
 
     private void CancelButton_Click(object sender, RoutedEventArgs e)

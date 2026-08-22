@@ -114,8 +114,8 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
         UpdateDisplays();
         
         // Set initial control values
-        ZoomSlider.Value = _currentZoom;
-        OpacitySlider.Value = _currentOpacity;
+        BgZoom.Value = _currentZoom;
+        BgOpacity.Value = _currentOpacity;
     }
     
     private void LoadImage()
@@ -286,7 +286,7 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
     {
         double zoomDelta = e.Delta > 0 ? 0.1 : -0.1;
         CurrentZoom += zoomDelta;
-        ZoomSlider.Value = _currentZoom;
+        BgZoom.Value = _currentZoom;
         UpdateImageTransform();
     }
     
@@ -301,14 +301,14 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
         DrawGridLines();
     }
     
-    private void ZoomSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    private void BgZoom_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
         if (!IsLoaded) return;
         CurrentZoom = e.NewValue;
         UpdateImageTransform();
     }
     
-    private void OpacitySlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    private void BgOpacity_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
         if (!IsLoaded) return;
         CurrentOpacity = e.NewValue;
@@ -322,8 +322,8 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
         CurrentZoom = _initialZoom;
         CurrentOpacity = _initialOpacity;
 
-        ZoomSlider.Value = _currentZoom;
-        OpacitySlider.Value = _currentOpacity;
+        BgZoom.Value = _currentZoom;
+        BgOpacity.Value = _currentOpacity;
         CropImage.Stretch = Stretch.UniformToFill;
         UpdateImageTransform();
     }
@@ -337,13 +337,7 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
     
     private void ConfirmButton_Click(object sender, RoutedEventArgs e)
     {
-        Result = new CropPreviewResult
-        {
-            OffsetX = _currentOffsetX,
-            OffsetY = _currentOffsetY,
-            Zoom = _currentZoom,
-            Opacity = _currentOpacity
-        };
+        Result = new CropPreviewResult(_currentOffsetX, _currentOffsetY, _currentZoom, _currentOpacity);
         DialogResult = true;
         Close();
     }

@@ -1,0 +1,58 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <!-- ═══════════════════════════════════════════
+       Segmented control — spec §5.4
+       Each segment is a RadioButton with this style.
+       28px high, 4px corner radius, no individual border.
+       Selected: bg.accent, fg.accent.on, 3px corner radius, 2px inset margin.
+       Parent container (bordered bg.input) is provided by Segmented.xaml.
+       ═══════════════════════════════════════════ -->
+
+  <Style x:Key="SegmentItem" TargetType="RadioButton">
+    <Setter Property="Background" Value="Transparent"/>
+    <Setter Property="Foreground" Value="{DynamicResource Brush.Text.Secondary}"/>
+    <Setter Property="FontSize" Value="12"/>
+    <Setter Property="MinHeight" Value="28"/>
+    <Setter Property="Padding" Value="14,0"/>
+    <Setter Property="Margin" Value="2"/>
+    <Setter Property="HorizontalContentAlignment" Value="Center"/>
+    <Setter Property="VerticalContentAlignment" Value="Center"/>
+    <Setter Property="Cursor" Value="Hand"/>
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="RadioButton">
+          <Border x:Name="Bd"
+                  Background="{TemplateBinding Background}"
+                  CornerRadius="4"
+                  Padding="{TemplateBinding Padding}"
+                  SnapsToDevicePixels="True">
+            <ContentPresenter x:Name="Cp"
+                              HorizontalAlignment="Center"
+                              VerticalAlignment="Center"
+                              TextElement.Foreground="{TemplateBinding Foreground}"
+                              RecognizesAccessKey="True"/>
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Bg.Hover}"/>
+              <Setter Property="Foreground" Value="{DynamicResource Brush.Text.Primary}"/>
+            </Trigger>
+            <Trigger Property="IsChecked" Value="True">
+              <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Accent}"/>
+              <Setter TargetName="Bd" Property="CornerRadius" Value="3"/>
+              <Setter TargetName="Bd" Property="Margin" Value="2"/>
+              <Setter Property="Foreground" Value="{DynamicResource Brush.Accent.On}"/>
+              <Setter Property="Cursor" Value="Arrow"/>
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter Property="Foreground" Value="{DynamicResource Brush.Text.Disabled}"/>
+              <Setter Property="Cursor" Value="Arrow"/>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+</ResourceDictionary>

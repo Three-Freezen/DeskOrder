@@ -1,0 +1,83 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <Style TargetType="Slider">
+    <Setter Property="Background" Value="Transparent"/>
+    <Setter Property="Foreground" Value="{DynamicResource Brush.Accent}"/>
+    <Setter Property="MinHeight" Value="20"/>
+    <Setter Property="VerticalAlignment" Value="Center"/>
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="Slider">
+          <Grid SnapsToDevicePixels="True" VerticalAlignment="Center">
+            <Border x:Name="TrackBackground"
+                    Height="4"
+                    VerticalAlignment="Center"
+                    CornerRadius="2"
+                    Background="{DynamicResource Brush.Bg.Active}"/>
+
+            <Track x:Name="PART_Track" Height="4" VerticalAlignment="Center">
+              <Track.DecreaseRepeatButton>
+                <RepeatButton>
+                  <RepeatButton.Template>
+                    <ControlTemplate TargetType="RepeatButton">
+                      <Grid Background="Transparent">
+                        <Border Height="4"
+                                CornerRadius="2"
+                                Background="{DynamicResource Brush.Accent}"/>
+                      </Grid>
+                    </ControlTemplate>
+                  </RepeatButton.Template>
+                </RepeatButton>
+              </Track.DecreaseRepeatButton>
+              <Track.IncreaseRepeatButton>
+                <RepeatButton>
+                  <RepeatButton.Template>
+                    <ControlTemplate TargetType="RepeatButton">
+                      <Grid Background="Transparent" Height="4"/>
+                    </ControlTemplate>
+                  </RepeatButton.Template>
+                </RepeatButton>
+              </Track.IncreaseRepeatButton>
+              <Track.Thumb>
+                <Thumb x:Name="Thumb"
+                       Width="14" Height="14"
+                       VerticalAlignment="Center"
+                       Focusable="False"
+                       OverridesDefaultStyle="True"
+                       UseLayoutRounding="True">
+                  <Thumb.Template>
+                    <ControlTemplate TargetType="Thumb">
+                      <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <Ellipse x:Name="Shadow"
+                                 Width="14" Height="14"
+                                 Fill="#FFFFFF"
+                                 Stroke="{DynamicResource Brush.Border.Default}"
+                                 StrokeThickness="1"/>
+                      </Grid>
+                    </ControlTemplate>
+                  </Thumb.Template>
+                </Thumb>
+              </Track.Thumb>
+            </Track>
+          </Grid>
+
+          <!-- ponytail: ThumbScale used to be defined inside the nested Thumb template
+               but Storyboard.TargetName only resolves within the same ControlTemplate
+               scope, so the hover-grow animation threw InvalidOperationException on
+               first mouse-over. Replaced with simple Width/Height Setters on Thumb. -->
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="Thumb" Property="Width" Value="16"/>
+              <Setter TargetName="Thumb" Property="Height" Value="16"/>
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter Property="Opacity" Value="0.5"/>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+</ResourceDictionary>
