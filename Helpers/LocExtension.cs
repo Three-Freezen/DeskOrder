@@ -1,6 +1,7 @@
 using System;
 using System.Globalization;
 using System.Linq;
+using System.Windows;
 using System.Windows.Data;
 using System.Windows.Markup;
 using DesktopZones.Services;
@@ -32,12 +33,30 @@ public class LocExtension : MarkupExtension
 
     public override object ProvideValue(IServiceProvider sp)
     {
-        var multi = new MultiBinding();
-        multi.Bindings.Add(new Binding($"[{Key}]") { Source = LocalizationService.Instance });
-        if (Arg0 != null) multi.Bindings.Add(Arg0);
-        if (Arg1 != null) multi.Bindings.Add(Arg1);
-        multi.Converter = new LocFormatConverter();
-        return multi;
+        // ponytail: WPF can't assign MultiBinding to string properties (TextBlock.Text,
+        // ContentControl.Content, etc.) — it raises "MultiBinding is not a valid value
+        // for Text". Standard fix is to fetch the target via IProvideValueTarget and
+        // call BindingOperations.SetBinding ourselves, then return a one-shot fallback
+        // string. The binding fires on LocalizationService.LanguageChanged because the
+        // indexer raises PropertyChanged, so the live update path still works.
+        var valueService = sp.GetService(typeof(IProvideValueTarget)) as IProvideValueTarget;
+        var targetObject = valueService?.TargetObject as DependencyObject;
+        var targetProperty = valueService?.TargetProperty as DependencyProperty;
+
+        if (targetObject != null && targetProperty != null)
+        {
+            var multi = new MultiBinding();
+            multi.Bindings.Add(new Binding($"[{Key}]") { Source = LocalizationService.Instance });
+            if (Arg0 != null) multi.Bindings.Add(Arg0);
+            if (Arg1 != null) multi.Bindings.Add(Arg1);
+            multi.Converter = new LocFormatConverter();
+            BindingOperations.SetBinding(targetObject, targetProperty, multi);
+        }
+
+        // Fallback for the brief window before the binding pushes its first value, and
+        // for non-DP targets (templates, ResourceDictionary entries). The indexer is
+        // synchronous so this is the actual current value, not a placeholder.
+        return LocalizationService.Instance[Key] ?? "";
     }
 }
 
