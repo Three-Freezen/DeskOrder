@@ -242,16 +242,18 @@ public static class ThemeService
 
     static Color? TryReadSystemAccent()
     {
+        // AccentColor lives at HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Accent\AccentColorMenu
+        // on Windows 10/11. Win10 also wrote Personalize\AccentColor but Win11 stopped updating that
+        // path, so we read the modern location. DWORD value is COLORREF 0x00BBGGRR:
+        //   low byte     = R
+        //   bits  8-15   = G
+        //   bits 16-23   = B
+        //   bits 24-31   = unused (alpha)
         try
         {
             using var key = Registry.CurrentUser.OpenSubKey(
-                @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
-            // AccentColor is stored as Windows COLORREF = 0x00BBGGRR:
-            //   low byte     = R
-            //   bits  8-15   = G
-            //   bits 16-23   = B
-            //   bits 24-31   = unused (alpha)
-            if (key?.GetValue("AccentColor") is int colorref)
+                @"Software\Microsoft\Windows\CurrentVersion\Explorer\Accent");
+            if (key?.GetValue("AccentColorMenu") is int colorref)
             {
                 return Color.FromRgb(
                     (byte)( colorref        & 0xFF),
