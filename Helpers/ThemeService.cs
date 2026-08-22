@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Shapes;
+using System.Windows.Threading;
 using Microsoft.Win32;
 
 namespace DesktopZones.Helpers;
@@ -22,6 +23,13 @@ public static class ThemeService
     static ResolvedTheme _resolved = ResolvedTheme.Dark;
     public static AppThemeMode CurrentMode => _current;
     public static ResolvedTheme ResolvedMode => _resolved;
+
+    // ponytail: last accent color successfully written by ApplySystemAccentIfApplicable.
+    // The poll timer ticks once a second; this cache makes the steady-state cost one
+    // registry read + one comparison instead of three brush writes + DynamicResource
+    // re-resolve on every tick.
+    static Color? _lastAppliedAccent;
+    static DispatcherTimer? _accentPollTimer;
 
     public static event Action<AppThemeMode>? Changed;
 
@@ -269,6 +277,8 @@ public static class ThemeService
         if (_current != AppThemeMode.System) return;
         var c = TryReadSystemAccent();
         if (!c.HasValue || !IsAccentVisible(c.Value)) return;
+        if (_lastAppliedAccent.HasValue && _lastAppliedAccent.Value == c.Value) return;
+        _lastAppliedAccent = c.Value;
         var color = c.Value;
         var wash = Color.FromArgb(0x33, color.R, color.G, color.B);
         var brushesDict = Application.Current?.Resources.MergedDictionaries
@@ -398,5 +408,21 @@ public static class ThemeService
                 Apply(AppThemeMode.System);
             }
         };
+
+        // ponytail: Win32 broadcasts "ImmersiveColorSet" on accent color changes,
+        // but .NET's SystemEvents.UserPreferenceChanged only maps a small fixed
+        // set of lParam strings to UserPreferenceCategory — "ImmersiveColorSet"
+        // isn't in that table, so the event never fires for accent changes. Poll
+        // the registry once a second and let ApplySystemAccentIfApplicable's cache
+        // short-circuit the steady-state (one read + one comparison per tick).
+        // 1-second latency is invisible; the alternative (HwndSource + lParam
+        // string parsing) is ~3x the code for the same outcome.
+        _accentPollTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _accentPollTimer.Tick += (_, _) =>
+        {
+            if (_current != AppThemeMode.System) return;
+            ApplySystemAccentIfApplicable();
+        };
+        _accentPollTimer.Start();
     }
 }
