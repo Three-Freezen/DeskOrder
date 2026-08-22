@@ -126,8 +126,8 @@ public partial class App : System.Windows.Application
         {
             _loc.CurrentLanguage = config.Language switch
             {
-                "en" => Services.Language.English,
-                _ => Services.Language.Chinese
+                "en" => "en",
+                _ => "zh"
             };
         }
 

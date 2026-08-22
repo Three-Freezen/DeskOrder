@@ -35,7 +35,7 @@ public partial class PanelWindow : Window
     private readonly System.Windows.Threading.DispatcherTimer _clockTimer;
     private bool _isGridView = true;
     private Zone? _selectedZone;
-    private Action<Services.Language>? _langChanged;
+    private Action<string>? _langChanged;
 
     public PanelWindow(ZoneManager zoneManager, ConfigService configService)
     {
@@ -92,7 +92,7 @@ public partial class PanelWindow : Window
         if (ZoneSelector == null) return;
         var prevSelection = ZoneSelector.SelectedIndex;
         ZoneSelector.Items.Clear();
-        var cn = _loc.CurrentLanguage == Services.Language.Chinese;
+        var cn = _loc.CurrentLanguage == "zh";
         ZoneSelector.Items.Add(cn ? "全部分区" : "All Zones");
         foreach (var zone in _zoneManager.Zones)
         {
@@ -817,7 +817,7 @@ public partial class PanelWindow : Window
             {
                 hwndOwner = h.Handle,
                 pszDisplayName = displayBuf,
-                lpszTitle = _loc.CurrentLanguage == Services.Language.Chinese ? "选择文件夹" : "Select Folder",
+                lpszTitle = _loc.CurrentLanguage == "zh" ? "选择文件夹" : "Select Folder",
                 ulFlags = 0x40
             };
             pidl = NativeMethods.SHBrowseForFolderW(ref bi);
@@ -885,7 +885,7 @@ public partial class PanelWindow : Window
         if (_zoneManager.Zones.Count > 1)
         {
             // Show zone selection dialog
-            var cn = _loc.CurrentLanguage == Services.Language.Chinese;
+            var cn = _loc.CurrentLanguage == "zh";
             var dlg = new Window
             {
                 Title = cn ? "选择分区" : "Select Zone",

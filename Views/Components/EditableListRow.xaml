@@ -1,6 +1,6 @@
 <UserControl x:Class="DesktopZones.Views.Components.EditableListRow"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:loc="clr-namespace:DesktopZones.Helpers"
              xmlns:local="clr-namespace:DesktopZones.Views.Components">
   <UserControl.Resources>
     <local:IconKeyToGeometryConverter x:Key="IconKeyToGeometry"/>
@@ -145,13 +145,13 @@
                 Data="{StaticResource Icon.Lock}"/>
         </Button>
         <Button Width="24" Height="24" Margin="2,0" Cursor="Hand" Click="EyeBtn_Click"
-                Background="Transparent" BorderThickness="0" ToolTip="显示">
+                Background="Transparent" BorderThickness="0" ToolTip="{loc:Loc ToolTip.Show}>
           <Path Width="14" Height="14" StrokeThickness="1.5"
                 Stroke="{DynamicResource Brush.Text.Tertiary}" StrokeLineJoin="Round"
                 Data="{StaticResource Icon.Eye}"/>
         </Button>
         <Button Width="24" Height="24" Margin="2,0" Cursor="Hand" Click="TrashBtn_Click"
-                Background="Transparent" BorderThickness="0" ToolTip="删除">
+                Background="Transparent" BorderThickness="0" ToolTip="{loc:Loc Manage.DeleteBtn}>
           <Path Width="14" Height="14" StrokeThickness="1.5"
                 Stroke="{DynamicResource Brush.Text.Tertiary}" StrokeLineJoin="Round"
                 Data="{StaticResource Icon.Trash}"/>

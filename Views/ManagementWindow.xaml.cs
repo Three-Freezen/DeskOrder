@@ -375,7 +375,7 @@ public partial class ManagementWindow : Window
     public void ShowMergeDialog(Zone sourceZone) => ShowMergeDialogImpl(sourceZone);
     public void DisbandEntireGroup(Zone masterZone)
     {
-        var cn = _loc.CurrentLanguage == Services.Language.Chinese;
+        var cn = _loc.CurrentLanguage == "zh";
         var result = MessageBox.Show(
             cn ? $"确定要解散组合分区「{masterZone.MergedGroupMembership.DisplayName}」吗？\n所有分区将恢复为独立窗口。"
                : $"Disband merged group \"{masterZone.MergedGroupMembership.DisplayName}\"?\nAll zones will return to individual windows.",
@@ -470,7 +470,7 @@ public partial class ManagementWindow : Window
     /// <summary>Confirm before performing a full hide-all (used by sidebar).</summary>
     public bool ConfirmHideAll()
     {
-        var cn = _loc.CurrentLanguage == Services.Language.Chinese;
+        var cn = _loc.CurrentLanguage == "zh";
         var totalZones = _zoneManager?.Zones?.Count ?? 0;
         var msg = cn
             ? $"隐藏全部 {totalZones} 个窗口？\n可从托盘菜单或本窗口恢复。"
@@ -637,7 +637,7 @@ public partial class ManagementWindow : Window
     {
         try
         {
-            var cn = _loc.CurrentLanguage == Services.Language.Chinese;
+            var cn = _loc.CurrentLanguage == "zh";
             var popup = new System.Windows.Controls.Primitives.Popup
             {
                 PlacementTarget = btn,
@@ -732,7 +732,7 @@ public partial class ManagementWindow : Window
 
     void ShowNoteHotkeyRecorderDialogImpl(StickyNote note)
     {
-        var cn = _loc.CurrentLanguage == Services.Language.Chinese;
+        var cn = _loc.CurrentLanguage == "zh";
         var dlg = new Window
         {
             Title = cn ? "录制快捷键" : "Record Hotkey",
@@ -862,7 +862,7 @@ public partial class ManagementWindow : Window
 
     void ShowMergedGroupContextMenuImpl(Zone masterZone, Button placementBtn)
     {
-        var cn = _loc.CurrentLanguage == Services.Language.Chinese;
+        var cn = _loc.CurrentLanguage == "zh";
         var popup = new System.Windows.Controls.Primitives.Popup
         {
             AllowsTransparency = true,
@@ -924,7 +924,7 @@ public partial class ManagementWindow : Window
 
     void DisbandSingleZoneImpl(Zone masterZone)
     {
-        var cn = _loc.CurrentLanguage == Services.Language.Chinese;
+        var cn = _loc.CurrentLanguage == "zh";
         var dialogTitle = cn ? "选择要分离的分区" : "Select Zone to Disband";
         var dialog = new Window
         {
@@ -1000,7 +1000,7 @@ public partial class ManagementWindow : Window
 
     void MergeWithAnotherGroupImpl(Zone sourceMaster)
     {
-        var cn = _loc.CurrentLanguage == Services.Language.Chinese;
+        var cn = _loc.CurrentLanguage == "zh";
         var otherGroups = _zoneManager.Zones.Where(z => z.MergedGroupMembership.SubZoneIds.Count > 0 && z.Id != sourceMaster.Id).ToList();
         if (otherGroups.Count == 0)
         {
@@ -1064,7 +1064,7 @@ public partial class ManagementWindow : Window
 
     void ShowMergeDialogImpl(Zone sourceZone)
     {
-        var cn = _loc.CurrentLanguage == Services.Language.Chinese;
+        var cn = _loc.CurrentLanguage == "zh";
         var eligibleZones = _zoneManager.Zones
             .Where(z => z.Id != sourceZone.Id
                 && (sourceZone.MergedGroupMembership.GroupId == null

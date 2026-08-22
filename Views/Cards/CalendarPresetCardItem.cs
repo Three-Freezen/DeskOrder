@@ -42,7 +42,7 @@ public class CalendarPresetCardItem : PresetCardItem
         var firstOfMonth = new DateTime(cal.DisplayYear, cal.DisplayMonth, 1);
         var daysInMonth = DateTime.DaysInMonth(firstOfMonth.Year, firstOfMonth.Month);
         var today = DateTime.Today;
-        var cn = LocalizationService.Instance.CurrentLanguage == Language.Chinese;
+        var cn = LocalizationService.Instance.CurrentLanguage == "zh";
 
         // ── Day-of-week header ──
         WeekdayLabels = StartOnMonday

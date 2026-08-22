@@ -1,0 +1,7 @@
+{
+  "DeskOrder":     { "ja": "DeskOrder", "ko": "DeskOrder", "es": "DeskOrder", "fr": "DeskOrder", "de": "DeskOrder", "ru": "DeskOrder", "pt": "DeskOrder" },
+  "Liquid Glass":  { "ja": "Liquid Glass", "ko": "Liquid Glass", "es": "Liquid Glass", "fr": "Liquid Glass", "de": "Liquid Glass", "ru": "Liquid Glass", "pt": "Liquid Glass" },
+  "Glassmorphism": { "ja": "Glassmorphism", "ko": "Glassmorphism", "es": "Glassmorphism", "fr": "Glassmorphism", "de": "Glassmorphism", "ru": "Glassmorphism", "pt": "Glassmorphism" },
+  "Preset":        { "ja": "プリセット",   "ko": "프리셋",      "es": "preajuste",   "fr": "préréglage",  "de": "Voreinstellung", "ru": "пресет",  "pt": "predefinição" },
+  "Hover":         { "ja": "ホバー",       "ko": "호버",        "es": "pasar el cursor", "fr": "survol",   "de": "Hover",       "ru": "наведение", "pt": "passar o cursor" }
+}

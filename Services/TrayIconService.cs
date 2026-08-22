@@ -217,15 +217,15 @@ public class TrayIconService : IDisposable
         var chineseItem = new MenuItem
         {
             Header = loc["Menu.Chinese"],
-            IsChecked = loc.CurrentLanguage == Language.Chinese
+            IsChecked = loc.CurrentLanguage == "zh"
         };
-        chineseItem.Click += (_, _) => { loc.CurrentLanguage = Language.Chinese; };
+        chineseItem.Click += (_, _) => { loc.CurrentLanguage = "zh"; };
         var englishItem = new MenuItem
         {
             Header = loc["Menu.English"],
-            IsChecked = loc.CurrentLanguage == Language.English
+            IsChecked = loc.CurrentLanguage == "en"
         };
-        englishItem.Click += (_, _) => { loc.CurrentLanguage = Language.English; };
+        englishItem.Click += (_, _) => { loc.CurrentLanguage = "en"; };
         langMenu.Items.Add(chineseItem);
         langMenu.Items.Add(englishItem);
         menu.Items.Add(langMenu);

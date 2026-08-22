@@ -154,7 +154,7 @@ public partial class LoadPresetDialog : Window, INotifyPropertyChanged
 
     private void ApplyLoc()
     {
-        var cn = _loc.CurrentLanguage == Services.Language.Chinese;
+        var cn = _loc.CurrentLanguage == "zh";
         // Window/Dialog title — derived per-kind. See SavePresetDialog for the matching key set.
         var titleKey = $"Preset.LoadTitle.{_service.Kind}";
         Title = _loc[titleKey];
@@ -464,7 +464,7 @@ public class ModeToNameConverter : IValueConverter
     public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
     {
         var mode = value?.ToString() ?? "";
-        var cn = LocalizationService.Instance.CurrentLanguage == Services.Language.Chinese;
+        var cn = LocalizationService.Instance.CurrentLanguage == "zh";
         return mode switch
         {
             "Digital" => cn ? "数字" : "Digital",

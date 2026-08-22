@@ -73,7 +73,7 @@ public partial class CalendarWidget : Window
         // --spawn-widget) bypasses ShowCalendar, so SnapToExpanded never runs.
         if (_calendar.IsVisible) _hover.SnapToExpanded();
     }
-    private Action<Services.Language>? _langChanged;
+    private Action<string>? _langChanged;
 
     void OnCalendarsChanged()
     {
@@ -427,7 +427,7 @@ public partial class CalendarWidget : Window
 
     void ApplyLoc()
     {
-        var cn = _loc.CurrentLanguage == Services.Language.Chinese;
+        var cn = _loc.CurrentLanguage == "zh";
         TodayBtn.Content = _loc["Calendar.Today"];
         AddNoteBtn.ToolTip = _loc["Calendar.AddNote"];
         NotesDateLabel.Text = cn ? "备注" : "Notes";
@@ -441,7 +441,7 @@ public partial class CalendarWidget : Window
     void ToggleRestore_Click(object s, RoutedEventArgs e)
     {
         _calendar.EnableRestoreButton = !_calendar.EnableRestoreButton;
-        var cn = _loc.CurrentLanguage == DesktopZones.Services.Language.Chinese;
+        var cn = _loc.CurrentLanguage == "zh";
         if (s is MenuItem mi)
             mi.Header = _calendar.EnableRestoreButton
                 ? (cn ? "关闭恢复按钮" : "Disable Restore")
@@ -451,7 +451,7 @@ public partial class CalendarWidget : Window
     void RebuildDisplay()
     {
         _vm.RebuildCells();
-        MonthTitleText.Text = _loc.CurrentLanguage == Services.Language.Chinese
+        MonthTitleText.Text = _loc.CurrentLanguage == "zh"
             ? $"{_vm.DisplayYear}年{_vm.DisplayMonth}月"
             : $"{_vm.DisplayMonth}/{_vm.DisplayYear}";
     }
@@ -516,7 +516,7 @@ public partial class CalendarWidget : Window
                 RebuildDisplay();
             }
             _vm.SelectDate(dateKey);
-            NotesDateLabel.Text = (_loc.CurrentLanguage == Services.Language.Chinese ? "备注 - " : "Notes - ") + dateKey;
+            NotesDateLabel.Text = (_loc.CurrentLanguage == "zh" ? "备注 - " : "Notes - ") + dateKey;
         }
         e.Handled = true;
     }
@@ -538,7 +538,7 @@ public partial class CalendarWidget : Window
 
     void ShowNoteDialog(string dateKey, CalendarNoteViewModel? existingNote)
     {
-        var cn = _loc.CurrentLanguage == Services.Language.Chinese;
+        var cn = _loc.CurrentLanguage == "zh";
         bool isEdit = existingNote != null;
         var title = isEdit ? (cn ? "编辑备注" : "Edit Note") : _loc["Calendar.AddNote"];
         var existingPriority = existingNote?.Priority ?? NotePriority.None;

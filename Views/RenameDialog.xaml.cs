@@ -21,7 +21,7 @@ public partial class RenameDialog : Window
 
     void ApplyLoc()
     {
-        var cn = _loc.CurrentLanguage == Services.Language.Chinese;
+        var cn = _loc.CurrentLanguage == "zh";
         TitleLabel.Text = cn ? "重命名" : "Rename";
         OkBtn.Content = cn ? "确定" : "OK";
         CancelBtn.Content = cn ? "取消" : "Cancel";

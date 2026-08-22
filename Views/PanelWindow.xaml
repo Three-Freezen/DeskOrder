@@ -1,6 +1,6 @@
 <Window x:Class="DesktopZones.Views.PanelWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:loc="clr-namespace:DesktopZones.Helpers"
         xmlns:l="clr-namespace:DesktopZones.Services"
         WindowStyle="None"
         AllowsTransparency="True"
@@ -84,7 +84,7 @@
                                     BorderThickness="1" VerticalAlignment="Center"
                                     Margin="0,0,12,0">
                                 <Grid Margin="8,0">
-                                    <TextBlock x:Name="SearchPlaceholder" Text="搜索..."
+                                    <TextBlock x:Name="SearchPlaceholder" Text="{loc:Loc Panel.Search}"
                                                FontSize="11" Foreground="#606080"
                                                VerticalAlignment="Center"/>
                                     <TextBox x:Name="SearchBox" FontSize="11"

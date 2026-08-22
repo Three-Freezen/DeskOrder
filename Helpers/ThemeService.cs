@@ -281,15 +281,24 @@ public static class ThemeService
         if (!c.HasValue || !IsAccentVisible(c.Value)) return;
         if (_lastAppliedAccent.HasValue && _lastAppliedAccent.Value == c.Value) return;
         _lastAppliedAccent = c.Value;
-        var color = c.Value;
-        var wash = Color.FromArgb(0x33, color.R, color.G, color.B);
+        var accentColor = c.Value;
+        // ponytail: accent drives the background; contrast color (AdaptiveTextColor's
+        // HSL flip) drives text and any brush that needs to stand out against the new
+        // bg. Result: the whole palette inverts around the user's accent — light
+        // accent → dark text on light bg, dark accent → light text on dark bg.
+        var contrastColor = AdaptiveTextColor.ResolveTextColor(accentColor);
+        var wash = Color.FromArgb(0x33, accentColor.R, accentColor.G, accentColor.B);
         var brushesDict = Application.Current?.Resources.MergedDictionaries
             .Cast<ResourceDictionary>()
             .FirstOrDefault(d => d.Source?.OriginalString.EndsWith("Theme.Brushes.xaml", StringComparison.OrdinalIgnoreCase) == true);
         if (brushesDict == null) return;
-        brushesDict["Brush.Accent"]       = new SolidColorBrush(color);
-        brushesDict["Brush.Accent.Wash"]  = new SolidColorBrush(wash);
-        brushesDict["Brush.Accent.Solid"] = new SolidColorBrush(color);
+        brushesDict["Brush.Bg.Base"]        = new SolidColorBrush(accentColor);
+        brushesDict["Brush.Bg.Surface"]     = new SolidColorBrush(accentColor);
+        brushesDict["Brush.Text.Primary"]   = new SolidColorBrush(contrastColor);
+        brushesDict["Brush.Text.Secondary"] = new SolidColorBrush(contrastColor);
+        brushesDict["Brush.Accent"]         = new SolidColorBrush(contrastColor);
+        brushesDict["Brush.Accent.Wash"]    = new SolidColorBrush(wash);
+        brushesDict["Brush.Accent.Solid"]   = new SolidColorBrush(contrastColor);
     }
 
     /// <summary>

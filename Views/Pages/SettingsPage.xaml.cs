@@ -111,7 +111,7 @@ public partial class SettingsPage : UserControl
             var cfg = _configService.Load();
             cfg.Language = lang;
             _configService.Save(cfg);
-            LocalizationService.Instance.CurrentLanguage = lang == "zh" ? Services.Language.Chinese : Services.Language.English;
+            LocalizationService.Instance.CurrentLanguage = lang == "zh" ? "zh" : "en";
         }
     }
 

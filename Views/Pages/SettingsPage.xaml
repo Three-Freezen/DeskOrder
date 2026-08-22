@@ -1,6 +1,6 @@
 <UserControl x:Class="DesktopZones.Views.Pages.SettingsPage"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:loc="clr-namespace:DesktopZones.Helpers"
              xmlns:components="clr-namespace:DesktopZones.Views.Components">
   <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="20,16,20,12">
     <StackPanel>
@@ -56,7 +56,7 @@
       </Border>
 
       <!-- 快捷键 -->
-      <TextBlock Text="快捷键" FontSize="11" FontWeight="SemiBold" Margin="0,4,0,8"
+      <TextBlock Text="{loc:Loc Note.Hotkey} FontSize="11" FontWeight="SemiBold" Margin="0,4,0,8"
                  Foreground="{DynamicResource Brush.Text.Tertiary}"/>
       <Border Background="{DynamicResource Brush.Bg.Surface}"
               BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1"

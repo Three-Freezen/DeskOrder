@@ -17,7 +17,7 @@ public partial class OverwriteConfirmDialog : Window
 
     private void ApplyLoc()
     {
-        var cn = _loc.CurrentLanguage == Services.Language.Chinese;
+        var cn = _loc.CurrentLanguage == "zh";
         Title = _loc["Preset.OverwriteTitle"];
         DialogTitle.Text = _loc["Preset.OverwriteTitle"];
         PromptText.Text = _loc.Get("Preset.OverwritePrompt", _presetName);

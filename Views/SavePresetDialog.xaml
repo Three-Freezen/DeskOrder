@@ -1,6 +1,6 @@
 <Window x:Class="DesktopZones.Views.SavePresetDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:loc="clr-namespace:DesktopZones.Helpers"
         Title="Save Zone Preset"
         Width="380" Height="220"
         MinWidth="340" MinHeight="200"
@@ -24,12 +24,12 @@
             </Grid.RowDefinitions>
 
             <!-- Title -->
-            <TextBlock x:Name="DialogTitle" Text="保存分区预设"
+            <TextBlock x:Name="DialogTitle" Text="{loc:Loc Preset.SaveTitle.Zone}"
                        FontSize="15" FontWeight="SemiBold"
                        Foreground="{DynamicResource Brush.Text.Primary}" Margin="0,0,0,12"/>
 
             <!-- Name label -->
-            <TextBlock x:Name="LabelName" Grid.Row="1" Text="预设名称"
+            <TextBlock x:Name="LabelName" Grid.Row="1" Text="{loc:Loc Preset.NameLabel}"
                        Foreground="{DynamicResource Brush.Text.Secondary}" FontSize="11" Margin="0,0,0,4"/>
 
             <!-- Name input -->
@@ -41,7 +41,7 @@
                          BorderThickness="1" Padding="8,6" FontSize="13"
                          TextChanged="NameBox_TextChanged"
                          KeyDown="NameBox_KeyDown"/>
-                <TextBlock x:Name="EmptyHint" Text="请输入预设名称"
+                <TextBlock x:Name="EmptyHint" Text="{loc:Loc Preset.EmptyNameHint}"
                            Foreground="{DynamicResource Brush.Text.Tertiary}" FontSize="11"
                            IsHitTestVisible="False"
                            VerticalAlignment="Center" Margin="10,0,0,0"
@@ -56,12 +56,12 @@
                 </Grid.ColumnDefinitions>
                 <!-- Saved hint, briefly shown after a successful preset save. Lives here so every caller
                      of SavePresetDialog benefits without each one wiring its own timer. -->
-                <TextBlock x:Name="SavedHint" Text="预设已保存"
+                <TextBlock x:Name="SavedHint" Text="{loc:Loc Preset.Saved}"
                            Foreground="{DynamicResource Brush.Success}" FontSize="11"
                            VerticalAlignment="Center" Margin="0,0,12,0"
                            Visibility="Collapsed"/>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
-                    <Button x:Name="CancelButton" Content="取消"
+                    <Button x:Name="CancelButton" Content="{loc:Loc Preset.Cancel}"
                         Background="{DynamicResource Brush.Bg.Surface}" Foreground="{DynamicResource Brush.Text.Secondary}"
                         BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1"
                         Padding="20,8" Cursor="Hand" FontSize="12"
@@ -72,7 +72,7 @@
                         </Style>
                     </Button.Resources>
                 </Button>
-                <Button x:Name="SaveButton" Content="保存"
+                <Button x:Name="SaveButton" Content="{loc:Loc Preset.Save}"
                         Background="{DynamicResource Brush.Accent.Solid}" Foreground="{DynamicResource Brush.Accent.On}"
                         BorderThickness="0" Padding="20,8" Margin="8,0,0,0"
                         Cursor="Hand" FontSize="12" FontWeight="SemiBold"

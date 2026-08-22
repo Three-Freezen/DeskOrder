@@ -543,7 +543,7 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
     
     private void ApplyLoc()
     {
-        var cn = _loc.CurrentLanguage == DesktopZones.Services.Language.Chinese;
+        var cn = _loc.CurrentLanguage == "zh";
         DialogTitle.Text = _loc["CropPreview.Title"];
         ConfirmButton.Content = _loc["CropPreview.Confirm"];
         CancelButton.Content = _loc["CropPreview.Cancel"];

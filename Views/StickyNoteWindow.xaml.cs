@@ -870,7 +870,7 @@ public partial class StickyNoteWindow : Window
     void ToggleRestore_Click(object s, RoutedEventArgs e)
     {
         _note.EnableRestoreButton = !_note.EnableRestoreButton;
-        var cn = _loc.CurrentLanguage == DesktopZones.Services.Language.Chinese;
+        var cn = _loc.CurrentLanguage == "zh";
         if (s is MenuItem mi)
             mi.Header = _note.EnableRestoreButton
                 ? (cn ? "关闭恢复按钮" : "Disable Restore")

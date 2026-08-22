@@ -535,7 +535,7 @@ public partial class PropertyPanel : UserControl
         int tint = z.GlassTintOpacity;
         int lum = z.GlassTintLuminosity;
         string mode = z.GlassColorMode;
-        var cn = LocalizationService.Instance.CurrentLanguage == Services.Language.Chinese;
+        var cn = LocalizationService.Instance.CurrentLanguage == "zh";
         if (!AcrylicHelper.ShowLiquidGlassDialog(owner, "液态玻璃设置",
             ref blur, ref tint, ref lum, ref mode, cn)) return;
         z.GlassBlurAmount = blur;

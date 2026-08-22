@@ -43,7 +43,7 @@ public partial class ZoneWindow : Window
     private readonly LocalizationService _loc = LocalizationService.Instance;
     private HwndSource? _src;
     private Canvas? _itemCanvas;
-    private Action<Services.Language>? _langChanged;
+    private Action<string>? _langChanged;
 
     private bool _dragging, _fileOver;
     private Point _ds, _is;
@@ -133,7 +133,7 @@ public partial class ZoneWindow : Window
 
     void ApplyLoc()
     {
-        var cn = _loc.CurrentLanguage == Services.Language.Chinese;
+        var cn = _loc.CurrentLanguage == "zh";
         CtxImport.Header = _loc["Zone.Import"];
         CtxImportFolder.Header = cn ? "导入文件夹..." : "Import Folder...";
         CtxImportFiles.Header = cn ? "导入文件..." : "Import Files...";
@@ -433,7 +433,7 @@ public partial class ZoneWindow : Window
         // If this zone is a sub-zone (not master), remove it from the group
         if (_zone.MergedGroupMembership.SubZoneIds.Count == 0)
         {
-            var cn = _loc.CurrentLanguage == Services.Language.Chinese;
+            var cn = _loc.CurrentLanguage == "zh";
             if (MessageBox.Show(
                 cn ? $"确定要将分区「{_zone.Name}」从组合中分离吗？"
                    : $"Remove zone \"{_zone.Name}\" from the merged group?",
@@ -1219,7 +1219,7 @@ public partial class ZoneWindow : Window
 
     void AddSubZoneTab(Guid zoneId, string name, string iconChar, SolidColorBrush? adaptiveBrush, string? titleTextColorOverride)
     {
-        var cn = _loc.CurrentLanguage == Services.Language.Chinese;
+        var cn = _loc.CurrentLanguage == "zh";
         bool isSelected = _vm.SelectedSubZoneId == zoneId;
 
         // ponytail: mirror ZoneTitleText resolution exactly — adaptive on → adaptive brush,

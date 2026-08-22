@@ -90,7 +90,7 @@ public partial class ClockWidget : Window
         // by snapping expanded when visible at construction.
         if (_clock.IsVisible) _hover.SnapToExpanded();
     }
-    private Action<Services.Language>? _langChanged;
+    private Action<string>? _langChanged;
 
     void OnClocksChanged()
     {
@@ -591,7 +591,7 @@ public partial class ClockWidget : Window
 
     void UpdateContextMenuLabels()
     {
-        var cn = _loc.CurrentLanguage == Services.Language.Chinese;
+        var cn = _loc.CurrentLanguage == "zh";
         bool isAnalog = _clock.Mode == ClockDisplayMode.Analog;
         CtxSwitchMode.Header = isAnalog ? _loc["Clock.DigitalMode"] : _loc["Clock.AnalogMode"];
         CtxToggleSeconds.Header = _clock.ShowSeconds ? _loc["Clock.HideSeconds"] : _loc["Clock.ShowSeconds"];
@@ -679,7 +679,7 @@ public partial class ClockWidget : Window
     void ToggleRestore_Click(object s, RoutedEventArgs e)
     {
         _clock.EnableRestoreButton = !_clock.EnableRestoreButton;
-        var cn = _loc.CurrentLanguage == Services.Language.Chinese;
+        var cn = _loc.CurrentLanguage == "zh";
         if (s is MenuItem mi)
             mi.Header = _clock.EnableRestoreButton
                 ? (cn ? "关闭恢复按钮" : "Disable Restore")

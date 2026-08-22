@@ -30,7 +30,7 @@ public partial class SavePresetDialog : Window
 
     private void ApplyLoc()
     {
-        var cn = _loc.CurrentLanguage == Services.Language.Chinese;
+        var cn = _loc.CurrentLanguage == "zh";
         // Window/Dialog title — derived per-kind so Clock/Calendar/Note/MergedGroup/Panel
         // no longer share Zone's hardcoded "保存分区预设".
         var titleKey = $"Preset.SaveTitle.{_service.Kind}";
