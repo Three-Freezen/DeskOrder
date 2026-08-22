@@ -169,6 +169,7 @@ public partial class PropertyTabStrip : UserControl
                 Background = System.Windows.Media.Brushes.Transparent,
                 Topmost = true,
                 ShowInTaskbar = false,
+                Opacity = 0.85,
                 Content = new Border
                 {
                     Background = (System.Windows.Media.Brush)FindResource("Brush.Bg.Chrome"),
@@ -262,6 +263,7 @@ public partial class PropertyTabStrip : UserControl
         _dragArmed = false;
         _dragOutTab = null;
         _dragOutArmed = false;
+        if (IsMouseCaptured) ReleaseMouseCapture();
         CleanupDragOutFeedback();
     }
 
