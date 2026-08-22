@@ -1,7 +1,7 @@
 <Window x:Class="DesktopZones.Views.MotionSettingsDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:loc="clr-namespace:DesktopZones.Helpers"
-        Title="{loc:Loc Motion.Title} Width="320" Height="320"
+        Title="{loc:Loc Motion.Title}" Width="320" Height="320"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         WindowStyle="None"
@@ -21,7 +21,7 @@
             </Grid.RowDefinitions>
 
             <!-- Title -->
-            <TextBlock x:Name="TitleLabel" Text="{loc:Loc Motion.Title} FontSize="13" FontWeight="SemiBold"
+            <TextBlock x:Name="TitleLabel" Text="{loc:Loc Motion.Title}" FontSize="13" FontWeight="SemiBold"
                        Foreground="{DynamicResource Brush.Text.Primary}" Margin="0,4,0,12"/>
 
             <!-- Origin mode -->
@@ -31,14 +31,14 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel>
-                    <TextBlock x:Name="OriginLabel" Text="{loc:Loc Motion.Origin} FontSize="12"
+                    <TextBlock x:Name="OriginLabel" Text="{loc:Loc Motion.Origin}" FontSize="12"
                                Foreground="{DynamicResource Brush.Text.Primary}"/>
-                    <TextBlock x:Name="OriginHint" Text="{loc:Loc Motion.OriginHint} FontSize="10" Margin="0,2,0,0"
+                    <TextBlock x:Name="OriginHint" Text="{loc:Loc Motion.OriginHint}" FontSize="10" Margin="0,2,0,0"
                                Foreground="{DynamicResource Brush.Text.Tertiary}"/>
                 </StackPanel>
                 <ComboBox Grid.Column="1" x:Name="OriginCombo" VerticalAlignment="Center" Width="140">
-                    <ComboBoxItem x:Name="ItemOriginCenter" Content="{loc:Loc Motion.Origin.ButtonCenter} Tag="ButtonCenter"/>
-                    <ComboBoxItem x:Name="ItemOriginCorner" Content="{loc:Loc Motion.Origin.ButtonCorner} Tag="ButtonCorner"/>
+                    <ComboBoxItem x:Name="ItemOriginCenter" Content="{loc:Loc MotionOriginButtonCenter}" Tag="ButtonCenter"/>
+                    <ComboBoxItem x:Name="ItemOriginCorner" Content="{loc:Loc MotionOriginButtonCorner}" Tag="ButtonCorner"/>
                 </ComboBox>
             </Grid>
 
@@ -49,18 +49,18 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel>
-                    <TextBlock x:Name="AnimationKindLabel" Text="{loc:Loc Motion.AnimationKind} FontSize="12"
+                    <TextBlock x:Name="AnimationKindLabel" Text="{loc:Loc Motion.AnimationKind}" FontSize="12"
                                Foreground="{DynamicResource Brush.Text.Primary}"/>
-                    <TextBlock x:Name="AnimationKindHint" Text="{loc:Loc Motion.AnimationKindHint} FontSize="10" Margin="0,2,0,0"
+                    <TextBlock x:Name="AnimationKindHint" Text="{loc:Loc Motion.AnimationKindHint}" FontSize="10" Margin="0,2,0,0"
                                Foreground="{DynamicResource Brush.Text.Tertiary}"/>
                 </StackPanel>
                 <ComboBox Grid.Column="1" x:Name="AnimationCombo" VerticalAlignment="Center" Width="120">
-                    <ComboBoxItem x:Name="ItemScaleExpand" Content="{loc:Loc Motion.Animation.ScaleExpand} Tag="ScaleExpand"/>
-                    <ComboBoxItem x:Name="ItemFade" Content="{loc:Loc Motion.Animation.Fade} Tag="Fade"/>
-                    <ComboBoxItem x:Name="ItemBounceExpand" Content="{loc:Loc Motion.Animation.BounceExpand} Tag="BounceExpand"/>
-                    <ComboBoxItem x:Name="ItemDirectionalExpand" Content="{loc:Loc Motion.Animation.DirectionalExpand} Tag="DirectionalExpand"/>
-                    <ComboBoxItem x:Name="ItemVerticalExpand" Content="{loc:Loc Motion.Animation.VerticalExpand} Tag="VerticalExpand"/>
-                    <ComboBoxItem x:Name="ItemNone" Content="{loc:Loc Motion.Animation.None} Tag="None"/>
+                    <ComboBoxItem x:Name="ItemScaleExpand" Content="{loc:Loc MotionAnimationScaleExpand}" Tag="ScaleExpand"/>
+                    <ComboBoxItem x:Name="ItemFade" Content="{loc:Loc MotionAnimationFade}" Tag="Fade"/>
+                    <ComboBoxItem x:Name="ItemBounceExpand" Content="{loc:Loc MotionAnimationBounceExpand}" Tag="BounceExpand"/>
+                    <ComboBoxItem x:Name="ItemDirectionalExpand" Content="{loc:Loc MotionAnimationDirectionalExpand}" Tag="DirectionalExpand"/>
+                    <ComboBoxItem x:Name="ItemVerticalExpand" Content="{loc:Loc MotionAnimationVerticalExpand}" Tag="VerticalExpand"/>
+                    <ComboBoxItem x:Name="ItemNone" Content="{loc:Loc MotionAnimationNone}" Tag="None"/>
                 </ComboBox>
             </Grid>
 
@@ -72,9 +72,9 @@
                     <ColumnDefinition Width="40"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel>
-                    <TextBlock x:Name="SpeedLabel" Text="{loc:Loc Motion.Speed} FontSize="12"
+                    <TextBlock x:Name="SpeedLabel" Text="{loc:Loc Motion.Speed}" FontSize="12"
                                Foreground="{DynamicResource Brush.Text.Primary}"/>
-                    <TextBlock x:Name="SpeedHint" Text="{loc:Loc Motion.SpeedHint} FontSize="10" Margin="0,2,0,0"
+                    <TextBlock x:Name="SpeedHint" Text="{loc:Loc Motion.SpeedHint}" FontSize="10" Margin="0,2,0,0"
                                Foreground="{DynamicResource Brush.Text.Tertiary}"/>
                 </StackPanel>
                 <Slider Grid.Column="1" x:Name="SpeedSlider"

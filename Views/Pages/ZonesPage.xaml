@@ -11,7 +11,7 @@
           <ColumnDefinition Width="Auto"/>
         </Grid.ColumnDefinitions>
         <StackPanel Grid.Column="0" Orientation="Horizontal">
-          <TextBlock Text="{loc:Loc Manage.Zones} FontSize="16" FontWeight="SemiBold"
+          <TextBlock Text="{loc:Loc Manage.Zones}" FontSize="16" FontWeight="SemiBold"
                      Foreground="{DynamicResource Brush.Text.Primary}" VerticalAlignment="Center"/>
           <TextBlock x:Name="CountLabel" Margin="8,0,0,0" FontSize="11"
                      FontFamily="Cascadia Code, Consolas, monospace"
@@ -38,7 +38,7 @@
         </ItemsControl>
         <StackPanel x:Name="EmptyHint" Visibility="Collapsed"
                     HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,80,0,0">
-          <TextBlock Text="{loc:Loc Manage.EmptyHint} FontSize="14" FontWeight="SemiBold"
+          <TextBlock Text="{loc:Loc Manage.EmptyHint}" FontSize="14" FontWeight="SemiBold"
                      Foreground="{DynamicResource Brush.Text.Secondary}" HorizontalAlignment="Center"/>
           <TextBlock Text="点击右上方「+ 新建」创建第一个分区" FontSize="11" Margin="0,8,0,0"
                      Foreground="{DynamicResource Brush.Text.Tertiary}" HorizontalAlignment="Center"/>

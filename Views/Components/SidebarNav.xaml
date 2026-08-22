@@ -128,16 +128,16 @@
         <StackPanel Margin="0,8,0,0">
 
           <!-- Group: 分区 -->
-          <TextBlock Text="{loc:Loc Manage.Zones} Margin="16,4,16,8" FontSize="11" FontWeight="SemiBold"
+          <TextBlock Text="{loc:Loc Manage.Zones}" Margin="16,4,16,8" FontSize="11" FontWeight="SemiBold"
                      Foreground="{DynamicResource Brush.Text.Tertiary}"/>
           <Button x:Name="NavZones" Style="{StaticResource NavItem}" Tag="zones" Click="NavItem_Click"
-                  ToolTip="{loc:Loc Manage.Zones}>
+                  ToolTip="{loc:Loc Manage.Zones}">
             <StackPanel Orientation="Horizontal">
               <Path Width="16" Height="16" Margin="0,0,12,0" Stretch="Uniform"
                     Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
                     StrokeThickness="1.5" StrokeLineJoin="Round"
                     Data="{StaticResource Icon.Zones}"/>
-              <TextBlock Text="{loc:Loc Manage.Zones} VerticalAlignment="Center"/>
+              <TextBlock Text="{loc:Loc Manage.Zones}" VerticalAlignment="Center"/>
             </StackPanel>
           </Button>
           <Button x:Name="NavMerged" Style="{StaticResource NavItem}" Tag="merged" Click="NavItem_Click"
@@ -151,13 +151,13 @@
             </StackPanel>
           </Button>
           <Button x:Name="NavPanel" Style="{StaticResource NavItem}" Tag="panel" Click="NavItem_Click"
-                  ToolTip="{loc:Loc Panel.Title}>
+                  ToolTip="{loc:Loc Panel.Title}">
             <StackPanel Orientation="Horizontal">
               <Path Width="16" Height="16" Margin="0,0,12,0" Stretch="Uniform"
                     Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
                     StrokeThickness="1.5" StrokeLineJoin="Round"
                     Data="{StaticResource Icon.Panel}"/>
-              <TextBlock Text="{loc:Loc Panel.Title} VerticalAlignment="Center"/>
+              <TextBlock Text="{loc:Loc Panel.Title}" VerticalAlignment="Center"/>
             </StackPanel>
           </Button>
 
@@ -165,33 +165,33 @@
           <TextBlock Text="组件" Margin="16,16,16,8" FontSize="11" FontWeight="SemiBold"
                      Foreground="{DynamicResource Brush.Text.Tertiary}"/>
           <Button x:Name="NavCalendar" Style="{StaticResource NavItem}" Tag="calendar" Click="NavItem_Click"
-                  ToolTip="{loc:Loc Manage.Calendars}>
+                  ToolTip="{loc:Loc Manage.Calendars}">
             <StackPanel Orientation="Horizontal">
               <Path Width="16" Height="16" Margin="0,0,12,0" Stretch="Uniform"
                     Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
                     StrokeThickness="1.5" StrokeLineJoin="Round"
                     Data="{StaticResource Icon.Calendar}"/>
-              <TextBlock Text="{loc:Loc Manage.Calendars} VerticalAlignment="Center"/>
+              <TextBlock Text="{loc:Loc Manage.Calendars}" VerticalAlignment="Center"/>
             </StackPanel>
           </Button>
           <Button x:Name="NavClock" Style="{StaticResource NavItem}" Tag="clock" Click="NavItem_Click"
-                  ToolTip="{loc:Loc Manage.Clocks}>
+                  ToolTip="{loc:Loc Manage.Clocks}">
             <StackPanel Orientation="Horizontal">
               <Path Width="16" Height="16" Margin="0,0,12,0" Stretch="Uniform"
                     Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
                     StrokeThickness="1.5" StrokeLineJoin="Round"
                     Data="{StaticResource Icon.Clock}"/>
-              <TextBlock Text="{loc:Loc Manage.Clocks} VerticalAlignment="Center"/>
+              <TextBlock Text="{loc:Loc Manage.Clocks}" VerticalAlignment="Center"/>
             </StackPanel>
           </Button>
           <Button x:Name="NavSticky" Style="{StaticResource NavItem}" Tag="sticky" Click="NavItem_Click"
-                  ToolTip="{loc:Loc Manage.Notes}>
+                  ToolTip="{loc:Loc Manage.Notes}">
             <StackPanel Orientation="Horizontal">
               <Path Width="16" Height="16" Margin="0,0,12,0" Stretch="Uniform"
                     Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
                     StrokeThickness="1.5" StrokeLineJoin="Round"
                     Data="{StaticResource Icon.Sticky}"/>
-              <TextBlock Text="{loc:Loc Manage.Notes} VerticalAlignment="Center"/>
+              <TextBlock Text="{loc:Loc Manage.Notes}" VerticalAlignment="Center"/>
             </StackPanel>
           </Button>
 
@@ -220,13 +220,13 @@
             </StackPanel>
           </Button>
           <Button x:Name="BtnHideAll" Style="{StaticResource NavItemDanger}" Click="HideAll_Click"
-                  ToolTip="{loc:Loc Manage.FullHideAll}>
+                  ToolTip="{loc:Loc Manage.FullHideAll}">
             <StackPanel Orientation="Horizontal">
               <Path Width="16" Height="16" Margin="0,0,12,0" Stretch="Uniform"
                     Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
                     StrokeThickness="1.5" StrokeLineJoin="Round"
                     Data="{StaticResource Icon.EyeOff}"/>
-              <TextBlock Text="{loc:Loc Manage.FullHideAll} VerticalAlignment="Center"/>
+              <TextBlock Text="{loc:Loc Manage.FullHideAll}" VerticalAlignment="Center"/>
             </StackPanel>
           </Button>
 

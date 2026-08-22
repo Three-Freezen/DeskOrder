@@ -830,7 +830,7 @@
                                     <TextBlock Grid.Column="1" Text="Panel" FontSize="6" FontWeight="SemiBold" Foreground="#E8E8F0" VerticalAlignment="Center" Margin="0,0,3,0"/>
                                     <!-- Col 2: Search bar -->
                                     <Border Grid.Column="2" Height="11" CornerRadius="5" Background="#15FFFFFF" BorderBrush="#20FFFFFF" BorderThickness="1" VerticalAlignment="Center" Margin="0,0,3,0">
-                                        <TextBlock Text="{loc:Loc Panel.Search} FontSize="5" Foreground="#606080" VerticalAlignment="Center" Margin="4,0,0,0"/>
+                                        <TextBlock Text="{loc:Loc Panel.Search}" FontSize="5" Foreground="#606080" VerticalAlignment="Center" Margin="4,0,0,0"/>
                                     </Border>
                                     <!-- Col 3: Grid/List toggle -->
                                     <Border Grid.Column="3" Width="11" Height="11" CornerRadius="2" Background="#20FFFFFF" Margin="0,0,2,0">

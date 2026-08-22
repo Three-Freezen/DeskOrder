@@ -56,7 +56,7 @@
       </Border>
 
       <!-- 快捷键 -->
-      <TextBlock Text="{loc:Loc Note.Hotkey} FontSize="11" FontWeight="SemiBold" Margin="0,4,0,8"
+      <TextBlock Text="{loc:Loc Note.Hotkey}" FontSize="11" FontWeight="SemiBold" Margin="0,4,0,8"
                  Foreground="{DynamicResource Brush.Text.Tertiary}"/>
       <Border Background="{DynamicResource Brush.Bg.Surface}"
               BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1"

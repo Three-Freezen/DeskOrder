@@ -44,7 +44,7 @@
                        Foreground="{DynamicResource Brush.Text.Primary}" VerticalAlignment="Center"/>
           </StackPanel>
           <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0">
-            <TextBlock x:Name="CrumbSection" Text="{loc:Loc Manage.Zones} FontSize="12"
+            <TextBlock x:Name="CrumbSection" Text="{loc:Loc Manage.Zones}" FontSize="12"
                        Foreground="{DynamicResource Brush.Text.Secondary}" VerticalAlignment="Center"/>
             <TextBlock Text="/" FontSize="11" Margin="6,0"
                        FontFamily="Cascadia Code, Consolas, monospace"
@@ -54,7 +54,7 @@
           </StackPanel>
           <StackPanel Grid.Column="2" Orientation="Horizontal">
             <Button Width="46" Height="40" Background="Transparent" BorderThickness="0" Cursor="Hand"
-                    Click="MinimizeButton_Click" ToolTip="{loc:Loc ToolTip.Minimize}>
+                    Click="MinimizeButton_Click" ToolTip="{loc:Loc ToolTip.Minimize}">
               <Path Width="10" Height="10"
                     Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.2"
                     StrokeLineJoin="Round"
@@ -68,7 +68,7 @@
                     Data="{StaticResource Icon.Maximize}"/>
             </Button>
             <Button Width="46" Height="40" Background="Transparent" BorderThickness="0" Cursor="Hand"
-                    Click="CloseButton_Click" ToolTip="{loc:Loc Appearance.GlassNone}>
+                    Click="CloseButton_Click" ToolTip="{loc:Loc Appearance.GlassNone}">
               <Path Width="10" Height="10"
                     Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.2"
                     StrokeLineJoin="Round"
