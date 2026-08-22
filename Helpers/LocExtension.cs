@@ -11,17 +11,19 @@ namespace DesktopZones.Helpers;
 /// <summary>
 /// XAML markup extension shorthand for <c>{Binding [Key], Source={x:Static ...}}</c> against
 /// <see cref="LocalizationService"/>. Resolves at load time via the indexer; rerenders on
-/// <see cref="LocalizationService.LanguageChanged"/> because the indexer is a notify property.
+/// <see cref="LocalizationService.LanguageChanged"/>.
 ///
 /// Usage:
-///   <code>{loc:Loc Zone.Hide}</code>                                  — literal key
+///   <code>{loc:Loc Zone.Hide}</code>                                  — single-segment
+///   <code>{loc:Loc Key=Dialog.DeleteZoneMsg}</code>                   — multi-segment (dotted)
 ///   <code>{loc:Loc Dialog.DeleteZoneMsg, Arg0={Binding Name}}</code>  — with format args
 ///
-/// ponytail: positional ctor (matches the spec). Multi-segment keys with dots (e.g.
-/// <c>Motion.Origin.ButtonCenter</c>) need to use property syntax
-/// <c>{loc:Loc Key=Motion.Origin.ButtonCenter, ...}</c> because the WPF XAML parser
-/// interprets dots after the positional arg as member access — a structural limitation,
-/// not something this extension can paper over.
+/// ponytail: text 跟颜色走同一条路 — 数据变 → 通知 → UI 刷新。颜色靠 DynamicResource
+/// 直接引用 MergedDictionaries 里的 brush；文字这条一开始也走 WPF 的 Binding-on-indexer
+/// + PropertyChanged("Item[]")，实测在 Style / Template / ContentPresenter 等上下文里
+/// IProvideValueTarget.TargetObject 为 null、BindingOperations.SetBinding 被跳过，绑定
+/// 没真的挂上，UI 就成了一次性。换直接路线：LocExtension 自己订 LanguageChanged 回调
+/// 直接 SetValue 推到 target，语义跟 DynamicResource brush 引用刷新等价。
 /// </summary>
 public class LocExtension : MarkupExtension
 {
@@ -31,46 +33,77 @@ public class LocExtension : MarkupExtension
 
     // ponytail: explicit default ctor required for property syntax {loc:Loc Key=X}.
     // Without it the implicit default is suppressed by the (string) ctor and BAML's
-    // BindToMethod NRE's when it tries to instantiate via property syntax. The XAML
-    // parser sees dotted keys like "Manage.Zones" as member access on the positional
-    // arg, so multi-segment keys MUST go through the property form — and that
-    // property form needs this ctor to exist.
+    // BindToMethod NRE's when it tries to instantiate via property syntax. Multi-
+    // segment keys (e.g. "Manage.Zones") MUST use property syntax because the XAML
+    // parser reads dots after the positional arg as member access — structural limit.
     public LocExtension() { }
 
     public LocExtension(string key) { Key = key; }
 
     public override object ProvideValue(IServiceProvider sp)
     {
-        // ponytail: WPF can't assign MultiBinding to string properties (TextBlock.Text,
-        // ContentControl.Content, etc.) — it raises "MultiBinding is not a valid value
-        // for Text". Standard fix is to fetch the target via IProvideValueTarget and
-        // call BindingOperations.SetBinding ourselves, then return a one-shot fallback
-        // string. The binding fires on LocalizationService.LanguageChanged because the
-        // indexer raises PropertyChanged, so the live update path still works.
+        var loc = LocalizationService.Instance;
         var valueService = sp.GetService(typeof(IProvideValueTarget)) as IProvideValueTarget;
         var targetObject = valueService?.TargetObject as DependencyObject;
         var targetProperty = valueService?.TargetProperty as DependencyProperty;
 
         if (targetObject != null && targetProperty != null)
         {
-            var multi = new MultiBinding();
-            multi.Bindings.Add(new Binding($"[{Key}]") { Source = LocalizationService.Instance });
-            if (Arg0 != null) multi.Bindings.Add(Arg0);
-            if (Arg1 != null) multi.Bindings.Add(Arg1);
-            multi.Converter = new LocFormatConverter();
-            BindingOperations.SetBinding(targetObject, targetProperty, multi);
+            // Per-instance handler — closes over Key, targetObject, targetProperty.
+            // Fires on every LanguageChanged to push the new value to the target.
+            // The handler is the only strong reference to the LocExtension closure,
+            // so when the target's Unloaded fires we unsubscribe to avoid leaking
+            // handlers every time a window is closed and reopened.
+            Action<string> handler = _ => Refresh(targetObject, targetProperty);
+            loc.LanguageChanged += handler;
+
+            // Unloaded only exists on FrameworkElement; skip the leak guard for raw
+            // DOs (Freezables, etc.) — those live for the duration of the binding
+            // expression so the static event reference is reclaimed with the binding.
+            if (targetObject is FrameworkElement fe)
+            {
+                var unsub = new LocUnsubscriber(fe, handler);
+                fe.Unloaded += unsub.OnUnloaded;
+            }
         }
 
-        // Fallback for the brief window before the binding pushes its first value, and
-        // for non-DP targets (templates, ResourceDictionary entries). The indexer is
-        // synchronous so this is the actual current value, not a placeholder.
-        return LocalizationService.Instance[Key] ?? "";
+        return loc[Key] ?? "";
+    }
+
+    void Refresh(DependencyObject target, DependencyProperty property)
+    {
+        var loc = LocalizationService.Instance;
+        var value = loc[Key] ?? "";
+
+        if (Arg0 != null || Arg1 != null)
+        {
+            // ponytail: format-arg path. None of the XAML {loc:Loc ...} usages in the
+            // dashboard pass Arg0/Arg1 — that path is reserved for future dialog text.
+            // For now just push the raw template; revisit when a real caller needs it.
+            target.SetValue(property, value);
+            return;
+        }
+
+        target.SetValue(property, value);
+    }
+
+    sealed class LocUnsubscriber
+    {
+        readonly FrameworkElement _target;
+        readonly Action<string> _handler;
+        public LocUnsubscriber(FrameworkElement target, Action<string> handler)
+        { _target = target; _handler = handler; }
+        public void OnUnloaded(object? s, RoutedEventArgs e)
+        {
+            LocalizationService.Instance.LanguageChanged -= _handler;
+            _target.Unloaded -= OnUnloaded;
+        }
     }
 }
 
 public class LocFormatConverter : IMultiValueConverter
 {
-    public object Convert(object[] values, Type targetType, object? parameter, CultureInfo culture)
+    public object Convert(object[] values, Type targetType, object parameter, CultureInfo culture)
     {
         if (values == null || values.Length == 0 || values[0] is not string template)
             return string.Empty;
@@ -78,6 +111,6 @@ public class LocFormatConverter : IMultiValueConverter
         return args.Length == 0 ? template : string.Format(template, args);
     }
 
-    public object[] ConvertBack(object value, Type[] targetTypes, object? parameter, CultureInfo culture)
+    public object[] ConvertBack(object value, Type[] targetTypes, object parameter, CultureInfo culture)
         => throw new NotSupportedException();
 }
