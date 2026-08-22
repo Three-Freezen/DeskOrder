@@ -386,8 +386,17 @@ public static class ThemeService
     {
         SystemEvents.UserPreferenceChanged += (_, e) =>
         {
-            if (e.Category == UserPreferenceCategory.General && _current == AppThemeMode.System)
+            if (_current != AppThemeMode.System) return;
+            // ponytail: HC toggle fires Accessibility, accent color fires Color,
+            // AppsUseLightTheme fires General. Filter on all three so live changes
+            // actually re-resolve the palette. Without Accessibility the user could
+            // flip Windows HC on and the app would silently stay on Light/Dark.
+            if (e.Category is UserPreferenceCategory.General
+                or UserPreferenceCategory.Color
+                or UserPreferenceCategory.Accessibility)
+            {
                 Apply(AppThemeMode.System);
+            }
         };
     }
 }
