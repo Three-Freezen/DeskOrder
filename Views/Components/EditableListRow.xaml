@@ -139,19 +139,19 @@
           </Style>
         </StackPanel.Style>
         <Button Width="24" Height="24" Margin="2,0" Cursor="Hand" Click="LockBtn_Click"
-                Background="Transparent" BorderThickness="0" ToolTip="锁定">
+                Background="Transparent" BorderThickness="0" ToolTip="{loc:Loc Key=Common.Lock}">
           <Path Width="14" Height="14" StrokeThickness="1.5"
                 Stroke="{DynamicResource Brush.Text.Tertiary}" StrokeLineJoin="Round"
                 Data="{StaticResource Icon.Lock}"/>
         </Button>
         <Button Width="24" Height="24" Margin="2,0" Cursor="Hand" Click="EyeBtn_Click"
-                Background="Transparent" BorderThickness="0" ToolTip="{loc:Loc ToolTip.Show}">
+                Background="Transparent" BorderThickness="0" ToolTip="{loc:Loc Key=ToolTip.Show}">
           <Path Width="14" Height="14" StrokeThickness="1.5"
                 Stroke="{DynamicResource Brush.Text.Tertiary}" StrokeLineJoin="Round"
                 Data="{StaticResource Icon.Eye}"/>
         </Button>
         <Button Width="24" Height="24" Margin="2,0" Cursor="Hand" Click="TrashBtn_Click"
-                Background="Transparent" BorderThickness="0" ToolTip="{loc:Loc Manage.DeleteBtn}">
+                Background="Transparent" BorderThickness="0" ToolTip="{loc:Loc Key=Manage.DeleteBtn}">
           <Path Width="14" Height="14" StrokeThickness="1.5"
                 Stroke="{DynamicResource Brush.Text.Tertiary}" StrokeLineJoin="Round"
                 Data="{StaticResource Icon.Trash}"/>

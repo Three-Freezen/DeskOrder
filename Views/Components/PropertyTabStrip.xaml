@@ -53,7 +53,7 @@
             </TextBlock>
             <Button Width="14" Height="14" Margin="6,0,0,0" Padding="0"
                     Background="Transparent" BorderThickness="0" Cursor="Hand"
-                    ToolTip="{loc:Loc Appearance.GlassNone}"
+                    ToolTip="{loc:Loc Key=Appearance.GlassNone}"
                     Command="{Binding CloseCommand}">
               <Button.Style>
                 <Style TargetType="Button">

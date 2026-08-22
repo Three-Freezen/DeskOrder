@@ -11,13 +11,13 @@
           <ColumnDefinition Width="Auto"/>
         </Grid.ColumnDefinitions>
         <StackPanel Grid.Column="0" Orientation="Horizontal">
-          <TextBlock Text="{loc:Loc Panel.Title}" FontSize="16" FontWeight="SemiBold"
+          <TextBlock Text="{loc:Loc Key=Panel.Title}" FontSize="16" FontWeight="SemiBold"
                      Foreground="{DynamicResource Brush.Text.Primary}" VerticalAlignment="Center"/>
           <TextBlock x:Name="CountLabel" Margin="8,0,0,0" FontSize="11"
                      FontFamily="Cascadia Code, Consolas, monospace"
                      Foreground="{DynamicResource Brush.Text.Tertiary}" VerticalAlignment="Center"/>
         </StackPanel>
-        <Button Grid.Column="2" Content="切换面板" Click="Toggle_Click" Cursor="Hand"
+        <Button Grid.Column="2" Content="{loc:Loc Key=Panel.Toggle}" Click="Toggle_Click" Cursor="Hand"
                 Background="{DynamicResource Brush.Accent.Solid}"
                 Foreground="{DynamicResource Brush.Accent.On}" FontWeight="SemiBold"
                 Padding="14,6" BorderThickness="0"/>

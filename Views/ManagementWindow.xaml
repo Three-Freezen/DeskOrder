@@ -44,7 +44,7 @@
                        Foreground="{DynamicResource Brush.Text.Primary}" VerticalAlignment="Center"/>
           </StackPanel>
           <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0">
-            <TextBlock x:Name="CrumbSection" Text="{loc:Loc Manage.Zones}" FontSize="12"
+            <TextBlock x:Name="CrumbSection" Text="{loc:Loc Key=Manage.Zones}" FontSize="12"
                        Foreground="{DynamicResource Brush.Text.Secondary}" VerticalAlignment="Center"/>
             <TextBlock Text="/" FontSize="11" Margin="6,0"
                        FontFamily="Cascadia Code, Consolas, monospace"
@@ -54,21 +54,21 @@
           </StackPanel>
           <StackPanel Grid.Column="2" Orientation="Horizontal">
             <Button Width="46" Height="40" Background="Transparent" BorderThickness="0" Cursor="Hand"
-                    Click="MinimizeButton_Click" ToolTip="{loc:Loc ToolTip.Minimize}">
+                    Click="MinimizeButton_Click" ToolTip="{loc:Loc Key=ToolTip.Minimize}">
               <Path Width="10" Height="10"
                     Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.2"
                     StrokeLineJoin="Round"
                     Data="{StaticResource Icon.Minimize}"/>
             </Button>
             <Button x:Name="MaxBtn" Width="46" Height="40" Background="Transparent" BorderThickness="0" Cursor="Hand"
-                    Click="MaxBtn_Click" ToolTip="最大化">
+                    Click="MaxBtn_Click" ToolTip="{loc:Loc Key=Common.Maximize}">
               <Path Width="10" Height="10"
                     Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.2"
                     StrokeLineJoin="Round"
                     Data="{StaticResource Icon.Maximize}"/>
             </Button>
             <Button Width="46" Height="40" Background="Transparent" BorderThickness="0" Cursor="Hand"
-                    Click="CloseButton_Click" ToolTip="{loc:Loc Appearance.GlassNone}">
+                    Click="CloseButton_Click" ToolTip="{loc:Loc Key=Appearance.GlassNone}">
               <Path Width="10" Height="10"
                     Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.2"
                     StrokeLineJoin="Round"
@@ -97,16 +97,16 @@
           <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
             <Ellipse Width="6" Height="6" Margin="0,0,6,0"
                      Fill="{DynamicResource Brush.Success}" VerticalAlignment="Center"/>
-            <TextBlock x:Name="StatusText" Text="就绪" FontSize="11"
+            <TextBlock x:Name="StatusText" Text="{loc:Loc Key=Status.Ready}" FontSize="11"
                        Foreground="{DynamicResource Brush.Text.Secondary}" VerticalAlignment="Center"/>
           </StackPanel>
           <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
             <Button x:Name="ThemeBtn" Width="24" Height="24" Background="Transparent" BorderThickness="0"
-                    Cursor="Hand" ToolTip="切换主题" Click="ThemeBtn_Click">
+                    Cursor="Hand" ToolTip="{loc:Loc Key=Common.SwitchTheme}" Click="ThemeBtn_Click">
               <Path x:Name="ThemeIcon" Width="14" Height="14" StrokeThickness="1.5"
                     Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeLineJoin="Round"/>
             </Button>
-            <TextBlock x:Name="ThemeLabel" Text="深色" FontSize="11" Margin="6,0,0,0"
+            <TextBlock x:Name="ThemeLabel" FontSize="11" Margin="6,0,0,0"
                        Foreground="{DynamicResource Brush.Text.Tertiary}" VerticalAlignment="Center"/>
           </StackPanel>
         </Grid>

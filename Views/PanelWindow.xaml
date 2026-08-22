@@ -84,7 +84,7 @@
                                     BorderThickness="1" VerticalAlignment="Center"
                                     Margin="0,0,12,0">
                                 <Grid Margin="8,0">
-                                    <TextBlock x:Name="SearchPlaceholder" Text="{loc:Loc Panel.Search}"
+                                    <TextBlock x:Name="SearchPlaceholder" Text="{loc:Loc Key=Panel.Search}"
                                                FontSize="11" Foreground="#606080"
                                                VerticalAlignment="Center"/>
                                     <TextBox x:Name="SearchBox" FontSize="11"

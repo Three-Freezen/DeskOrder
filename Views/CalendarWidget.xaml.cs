@@ -427,15 +427,18 @@ public partial class CalendarWidget : Window
 
     void ApplyLoc()
     {
-        var cn = _loc.CurrentLanguage == "zh";
         TodayBtn.Content = _loc["Calendar.Today"];
         AddNoteBtn.ToolTip = _loc["Calendar.AddNote"];
-        NotesDateLabel.Text = cn ? "备注" : "Notes";
+        NotesDateLabel.Text = _loc["Common.Notes"];
         CtxDelete.Header = _loc["Calendar.Delete"];
-        Dow0.Text = cn ? "一" : "Mo"; Dow1.Text = cn ? "二" : "Tu"; Dow2.Text = cn ? "三" : "We"; Dow3.Text = cn ? "四" : "Th";
-        Dow4.Text = cn ? "五" : "Fr"; Dow5.Text = cn ? "六" : "Sa";
-        Dow6.Text = cn ? "日" : "Su";
-        MonthTitleText.Text = cn ? $"{_vm.DisplayYear}年{_vm.DisplayMonth}月" : $"{_vm.DisplayMonth}/{_vm.DisplayYear}";
+        Dow0.Text = _loc["Calendar.Weekday.1"];
+        Dow1.Text = _loc["Calendar.Weekday.2"];
+        Dow2.Text = _loc["Calendar.Weekday.3"];
+        Dow3.Text = _loc["Calendar.Weekday.4"];
+        Dow4.Text = _loc["Calendar.Weekday.5"];
+        Dow5.Text = _loc["Calendar.Weekday.6"];
+        Dow6.Text = _loc["Calendar.Weekday.0"];
+        MonthTitleText.Text = _loc.Get("Calendar.MonthYear", _vm.DisplayYear, _vm.DisplayMonth);
     }
 
     void ToggleRestore_Click(object s, RoutedEventArgs e)
@@ -516,7 +519,7 @@ public partial class CalendarWidget : Window
                 RebuildDisplay();
             }
             _vm.SelectDate(dateKey);
-            NotesDateLabel.Text = (_loc.CurrentLanguage == "zh" ? "备注 - " : "Notes - ") + dateKey;
+            NotesDateLabel.Text = (_loc["Common.Notes"] + " - ") + dateKey;
         }
         e.Handled = true;
     }

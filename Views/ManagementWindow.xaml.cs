@@ -74,6 +74,12 @@ public partial class ManagementWindow : Window
 
         Helpers.PropertyWindowService.Init(this);
 
+        // Re-translate dynamic UI text on language switch. ThemeLabel, breadcrumb,
+        // and tray events (in App.xaml.cs) are the few things that aren't XAML
+        // loc:Loc bindings.
+        _loc.LanguageChanged += _ => RefreshDynamicText();
+        RefreshDynamicText();
+
         _zoneManager.ZoneVisibilityChanged += OnZoneVisibilityChanged;
 
         if (_panelService != null)
@@ -192,15 +198,18 @@ public partial class ManagementWindow : Window
         ThemeIcon.Data = resolved == AppThemeMode.Light
             ? (Geometry)FindResource("Icon.Sun")
             : (Geometry)FindResource("Icon.Moon");
-        if (ThemeLabel != null)
+        UpdateThemeLabel();
+    }
+
+    void UpdateThemeLabel()
+    {
+        if (ThemeLabel == null) return;
+        ThemeLabel.Text = ThemeService.CurrentMode switch
         {
-            ThemeLabel.Text = ThemeService.CurrentMode switch
-            {
-                AppThemeMode.System => "跟随系统",
-                AppThemeMode.Light  => "浅色",
-                _                   => "深色",
-            };
-        }
+            AppThemeMode.System => _loc["Theme.System"],
+            AppThemeMode.Light  => _loc["Theme.Light"],
+            _                   => _loc["Theme.Dark"],
+        };
     }
 
     static AppThemeMode ResolveSystemThemeForIcon()
@@ -225,25 +234,45 @@ public partial class ManagementWindow : Window
         catch { }
     }
 
-    static string GetCrumbSectionLabel(string section) => section switch
-    {
-        "zones" or "merged" or "panel" => "分区",
-        "calendar" or "clock" or "sticky" => "组件",
-        _ => "DeskOrder",
-    };
+    string? _lastSection;
+    string? _lastCountLabel;
 
-    static string GetCrumbCurrentLabel(string section) => section switch
+    /// <summary>Re-evaluate the few UI strings that aren't XAML loc:Loc bindings —
+    /// theme label + breadcrumb section/current. Called on LanguageChanged
+    /// and once on construction so the initial labels are translated.</summary>
+    void RefreshDynamicText()
     {
-        "zones"    => "工作区",
-        "merged"   => "组合分区",
-        "panel"    => "面板",
-        "calendar" => "日历",
-        "clock"    => "时钟",
-        "sticky"   => "便签",
-        "settings" => "设置",
-        "about"    => "关于",
-        _          => "",
-    };
+        try { UpdateThemeLabel(); } catch { }
+        if (_lastSection != null) UpdateBreadcrumb(_lastSection, _lastCountLabel ?? "");
+    }
+
+    static string GetCrumbSectionLabel(string section)
+    {
+        var loc = LocalizationService.Instance;
+        return section switch
+        {
+            "zones" or "merged" or "panel" => loc["Breadcrumb.GroupZones"],
+            "calendar" or "clock" or "sticky" => loc["Breadcrumb.GroupWidgets"],
+            _ => "DeskOrder",
+        };
+    }
+
+    static string GetCrumbCurrentLabel(string section)
+    {
+        var loc = LocalizationService.Instance;
+        return section switch
+        {
+            "zones"    => loc["Breadcrumb.Zones"],
+            "merged"   => loc["Breadcrumb.Merged"],
+            "panel"    => loc["Breadcrumb.Panel"],
+            "calendar" => loc["Breadcrumb.Calendar"],
+            "clock"    => loc["Breadcrumb.Clock"],
+            "sticky"   => loc["Breadcrumb.Sticky"],
+            "settings" => loc["Breadcrumb.Settings"],
+            "about"    => loc["Breadcrumb.About"],
+            _          => "",
+        };
+    }
 
     /// <summary>Wrap a dialog window with a custom dark title bar (replaces ToolWindow white title bar).</summary>
     public static void WrapDialogWithDarkTitleBar(Window dlg, Border contentBorder, string title)
@@ -1186,7 +1215,7 @@ public partial class ManagementWindow : Window
             _          => new ZonesPage(this, _viewModel, _zoneManager)
         };
         try { MainContent.Content = page; ApplyLoc(); } catch { }
-        try { UpdateBreadcrumb(section, GetSectionCountLabel(section)); } catch { }
+        try { UpdateBreadcrumb(section, GetSectionCountLabel(section)); _lastSection = section; _lastCountLabel = GetSectionCountLabel(section); } catch { }
         try { if (SideNav != null) SideNav.ActiveSection = section; } catch { }
     }
 

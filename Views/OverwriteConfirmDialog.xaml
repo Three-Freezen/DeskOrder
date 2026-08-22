@@ -23,7 +23,7 @@
             </Grid.RowDefinitions>
 
             <!-- Title -->
-            <TextBlock x:Name="DialogTitle" Text="{loc:Loc Preset.OverwriteTitle}"
+            <TextBlock x:Name="DialogTitle" Text="{loc:Loc Key=Preset.OverwriteTitle}"
                        FontSize="15" FontWeight="SemiBold"
                        Foreground="{DynamicResource Brush.Text.Primary}" Margin="0,0,0,8"/>
 
@@ -35,7 +35,7 @@
 
             <!-- Buttons -->
             <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
-                <Button x:Name="CancelButton" Content="{loc:Loc Preset.Cancel}"
+                <Button x:Name="CancelButton" Content="{loc:Loc Key=Preset.Cancel}"
                         Background="{DynamicResource Brush.Bg.Surface}" Foreground="{DynamicResource Brush.Text.Secondary}"
                         BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1"
                         Padding="20,8" Cursor="Hand" FontSize="12"
@@ -46,7 +46,7 @@
                         </Style>
                     </Button.Resources>
                 </Button>
-                <Button x:Name="OverwriteButton" Content="{loc:Loc Preset.Overwrite}"
+                <Button x:Name="OverwriteButton" Content="{loc:Loc Key=Preset.Overwrite}"
                         Background="{DynamicResource Brush.Accent.Solid}" Foreground="{DynamicResource Brush.Accent.On}"
                         BorderThickness="0" Padding="20,8" Margin="8,0,0,0"
                         Cursor="Hand" FontSize="12" FontWeight="SemiBold"

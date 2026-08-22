@@ -4,20 +4,20 @@
              xmlns:components="clr-namespace:DesktopZones.Views.Components">
   <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="20,16,20,12">
     <StackPanel>
-      <TextBlock Text="设置" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,16"
+      <TextBlock Text="{loc:Loc Key=Settings.PageTitle}" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,16"
                  Foreground="{DynamicResource Brush.Text.Primary}"/>
 
       <!-- 常规 -->
-      <TextBlock Text="常规" FontSize="11" FontWeight="SemiBold" Margin="0,4,0,8"
+      <TextBlock Text="{loc:Loc Key=Settings.General}" FontSize="11" FontWeight="SemiBold" Margin="0,4,0,8"
                  Foreground="{DynamicResource Brush.Text.Tertiary}"/>
       <Border Background="{DynamicResource Brush.Bg.Surface}"
               BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1"
               CornerRadius="6" Padding="14,8" Margin="0,0,0,16">
         <StackPanel>
-          <CheckBox x:Name="StartWithWindowsBox" Content="开机自启动" Margin="0,6,0,6"
+          <CheckBox x:Name="StartWithWindowsBox" Content="{loc:Loc Key=Settings.StartWithWindows}" Margin="0,6,0,6"
                     Foreground="{DynamicResource Brush.Text.Primary}"
                     Checked="StartWithWindows_Changed" Unchecked="StartWithWindows_Changed"/>
-          <CheckBox x:Name="StartMinimizedBox" Content="启动时最小化到托盘" Margin="0,6,0,6"
+          <CheckBox x:Name="StartMinimizedBox" Content="{loc:Loc Key=Settings.StartMinimized}" Margin="0,6,0,6"
                     Foreground="{DynamicResource Brush.Text.Primary}"
                     Checked="StartMinimized_Changed" Unchecked="StartMinimized_Changed"/>
           <Grid Margin="0,8,0,8">
@@ -25,38 +25,38 @@
               <ColumnDefinition Width="*"/>
               <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
-            <TextBlock Text="语言" VerticalAlignment="Center" Margin="0,0,0,0"
+            <TextBlock Text="{loc:Loc Key=Settings.Language}" VerticalAlignment="Center" Margin="0,0,0,0"
                        Foreground="{DynamicResource Brush.Text.Primary}"/>
             <ComboBox x:Name="LanguageCombo" Grid.Column="1" Width="120"
                       SelectionChanged="Language_Changed">
-              <ComboBoxItem Content="简体中文" Tag="zh"/>
-              <ComboBoxItem Content="English" Tag="en"/>
+              <ComboBoxItem Content="{loc:Loc Key=Menu.Chinese}" Tag="zh"/>
+              <ComboBoxItem Content="{loc:Loc Key=Menu.English}" Tag="en"/>
             </ComboBox>
           </Grid>
         </StackPanel>
       </Border>
 
       <!-- 外观 -->
-      <TextBlock Text="外观" FontSize="11" FontWeight="SemiBold" Margin="0,4,0,8"
+      <TextBlock Text="{loc:Loc Key=Settings.Appearance}" FontSize="11" FontWeight="SemiBold" Margin="0,4,0,8"
                  Foreground="{DynamicResource Brush.Text.Tertiary}"/>
       <Border Background="{DynamicResource Brush.Bg.Surface}"
               BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1"
               CornerRadius="6" Padding="14,8" Margin="0,0,0,16">
         <StackPanel>
-          <TextBlock Text="主题" Margin="0,6,0,6"
+          <TextBlock Text="{loc:Loc Key=Settings.Theme}" Margin="0,6,0,6"
                      Foreground="{DynamicResource Brush.Text.Primary}"/>
           <Border Background="{DynamicResource Brush.Bg.Input}" CornerRadius="4" Padding="2">
             <StackPanel Orientation="Horizontal">
-              <RadioButton x:Name="ThemeSystemRb" Content="跟随系统" GroupName="Theme" Style="{StaticResource SegmentItem}" Checked="ThemeRb_Changed"/>
-              <RadioButton x:Name="ThemeLightRb"  Content="浅色"     GroupName="Theme" Style="{StaticResource SegmentItem}" Checked="ThemeRb_Changed"/>
-              <RadioButton x:Name="ThemeDarkRb"   Content="深色"     GroupName="Theme" Style="{StaticResource SegmentItem}" Checked="ThemeRb_Changed"/>
+              <RadioButton x:Name="ThemeSystemRb" Content="{loc:Loc Key=Theme.System}" GroupName="Theme" Style="{StaticResource SegmentItem}" Checked="ThemeRb_Changed"/>
+              <RadioButton x:Name="ThemeLightRb"  Content="{loc:Loc Key=Theme.Light}"  GroupName="Theme" Style="{StaticResource SegmentItem}" Checked="ThemeRb_Changed"/>
+              <RadioButton x:Name="ThemeDarkRb"   Content="{loc:Loc Key=Theme.Dark}"   GroupName="Theme" Style="{StaticResource SegmentItem}" Checked="ThemeRb_Changed"/>
             </StackPanel>
           </Border>
         </StackPanel>
       </Border>
 
       <!-- 快捷键 -->
-      <TextBlock Text="{loc:Loc Note.Hotkey}" FontSize="11" FontWeight="SemiBold" Margin="0,4,0,8"
+      <TextBlock Text="{loc:Loc Key=Note.Hotkey}" FontSize="11" FontWeight="SemiBold" Margin="0,4,0,8"
                  Foreground="{DynamicResource Brush.Text.Tertiary}"/>
       <Border Background="{DynamicResource Brush.Bg.Surface}"
               BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1"
@@ -65,7 +65,7 @@
       </Border>
 
       <!-- 更新 -->
-      <TextBlock Text="更新" FontSize="11" FontWeight="SemiBold" Margin="0,4,0,8"
+      <TextBlock Text="{loc:Loc Key=Settings.Update}" FontSize="11" FontWeight="SemiBold" Margin="0,4,0,8"
                  Foreground="{DynamicResource Brush.Text.Tertiary}"/>
       <Border Background="{DynamicResource Brush.Bg.Surface}"
               BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1"
@@ -76,11 +76,11 @@
             <ColumnDefinition Width="Auto"/>
           </Grid.ColumnDefinitions>
           <StackPanel VerticalAlignment="Center">
-            <TextBlock Text="检查更新" Foreground="{DynamicResource Brush.Text.Primary}"/>
-            <TextBlock Text="已是最新版本 v0.9.0" FontSize="11" Margin="0,2,0,0"
+            <TextBlock Text="{loc:Loc Key=Settings.CheckUpdate}" Foreground="{DynamicResource Brush.Text.Primary}"/>
+            <TextBlock Text="{loc:Loc Key=Settings.UpToDate}" FontSize="11" Margin="0,2,0,0"
                        Foreground="{DynamicResource Brush.Text.Tertiary}"/>
           </StackPanel>
-          <Button Grid.Column="1" Content="检查更新" Click="CheckUpdate_Click" Cursor="Hand"
+          <Button Grid.Column="1" Content="{loc:Loc Key=Settings.CheckUpdate}" Click="CheckUpdate_Click" Cursor="Hand"
                   Background="{DynamicResource Brush.Accent.Solid}"
                   Foreground="{DynamicResource Brush.Accent.On}" FontWeight="SemiBold"
                   Padding="14,6" BorderThickness="0"/>

@@ -29,8 +29,9 @@ cs_text = read_all('*.cs')
 
 # Strict: keys that MUST be translated (XAML markup + the canonical singleton accessor)
 strict = set()
-strict.update(re.findall(r'loc:Loc\s+([A-Za-z0-9_.]+)', xaml_text))
-strict.update(re.findall(r'loc:Loc\s+Key=([A-Za-z0-9_.]+)', xaml_text))
+# Positional form: {loc:Loc SomeKey} — skip the "Key" property name in {loc:Loc Key=...}
+strict.update(m for m in re.findall(r'loc:Loc\s+([A-Za-z][A-Za-z0-9_.]*)\b', xaml_text) if m != 'Key')
+strict.update(re.findall(r'loc:Loc\s+Key=([A-Za-z][A-Za-z0-9_.]*)', xaml_text))
 strict.update(re.findall(r'Path=\[([A-Za-z0-9_.]+)\]', xaml_text))
 strict.update(re.findall(r'LocalizationService\.Instance\["([A-Za-z][A-Za-z0-9_.]*)"\]', cs_text))
 

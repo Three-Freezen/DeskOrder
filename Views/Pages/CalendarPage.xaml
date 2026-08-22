@@ -11,18 +11,18 @@
           <ColumnDefinition Width="Auto"/>
         </Grid.ColumnDefinitions>
         <StackPanel Grid.Column="0" Orientation="Horizontal">
-          <TextBlock Text="{loc:Loc Manage.Calendars}" FontSize="16" FontWeight="SemiBold"
+          <TextBlock Text="{loc:Loc Key=Manage.Calendars}" FontSize="16" FontWeight="SemiBold"
                      Foreground="{DynamicResource Brush.Text.Primary}" VerticalAlignment="Center"/>
           <TextBlock x:Name="CountLabel" Margin="8,0,0,0" FontSize="11"
                      FontFamily="Cascadia Code, Consolas, monospace"
                      Foreground="{DynamicResource Brush.Text.Tertiary}" VerticalAlignment="Center"/>
         </StackPanel>
         <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right">
-          <Button x:Name="SortBtn" Content="⇅ 名称" Click="SortBtn_Click" Cursor="Hand"
+          <Button x:Name="SortBtn" Content="{loc:Loc Key=Common.SortByName}" Click="SortBtn_Click" Cursor="Hand"
                   Background="Transparent" BorderThickness="0"
                   Foreground="{DynamicResource Brush.Text.Secondary}" FontSize="11"
-                  Padding="8,6" ToolTip="排序方式"/>
-          <Button Content="+ 新建日历" Click="NewCalendar_Click" Cursor="Hand" Margin="8,0,0,0"
+                  Padding="8,6" ToolTip="{loc:Loc Key=Common.SortTooltip}"/>
+          <Button Content="{loc:Loc Key=Manage.NewCalendar}" Click="NewCalendar_Click" Cursor="Hand" Margin="8,0,0,0"
                   Background="{DynamicResource Brush.Accent.Solid}"
                   Foreground="{DynamicResource Brush.Accent.On}" FontWeight="SemiBold"
                   Padding="14,6" BorderThickness="0"/>
@@ -38,9 +38,9 @@
         </ItemsControl>
         <StackPanel x:Name="EmptyHint" Visibility="Collapsed"
                     HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,80,0,0">
-          <TextBlock Text="还没有日历" FontSize="14" FontWeight="SemiBold"
+          <TextBlock Text="{loc:Loc Key=Manage.EmptyCalendars}" FontSize="14" FontWeight="SemiBold"
                      Foreground="{DynamicResource Brush.Text.Secondary}" HorizontalAlignment="Center"/>
-          <TextBlock Text="点击右上方「+ 新建日历」" FontSize="11" Margin="0,8,0,0"
+          <TextBlock Text="{loc:Loc Key=Manage.EmptyHintCalendars}" FontSize="11" Margin="0,8,0,0"
                      Foreground="{DynamicResource Brush.Text.Tertiary}" HorizontalAlignment="Center"/>
         </StackPanel>
       </Grid>

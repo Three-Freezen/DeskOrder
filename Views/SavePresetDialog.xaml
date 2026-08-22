@@ -24,12 +24,12 @@
             </Grid.RowDefinitions>
 
             <!-- Title -->
-            <TextBlock x:Name="DialogTitle" Text="{loc:Loc Preset.SaveTitle.Zone}"
+            <TextBlock x:Name="DialogTitle" Text="{loc:Loc Key=Preset.SaveTitle.Zone}"
                        FontSize="15" FontWeight="SemiBold"
                        Foreground="{DynamicResource Brush.Text.Primary}" Margin="0,0,0,12"/>
 
             <!-- Name label -->
-            <TextBlock x:Name="LabelName" Grid.Row="1" Text="{loc:Loc Preset.NameLabel}"
+            <TextBlock x:Name="LabelName" Grid.Row="1" Text="{loc:Loc Key=Preset.NameLabel}"
                        Foreground="{DynamicResource Brush.Text.Secondary}" FontSize="11" Margin="0,0,0,4"/>
 
             <!-- Name input -->
@@ -41,7 +41,7 @@
                          BorderThickness="1" Padding="8,6" FontSize="13"
                          TextChanged="NameBox_TextChanged"
                          KeyDown="NameBox_KeyDown"/>
-                <TextBlock x:Name="EmptyHint" Text="{loc:Loc Preset.EmptyNameHint}"
+                <TextBlock x:Name="EmptyHint" Text="{loc:Loc Key=Preset.EmptyNameHint}"
                            Foreground="{DynamicResource Brush.Text.Tertiary}" FontSize="11"
                            IsHitTestVisible="False"
                            VerticalAlignment="Center" Margin="10,0,0,0"
@@ -56,12 +56,12 @@
                 </Grid.ColumnDefinitions>
                 <!-- Saved hint, briefly shown after a successful preset save. Lives here so every caller
                      of SavePresetDialog benefits without each one wiring its own timer. -->
-                <TextBlock x:Name="SavedHint" Text="{loc:Loc Preset.Saved}"
+                <TextBlock x:Name="SavedHint" Text="{loc:Loc Key=Preset.Saved}"
                            Foreground="{DynamicResource Brush.Success}" FontSize="11"
                            VerticalAlignment="Center" Margin="0,0,12,0"
                            Visibility="Collapsed"/>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
-                    <Button x:Name="CancelButton" Content="{loc:Loc Preset.Cancel}"
+                    <Button x:Name="CancelButton" Content="{loc:Loc Key=Preset.Cancel}"
                         Background="{DynamicResource Brush.Bg.Surface}" Foreground="{DynamicResource Brush.Text.Secondary}"
                         BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1"
                         Padding="20,8" Cursor="Hand" FontSize="12"
@@ -72,7 +72,7 @@
                         </Style>
                     </Button.Resources>
                 </Button>
-                <Button x:Name="SaveButton" Content="{loc:Loc Preset.Save}"
+                <Button x:Name="SaveButton" Content="{loc:Loc Key=Preset.Save}"
                         Background="{DynamicResource Brush.Accent.Solid}" Foreground="{DynamicResource Brush.Accent.On}"
                         BorderThickness="0" Padding="20,8" Margin="8,0,0,0"
                         Cursor="Hand" FontSize="12" FontWeight="SemiBold"

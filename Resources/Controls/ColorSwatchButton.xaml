@@ -1,6 +1,7 @@
 <UserControl x:Class="DesktopZones.Views.Components.ColorSwatchButton"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="clr-namespace:DesktopZones.Helpers"
              xmlns:local="clr-namespace:DesktopZones.Views.Components"
              Width="24" Height="24">
   <UserControl.Resources>
@@ -22,11 +23,11 @@
               BorderBrush="{DynamicResource Brush.Border.Default}" BorderThickness="1"
               CornerRadius="6" Padding="6" MinWidth="220">
         <StackPanel>
-          <TextBlock Text="预设" FontSize="11" FontWeight="SemiBold"
+          <TextBlock Text="{loc:Loc Key=Common.Preset}" FontSize="11" FontWeight="SemiBold"
                      Foreground="{DynamicResource Brush.Text.Tertiary}" Margin="4,2,0,4"/>
           <UniformGrid x:Name="Swatches" Columns="6" Rows="2"/>
           <Separator Margin="0,4" Background="{DynamicResource Brush.Border.Subtle}"/>
-          <Button Content="自定义..." Click="Custom_Click"
+          <Button Content="{loc:Loc Key=Common.Custom}" Click="Custom_Click"
                   Background="{DynamicResource Brush.Bg.Input}"
                   Foreground="{DynamicResource Brush.Text.Primary}"
                   BorderBrush="{DynamicResource Brush.Border.Default}"

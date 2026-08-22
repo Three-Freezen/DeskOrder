@@ -830,7 +830,7 @@
                                     <TextBlock Grid.Column="1" Text="Panel" FontSize="6" FontWeight="SemiBold" Foreground="#E8E8F0" VerticalAlignment="Center" Margin="0,0,3,0"/>
                                     <!-- Col 2: Search bar -->
                                     <Border Grid.Column="2" Height="11" CornerRadius="5" Background="#15FFFFFF" BorderBrush="#20FFFFFF" BorderThickness="1" VerticalAlignment="Center" Margin="0,0,3,0">
-                                        <TextBlock Text="{loc:Loc Panel.Search}" FontSize="5" Foreground="#606080" VerticalAlignment="Center" Margin="4,0,0,0"/>
+                                        <TextBlock Text="{loc:Loc Key=Panel.Search}" FontSize="5" Foreground="#606080" VerticalAlignment="Center" Margin="4,0,0,0"/>
                                     </Border>
                                     <!-- Col 3: Grid/List toggle -->
                                     <Border Grid.Column="3" Width="11" Height="11" CornerRadius="2" Background="#20FFFFFF" Margin="0,0,2,0">
@@ -903,14 +903,14 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
-            <TextBlock x:Name="DialogTitle" Text="{loc:Loc Preset.LoadButton}"
+            <TextBlock x:Name="DialogTitle" Text="{loc:Loc Key=Preset.LoadButton}"
                        FontSize="16" FontWeight="SemiBold"
                        Foreground="{StaticResource T1}" Margin="0,2,0,12"/>
 
             <Grid Grid.Row="1">
                 <StackPanel x:Name="EmptyHint" VerticalAlignment="Center" HorizontalAlignment="Center" Visibility="Collapsed">
                     <TextBlock Text="ℹ" FontSize="32" Foreground="{StaticResource T3}" HorizontalAlignment="Center"/>
-                    <TextBlock x:Name="EmptyHintText" Text="{loc:Loc Preset.Empty}"
+                    <TextBlock x:Name="EmptyHintText" Text="{loc:Loc Key=Preset.Empty}"
                                Foreground="{StaticResource T2}" FontSize="14"
                                Margin="0,8,0,0" HorizontalAlignment="Center"/>
                 </StackPanel>
@@ -933,7 +933,7 @@
             </Grid>
 
             <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
-                <Button x:Name="CancelButton" Content="{loc:Loc Preset.Cancel}"
+                <Button x:Name="CancelButton" Content="{loc:Loc Key=Preset.Cancel}"
                         Background="#15FFFFFF" Foreground="{StaticResource T2}"
                         BorderBrush="{StaticResource IBd}" BorderThickness="1"
                         Padding="20,8" Cursor="Hand" FontSize="12"
@@ -944,7 +944,7 @@
                         </Style>
                     </Button.Resources>
                 </Button>
-                <Button x:Name="ApplyButton" Content="{loc:Loc Preset.Apply}"
+                <Button x:Name="ApplyButton" Content="{loc:Loc Key=Preset.Apply}"
                         Background="{StaticResource Acc}" Foreground="White"
                         BorderThickness="0" Padding="20,8" Margin="8,0,0,0"
                         Cursor="Hand" FontSize="12" FontWeight="SemiBold"
