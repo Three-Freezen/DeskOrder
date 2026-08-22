@@ -74,5 +74,24 @@
   "Item.Rename": "Rename",
 
   "Zone.Edit": "Edit",
-  "Zone.Hide": "Hide"
+  "Zone.Hide": "Hide",
+
+  "App.TrayTooltip": "DeskOrder",
+
+  "Tray.ShowAll": "Show all zones",
+  "Tray.HideAll": "Hide all zones",
+  "Tray.NewZone": "New zone",
+  "Tray.NewNote": "New note",
+  "Tray.NewClock": "New clock",
+  "Tray.NewCalendar": "New calendar",
+  "Tray.Manage": "Manage zones…",
+  "Tray.Exit": "Exit",
+
+  "Menu.Language": "Language",
+  "Menu.Chinese": "简体中文",
+  "Menu.English": "English",
+
+  "Toast.HotkeyFailed.Title": "Hotkey registration failed",
+  "Toast.HotkeyFailed.Body": "Another program may be using: {0}+{1}",
+  "Toast.TrayError.Title": "Tray icon error"
 }

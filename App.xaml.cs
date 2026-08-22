@@ -37,6 +37,7 @@ public partial class App : System.Windows.Application
 
     // ── Global hotkey ──
     private const int WM_HOTKEY = 0x0312;
+    private const int WM_SETTINGCHANGE = 0x001A;
     private const int HOTKEY_ID_BASE = 0x4000;
     private const int HOTKEY_ID_PANEL = 0x3FFF;
     private readonly Dictionary<int, Guid> _hotkeyToNoteId = new();
@@ -150,7 +151,7 @@ public partial class App : System.Windows.Application
             {
                 // Hotkey registration failed — likely conflict with another app or system shortcut
                 System.Diagnostics.Debug.WriteLine($"[DeskOrder] Failed to register panel hotkey: 0x{config.PanelHotkey.PanelHotkeyModifiers:X}+0x{config.PanelHotkey.PanelHotkeyKey:X}");
-                _trayIcon?.ShowBalloonTip("快捷键注册失败", $"另一程序可能占用：{config.PanelHotkey.PanelHotkeyModifiers}+{config.PanelHotkey.PanelHotkeyKey}");
+                _trayIcon?.ShowBalloonTip(_loc["Toast.HotkeyFailed.Title"], _loc.Get("Toast.HotkeyFailed.Body", config.PanelHotkey.PanelHotkeyModifiers, config.PanelHotkey.PanelHotkeyKey));
             }
         }
 
@@ -275,6 +276,21 @@ public partial class App : System.Windows.Application
                 return IntPtr.Zero;
             }
             handled = true;
+        }
+        // ponytail: WM_SETTINGCHANGE with lParam pointing to a setting name is the
+        // canonical Win32 hook for Windows Personalization changes. The 1-second
+        // DispatcherTimer poll in ThemeService is a fallback for cases where this
+        // broadcast doesn't reach our hidden MainWindow (some shell versions don't
+        // deliver the broadcast to windows without a title bar / taskbar entry).
+        // Strings observed in practice: "ImmersiveColorSet" (accent change),
+        // "UserPreferences" (bulk prefs), "WindowsThemeElement" (HC toggle).
+        if (msg == WM_SETTINGCHANGE && lParam != IntPtr.Zero)
+        {
+            var setting = System.Runtime.InteropServices.Marshal.PtrToStringAuto(lParam);
+            if (setting is "ImmersiveColorSet" or "UserPreferences" or "WindowsThemeElement")
+            {
+                ThemeService.ApplySystemAccent();
+            }
         }
         return IntPtr.Zero;
     }
@@ -465,7 +481,7 @@ public partial class App : System.Windows.Application
         _trayIcon.Exit -= TrayExit;
 
         _trayIcon.LeftClick += TrayLeftClick;
-        _trayIcon.NotifyError += msg => _trayIcon?.ShowBalloonTip("托盘图标错误", msg);
+        _trayIcon.NotifyError += msg => _trayIcon?.ShowBalloonTip(_loc["Toast.TrayError.Title"], msg);
         _trayIcon.DoubleClick += TrayDoubleClick;
         _trayIcon.ShowAllZones += TrayShowAll;
         _trayIcon.HideAllZones += TrayHideAll;

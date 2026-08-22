@@ -74,5 +74,24 @@
   "Item.Rename": "重命名",
 
   "Zone.Edit": "编辑",
-  "Zone.Hide": "隐藏"
+  "Zone.Hide": "隐藏",
+
+  "App.TrayTooltip": "DeskOrder",
+
+  "Tray.ShowAll": "全部显示",
+  "Tray.HideAll": "全部隐藏",
+  "Tray.NewZone": "新建分区",
+  "Tray.NewNote": "新建便签",
+  "Tray.NewClock": "新建时钟",
+  "Tray.NewCalendar": "新建日历",
+  "Tray.Manage": "管理分区…",
+  "Tray.Exit": "退出",
+
+  "Menu.Language": "语言",
+  "Menu.Chinese": "简体中文",
+  "Menu.English": "English",
+
+  "Toast.HotkeyFailed.Title": "快捷键注册失败",
+  "Toast.HotkeyFailed.Body": "另一程序可能占用：{0}+{1}",
+  "Toast.TrayError.Title": "托盘图标错误"
 }
