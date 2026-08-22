@@ -20,46 +20,4 @@
     </None>
   </ItemGroup>
 
-  <ItemGroup>
-    <None Include="i18n\*.json">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-  </ItemGroup>
-
-  <PropertyGroup>
-    <SeedTranslations Condition="'$(SeedTranslations)'==''">false</SeedTranslations>
-  </PropertyGroup>
-
-  <Target Name="SeedI18n" BeforeTargets="BeforeBuild"
-          Condition="'$(SeedTranslations)'=='true'">
-    <Message Text="==> Seeding missing translations..." Importance="high" />
-    <Exec Command="dotnet run --project tools/seed-translations --verbosity quiet"
-          WorkingDirectory="$(MSBuildProjectDirectory)" />
-  </Target>
-
-  <Target Name="ValidateI18n" AfterTargets="Build"
-          Condition="'$(SeedTranslations)'=='true' AND Exists('$(MSBuildProjectDirectory)\i18n\source.zh.json')">
-    <Message Text="==> Validating i18n..." Importance="high" />
-    <Exec Command="dotnet run --project tools/seed-translations -- --validate-only"
-          WorkingDirectory="$(MSBuildProjectDirectory)" />
-  </Target>
-
-  <ItemGroup>
-    <Compile Remove="DesktopZones.Tests\**" />
-    <Page Remove="DesktopZones.Tests\**" />
-    <ApplicationDefinition Remove="DesktopZones.Tests\**" />
-    <None Remove="DesktopZones.Tests\**" />
-    <Compile Remove="tools\**" />
-    <Page Remove="tools\**" />
-    <ApplicationDefinition Remove="tools\**" />
-    <None Remove="tools\**" />
-  </ItemGroup>
-
-  <!-- i18n/ files are not source code, exclude from SDK globs -->
-  <ItemGroup>
-    <Compile Remove="i18n\**" />
-    <Page Remove="i18n\**" />
-    <Content Remove="i18n\**" />
-  </ItemGroup>
-
 </Project>
