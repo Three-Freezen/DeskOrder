@@ -1,0 +1,78 @@
+{
+  "_meta": {
+    "language": "en",
+    "name": "English",
+    "_comment": "English source. Fallback chain is target -> en -> zh -> key."
+  },
+
+  "Appearance.GlassNone": "No glass effect",
+
+  "Manage.Calendars": "Calendars",
+  "Manage.Clocks": "Clocks",
+  "Manage.DeleteBtn": "Delete",
+  "Manage.EmptyHint": "No zones yet",
+  "Manage.FullHideAll": "Hide all",
+  "Manage.Notes": "Sticky Notes",
+  "Manage.Zones": "Zones",
+
+  "Motion.AnimationKind": "Animation",
+  "Motion.AnimationKindHint": "How the zone appears on screen",
+  "Motion.Origin": "Origin",
+  "Motion.OriginHint": "Where the animation starts from",
+  "Motion.Speed": "Speed",
+  "Motion.SpeedHint": "1.0 is the default speed",
+  "Motion.Title": "Motion",
+
+  "MotionAnimationBounceExpand": "Bounce",
+  "MotionAnimationDirectionalExpand": "Directional",
+  "MotionAnimationFade": "Fade",
+  "MotionAnimationNone": "None",
+  "MotionAnimationScaleExpand": "Scale",
+  "MotionAnimationVerticalExpand": "Vertical",
+
+  "MotionOriginButtonCenter": "Button center",
+  "MotionOriginButtonCorner": "Button corner",
+
+  "Note.Hotkey": "Hotkeys",
+  "Note.OpenFailed": "Couldn't open the note",
+  "Note.OpenFailed.Title": "Open failed",
+  "Note.SaveFailed": "Couldn't save the note",
+  "Note.SaveFailed.Title": "Save failed",
+
+  "Panel.Hide": "Hide panel",
+  "Panel.Import": "Import / New",
+  "Panel.ImportFiles": "Import files…",
+  "Panel.ImportFolder": "Import folder…",
+  "Panel.New": "New",
+  "Panel.NewDocx": "New Word document",
+  "Panel.NewFolder": "New folder",
+  "Panel.NewPptx": "New PowerPoint presentation",
+  "Panel.NewTxt": "New text document",
+  "Panel.NewXlsx": "New Excel workbook",
+  "Panel.Search": "Search files…",
+  "Panel.Settings": "Panel settings",
+  "Panel.Title": "Panel",
+
+  "Preset.Apply": "Apply",
+  "Preset.Cancel": "Cancel",
+  "Preset.Empty": "No presets yet",
+  "Preset.EmptyNameHint": "Name this preset…",
+  "Preset.LoadButton": "Load preset",
+  "Preset.NameLabel": "Name",
+  "Preset.Overwrite": "Overwrite",
+  "Preset.OverwriteTitle": "Overwrite preset?",
+  "Preset.Save": "Save",
+  "Preset.Saved": "Saved",
+  "Preset.SaveTitle.Zone": "Save zone preset",
+
+  "ToolTip.Minimize": "Minimize",
+  "ToolTip.Show": "Show",
+
+  "Item.Delete": "Delete",
+  "Item.Open": "Open",
+  "Item.OpenLocation": "Show in folder",
+  "Item.Rename": "Rename",
+
+  "Zone.Edit": "Edit",
+  "Zone.Hide": "Hide"
+}

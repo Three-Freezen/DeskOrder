@@ -10,14 +10,12 @@ public sealed class LocalizationService : INotifyPropertyChanged
     public static LocalizationService Instance { get; } = new();
     private LocalizationService() { }
 
-    public IReadOnlyList<string> AvailableLanguages { get; } =
-        new[] { "zh", "en", "ja", "ko", "es", "fr", "de", "ru", "pt" };
+    public IReadOnlyList<string> AvailableLanguages { get; } = new[] { "zh", "en" };
 
     public IReadOnlyDictionary<string, string> NativeLanguageNames { get; } =
         new Dictionary<string, string>
         {
-            ["zh"] = "中文",   ["en"] = "English",  ["ja"] = "日本語",  ["ko"] = "한국어",
-            ["es"] = "Español", ["fr"] = "Français", ["de"] = "Deutsch", ["ru"] = "Русский", ["pt"] = "Português"
+            ["zh"] = "中文", ["en"] = "English"
         };
 
     private string _currentLang = "zh";
@@ -45,9 +43,6 @@ public sealed class LocalizationService : INotifyPropertyChanged
         var i18nDir = GetI18nDir();
         _tables["zh"] = LoadFromDisk(Path.Combine(i18nDir, "source.zh.json"));
         _tables["en"] = LoadFromDisk(Path.Combine(i18nDir, "source.en.json"));
-        foreach (var lang in AvailableLanguages)
-            if (lang != "zh" && lang != "en")
-                _tables[lang] = LoadFromDisk(Path.Combine(i18nDir, $"{lang}.json"));
         _tables["override"] = LoadAppDataOverrides();
     }
 

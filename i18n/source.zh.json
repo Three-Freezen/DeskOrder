@@ -1,0 +1,78 @@
+{
+  "_meta": {
+    "language": "zh",
+    "name": "简体中文",
+    "_comment": "源文本。所有 key 必须与 XAML {loc:Loc Key} 和 C# LocalizationService.Instance[\"Key\"] 实际引用保持一致；缺失时会回退到英文，再回退到 key 字面量。"
+  },
+
+  "Appearance.GlassNone": "无玻璃效果",
+
+  "Manage.Calendars": "日历",
+  "Manage.Clocks": "时钟",
+  "Manage.DeleteBtn": "删除",
+  "Manage.EmptyHint": "暂无分区",
+  "Manage.FullHideAll": "全部隐藏",
+  "Manage.Notes": "便签",
+  "Manage.Zones": "分区",
+
+  "Motion.AnimationKind": "动画类型",
+  "Motion.AnimationKindHint": "选择窗口显示时的过渡效果",
+  "Motion.Origin": "展开原点",
+  "Motion.OriginHint": "动效从按钮的哪个位置开始",
+  "Motion.Speed": "动画速度",
+  "Motion.SpeedHint": "1.0 表示默认速度",
+  "Motion.Title": "动效设置",
+
+  "MotionAnimationBounceExpand": "弹性展开",
+  "MotionAnimationDirectionalExpand": "方向展开",
+  "MotionAnimationFade": "淡入淡出",
+  "MotionAnimationNone": "无动效",
+  "MotionAnimationScaleExpand": "缩放展开",
+  "MotionAnimationVerticalExpand": "纵向展开",
+
+  "MotionOriginButtonCenter": "按钮中心",
+  "MotionOriginButtonCorner": "按钮边角",
+
+  "Note.Hotkey": "快捷键",
+  "Note.OpenFailed": "打开便签失败",
+  "Note.OpenFailed.Title": "打开失败",
+  "Note.SaveFailed": "保存便签失败",
+  "Note.SaveFailed.Title": "保存失败",
+
+  "Panel.Hide": "隐藏面板",
+  "Panel.Import": "导入 / 新建",
+  "Panel.ImportFiles": "导入文件…",
+  "Panel.ImportFolder": "导入文件夹…",
+  "Panel.New": "新建",
+  "Panel.NewDocx": "新建 Word 文档",
+  "Panel.NewFolder": "新建文件夹",
+  "Panel.NewPptx": "新建 PowerPoint 演示文稿",
+  "Panel.NewTxt": "新建文本文档",
+  "Panel.NewXlsx": "新建 Excel 工作簿",
+  "Panel.Search": "搜索文件…",
+  "Panel.Settings": "面板设置",
+  "Panel.Title": "面板",
+
+  "Preset.Apply": "应用",
+  "Preset.Cancel": "取消",
+  "Preset.Empty": "还没有预设",
+  "Preset.EmptyNameHint": "给预设起个名字…",
+  "Preset.LoadButton": "加载预设",
+  "Preset.NameLabel": "名称",
+  "Preset.Overwrite": "覆盖",
+  "Preset.OverwriteTitle": "覆盖预设？",
+  "Preset.Save": "保存",
+  "Preset.Saved": "已保存",
+  "Preset.SaveTitle.Zone": "保存分区预设",
+
+  "ToolTip.Minimize": "最小化",
+  "ToolTip.Show": "显示",
+
+  "Item.Delete": "删除",
+  "Item.Open": "打开",
+  "Item.OpenLocation": "打开所在位置",
+  "Item.Rename": "重命名",
+
+  "Zone.Edit": "编辑",
+  "Zone.Hide": "隐藏"
+}
