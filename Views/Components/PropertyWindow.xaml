@@ -21,6 +21,24 @@
       </BeginStoryboard>
     </EventTrigger>
   </Window.Triggers>
+  <Window.Resources>
+    <Storyboard x:Key="CloseStoryboard">
+      <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                       From="1" To="0"
+                       Duration="{StaticResource Motion.Fast}"
+                       EasingFunction="{StaticResource Motion.StandardSpline}"/>
+      <DoubleAnimation Storyboard.TargetName="RootScale"
+                       Storyboard.TargetProperty="ScaleX"
+                       From="1" To="0.95"
+                       Duration="{StaticResource Motion.Fast}"
+                       EasingFunction="{StaticResource Motion.StandardSpline}"/>
+      <DoubleAnimation Storyboard.TargetName="RootScale"
+                       Storyboard.TargetProperty="ScaleY"
+                       From="1" To="0.95"
+                       Duration="{StaticResource Motion.Fast}"
+                       EasingFunction="{StaticResource Motion.StandardSpline}"/>
+    </Storyboard>
+  </Window.Resources>
   <Border x:Name="RootBorder"
           Background="{DynamicResource Brush.Bg.Chrome}"
           BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1"
@@ -47,8 +65,15 @@
       <DropShadowEffect BlurRadius="24" ShadowDepth="0" Color="Black" Opacity="0.45"/>
     </Border.Effect>
     <DockPanel>
-      <Border DockPanel.Dock="Top" Background="{DynamicResource Brush.Bg.Chrome}"
-              BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="0,0,0,1">
+      <!-- ponytail: top border is the title bar — MouseLeftButtonDown on it
+           drives DragMove; double-click toggles maximize. Original code had no
+           drag handler, so the floating panel was un-grabbable. -->
+      <Border x:Name="TitleBar" DockPanel.Dock="Top"
+              Background="{DynamicResource Brush.Bg.Chrome}"
+              BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="0,0,0,1"
+              PreviewMouseLeftButtonDown="TitleBar_MouseLeftButtonDown"
+            PreviewMouseMove="TitleBar_PreviewMouseMove"
+            PreviewMouseLeftButtonUp="TitleBar_PreviewMouseLeftButtonUp">
         <controls:PropertyTabStrip x:Name="TabStrip"/>
       </Border>
       <controls:PropertyPanel x:Name="BodyPanel" Margin="0"/>

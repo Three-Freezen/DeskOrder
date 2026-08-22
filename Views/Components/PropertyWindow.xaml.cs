@@ -29,9 +29,31 @@ public partial class PropertyWindow : Window
         set => SetValue(TargetProperty, value);
     }
 
+    bool _isClosing;
+    System.Windows.Media.Animation.Storyboard? _closeStoryboard;
+
+    // Override OnClosing to play fade-out animation before actually closing.
+    protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
+    {
+        if (_isClosing) return; // allow close after animation
+        if (WindowState == WindowState.Minimized) return; // skip animation for minimize
+        if (_closeStoryboard == null) return; // fallback: no animation resource found
+
+        e.Cancel = true;
+        _isClosing = true;
+        _closeStoryboard.Completed += (_, _) =>
+        {
+            // Keep _isClosing = true so the next OnClosing call returns early
+            // and allows the close to proceed.
+            Close();
+        };
+        _closeStoryboard.Begin();
+    }
+
     public PropertyWindow(object target, ConfigService configService)
     {
         InitializeComponent();
+        _closeStoryboard = TryFindResource("CloseStoryboard") as System.Windows.Media.Animation.Storyboard;
         Target = target;
         Title = target is Zone z ? z.Name : target?.GetType().Name;
     }
@@ -39,6 +61,7 @@ public partial class PropertyWindow : Window
     public PropertyWindow()
     {
         InitializeComponent();
+        _closeStoryboard = TryFindResource("CloseStoryboard") as System.Windows.Media.Animation.Storyboard;
     }
 
     void OnTargetChanged() { Body.Target = Target; }
