@@ -238,12 +238,17 @@ public static class ThemeService
         {
             using var key = Registry.CurrentUser.OpenSubKey(
                 @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
-            if (key?.GetValue("AccentColor") is int argb)
+            // AccentColor is stored as Windows COLORREF = 0x00BBGGRR:
+            //   low byte     = R
+            //   bits  8-15   = G
+            //   bits 16-23   = B
+            //   bits 24-31   = unused (alpha)
+            if (key?.GetValue("AccentColor") is int colorref)
             {
                 return Color.FromRgb(
-                    (byte)((argb >> 16) & 0xFF),
-                    (byte)((argb >>  8) & 0xFF),
-                    (byte)( argb        & 0xFF));
+                    (byte)( colorref        & 0xFF),
+                    (byte)((colorref >>  8) & 0xFF),
+                    (byte)((colorref >> 16) & 0xFF));
             }
         }
         catch { }
