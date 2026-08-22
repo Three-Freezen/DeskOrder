@@ -9,6 +9,7 @@
                 <ResourceDictionary Source="Resources/Theme.xaml"/>
                 <ResourceDictionary Source="Resources/Motion.xaml"/>
                 <ResourceDictionary Source="Resources/Theme.Colors.Light.xaml"/>
+                <ResourceDictionary Source="Resources/Theme.Colors.HighContrast.xaml"/>
                 <ResourceDictionary Source="Resources/Theme.Colors.Dark.xaml"/>
                 <ResourceDictionary Source="Resources/Theme.Brushes.xaml"/>
                 <ResourceDictionary Source="Resources/Icons.xaml"/>
