@@ -29,6 +29,14 @@ public class LocExtension : MarkupExtension
     public BindingBase? Arg0 { get; set; }
     public BindingBase? Arg1 { get; set; }
 
+    // ponytail: explicit default ctor required for property syntax {loc:Loc Key=X}.
+    // Without it the implicit default is suppressed by the (string) ctor and BAML's
+    // BindToMethod NRE's when it tries to instantiate via property syntax. The XAML
+    // parser sees dotted keys like "Manage.Zones" as member access on the positional
+    // arg, so multi-segment keys MUST go through the property form — and that
+    // property form needs this ctor to exist.
+    public LocExtension() { }
+
     public LocExtension(string key) { Key = key; }
 
     public override object ProvideValue(IServiceProvider sp)
