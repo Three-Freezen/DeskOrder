@@ -160,6 +160,13 @@ public partial class PropertyTabStrip : UserControl
             _isDragOut = false;
             _dragInsertIndex = _dragFromIndex;
 
+            // ponytail: capture mouse so MouseMove/MouseUp keep routing here
+            // even when the cursor leaves the source window. Without this, the
+            // drag-out chip freezes in place and MouseUp never reaches
+            // HandlePreviewMouseLeftButtonUp when the user releases on the
+            // desktop or another window.
+            Mouse.Capture(this);
+
             // ponytail: create the ghost once on press so the user sees
             // immediate pickup feedback even before threshold is crossed.
             // Hide it until _dragArmed fires (5px threshold) to keep clicks
@@ -183,6 +190,21 @@ public partial class PropertyTabStrip : UserControl
             PropertyWindowManager.Instance.CheckEmptyFloatingAndClose(this);
             e.Handled = true;
         }
+    }
+
+    // ponytail: MouseMove on the strip itself. Active when Mouse.Capture is
+    // held during a drag — fires even when the cursor is outside the source
+    // window. We only use it to update the drag-out chip's screen position;
+    // arm/commit logic and reorder stay on TabRoot_MouseMove /
+    // HandlePreviewMouseMove where the cursor is over the relevant element.
+    void TabStrip_MouseMove_Captured(object sender, MouseEventArgs e)
+    {
+        if (Mouse.Captured != this) return;
+        if (_dragOutFeedback == null) return;
+        if (e.LeftButton != MouseButtonState.Pressed) return;
+        var screen = PointToScreen(e.GetPosition(this));
+        _dragOutFeedback.Left = screen.X - 80;
+        _dragOutFeedback.Top = screen.Y - 16;
     }
 
     void TabRoot_MouseMove(object sender, MouseEventArgs e)
@@ -498,6 +520,9 @@ public partial class PropertyTabStrip : UserControl
 
     void ResetDrag()
     {
+        // ponytail: release mouse capture before clearing other state so a
+        // subsequent click anywhere isn't still routed to this strip.
+        if (Mouse.Captured == this) Mouse.Capture(null);
         CleanupDragGhost();
         if (_isTransferring && _transferTarget != null)
             _transferTarget.HandleTransferDragLeave();
@@ -525,7 +550,12 @@ public partial class PropertyTabStrip : UserControl
 
     void HandleDragOutDrop(PropertyTab tab, Point screenPos)
     {
-        var main = Window.GetWindow(this) as ManagementWindow;
+        // ponytail: locate ManagementWindow regardless of which window hosts
+        // this strip. `Window.GetWindow(this)` returns the immediate parent
+        // (could be a floating PropertyWindow), whose `as ManagementWindow`
+        // cast fails → method silently returned → drag-out from a floating
+        // window did nothing. Walk Application.Windows instead.
+        var main = Application.Current.Windows.OfType<ManagementWindow>().FirstOrDefault();
         if (main == null) return;
 
         var sep = tab.Key.IndexOf(':');
