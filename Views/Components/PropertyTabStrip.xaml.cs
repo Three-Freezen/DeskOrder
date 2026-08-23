@@ -192,25 +192,19 @@ public partial class PropertyTabStrip : UserControl
         }
     }
 
-    // ponytail: MouseMove on the strip itself. Active when Mouse.Capture is
-    // held during a drag — fires even when the cursor is outside the source
-    // window. We only use it to update the drag-out chip's screen position;
-    // arm/commit logic and reorder stay on TabRoot_MouseMove /
-    // HandlePreviewMouseMove where the cursor is over the relevant element.
+    // ponytail: sole drag-MouseMove handler. Active whenever Mouse.Capture is
+    // held by this strip — which is set in TabRoot_MouseLeftButtonDown so every
+    // drag has capture. Capture redirects MouseMove to the strip regardless of
+    // cursor position, so the previous TabRoot_MouseMove handler on the inner
+    // tab Border stopped firing under capture and silently killed all drag
+    // logic (arm / ghost / chip-create / reorder / drop-target / commit).
+    // Consolidated here so the whole state machine runs on every tick.
     void TabStrip_MouseMove_Captured(object sender, MouseEventArgs e)
     {
         if (Mouse.Captured != this) return;
-        if (_dragOutFeedback == null) return;
-        if (e.LeftButton != MouseButtonState.Pressed) return;
-        var screen = PointToScreen(e.GetPosition(this));
-        _dragOutFeedback.Left = screen.X - 80;
-        _dragOutFeedback.Top = screen.Y - 16;
-    }
-
-    void TabRoot_MouseMove(object sender, MouseEventArgs e)
-    {
         if (_dragTab == null || _dragFromIndex < 0) return;
         if (e.LeftButton != MouseButtonState.Pressed) return;
+
         var pos = e.GetPosition(this);
         var stripBounds = new Rect(0, 0, ActualWidth, ActualHeight);
         bool outsideStrip = !stripBounds.Contains(pos);
@@ -233,7 +227,6 @@ public partial class PropertyTabStrip : UserControl
         // — that's the "莫名其妙的小浮窗" bug.
         if (!_dragOutArmed && outsideStrip)
             _dragOutArmed = true;
-        // No CaptureMouse — window-level PreviewMouseMove routes events here.
 
         // Feedback chip only appears once armed AND cursor is already outside
         // the strip, so a normal reorder drag never flashes it.
@@ -275,12 +268,12 @@ public partial class PropertyTabStrip : UserControl
 
         if (_dragOutFeedback != null)
         {
-            var screen = PointToScreen(e.GetPosition(this));
+            var screen = PointToScreen(pos);
             _dragOutFeedback.Left = screen.X - 80;
             _dragOutFeedback.Top = screen.Y - 16;
         }
 
-        // Ponytail: commit drag-out once armed and the cursor has left the strip.
+        // ponytail: commit drag-out once armed and the cursor has left the strip.
         if (_dragOutArmed && !_isDragOut && outsideStrip)
             _isDragOut = true;
 
