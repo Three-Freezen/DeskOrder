@@ -46,7 +46,7 @@ public class PropertyWindowManager
     /// gear button, panel settings button, etc.). Honours the "no duplicate
     /// editor per target" rule by reusing an existing floating or by detaching
     /// the docked panel's same target before opening a new floating.</summary>
-    public void PopOutTarget(object target, ConfigService configService, ManagementWindow main, Window? requester = null)
+    public void PopOutTarget(object target, ConfigService configService, ManagementWindow main, Window? requester = null, Point? cursorScreen = null)
     {
         if (target == null) return;
 
@@ -69,7 +69,7 @@ public class PropertyWindowManager
             main.DockedTabs.CloseTab(key);
 
         // 3. Open fresh floating at requester (or persisted / main window) position.
-        var pos = ResolvePopPosition(target, requester, main, configService);
+        var pos = ResolvePopPosition(target, requester, main, configService, cursorScreen);
         OpenFloating(target, configService, main, pos);
     }
 
@@ -198,7 +198,7 @@ public class PropertyWindowManager
     /// the requester offset, then a 24-px cascade off the most recently opened
     /// floating (avoid stacking), then a sensible offset from the main
     /// management window, then the work-area corner.</summary>
-    static (double x, double y) ResolvePopPosition(object target, Window? requester, ManagementWindow main, ConfigService configService)
+    static (double x, double y) ResolvePopPosition(object target, Window? requester, ManagementWindow main, ConfigService configService, Point? cursorScreen = null)
     {
         // 1. Per-Id persisted rect.
         try
@@ -209,6 +209,13 @@ public class PropertyWindowManager
                 return CascadeIfColliding(rect.X, rect.Y, main);
         }
         catch { }
+
+        // ponytail: drag-out from a tab — center the new floating PropertyWindow
+        // on the cursor's drop position. Without this the fall-through lands at
+        // step 3 (main-window right edge) which the user reads as "a stray small
+        // floating window at the right edge of the screen".
+        if (cursorScreen.HasValue)
+            return CascadeIfColliding(cursorScreen.Value.X - 180, cursorScreen.Value.Y - 16, main);
 
         // 2. Requester offset (button that triggered the pop-out).
         if (requester != null && requester.IsVisible && !double.IsNaN(requester.Left) && !double.IsNaN(requester.Top))

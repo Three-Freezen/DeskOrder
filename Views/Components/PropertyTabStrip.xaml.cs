@@ -415,7 +415,14 @@ public partial class PropertyTabStrip : UserControl
             var newX = container.TranslatePoint(new Point(0, 0), TabsScroller).X;
             var delta = kv.Value - newX;
             if (Math.Abs(delta) < 0.5) continue;
-            var transform = container.RenderTransform as TranslateTransform;
+            // ponytail: container is a ContentPresenter (ItemsControl wraps each
+            // non-UIElement item), but the TranslateTransform lives on the inner
+            // Border (template root). Animating the container's RenderTransform
+            // was a no-op (no transform set on ContentPresenter) — tabs snapped
+            // to their new positions with no visible slide. Drill in to the
+            // Border so the 160ms ease-out actually plays.
+            var border = container as Border ?? VisualTreeHelper.GetChild(container, 0) as Border;
+            var transform = border?.RenderTransform as TranslateTransform;
             if (transform == null) continue;
             // ponytail: 160ms ease-out per spec §0 决策 9
             var anim = new DoubleAnimation(delta, 0, TimeSpan.FromMilliseconds(160))
@@ -490,7 +497,12 @@ public partial class PropertyTabStrip : UserControl
 
         if (target == null) return;
 
-        main.OpenFloatingProperty(target);
+        // ponytail: pass the cursor's screen position so the new floating
+        // PropertyWindow opens at the drop point (not at the right-edge fallback
+        // in ResolvePopPosition). The user previously reported "a small floating
+        // window at the rightmost edge of the screen" — that was the new window
+        // landing on the fallback position.
+        main.OpenFloatingProperty(target, screenPos);
         CloseTab(tab.Key);
     }
 

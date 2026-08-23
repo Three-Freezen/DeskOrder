@@ -421,6 +421,12 @@ public partial class ManagementWindow : Window
     public void OpenFloatingProperty(object target, Window? requester) =>
         PropertyWindowManager.Instance.PopOutTarget(target, _configService, this, requester: requester);
 
+    // ponytail: drag-out entry — caller passes the cursor's screen position so
+    // the new floating PropertyWindow opens where the user dropped the tab,
+    // instead of falling through to the right-edge fallback in ResolvePopPosition.
+    public void OpenFloatingProperty(object target, Point cursorScreen) =>
+        PropertyWindowManager.Instance.PopOutTarget(target, _configService, this, requester: null, cursorScreen: cursorScreen);
+
     /// <summary>Make sure the docked property column is visible. Used by the
     /// workspace dock flow so a freshly-clicked list row lights up the right
     /// panel without the user having to manually un-collapse it first.</summary>
