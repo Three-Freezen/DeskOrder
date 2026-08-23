@@ -27,9 +27,7 @@
           Background="{DynamicResource Brush.Bg.Chrome}"
           BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1"
           CornerRadius="10"
-          RenderTransformOrigin="0.5,0.5"
-          PreviewMouseMove="RootBorder_PreviewMouseMove"
-          PreviewMouseLeftButtonUp="RootBorder_PreviewMouseLeftButtonUp">
+          RenderTransformOrigin="0.5,0.5">
     <Border.RenderTransform>
       <ScaleTransform x:Name="RootScale" ScaleX="0.97" ScaleY="0.97"/>
     </Border.RenderTransform>

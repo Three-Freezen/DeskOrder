@@ -192,19 +192,6 @@ public partial class PropertyWindow : Window
         Top = _dragTop;
     }
 
-    // ── Window-level preview handlers — route to tab strip for drag-out ──
-
-    void RootBorder_PreviewMouseMove(object sender, MouseEventArgs e)
-    {
-        if (e.LeftButton != MouseButtonState.Pressed) return;
-        TabStrip.HandlePreviewMouseMove(e);
-    }
-
-    void RootBorder_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
-    {
-        TabStrip.HandlePreviewMouseLeftButtonUp(e);
-    }
-
     // ── Safety nets ──
 
     void Window_Deactivated(object sender, EventArgs e)

@@ -4,8 +4,10 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -63,6 +65,13 @@ public class PropertyTab : INotifyPropertyChanged
 /// tab gets the accent indicator and Surface background; hover reveals a close-x that
 /// invokes CloseCommand on the tab. Tabs is the source of truth (ObservableCollection);
 /// OpenOrFocus / PinTab / CloseTab mutate it and update IsActive in lockstep.
+///
+/// ponytail: drag is driven by a DispatcherTimer that polls Win32 cursor state
+/// (GetCursorPos + GetAsyncKeyState) — no Mouse.Capture, no routed-event
+/// preview dependency. The previous design relied on PreviewMouseLeftButtonUp
+/// tunnelling through RootBorder, which silently stops when the cursor leaves
+/// the source window's visual tree (the user's "窗口拖不出来" symptom). Win32
+/// polling doesn't care where the cursor is — desktop, other app, anywhere.
 /// </summary>
 public partial class PropertyTabStrip : UserControl
 {
@@ -79,21 +88,25 @@ public partial class PropertyTabStrip : UserControl
 
     public event EventHandler? ActiveTabChanged;
 
-    // ── Drag-to-reorder state ──
+    // ── Win32 cursor polling ──
+    [DllImport("user32.dll")] static extern bool GetCursorPos(out POINT lpPoint);
+    [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vKey);
+    [StructLayout(LayoutKind.Sequential)] struct POINT { public int X; public int Y; }
+    const int VK_LBUTTON = 0x01;
+
+    // ── Drag state ──
     PropertyTab? _dragTab;
     int _dragFromIndex = -1;
     Point _dragOrigin;
     bool _dragArmed;
+    bool _dragCompleted;     // guard so reset-on-release only runs once
 
-    // ── Drag-to-float state ──
     PropertyTab? _dragOutTab;
     bool _dragOutArmed;
-    bool _isDragOut;           // true when cursor left the strip during drag-out
-    Window? _dragOutFeedback;
+    bool _isDragOut;         // true once cursor has left the strip during drag-out
+    Popup? _dragPopup;       // visual feedback — auto-top-r, crosses window boundaries
+    DispatcherTimer? _dragTimer;
 
-    // ── Drag visual + transfer state ──
-    PropertyTabGhost? _dragGhost;
-    AdornerLayer? _dragGhostLayer;
     int _dragInsertIndex = -1;
     bool _isTransferring;
     PropertyTabStrip? _transferTarget;
@@ -118,11 +131,11 @@ public partial class PropertyTabStrip : UserControl
     /// <summary>Forward to scroller so callers don't need to know about the inner host.</summary>
     public void ScrollIntoView(PropertyTab tab) => TabsScroller.ScrollIntoView(tab);
 
-    /// <summary>Force-cancel any in-progress drag and clean up the feedback window.
-    /// Called from PropertyWindow on Deactivated / Escape to prevent orphaned windows.</summary>
+    /// <summary>Force-cancel any in-progress drag. Called from PropertyWindow on
+    /// Deactivated / Escape / Closed to release the timer + popup cleanly.</summary>
     public void CancelDrag()
     {
-        if (_dragOutFeedback != null || _dragTab != null)
+        if (_dragTab != null)
             ResetDrag();
     }
 
@@ -138,11 +151,15 @@ public partial class PropertyTabStrip : UserControl
         foreach (var t in Tabs) t.IsActive = ReferenceEquals(t, ActiveTab);
     }
 
-    // ── Tab click / drag origin ──
+    // ── Tab click ──
 
     void TabRoot_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        if (_dragArmed) { _dragArmed = false; return; }
+        // ponytail: only treat as a click if no drag was armed. Don't reset
+        // _dragArmed here — the Timer's drop branch owns that state from now
+        // on, and resetting it here would race against the Timer's reorder
+        // condition (`_dragArmed && !outsideStrip`).
+        if (_dragArmed) return;
         if (sender is Border { DataContext: PropertyTab tab })
             ActiveTab = tab;
     }
@@ -155,29 +172,12 @@ public partial class PropertyTabStrip : UserControl
             _dragFromIndex = Tabs.IndexOf(tab);
             _dragOrigin = e.GetPosition(this);
             _dragArmed = false;
+            _dragCompleted = false;
             _dragOutTab = tab;
             _dragOutArmed = false;
             _isDragOut = false;
             _dragInsertIndex = _dragFromIndex;
-
-            // ponytail: capture mouse so MouseMove/MouseUp keep routing here
-            // even when the cursor leaves the source window. Without this, the
-            // drag-out chip freezes in place and MouseUp never reaches
-            // HandlePreviewMouseLeftButtonUp when the user releases on the
-            // desktop or another window.
-            Mouse.Capture(this);
-
-            // ponytail: create the ghost once on press so the user sees
-            // immediate pickup feedback even before threshold is crossed.
-            // Hide it until _dragArmed fires (5px threshold) to keep clicks
-            // totally clean — only drags get a ghost.
-            _dragGhostLayer = AdornerLayer.GetAdornerLayer(TabsScroller);
-            if (_dragGhostLayer != null)
-            {
-                _dragGhost = new PropertyTabGhost(TabsScroller, tab);
-                _dragGhost.Visibility = Visibility.Collapsed;
-                _dragGhostLayer.Add(_dragGhost);
-            }
+            StartDragTimer();
         }
     }
 
@@ -192,97 +192,73 @@ public partial class PropertyTabStrip : UserControl
         }
     }
 
-    // ponytail: sole drag-MouseMove handler. Active whenever Mouse.Capture is
-    // held by this strip — which is set in TabRoot_MouseLeftButtonDown so every
-    // drag has capture. Capture redirects MouseMove to the strip regardless of
-    // cursor position, so the previous TabRoot_MouseMove handler on the inner
-    // tab Border stopped firing under capture and silently killed all drag
-    // logic (arm / ghost / chip-create / reorder / drop-target / commit).
-    // Consolidated here so the whole state machine runs on every tick.
-    void TabStrip_MouseMove_Captured(object sender, MouseEventArgs e)
-    {
-        if (Mouse.Captured != this) return;
-        if (_dragTab == null || _dragFromIndex < 0) return;
-        if (e.LeftButton != MouseButtonState.Pressed) return;
+    // ── Drag loop ──
 
-        var pos = e.GetPosition(this);
+    void StartDragTimer()
+    {
+        if (_dragTimer != null) return;
+        // ponytail: 16ms ≈ 60fps. Fine for cursor polling; WPF UI thread
+        // already serializes layout/render so a 60fps timer doesn't add
+        // measurable load.
+        _dragTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
+        _dragTimer.Tick += OnDragTick;
+        _dragTimer.Start();
+    }
+
+    void OnDragTick(object? sender, EventArgs e)
+    {
+        if (_dragTab == null || _dragCompleted) return;
+
+        GetCursorPos(out POINT pt);
+        var screen = new Point(pt.X, pt.Y);
+        var stripOrigin = PointToScreen(new Point(0, 0));
+        var pos = new Point(screen.X - stripOrigin.X, screen.Y - stripOrigin.Y);
         var stripBounds = new Rect(0, 0, ActualWidth, ActualHeight);
         bool outsideStrip = !stripBounds.Contains(pos);
 
-        if (!_dragArmed && Math.Abs(pos.X - _dragOrigin.X) > 5)
+        // ponytail: arm threshold — Euclidean distance (any direction), not
+        // X-only. The previous X-only check left vertical drags invisible
+        // (ghost at initial position) and is what produced the "两个小浮窗"
+        // symptom (ghost stuck inside + chip outside).
+        var dragOriginScreen = PointToScreen(_dragOrigin);
+        var dx = screen.X - dragOriginScreen.X;
+        var dy = screen.Y - dragOriginScreen.Y;
+        if (!_dragArmed && (dx * dx + dy * dy) > 25)
             _dragArmed = true;
 
-        // ponytail: once armed, reveal the ghost and follow the cursor.
-        if (_dragArmed && _dragGhost != null)
-        {
-            if (_dragGhost.Visibility == Visibility.Collapsed)
-                _dragGhost.Visibility = Visibility.Visible;
-            var screen = PointToScreen(pos);
-            _dragGhost.UpdatePosition(screen);
-        }
-
-        // ponytail: arm drag-out when the cursor leaves the strip, not on a
-        // 40px horizontal threshold. The strip is narrow so a small vertical
-        // wobble used to commit drag-out and pop a stray floating PropertyWindow
-        // — that's the "莫名其妙的小浮窗" bug.
+        // ponytail: arm drag-out when the cursor leaves the strip (works
+        // outside the source window too — strip-local pos goes negative or
+        // past ActualWidth/Height when cursor is in another window).
         if (!_dragOutArmed && outsideStrip)
             _dragOutArmed = true;
 
-        // Feedback chip only appears once armed AND cursor is already outside
-        // the strip, so a normal reorder drag never flashes it.
-        if (_dragOutArmed && _dragOutFeedback == null && _dragOutTab != null && outsideStrip)
+        // Show popup the first time drag-out arms (and cursor is already
+        // outside the strip).
+        if (_dragPopup == null && _dragOutTab != null && outsideStrip)
         {
-            // ponytail: hit-test invisible so mouse events pass through to the
-            // underlying PropertyWindow and RootBorder.PreviewMouseLeftButtonUp
-            // can still clean up. ShowActivated=false keeps the original window
-            // activated — otherwise Window_Deactivated would fire and CancelDrag
-            // would yank the chip away mid-drag.
-            _dragOutFeedback = new Window
-            {
-                Width = 160, Height = 32,
-                WindowStyle = WindowStyle.None,
-                AllowsTransparency = true,
-                Background = Brushes.Transparent,
-                Topmost = true, ShowInTaskbar = false, Opacity = 0.85,
-                IsHitTestVisible = false,
-                ShowActivated = false,
-                Content = new Border
-                {
-                    Background = (Brush)FindResource("Brush.Bg.Chrome"),
-                    BorderBrush = (Brush)FindResource("Brush.Accent"),
-                    BorderThickness = new Thickness(1),
-                    CornerRadius = new CornerRadius(4),
-                    IsHitTestVisible = false,
-                    Child = new TextBlock
-                    {
-                        Text = _dragOutTab.Title,
-                        Foreground = (Brush)FindResource("Brush.Text.Primary"),
-                        VerticalAlignment = VerticalAlignment.Center,
-                        HorizontalAlignment = HorizontalAlignment.Center,
-                        FontSize = 12,
-                    }
-                }
-            };
-            _dragOutFeedback.Show();
+            _dragPopup = CreateDragPopup(_dragOutTab);
+            _dragPopup.IsOpen = true;
         }
 
-        if (_dragOutFeedback != null)
+        // Re-center the popup on the cursor. PlacementMode.MousePoint puts
+        // top-left at the cursor on IsOpen; afterwards we re-assert the
+        // offset every tick so it tracks live movement.
+        if (_dragPopup != null)
         {
-            var screen = PointToScreen(pos);
-            _dragOutFeedback.Left = screen.X - 80;
-            _dragOutFeedback.Top = screen.Y - 16;
+            _dragPopup.HorizontalOffset = screen.X - 80;
+            _dragPopup.VerticalOffset = screen.Y - 16;
         }
 
-        // ponytail: commit drag-out once armed and the cursor has left the strip.
+        // Commit drag-out once armed and the cursor has actually left.
         if (_dragOutArmed && !_isDragOut && outsideStrip)
             _isDragOut = true;
 
-        // ponytail: cross-window transfer — if drag-out is armed AND cursor is
-        // over another strip's hit zone, mark transferring and tell the target
-        // to show its drop indicator. Otherwise, leave any previous target.
+        // ponytail: cross-window transfer — if drag-out is armed AND cursor
+        // is over another strip's hit zone, mark transferring and tell the
+        // target to show its drop indicator. Otherwise, leave any previous
+        // target.
         if (_dragOutArmed && outsideStrip)
         {
-            var screen = PointToScreen(pos);
             var target = TabDragRouter.FindDropTarget(screen);
             if (target != null && target != this)
             {
@@ -306,10 +282,7 @@ public partial class PropertyTabStrip : UserControl
             }
         }
 
-        // ponytail: live reorder while drag stays inside the strip. The ghost
-        // and the moved tab occupy the same slot visually (ghost is on top via
-        // AdornerLayer), so MoveTab shifts the others — animate them with
-        // TranslateTransform per §4.1 of the spec.
+        // ponytail: live reorder while cursor stays inside the strip.
         if (_dragArmed && !outsideStrip && _dragTab != null)
         {
             int newIndex = ComputeDropIndex(pos.X);
@@ -325,130 +298,82 @@ public partial class PropertyTabStrip : UserControl
                 Dispatcher.BeginInvoke(new Action(PlaySlideAnimations), DispatcherPriority.Loaded);
             }
         }
-    }
 
-    // ── Window-level preview handlers (called from PropertyWindow) ──
+        // Detect LButton release via Win32 — fires on the desktop, in other
+        // windows, anywhere outside WPF's routed-event reach.
+        short state = GetAsyncKeyState(VK_LBUTTON);
+        if ((state & 0x8000) != 0) return;     // still pressed — keep going
 
-    /// <summary>Called by PropertyWindow.RootBorder_PreviewMouseMove so drag-out
-    /// detection works even when the cursor has left the strip bounds.</summary>
-    public void HandlePreviewMouseMove(MouseEventArgs e)
-    {
-        if (_dragTab == null) return;
-        if (e.LeftButton != MouseButtonState.Pressed) return;
-
-        var pos = e.GetPosition(this);
-        var stripBounds = new Rect(0, 0, ActualWidth, ActualHeight);
-        bool outsideStrip = !stripBounds.Contains(pos);
-
-        // ponytail: arm drag-out here too — once the cursor has left the tab
-        // Border but is still on the PropertyWindow, only this handler fires.
-        if (!_dragOutArmed && outsideStrip)
-            _dragOutArmed = true;
-
-        // Update feedback window position.
-        if (_dragOutFeedback != null)
+        _dragCompleted = true;
+        try
         {
-            var screen = PointToScreen(e.GetPosition(this));
-            _dragOutFeedback.Left = screen.X - 80;
-            _dragOutFeedback.Top = screen.Y - 16;
-        }
-
-        // ponytail: commit drag-out once armed and the cursor has left the strip.
-        if (!_isDragOut && outsideStrip)
-            _isDragOut = true;
-    }
-
-    /// <summary>Called by PropertyWindow.RootBorder_PreviewMouseLeftButtonUp so the
-    /// drop is always detected, even when the cursor is outside the strip.</summary>
-    public void HandlePreviewMouseLeftButtonUp(MouseEventArgs e)
-    {
-        // ponytail: cross-window transfer takes priority over plain drag-out.
-        // If we're transferring into another strip, route the tab there.
-        if (_isTransferring && _transferTarget != null && _dragOutTab != null)
-        {
-            var tab = _dragOutTab;
-            var key = tab.Key;
-            _transferTarget.HandleTransferDragLeave();
-            CleanupDragOutFeedback();
-            CleanupDragGhost();
-            PropertyWindowManager.Instance.TransferTab(this, _transferTarget, key);
-            // ponytail: TransferTab calls OpenOrFocus which creates a NEW
-            // PropertyTab instance on the target strip (same Key). The old
-            // `tab` reference is from the source strip — ContainerFromItem
-            // on the target returns null for it. Look up the new tab by key.
-            var newTab = _transferTarget.Tabs.FirstOrDefault(t => t.Key == key);
-            if (newTab != null) _transferTarget.ScrollIntoView(newTab);
-            ResetDrag();
-            e.Handled = true;
-            return;
-        }
-        // not transferring — fall through to drag-out / reorder
-        if (_dragOutArmed && _dragOutTab != null)
-        {
-            CleanupDragOutFeedback();
-
-            if (_isDragOut)
+            // ponytail: transfer takes priority over plain drag-out.
+            if (_isTransferring && _transferTarget != null && _dragOutTab != null)
             {
-                // Cursor left the strip — pop out the target as a floating window.
-                var screenPos = PointToScreen(e.GetPosition(this));
-                HandleDragOutDrop(_dragOutTab, screenPos);
-                ResetDrag();
-                e.Handled = true;
+                var key = _dragOutTab.Key;
+                _transferTarget.HandleTransferDragLeave();
+                PropertyWindowManager.Instance.TransferTab(this, _transferTarget, key);
+                var newTab = _transferTarget.Tabs.FirstOrDefault(t => t.Key == key);
+                if (newTab != null) _transferTarget.ScrollIntoView(newTab);
                 return;
             }
-            // Cursor still inside — fall through to reorder logic.
-        }
 
-        if (!_dragArmed || _dragTab == null || _dragFromIndex < 0)
+            // Plain drag-out — pop a floating PropertyWindow for the tab.
+            if (_dragOutArmed && _dragOutTab != null && _isDragOut)
+            {
+                HandleDragOutDrop(_dragOutTab, screen);
+                return;
+            }
+
+            // Reorder drop inside the strip.
+            if (_dragArmed && _dragTab != null && _dragFromIndex >= 0 && !outsideStrip)
+            {
+                int dropIndex = ComputeDropIndex(pos.X);
+                if (dropIndex >= 0 && dropIndex != _dragFromIndex && dropIndex != _dragFromIndex + 1)
+                {
+                    int target = dropIndex;
+                    if (target > _dragFromIndex) target--;
+                    MoveTab(_dragFromIndex, target);
+                }
+            }
+        }
+        finally
         {
             ResetDrag();
-            return;
         }
-
-        var dropX = e.GetPosition(TabsHost).X;
-        int dropIndex = ComputeDropIndex(dropX);
-        if (dropIndex >= 0 && dropIndex != _dragFromIndex && dropIndex != _dragFromIndex + 1)
-        {
-            int target = dropIndex;
-            if (target > _dragFromIndex) target--;
-            MoveTab(_dragFromIndex, target);
-        }
-        ResetDrag();
-        e.Handled = true;
     }
 
-    // ── Strip-level MouseUp (kept for reorder when drop is inside the strip) ──
-
-    void TabsScroller_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    Popup CreateDragPopup(PropertyTab tab)
     {
-        // delegate to original strip-level handler logic (kept verbatim below)
-        HandleTabsHostMouseLeftButtonUp(e);
-    }
-
-    void HandleTabsHostMouseLeftButtonUp(MouseButtonEventArgs e)
-    {
-        if (_dragOutArmed && _isDragOut)
+        return new Popup
         {
-            ResetDrag();
-            e.Handled = true;
-            return;
-        }
-        if (!_dragArmed || _dragTab == null || _dragFromIndex < 0)
-        {
-            ResetDrag();
-            return;
-        }
-        var dropX = e.GetPosition(TabsHost).X;
-        int dropIndex = ComputeDropIndex(dropX);
-        if (dropIndex >= 0 && dropIndex != _dragFromIndex && dropIndex != _dragFromIndex + 1)
-        {
-            int target = dropIndex;
-            if (target > _dragFromIndex) target--;
-            MoveTab(_dragFromIndex, target);
-        }
-        _dragArmed = false;
-        ResetDrag();
-        e.Handled = true;
+            Placement = PlacementMode.MousePoint,
+            AllowsTransparency = true,
+            StaysOpen = true,
+            // ponytail: popup + child both non-hit-testable and non-focusable
+            // so the popup never intercepts mouse or keyboard — clicks pass
+            // through to whatever's underneath, focus stays on the source
+            // window, Window_Deactivated never fires mid-drag.
+            Focusable = false,
+            IsHitTestVisible = false,
+            Child = new Border
+            {
+                Width = 160, Height = 32,
+                Background = (Brush)FindResource("Brush.Bg.Chrome"),
+                BorderBrush = (Brush)FindResource("Brush.Accent"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                IsHitTestVisible = false,
+                Child = new TextBlock
+                {
+                    Text = tab.Title,
+                    Foreground = (Brush)FindResource("Brush.Text.Primary"),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    FontSize = 12,
+                }
+            }
+        };
     }
 
     internal int ComputeDropIndex(double x)
@@ -513,32 +438,29 @@ public partial class PropertyTabStrip : UserControl
 
     void ResetDrag()
     {
-        // ponytail: release mouse capture before clearing other state so a
-        // subsequent click anywhere isn't still routed to this strip.
-        if (Mouse.Captured == this) Mouse.Capture(null);
-        CleanupDragGhost();
+        if (_dragTimer != null)
+        {
+            _dragTimer.Stop();
+            _dragTimer.Tick -= OnDragTick;
+            _dragTimer = null;
+        }
+        if (_dragPopup != null)
+        {
+            _dragPopup.IsOpen = false;
+            _dragPopup = null;
+        }
         if (_isTransferring && _transferTarget != null)
             _transferTarget.HandleTransferDragLeave();
         _dragTab = null;
         _dragFromIndex = -1;
         _dragArmed = false;
+        _dragCompleted = false;
         _dragOutTab = null;
         _dragOutArmed = false;
         _isDragOut = false;
         _isTransferring = false;
         _transferTarget = null;
         _dragInsertIndex = -1;
-        CleanupDragOutFeedback();
-    }
-
-    void CleanupDragGhost()
-    {
-        if (_dragGhost != null && _dragGhostLayer != null)
-        {
-            _dragGhostLayer.Remove(_dragGhost);
-            _dragGhostLayer = null;
-            _dragGhost = null;
-        }
     }
 
     void HandleDragOutDrop(PropertyTab tab, Point screenPos)
@@ -570,19 +492,6 @@ public partial class PropertyTabStrip : UserControl
 
         main.OpenFloatingProperty(target);
         CloseTab(tab.Key);
-    }
-
-    void CleanupDragOutFeedback()
-    {
-        if (_dragOutFeedback == null) return;
-        var w = _dragOutFeedback;
-        _dragOutFeedback = null; // clear reference first
-        try
-        {
-            w.Hide();           // immediate visual removal
-            w.Close();          // release resources
-        }
-        catch { }
     }
 
     // ── Public tab management ──
