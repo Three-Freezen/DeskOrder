@@ -109,7 +109,6 @@
           BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="0,0,0,1"
           Padding="0,4">
     <local:PropertyTabScroller x:Name="TabsScroller"
-                               MouseLeftButtonUp="TabsScroller_MouseLeftButtonUp"
                                Tabs="{Binding Tabs, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                ItemTemplate="{StaticResource PropertyTabTemplate}"
                                MinTabWidth="100"/>
