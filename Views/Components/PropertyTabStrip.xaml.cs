@@ -103,15 +103,6 @@ public partial class PropertyTabStrip : UserControl
     PropertyTab? _dragOutTab;
     bool _dragOutArmed;
     bool _isDragOut;         // true once cursor has left the strip during drag-out
-    Window? _dragPopup;       // ponytail: drag-out feedback — top-level Window so it
-                                 // tracks the cursor via Left/Top in screen coords and
-                                 // renders above any other window. Popup was tried first
-                                 // but PlacementMode.MousePoint anchors the placement at
-                                 // the cursor captured at IsOpen=true (doesn't re-read on
-                                 // HorizontalOffset changes when value is unchanged),
-                                 // so the chip froze at the initial cursor + whatever
-                                 // offset formula we used. Window.Left/Top write straight
-                                 // through to the HWND.
     DispatcherTimer? _dragTimer;
 
     int _dragInsertIndex = -1;
@@ -239,29 +230,6 @@ public partial class PropertyTabStrip : UserControl
         if (!_dragOutArmed && outsideStrip)
             _dragOutArmed = true;
 
-        // ponytail: show chip the first time drag-out arms (and cursor is
-        // already outside the strip). Window.Show() is non-blocking —
-        // returns immediately. Position the cursor on the chip's title bar
-        // (top-center), the way a window sits under its cursor while being
-        // dragged — the chip extends ~80px left/right and ~32px below the
-        // cursor so the cursor reads as "on the title bar".
-        if (_dragPopup == null && _dragOutTab != null && outsideStrip)
-        {
-            _dragPopup = CreateDragPopup(_dragOutTab);
-            _dragPopup.Left = screen.X - 80;
-            _dragPopup.Top = screen.Y - 4;
-            _dragPopup.Show();
-        }
-
-        // Track the cursor each tick. Window.Left/Top are screen coords;
-        // assigning to the same value is a no-op (no SetWindowPos roundtrip)
-        // so a stationary cursor doesn't cause flicker.
-        if (_dragPopup != null)
-        {
-            _dragPopup.Left = screen.X - 80;
-            _dragPopup.Top = screen.Y - 4;
-        }
-
         // Commit drag-out once armed and the cursor has actually left.
         if (_dragOutArmed && !_isDragOut && outsideStrip)
             _isDragOut = true;
@@ -356,41 +324,6 @@ public partial class PropertyTabStrip : UserControl
         }
     }
 
-    Window CreateDragPopup(PropertyTab tab)
-    {
-        // ponytail: top-level Window — IsHitTestVisible=false so it never
-        // captures mouse (clicks pass through to whatever's underneath);
-        // ShowActivated=false so it never takes activation from the source
-        // window (Window_Deactivated stays quiet, drag isn't cancelled
-        // mid-flight by the deactivation handler in PropertyWindow).
-        return new Window
-        {
-            Width = 160, Height = 32,
-            WindowStyle = WindowStyle.None,
-            AllowsTransparency = true,
-            Background = Brushes.Transparent,
-            Topmost = true, ShowInTaskbar = false, Opacity = 0.85,
-            IsHitTestVisible = false, ShowActivated = false,
-            Content = new Border
-            {
-                Width = 160, Height = 32,
-                Background = (Brush)FindResource("Brush.Bg.Chrome"),
-                BorderBrush = (Brush)FindResource("Brush.Accent"),
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(4),
-                IsHitTestVisible = false,
-                Child = new TextBlock
-                {
-                    Text = tab.Title,
-                    Foreground = (Brush)FindResource("Brush.Text.Primary"),
-                    VerticalAlignment = VerticalAlignment.Center,
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    FontSize = 12,
-                }
-            }
-        };
-    }
-
     internal int ComputeDropIndex(double x)
     {
         double acc = 0;
@@ -465,13 +398,6 @@ public partial class PropertyTabStrip : UserControl
             _dragTimer.Stop();
             _dragTimer.Tick -= OnDragTick;
             _dragTimer = null;
-        }
-        if (_dragPopup != null)
-        {
-            // ponytail: Window needs explicit Close() — Hide()+null leaves the
-            // HWND alive until next GC pass.
-            try { _dragPopup.Close(); } catch { }
-            _dragPopup = null;
         }
         if (_isTransferring && _transferTarget != null)
             _transferTarget.HandleTransferDragLeave();
