@@ -93,6 +93,11 @@ public partial class PropertyTabStrip : UserControl
         TabsHost.ItemsSource = Tabs;
     }
 
+    // ponytail: backward-compat alias — the XAML no longer declares the inner
+    // ItemsControl directly; it lives inside PropertyTabScroller.TabsHostInner.
+    // All existing `TabsHost` references in this file continue to work.
+    ItemsControl TabsHost => TabsScroller.TabsHost;
+
     /// <summary>Force-cancel any in-progress drag and clean up the feedback window.
     /// Called from PropertyWindow on Deactivated / Escape to prevent orphaned windows.</summary>
     public void CancelDrag()
@@ -141,16 +146,29 @@ public partial class PropertyTabStrip : UserControl
         if (_dragTab == null || _dragFromIndex < 0) return;
         if (e.LeftButton != MouseButtonState.Pressed) return;
         var pos = e.GetPosition(this);
+        var stripBounds = new Rect(0, 0, ActualWidth, ActualHeight);
+        bool outsideStrip = !stripBounds.Contains(pos);
 
         if (!_dragArmed && Math.Abs(pos.X - _dragOrigin.X) > 5)
             _dragArmed = true;
 
-        if (!_dragOutArmed && Math.Abs(pos.X - _dragOrigin.X) > 40)
+        // ponytail: arm drag-out when the cursor leaves the strip, not on a
+        // 40px horizontal threshold. The strip is narrow so a small vertical
+        // wobble used to commit drag-out and pop a stray floating PropertyWindow
+        // — that's the "莫名其妙的小浮窗" bug.
+        if (!_dragOutArmed && outsideStrip)
             _dragOutArmed = true;
         // No CaptureMouse — window-level PreviewMouseMove routes events here.
 
-        if (_dragOutArmed && _dragOutFeedback == null && _dragOutTab != null)
+        // Feedback chip only appears once armed AND cursor is already outside
+        // the strip, so a normal reorder drag never flashes it.
+        if (_dragOutArmed && _dragOutFeedback == null && _dragOutTab != null && outsideStrip)
         {
+            // ponytail: hit-test invisible so mouse events pass through to the
+            // underlying PropertyWindow and RootBorder.PreviewMouseLeftButtonUp
+            // can still clean up. ShowActivated=false keeps the original window
+            // activated — otherwise Window_Deactivated would fire and CancelDrag
+            // would yank the chip away mid-drag.
             _dragOutFeedback = new Window
             {
                 Width = 160, Height = 32,
@@ -158,12 +176,15 @@ public partial class PropertyTabStrip : UserControl
                 AllowsTransparency = true,
                 Background = Brushes.Transparent,
                 Topmost = true, ShowInTaskbar = false, Opacity = 0.85,
+                IsHitTestVisible = false,
+                ShowActivated = false,
                 Content = new Border
                 {
                     Background = (Brush)FindResource("Brush.Bg.Chrome"),
                     BorderBrush = (Brush)FindResource("Brush.Accent"),
                     BorderThickness = new Thickness(1),
                     CornerRadius = new CornerRadius(4),
+                    IsHitTestVisible = false,
                     Child = new TextBlock
                     {
                         Text = _dragOutTab.Title,
@@ -184,13 +205,9 @@ public partial class PropertyTabStrip : UserControl
             _dragOutFeedback.Top = screen.Y - 16;
         }
 
-        // Detect cursor leaving the strip — mark as drag-out.
-        if (_dragOutArmed && !_isDragOut)
-        {
-            var stripBounds = new Rect(0, 0, ActualWidth, ActualHeight);
-            if (!stripBounds.Contains(pos))
-                _isDragOut = true;
-        }
+        // Ponytail: commit drag-out once armed and the cursor has left the strip.
+        if (_dragOutArmed && !_isDragOut && outsideStrip)
+            _isDragOut = true;
     }
 
     // ── Window-level preview handlers (called from PropertyWindow) ──
@@ -199,10 +216,17 @@ public partial class PropertyTabStrip : UserControl
     /// detection works even when the cursor has left the strip bounds.</summary>
     public void HandlePreviewMouseMove(MouseEventArgs e)
     {
-        if (_dragTab == null || !_dragOutArmed) return;
+        if (_dragTab == null) return;
         if (e.LeftButton != MouseButtonState.Pressed) return;
 
         var pos = e.GetPosition(this);
+        var stripBounds = new Rect(0, 0, ActualWidth, ActualHeight);
+        bool outsideStrip = !stripBounds.Contains(pos);
+
+        // ponytail: arm drag-out here too — once the cursor has left the tab
+        // Border but is still on the PropertyWindow, only this handler fires.
+        if (!_dragOutArmed && outsideStrip)
+            _dragOutArmed = true;
 
         // Update feedback window position.
         if (_dragOutFeedback != null)
@@ -212,13 +236,9 @@ public partial class PropertyTabStrip : UserControl
             _dragOutFeedback.Top = screen.Y - 16;
         }
 
-        // Detect cursor leaving the strip.
-        if (!_isDragOut)
-        {
-            var stripBounds = new Rect(0, 0, ActualWidth, ActualHeight);
-            if (!stripBounds.Contains(pos))
-                _isDragOut = true;
-        }
+        // ponytail: commit drag-out once armed and the cursor has left the strip.
+        if (!_isDragOut && outsideStrip)
+            _isDragOut = true;
     }
 
     /// <summary>Called by PropertyWindow.RootBorder_PreviewMouseLeftButtonUp so the
@@ -261,22 +281,25 @@ public partial class PropertyTabStrip : UserControl
 
     // ── Strip-level MouseUp (kept for reorder when drop is inside the strip) ──
 
-    void TabsHost_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    void TabsScroller_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        // If drag-out was in progress, the window-level handler already dealt with it.
+        // delegate to original strip-level handler logic (kept verbatim below)
+        HandleTabsHostMouseLeftButtonUp(e);
+    }
+
+    void HandleTabsHostMouseLeftButtonUp(MouseButtonEventArgs e)
+    {
         if (_dragOutArmed && _isDragOut)
         {
             ResetDrag();
             e.Handled = true;
             return;
         }
-
         if (!_dragArmed || _dragTab == null || _dragFromIndex < 0)
         {
             ResetDrag();
             return;
         }
-
         var dropX = e.GetPosition(TabsHost).X;
         int dropIndex = ComputeDropIndex(dropX);
         if (dropIndex >= 0 && dropIndex != _dragFromIndex && dropIndex != _dragFromIndex + 1)

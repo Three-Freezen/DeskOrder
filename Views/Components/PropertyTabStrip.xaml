@@ -105,14 +105,10 @@
   <Border Background="{DynamicResource Brush.Bg.Base}"
           BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="0,0,0,1"
           Padding="0,4">
-    <ScrollViewer x:Name="TabsScroller" HorizontalScrollBarVisibility="Hidden"
-                  VerticalScrollBarVisibility="Disabled">
-      <ItemsControl x:Name="TabsHost" ItemTemplate="{StaticResource PropertyTabTemplate}"
-                  MouseLeftButtonUp="TabsHost_MouseLeftButtonUp">
-        <ItemsControl.ItemsPanel>
-          <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
-        </ItemsControl.ItemsPanel>
-      </ItemsControl>
-    </ScrollViewer>
+    <local:PropertyTabScroller x:Name="TabsScroller"
+                               MouseLeftButtonUp="TabsScroller_MouseLeftButtonUp"
+                               Tabs="{Binding Tabs, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                               ItemTemplate="{StaticResource PropertyTabTemplate}"
+                               MinTabWidth="100"/>
   </Border>
 </UserControl>

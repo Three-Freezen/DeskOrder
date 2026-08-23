@@ -1,0 +1,40 @@
+<UserControl x:Class="DesktopZones.Views.Components.PropertyTabScroller"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:DesktopZones.Views.Components"
+             x:Name="Root">
+  <Grid>
+    <Grid.ColumnDefinitions>
+      <ColumnDefinition Width="Auto"/>
+      <ColumnDefinition Width="*"/>
+      <ColumnDefinition Width="Auto"/>
+    </Grid.ColumnDefinitions>
+
+    <Button x:Name="BtnLeft" Grid.Column="0" Width="24" Padding="0"
+            Visibility="Collapsed" Click="BtnLeft_Click"
+            Background="Transparent" BorderThickness="0" Cursor="Hand">
+      <Path Width="8" Height="8" Stretch="Uniform" StrokeThickness="1.5"
+            Stroke="{DynamicResource Brush.Text.Secondary}"
+            Data="M 4,0 L 0,4 L 4,8"/>
+    </Button>
+
+    <ScrollViewer x:Name="Scroller" Grid.Column="1"
+                  HorizontalScrollBarVisibility="Hidden"
+                  VerticalScrollBarVisibility="Disabled">
+      <ItemsControl x:Name="TabsHostInner"
+                    MouseLeftButtonUp="TabsHost_MouseLeftButtonUp">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+      </ItemsControl>
+    </ScrollViewer>
+
+    <Button x:Name="BtnRight" Grid.Column="2" Width="24" Padding="0"
+            Visibility="Collapsed" Click="BtnRight_Click"
+            Background="Transparent" BorderThickness="0" Cursor="Hand">
+      <Path Width="8" Height="8" Stretch="Uniform" StrokeThickness="1.5"
+            Stroke="{DynamicResource Brush.Text.Secondary}"
+            Data="M 0,0 L 4,4 L 0,8"/>
+    </Button>
+  </Grid>
+</UserControl>
