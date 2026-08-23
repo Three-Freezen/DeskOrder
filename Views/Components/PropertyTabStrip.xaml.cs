@@ -99,10 +99,6 @@ public partial class PropertyTabStrip : UserControl
     Point _dragOrigin;
     bool _dragArmed;
     bool _dragCompleted;     // guard so reset-on-release only runs once
-    // ponytail: cursor position relative to the tab's top-left at mousedown
-    // (screen coords). The chip positions itself so the cursor stays at this
-    // same offset on the chip — like dragging a window by its title bar.
-    double _grabOffsetX, _grabOffsetY;
 
     PropertyTab? _dragOutTab;
     bool _dragOutArmed;
@@ -188,14 +184,6 @@ public partial class PropertyTabStrip : UserControl
             _dragOutArmed = false;
             _isDragOut = false;
             _dragInsertIndex = _dragFromIndex;
-            // ponytail: grab point on the tab in screen coords — the cursor's
-            // offset from the tab's top-left at mousedown. During drag the
-            // chip is placed so this offset is preserved, matching the feel
-            // of dragging a window by the title bar.
-            var borderScreen = ((Border)sender).PointToScreen(new Point(0, 0));
-            var cursorScreen = PointToScreen(e.GetPosition(this));
-            _grabOffsetX = cursorScreen.X - borderScreen.X;
-            _grabOffsetY = cursorScreen.Y - borderScreen.Y;
             StartDragTimer();
         }
     }
@@ -253,14 +241,15 @@ public partial class PropertyTabStrip : UserControl
 
         // ponytail: show chip the first time drag-out arms (and cursor is
         // already outside the strip). Window.Show() is non-blocking —
-        // returns immediately. Position via grab offset so the cursor
-        // stays at the same relative point on the chip as it was on
-        // the tab at mousedown — like dragging a window.
+        // returns immediately. Position the cursor on the chip's title bar
+        // (top-center), the way a window sits under its cursor while being
+        // dragged — the chip extends ~80px left/right and ~32px below the
+        // cursor so the cursor reads as "on the title bar".
         if (_dragPopup == null && _dragOutTab != null && outsideStrip)
         {
             _dragPopup = CreateDragPopup(_dragOutTab);
-            _dragPopup.Left = screen.X - _grabOffsetX;
-            _dragPopup.Top = screen.Y - _grabOffsetY;
+            _dragPopup.Left = screen.X - 80;
+            _dragPopup.Top = screen.Y - 4;
             _dragPopup.Show();
         }
 
@@ -269,8 +258,8 @@ public partial class PropertyTabStrip : UserControl
         // so a stationary cursor doesn't cause flicker.
         if (_dragPopup != null)
         {
-            _dragPopup.Left = screen.X - _grabOffsetX;
-            _dragPopup.Top = screen.Y - _grabOffsetY;
+            _dragPopup.Left = screen.X - 80;
+            _dragPopup.Top = screen.Y - 4;
         }
 
         // Commit drag-out once armed and the cursor has actually left.
@@ -527,9 +516,15 @@ public partial class PropertyTabStrip : UserControl
 
         // ponytail: pass the cursor's screen position so the new floating
         // PropertyWindow opens at the drop point (not at the right-edge fallback
-        // in ResolvePopPosition), with a fixed initial size so it doesn't
-        // inherit whatever the user last resized the previous PropertyWindow to.
-        main.OpenFloatingProperty(target, screenPos, new Size(360, 480));
+        // in ResolvePopPosition), and inherit the docked panel's dimensions so
+        // the popped-out window is the same shape as the area the tab came
+        // from. Fall back to 360×480 if the docked panel hasn't been measured
+        // yet (ActualWidth/Height = 0).
+        var w = main.DockedPanel?.ActualWidth ?? 0;
+        var h = main.DockedPanel?.ActualHeight ?? 0;
+        if (w <= 0) w = 360;
+        if (h <= 0) h = 480;
+        main.OpenFloatingProperty(target, screenPos, new Size(w, h));
         CloseTab(tab.Key);
     }
 
