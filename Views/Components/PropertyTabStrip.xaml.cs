@@ -1,12 +1,16 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
+using System.Windows.Threading;
 using DesktopZones.Models;
 using DesktopZones.Services;
 using DesktopZones.ViewModels;
@@ -87,6 +91,20 @@ public partial class PropertyTabStrip : UserControl
     bool _isDragOut;           // true when cursor left the strip during drag-out
     Window? _dragOutFeedback;
 
+    // ── Drag visual + transfer state ──
+    PropertyTabGhost? _dragGhost;
+    AdornerLayer? _dragGhostLayer;
+    int _dragInsertIndex = -1;
+    bool _isTransferring;
+    Border? _dropIndicator;
+    PropertyTabStrip? _transferTarget;
+
+    // ── Transfer drop indicator (called by source strip's drag loop) ──
+    DropIndicatorAdorner? _dropIndicatorAdorner;
+    int _pendingInsertIndex = -1;
+
+    readonly Dictionary<PropertyTab, double> _pendingSlide = new();
+
     public PropertyTabStrip()
     {
         InitializeComponent();
@@ -97,6 +115,9 @@ public partial class PropertyTabStrip : UserControl
     // ItemsControl directly; it lives inside PropertyTabScroller.TabsHostInner.
     // All existing `TabsHost` references in this file continue to work.
     ItemsControl TabsHost => TabsScroller.TabsHost;
+
+    /// <summary>Forward to scroller so callers don't need to know about the inner host.</summary>
+    public void ScrollIntoView(PropertyTab tab) => TabsScroller.ScrollIntoView(tab);
 
     /// <summary>Force-cancel any in-progress drag and clean up the feedback window.
     /// Called from PropertyWindow on Deactivated / Escape to prevent orphaned windows.</summary>
@@ -138,6 +159,30 @@ public partial class PropertyTabStrip : UserControl
             _dragOutTab = tab;
             _dragOutArmed = false;
             _isDragOut = false;
+            _dragInsertIndex = _dragFromIndex;
+
+            // ponytail: create the ghost once on press so the user sees
+            // immediate pickup feedback even before threshold is crossed.
+            // Hide it until _dragArmed fires (5px threshold) to keep clicks
+            // totally clean — only drags get a ghost.
+            _dragGhostLayer = AdornerLayer.GetAdornerLayer(TabsScroller);
+            if (_dragGhostLayer != null)
+            {
+                _dragGhost = new PropertyTabGhost(TabsScroller, tab);
+                _dragGhost.Visibility = Visibility.Collapsed;
+                _dragGhostLayer.Add(_dragGhost);
+            }
+        }
+    }
+
+    void TabRoot_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Middle) return;
+        if (sender is Border { DataContext: PropertyTab tab })
+        {
+            CloseTab(tab.Key);
+            PropertyWindowManager.Instance.CheckEmptyFloatingAndClose(this);
+            e.Handled = true;
         }
     }
 
@@ -151,6 +196,15 @@ public partial class PropertyTabStrip : UserControl
 
         if (!_dragArmed && Math.Abs(pos.X - _dragOrigin.X) > 5)
             _dragArmed = true;
+
+        // ponytail: once armed, reveal the ghost and follow the cursor.
+        if (_dragArmed && _dragGhost != null)
+        {
+            if (_dragGhost.Visibility == Visibility.Collapsed)
+                _dragGhost.Visibility = Visibility.Visible;
+            var screen = PointToScreen(pos);
+            _dragGhost.UpdatePosition(screen);
+        }
 
         // ponytail: arm drag-out when the cursor leaves the strip, not on a
         // 40px horizontal threshold. The strip is narrow so a small vertical
@@ -208,6 +262,55 @@ public partial class PropertyTabStrip : UserControl
         // Ponytail: commit drag-out once armed and the cursor has left the strip.
         if (_dragOutArmed && !_isDragOut && outsideStrip)
             _isDragOut = true;
+
+        // ponytail: cross-window transfer — if drag-out is armed AND cursor is
+        // over another strip's hit zone, mark transferring and tell the target
+        // to show its drop indicator. Otherwise, leave any previous target.
+        if (_dragOutArmed && outsideStrip)
+        {
+            var screen = PointToScreen(pos);
+            var target = TabDragRouter.FindDropTarget(screen);
+            if (target != null && target != this)
+            {
+                if (!_isTransferring || target != _transferTarget)
+                {
+                    if (_isTransferring) _transferTarget?.HandleTransferDragLeave();
+                    _isTransferring = true;
+                    _transferTarget = target;
+                    target.HandleTransferDragEnter(ComputeInsertFor(target, screen));
+                }
+                else
+                {
+                    target.HandleTransferDragMove(ComputeInsertFor(target, screen));
+                }
+            }
+            else if (_isTransferring)
+            {
+                _transferTarget?.HandleTransferDragLeave();
+                _isTransferring = false;
+                _transferTarget = null;
+            }
+        }
+
+        // ponytail: live reorder while drag stays inside the strip. The ghost
+        // and the moved tab occupy the same slot visually (ghost is on top via
+        // AdornerLayer), so MoveTab shifts the others — animate them with
+        // TranslateTransform per §4.1 of the spec.
+        if (_dragArmed && !outsideStrip && _dragTab != null)
+        {
+            int newIndex = ComputeDropIndex(pos.X);
+            if (newIndex >= 0 && newIndex != _dragInsertIndex
+                && newIndex != _dragFromIndex && newIndex != _dragFromIndex + 1)
+            {
+                int target = newIndex;
+                if (target > _dragFromIndex) target--;
+                CaptureSlidePositions(Math.Min(_dragFromIndex, target), Math.Max(_dragFromIndex, target));
+                MoveTab(_dragFromIndex, target);
+                _dragFromIndex = target;
+                _dragInsertIndex = newIndex;
+                Dispatcher.BeginInvoke(new Action(PlaySlideAnimations), DispatcherPriority.Loaded);
+            }
+        }
     }
 
     // ── Window-level preview handlers (called from PropertyWindow) ──
@@ -245,6 +348,26 @@ public partial class PropertyTabStrip : UserControl
     /// drop is always detected, even when the cursor is outside the strip.</summary>
     public void HandlePreviewMouseLeftButtonUp(MouseEventArgs e)
     {
+        // ponytail: cross-window transfer takes priority over plain drag-out.
+        // If we're transferring into another strip, route the tab there.
+        if (_isTransferring && _transferTarget != null && _dragOutTab != null)
+        {
+            var tab = _dragOutTab;
+            var key = tab.Key;
+            _transferTarget.HandleTransferDragLeave();
+            CleanupDragOutFeedback();
+            CleanupDragGhost();
+            PropertyWindowManager.Instance.TransferTab(this, _transferTarget, key);
+            // ponytail: scroll the newly-added tab into view on the target
+            // strip — TransferTab re-opens via OpenOrFocus which keeps the
+            // existing instance focused, but if it's a new entry in an
+            // overflowed strip we want it visible.
+            _transferTarget.ScrollIntoView(tab);
+            ResetDrag();
+            e.Handled = true;
+            return;
+        }
+        // not transferring — fall through to drag-out / reorder
         if (_dragOutArmed && _dragOutTab != null)
         {
             CleanupDragOutFeedback();
@@ -313,7 +436,7 @@ public partial class PropertyTabStrip : UserControl
         e.Handled = true;
     }
 
-    int ComputeDropIndex(double x)
+    internal int ComputeDropIndex(double x)
     {
         double acc = 0;
         for (int i = 0; i < Tabs.Count; i++)
@@ -327,15 +450,77 @@ public partial class PropertyTabStrip : UserControl
         return Tabs.Count;
     }
 
+    // ── Slide animation (§4.1) ──
+
+    void CaptureSlidePositions(int from, int to)
+    {
+        _pendingSlide.Clear();
+        for (int i = from; i <= to; i++)
+        {
+            if (i < 0 || i >= Tabs.Count) continue;
+            var tab = Tabs[i];
+            var container = (FrameworkElement)TabsHost.ItemContainerGenerator.ContainerFromItem(tab);
+            if (container == null) continue;
+            var x = container.TranslatePoint(new Point(0, 0), TabsScroller).X;
+            _pendingSlide[tab] = x;
+        }
+    }
+
+    void PlaySlideAnimations()
+    {
+        foreach (var kv in _pendingSlide)
+        {
+            var container = (FrameworkElement)TabsHost.ItemContainerGenerator.ContainerFromItem(kv.Key);
+            if (container == null) continue;
+            var newX = container.TranslatePoint(new Point(0, 0), TabsScroller).X;
+            var delta = kv.Value - newX;
+            if (Math.Abs(delta) < 0.5) continue;
+            var transform = container.RenderTransform as TranslateTransform;
+            if (transform == null) continue;
+            // ponytail: 160ms ease-out per spec §0 决策 9
+            var anim = new DoubleAnimation(delta, 0, TimeSpan.FromMilliseconds(160))
+            {
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            };
+            transform.BeginAnimation(TranslateTransform.XProperty, anim);
+        }
+        _pendingSlide.Clear();
+    }
+
+    // ── Cross-window transfer helper ──
+
+    int ComputeInsertFor(PropertyTabStrip target, Point screenPos)
+    {
+        if (target.TabsHost == null) return -1;
+        var localInHost = target.TabsHost.PointFromScreen(screenPos);
+        return target.ComputeDropIndex(localInHost.X);
+    }
+
     void ResetDrag()
     {
+        CleanupDragGhost();
+        if (_isTransferring && _transferTarget != null)
+            _transferTarget.HandleTransferDragLeave();
         _dragTab = null;
         _dragFromIndex = -1;
         _dragArmed = false;
         _dragOutTab = null;
         _dragOutArmed = false;
         _isDragOut = false;
+        _isTransferring = false;
+        _transferTarget = null;
+        _dragInsertIndex = -1;
         CleanupDragOutFeedback();
+    }
+
+    void CleanupDragGhost()
+    {
+        if (_dragGhost != null && _dragGhostLayer != null)
+        {
+            _dragGhostLayer.Remove(_dragGhost);
+            _dragGhostLayer = null;
+            _dragGhost = null;
+        }
     }
 
     void HandleDragOutDrop(PropertyTab tab, Point screenPos)
@@ -438,5 +623,66 @@ public partial class PropertyTabStrip : UserControl
         if (from == to) return;
         Tabs.Move(from, to);
         RefreshActiveFlag();
+    }
+
+    // ── Transfer drop indicator (public, called by source strip's drag loop) ──
+
+    public void HandleTransferDragEnter(int insertIndex)
+    {
+        EnsureDropIndicator();
+        if (_dropIndicatorAdorner == null) return;
+        _pendingInsertIndex = insertIndex;
+        _dropIndicatorAdorner.InvalidateVisual();
+    }
+
+    public void HandleTransferDragMove(int insertIndex)
+    {
+        _pendingInsertIndex = insertIndex;
+        _dropIndicatorAdorner?.InvalidateVisual();
+    }
+
+    public void HandleTransferDragLeave()
+    {
+        // ponytail: hide by clearing the index and invalidating — the adorner
+        // simply draws nothing when index is -1.
+        _pendingInsertIndex = -1;
+        _dropIndicatorAdorner?.InvalidateVisual();
+    }
+
+    void EnsureDropIndicator()
+    {
+        if (_dropIndicatorAdorner != null || TabsScroller == null) return;
+        var layer = AdornerLayer.GetAdornerLayer(TabsScroller);
+        if (layer == null) return;
+        _dropIndicatorAdorner = new DropIndicatorAdorner(TabsScroller, this);
+        layer.Add(_dropIndicatorAdorner);
+    }
+
+    sealed class DropIndicatorAdorner : Adorner
+    {
+        readonly PropertyTabStrip _owner;
+        public DropIndicatorAdorner(UIElement adorned, PropertyTabStrip owner) : base(adorned)
+        {
+            _owner = owner;
+            IsHitTestVisible = false;
+        }
+        protected override void OnRender(DrawingContext dc)
+        {
+            var idx = _owner._pendingInsertIndex;
+            var host = _owner.TabsScroller;
+            if (idx < 0 || host == null || _owner.TabsHost == null) return;
+            double x;
+            if (idx >= _owner.Tabs.Count)
+                x = host.ActualWidth - 1;
+            else
+            {
+                var container = (FrameworkElement)_owner.TabsHost.ItemContainerGenerator.ContainerFromIndex(idx);
+                if (container == null) return;
+                var p = container.TranslatePoint(new Point(0, 0), host);
+                x = p.X - 1;
+            }
+            var brush = (System.Windows.Media.Brush)_owner.FindResource("Brush.Accent");
+            dc.DrawRectangle(brush, null, new Rect(x, 4, 2, host.ActualHeight - 8));
+        }
     }
 }

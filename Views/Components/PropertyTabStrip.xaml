@@ -11,7 +11,11 @@
               Cursor="Hand"
               MouseLeftButtonDown="TabRoot_MouseLeftButtonDown"
               MouseLeftButtonUp="TabRoot_MouseLeftButtonUp"
-              MouseMove="TabRoot_MouseMove">
+              MouseMove="TabRoot_MouseMove"
+              PreviewMouseDown="TabRoot_PreviewMouseDown">
+        <Border.RenderTransform>
+          <TranslateTransform x:Name="TabTransform"/>
+        </Border.RenderTransform>
         <Border.Style>
           <Style TargetType="Border">
             <Setter Property="Background" Value="{DynamicResource Brush.Bg.Base}"/>
