@@ -114,6 +114,11 @@ public partial class ZoneWindow : Window
         { IsEnabled = _zone.EnableRestoreButton };
         // ponytail: 2026-08-21 — pick up live changes from MotionSettingsDialog.
         _zone.HoverExpandSettingsChanged += OnHoverExpandSettingsChanged;
+        // ponytail: ghost-glass fix — acrylic follows the expand state: enable glass when
+        // content expands (hover preview / click), disable when it collapses, so a collapsed
+        // zone shows ONLY the RestoreButton and never a full-window glass rectangle.
+        _hover.Expanded += ReapplyAcrylic;
+        _hover.Collapsed += () => AcrylicHelper.DisableBlur(this);
         // ponytail: bug fix — ZoneManager.ShowZone new-window branch calls window.Show()
         // but NOT window.ShowZone(), so SnapToExpanded never runs and _isExpanded stays
         // false. Clicking Hide then early-returns inside CollapseAnimated ("!_isExpanded")
@@ -1052,9 +1057,25 @@ public partial class ZoneWindow : Window
     }
 
     // ── Acrylic / frosted glass ──
+    /// <summary>
+    /// ponytail: ghost-glass fix — re-enable liquid glass when the zone expands from the
+    /// RestoreButton (hover preview or click). Routes through ApplyAcrylic so the
+    /// expanded-state gate stays the single source of truth for EnableBlur.
+    /// </summary>
+    void ReapplyAcrylic()
+    {
+        var s = ResolveStyle();
+        ApplyAcrylic(s.FillColor, s.TitleBarFillColor);
+    }
+
     void ApplyAcrylic(string fillColor, string titleBarFillColor)
     {
-        if (_zone.EnableAcrylic)
+        // ponytail: ghost-glass fix — a collapsed zone keeps its full-size window (only the
+        // RestoreButton is visible), so enabling acrylic here would tint the WHOLE window
+        // bounds with a ghost glass rectangle. Only enable blur while the content is
+        // expanded; whenever collapsed (or mid-collapse), disable it instead.
+        bool expanded = _hover?.IsExpanded ?? false;
+        if (_zone.EnableAcrylic && expanded)
         {
             var blurResult = AcrylicHelper.EnableBlur(this, _zone.GlassBlurAmount, _zone.GlassTintOpacity, _zone.GlassTintLuminosity, _zone.GlassColorMode);
             if (!blurResult.Success)

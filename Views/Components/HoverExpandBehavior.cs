@@ -80,6 +80,19 @@ public class HoverExpandBehavior : IDisposable
 
     public bool IsEnabled { get; set; }
 
+    /// <summary>
+    /// ponytail: ghost-glass fix — true while content is expanded (set by SnapToExpanded /
+    /// ExpandAnimated). Host windows read this to gate DWM acrylic so a collapsed window
+    /// (full-size, content scaled to 0) never re-enables the full-window glass tint.
+    /// </summary>
+    public bool IsExpanded => _isExpanded;
+
+    /// <summary>Fired when content becomes visible (animated expand, hover or click).</summary>
+    public event Action? Expanded;
+
+    /// <summary>Fired when content finishes collapsing to the RestoreButton.</summary>
+    public event Action? Collapsed;
+
     readonly MouseEventHandler _enterHandler;
     readonly MouseEventHandler _exitHandler;
 
@@ -295,6 +308,14 @@ public class HoverExpandBehavior : IDisposable
                 // let StartAnimation drive them from current value to 0/1.
                 break;
         }
+
+        // ponytail: ghost-content fix — Opacity is ONLY animated by Fade. Every other
+        // kind keeps Opacity=1 permanently. SnapToCollapsed sets Opacity=0 and, without
+        // this restore, the next expand would scale the content up with Opacity still 0:
+        // an empty full-window glass block after "settings change while collapsed →
+        // click restore". (Fade expands from the stored 0 → fade-in; None syncs its own.)
+        if (kind != HoverExpandAnimationKind.Fade && kind != HoverExpandAnimationKind.None)
+            _expandedContent.Opacity = 1;
     }
 
     void CheckMouseState()
@@ -324,6 +345,9 @@ public class HoverExpandBehavior : IDisposable
         _expandedContent.Visibility = Visibility.Visible;
         _collapsedButton!.Visibility = Visibility.Collapsed;
         if (_expandedModeElement != null) _expandedModeElement.Visibility = Visibility.Visible;
+        // ponytail: notify hosts AFTER the state flip so their acrylic re-apply sees
+        // IsExpanded == true (ghost-glass fix: liquid glass only while expanded).
+        Expanded?.Invoke();
         StartAnimation(isExpand: true);
     }
 
@@ -361,6 +385,8 @@ public class HoverExpandBehavior : IDisposable
                 _expandedContent.Visibility = Visibility.Collapsed;
                 _collapsedButton!.Visibility = Visibility.Visible;
                 if (_expandedModeElement != null) _expandedModeElement.Visibility = Visibility.Collapsed;
+                // ponytail: ghost-glass fix — hosts disable DWM acrylic once collapsed.
+                Collapsed?.Invoke();
             }
         };
         safetyTimer.Start();
@@ -370,6 +396,7 @@ public class HoverExpandBehavior : IDisposable
             _expandedContent.Visibility = Visibility.Collapsed;
             _collapsedButton!.Visibility = Visibility.Visible;
             if (_expandedModeElement != null) _expandedModeElement.Visibility = Visibility.Collapsed;
+            Collapsed?.Invoke();
             onComplete?.Invoke();
         });
     }

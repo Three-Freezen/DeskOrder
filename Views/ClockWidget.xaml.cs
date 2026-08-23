@@ -84,6 +84,10 @@ public partial class ClockWidget : Window
             () => _clock.HoverExpandOrigin,
             () => _clock.HoverAutoExpand)
         { IsEnabled = _clock.EnableRestoreButton };
+        // ponytail: ghost-glass fix — see ZoneWindow. Acrylic follows the expand state so a
+        // collapsed clock shows ONLY the RestoreButton (no full-window glass rectangle).
+        _hover.Expanded += ApplyAcrylic;
+        _hover.Collapsed += () => AcrylicHelper.DisableBlur(this);
         // ponytail: bug fix — see ZoneWindow ctor for full rationale. Window.Show()
         // (called by OpenClockWindow / --spawn-widget) doesn't route through
         // ShowClock, so SnapToExpanded never fires and HideClock → CollapseAnimated
@@ -437,7 +441,11 @@ public partial class ClockWidget : Window
         string borderColorStr = _clock.UseGlobalAppearance ? config.GlobalBorderColor : _clock.BorderColor;
         double borderThickness = _clock.UseGlobalAppearance ? config.GlobalBorderThickness : _clock.BorderThickness;
 
-        if (_clock.EnableAcrylic)
+        // ponytail: ghost-glass fix — acrylic follows the expand state: a collapsed clock
+        // keeps its full-size window (only the RestoreButton shows), so enabling blur here
+        // would paint the tint across the whole window. Only enable while expanded.
+        bool expanded = _hover?.IsExpanded ?? false;
+        if (_clock.EnableAcrylic && expanded)
         {
             var blurResult = AcrylicHelper.EnableBlur(this, _clock.GlassBlurAmount, _clock.GlassTintOpacity,
                 _clock.GlassTintLuminosity, _clock.GlassColorMode);
@@ -777,7 +785,6 @@ public partial class ClockWidget : Window
         // though the user hasn't touched anything.
         if (!skipResync)
         {
-            ApplyAcrylic();
             _clock.IsVisible = true;
             _widgetService.UpdateClock(_clock);
         }
@@ -790,6 +797,11 @@ public partial class ClockWidget : Window
         Left = _clock.X; Top = _clock.Y;
         MainContent.Visibility = Visibility.Visible; RestoreButton.Visibility = Visibility.Collapsed;
         _hover?.SnapToExpanded();
+        // ponytail: ghost-glass fix — re-apply acrylic AFTER SnapToExpanded so the
+        // expanded-state gate sees IsExpanded == true and re-enables liquid glass when
+        // showing from the collapsed button.
+        if (!skipResync)
+            ApplyAcrylic();
         MinWidth = 140; MinHeight = 80;
         Width = _clock.Width > 140 ? _clock.Width : 320;
         Height = _clock.Height > 80 ? _clock.Height : 140;

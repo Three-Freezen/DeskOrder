@@ -70,6 +70,10 @@ public partial class CalendarWidget : Window
             () => _calendar.HoverExpandOrigin,
             () => _calendar.HoverAutoExpand)
         { IsEnabled = _calendar.EnableRestoreButton };
+        // ponytail: ghost-glass fix — see ZoneWindow. Acrylic follows the expand state so a
+        // collapsed calendar shows ONLY the RestoreButton (no full-window glass rectangle).
+        _hover.Expanded += ApplyAcrylic;
+        _hover.Collapsed += () => AcrylicHelper.DisableBlur(this);
         // ponytail: bug fix — see ZoneWindow ctor. Window.Show() (OpenCalendarWindow /
         // --spawn-widget) bypasses ShowCalendar, so SnapToExpanded never runs.
         if (_calendar.IsVisible) _hover.SnapToExpanded();
@@ -320,7 +324,11 @@ public partial class CalendarWidget : Window
         string borderColorStr = _calendar.UseGlobalAppearance ? config.GlobalBorderColor : _calendar.BorderColor;
         double borderThickness = _calendar.UseGlobalAppearance ? config.GlobalBorderThickness : _calendar.BorderThickness;
 
-        if (_calendar.EnableAcrylic)
+        // ponytail: ghost-glass fix — see ZoneWindow/ClockWidget. A collapsed calendar keeps
+        // its full-size window, so enabling blur here would paint the tint across the whole
+        // window. Only enable while content is expanded.
+        bool expanded = _hover?.IsExpanded ?? false;
+        if (_calendar.EnableAcrylic && expanded)
         {
             var blurResult = AcrylicHelper.EnableBlur(this, _calendar.GlassBlurAmount, _calendar.GlassTintOpacity,
                 _calendar.GlassTintLuminosity, _calendar.GlassColorMode);
@@ -867,7 +875,6 @@ public partial class CalendarWidget : Window
         // though the user hasn't touched anything.
         if (!skipResync)
         {
-            ApplyAcrylic();
             _calendar.IsVisible = true;
             _widgetService.UpdateCalendar(_calendar);
         }
@@ -878,6 +885,11 @@ public partial class CalendarWidget : Window
         Left = _calendar.X; Top = _calendar.Y;
         MainContent.Visibility = Visibility.Visible; RestoreButton.Visibility = Visibility.Collapsed;
         _hover?.SnapToExpanded();
+        // ponytail: ghost-glass fix — re-apply acrylic AFTER SnapToExpanded so the
+        // expanded-state gate sees IsExpanded == true and re-enables liquid glass when
+        // showing from the collapsed button.
+        if (!skipResync)
+            ApplyAcrylic();
         MinWidth = 260; MinHeight = 460;
         Width = _calendar.Width > 260 ? _calendar.Width : 320;
         Height = _calendar.Height > 340 ? _calendar.Height : 440;

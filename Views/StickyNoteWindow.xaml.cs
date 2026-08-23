@@ -91,6 +91,10 @@ public partial class StickyNoteWindow : Window
             () => _note.HoverExpandOrigin,
             () => _note.HoverAutoExpand)
         { IsEnabled = _note.EnableRestoreButton };
+        // ponytail: ghost-glass fix — see ZoneWindow. Acrylic follows the expand state so a
+        // collapsed note shows ONLY the RestoreButton (no full-window glass rectangle).
+        _hover.Expanded += ApplyAcrylic;
+        _hover.Collapsed += () => AcrylicHelper.DisableBlur(this);
         // ponytail: bug fix — see ZoneWindow ctor. ShowNoteFromService / OpenNoteWindow
         // call window.Show() without going through the equivalent of ShowZone, so
         // SnapToExpanded never runs.
@@ -440,10 +444,13 @@ public partial class StickyNoteWindow : Window
         // Save dimensions before any reference swap can occur
         var savedW = _note.Width; var savedH = _note.Height;
         if (!IsVisible) Show();
-        ApplyAcrylic();
         Left = _note.X; Top = _note.Y;
         MainContent.Visibility = Visibility.Visible; RestoreButton.Visibility = Visibility.Collapsed;
         _hover?.SnapToExpanded();
+        // ponytail: ghost-glass fix — re-apply acrylic AFTER SnapToExpanded so the
+        // expanded-state gate sees IsExpanded == true and re-enables liquid glass when
+        // showing from the collapsed button.
+        ApplyAcrylic();
         MinWidth = 180; MinHeight = 120;
         _note.IsVisible = true; if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
         NativeMethods.SetRoundedCorners(this, 10);
@@ -537,7 +544,11 @@ public partial class StickyNoteWindow : Window
         string borderColorStr = _note.UseGlobalAppearance ? config.GlobalBorderColor : _note.BorderColor;
         double borderThickness = _note.UseGlobalAppearance ? config.GlobalBorderThickness : _note.BorderThickness;
 
-        if (_note.EnableAcrylic)
+        // ponytail: ghost-glass fix — see ZoneWindow. A collapsed note keeps its full-size
+        // window, so enabling blur here would paint the tint across the whole window.
+        // Only enable while content is expanded; collapsed / acrylic-off → disable.
+        bool expanded = _hover?.IsExpanded ?? false;
+        if (_note.EnableAcrylic && expanded)
         {
             var blurResult = AcrylicHelper.EnableBlur(this, _note.GlassBlurAmount, _note.GlassTintOpacity,
                 _note.GlassTintLuminosity, _note.GlassColorMode);
@@ -553,6 +564,9 @@ public partial class StickyNoteWindow : Window
         }
         else
         {
+            // ponytail: ghost-glass fix — this branch previously never disabled blur, so
+            // toggling acrylic off (or collapsing) could leave the full-window blur behind.
+            AcrylicHelper.DisableBlur(this);
             try
             {
                 var fillColor = (Color)ColorConverter.ConvertFromString(fillColorStr)!;
