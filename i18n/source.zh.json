@@ -17,7 +17,7 @@
   "Motion.AnimationKind": "动画类型",
   "Motion.AnimationKindHint": "选择窗口显示时的过渡效果",
   "Motion.Origin": "展开原点",
-  "Motion.OriginHint": "动效从按钮的哪个位置开始",
+  "Motion.OriginHint": "按钮停靠左上角或中央，动效从按钮展开",
   "Motion.Speed": "动画速度",
   "Motion.SpeedHint": "1.0 表示默认速度",
   "Motion.Title": "动效设置",
@@ -25,7 +25,7 @@
   "Motion.UnknownAnimation": "请先选择动效类型和原点",
 
   "MotionAnimationBounceExpand": "弹性展开",
-  "MotionAnimationDirectionalExpand": "方向展开",
+  "MotionAnimationDirectionalExpand": "横向展开",
   "MotionAnimationFade": "淡入淡出",
   "MotionAnimationNone": "无动效",
   "MotionAnimationScaleExpand": "缩放展开",

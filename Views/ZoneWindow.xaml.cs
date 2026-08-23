@@ -196,12 +196,30 @@ public partial class ZoneWindow : Window
 
     // ── Show / Hide ──
 
-    public void ShowZone()
+    public void ShowZone(double waveDelayMs = 0)
     {
+        // ponytail: 2026-08-23 — a window hidden via Hide()/ApplyHidden (full-hide
+        // path) stays in the manager's dictionary when the hide came through
+        // UpdateZone/RefreshZone; ShowZone never re-showed it, so the zone stayed
+        // invisible. Re-show symmetrically with ShowClock/ShowCalendar/ShowNote.
+        if (!IsVisible) Show();
         if (_zone.Width < 100) _zone.Width = 400; if (_zone.Height < 100) _zone.Height = 300;
         Width = _zone.Width; Height = _zone.Height; Left = _zone.X; Top = _zone.Y;
-        MainContent.Visibility = Visibility.Visible; RestoreButton.Visibility = Visibility.Collapsed;
-        _hover?.SnapToExpanded();
+        if (waveDelayMs > 0)
+        {
+            // ponytail: batch "Show All" wave — start collapsed and play the zone's own
+            // configured animation after its stagger delay (each window uses its own
+            // kind/speed/origin, so the batch opens as a staggered cascade).
+            MainContent.Visibility = Visibility.Visible; RestoreButton.Visibility = Visibility.Collapsed;
+            _hover?.SnapToCollapsed();
+            RestoreButton.Visibility = Visibility.Collapsed; // no button flash during the delay
+            _hover?.ShowAfterDelay(waveDelayMs);
+        }
+        else
+        {
+            MainContent.Visibility = Visibility.Visible; RestoreButton.Visibility = Visibility.Collapsed;
+            _hover?.SnapToExpanded();
+        }
         _zone.IsVisible = true;
         // ponytail: BP-A — Visibility=Visible is processed in the next layout pass, so a
         // synchronous ApplyStyle would walk the visual tree before WPF has re-attached
@@ -215,7 +233,7 @@ public partial class ZoneWindow : Window
         _mgr.FireZoneVisibilityChanged(_zone.Id, true);
     }
 
-    public void HideZone()
+    public void HideZone(double waveDelayMs = 0)
     {
         // Save dimensions only if not currently minimized (RestoreButton not visible)
         // If minimized, the original dimensions are already saved in _zone
@@ -224,14 +242,37 @@ public partial class ZoneWindow : Window
             _zone.X = Left; _zone.Y = Top; _zone.Width = Width; _zone.Height = Height;
             _mgr.SaveConfig();
         }
-        AcrylicHelper.DisableBlur(this);
         if (!_zone.EnableRestoreButton)
         {
-            // ponytail: full hide — window itself goes away, RestoreButton never shown.
-            MainContent.Visibility = Visibility.Collapsed;
-            Width = 36; Height = 36;
-            NativeMethods.DisableRoundedCorners(this);
-            Hide();
+            if (waveDelayMs > 0)
+            {
+                // ponytail: batch "Minimize All" wave — play the zone's own collapse
+                // animation first (staggered), then finalize the full hide: the window
+                // shrinks to 36×36, hides and closes itself once the animation finishes.
+                _hover?.CollapseAfterDelay(waveDelayMs, onComplete: () =>
+                {
+                    AcrylicHelper.DisableBlur(this);
+                    _hover?.SnapToFullHidden();
+                    MainContent.Visibility = Visibility.Collapsed;
+                    Width = 36; Height = 36;
+                    NativeMethods.DisableRoundedCorners(this);
+                    Hide();
+                    Close();
+                });
+            }
+            else
+            {
+                // ponytail: full hide — window itself goes away, RestoreButton never shown.
+                // SnapToFullHidden resets the hover state (IsExpanded=false, scale/opacity 0)
+                // so no later ApplyStyle/ApplyAcrylic can re-enable the DWM glass on the
+                // hidden window (the "empty liquid glass" ghost).
+                AcrylicHelper.DisableBlur(this);
+                _hover?.SnapToFullHidden();
+                MainContent.Visibility = Visibility.Collapsed;
+                Width = 36; Height = 36;
+                NativeMethods.DisableRoundedCorners(this);
+                Hide();
+            }
         }
         else
         {
@@ -240,10 +281,26 @@ public partial class ZoneWindow : Window
             // to expand again.
             NativeMethods.DisableRoundedCorners(this);
             if ((DataContext as ZoneViewModel)?.IsLocked != true) NativeMethods.PinToDesktop(this);
-            _hover?.CollapseAnimated();
+            if (waveDelayMs > 0)
+                _hover?.CollapseAfterDelay(waveDelayMs, null);
+            else
+                _hover?.CollapseAnimated();
         }
         _zone.IsVisible = false;
         _mgr.FireZoneVisibilityChanged(_zone.Id, false);
+    }
+
+    /// <summary>
+    /// Batch-wave entrance for a freshly created window ("Show All" after the zone
+    /// window was closed by a full hide): collapse the just-shown content and play
+    /// the zone's own configured expand animation after the stagger delay.
+    /// </summary>
+    public void PlayEntranceAnimation(double waveDelayMs)
+    {
+        if (waveDelayMs <= 0) return;
+        _hover?.SnapToCollapsed();
+        RestoreButton.Visibility = Visibility.Collapsed; // no button flash during the delay
+        _hover?.ShowAfterDelay(waveDelayMs);
     }
 
     void ApplyHidden()
@@ -252,12 +309,21 @@ public partial class ZoneWindow : Window
         NativeMethods.DisableRoundedCorners(this);
         if (!_zone.EnableRestoreButton)
         {
+            // ponytail: full hide — see HideZone for the SnapToFullHidden rationale.
+            _hover?.SnapToFullHidden();
             MainContent.Visibility = Visibility.Collapsed;
             Width = 36; Height = 36;
             Hide();
         }
         else
         {
+            // ponytail: 2026-08-23 — restore the full window size. If a previous
+            // full-hide (EnableRestoreButton was off) shrank the window to 36×36,
+            // collapsed-to-button mode needs the full-size window back (spec §7.2:
+            // the window keeps its size while collapsed; the anchor math and the
+            // hover region depend on it).
+            Width = _zone.Width < 100 ? 400 : _zone.Width;
+            Height = _zone.Height < 100 ? 300 : _zone.Height;
             // ponytail: keep window at full size; HoverExpandBehavior owns
             // visibility/scale from here.
             _hover?.SnapToCollapsed();
@@ -568,7 +634,16 @@ public partial class ZoneWindow : Window
         // ponytail: click = permanent expand (no auto-collapse); the hover path
         // (1 s on RestoreButton) is the temporary preview with 3 s auto-collapse.
         // Both share the same animation from HoverExpandBehavior's animationGetter.
-        if (!_restoreDragging) { _hover?.ExpandAnimated(permanent: true); _mgr.SaveConfig(); }
+        if (!_restoreDragging)
+        {
+            // ponytail: 2026-08-23 — keep the model in sync with the window: expanding
+            // from the RestoreButton makes the zone visible again, so persist it before
+            // any ZonesChanged/visibility listener can observe the stale hidden state.
+            _zone.IsVisible = true;
+            _hover?.ExpandAnimated(permanent: true);
+            _mgr.SaveConfig();
+            _mgr.FireZoneVisibilityChanged(_zone.Id, true);
+        }
     }
 
     void Restore_Enter(object s, MouseEventArgs e) { RestoreButton.Background = RestoreHoverBrush; }

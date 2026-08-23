@@ -551,13 +551,16 @@ public partial class ManagementWindow : Window
 
     public void ShowAll()
     {
+        // ponytail: 2026-08-23 batch wave — zones play first (staggered by position),
+        // then widgets/notes continue the same cascade after the zone slots.
         _zoneManager.ShowAll();
-        ShowAllWidgets();
+        ShowAllWidgets(baseDelayMs: (_zoneManager?.Zones?.Count ?? 0) * HoverExpandBehavior.BatchStaggerMs);
     }
     public void HideAll()
     {
+        // ponytail: batch wave — mirror of ShowAll (zones first, then widgets/notes).
         _zoneManager.HideAll();
-        HideAllWidgets();
+        HideAllWidgets(baseDelayMs: (_zoneManager?.Zones?.Count ?? 0) * HoverExpandBehavior.BatchStaggerMs);
     }
     public void FullHideAll()
     {
@@ -579,43 +582,189 @@ public partial class ManagementWindow : Window
         return res == MessageBoxResult.Yes;
     }
 
-    public void ShowAllWidgetsFromVm() => ShowAllWidgets();
-    public void HideAllWidgetsFromVm() => HideAllWidgets();
+    public void ShowAllWidgetsFromVm() => ShowAllWidgets(baseDelayMs: (_zoneManager?.Zones?.Count ?? 0) * HoverExpandBehavior.BatchStaggerMs);
+    public void HideAllWidgetsFromVm() => HideAllWidgets(baseDelayMs: (_zoneManager?.Zones?.Count ?? 0) * HoverExpandBehavior.BatchStaggerMs);
     public void FullHideAllWidgetsFromVm() => FullHideAllWidgets();
 
-    void ShowAllWidgets()
+    void ShowAllWidgets(double baseDelayMs = 0)
     {
         if (_isBatchWidgetOperation) return;
         _isBatchWidgetOperation = true;
         try
         {
             var app = (App)System.Windows.Application.Current;
+            // ponytail: 2026-08-23 CRITICAL — iterate SNAPSHOTS of the live collections.
+            // ShowNote/ShowClock/ShowCalendar call UpdateNote/UpdateClock/UpdateCalendar,
+            // which REPLACE the item inside the very collection being enumerated
+            // (Notes[idx] = note). The next MoveNext of the foreach then throws
+            // "Collection was modified" OUTSIDE the per-item try/catch, the outer
+            // catch { } swallows it, and every widget after the first note is silently
+            // skipped — exactly the reported "全部显示后时钟和日历还要额外点击".
+            // Verified in D:\BS\he_debug.log: the note line printed, the clock/calendar
+            // loops never ran.
+            //
+            // ponytail: batch wave — each window plays its OWN configured animation at
+            // its stagger slot (sorted by screen position), so "Show All" opens as a
+            // synchronized left-to-right / top-to-bottom cascade.
             if (_notesService != null)
-                foreach (var note in _notesService.Notes)
-                    if (!app.IsNoteWindowOpen(note.Id))
-                        OpenNoteWindow(note);
+            {
+                int i = 0;
+                foreach (var note in _notesService.Notes.OrderBy(n => n.Y).ThenBy(n => n.X).ToList())
+                {
+                    double delay = baseDelayMs + i * HoverExpandBehavior.BatchStaggerMs;
+                    i++;
+                    try
+                    {
+                        if (app.IsNoteWindowOpen(note.Id))
+                        {
+                            if (_notesService.Windows.TryGetValue(note.Id, out var w)
+                                && (!note.IsVisible || !w.IsVisible
+                                    || w.MainContent.Visibility != Visibility.Visible
+                                    || w.RestoreButton.Visibility == Visibility.Visible))
+                            {
+                                System.Diagnostics.Debug.WriteLine(
+                                    $"[ShowAllWidgets] note {note.Id}: modelVisible={note.IsVisible} -> ShowNote delay={delay}");
+                                w.ShowNote(delay);
+                            }
+                        }
+                        else
+                        {
+                            System.Diagnostics.Debug.WriteLine($"[ShowAllWidgets] note {note.Id}: opening new window delay={delay}");
+                            OpenNoteWindow(note);
+                            if (delay > 0 && _notesService.Windows.TryGetValue(note.Id, out var nw))
+                                nw.PlayEntranceAnimation(delay);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[ShowAllWidgets] note {note.Id} failed: {ex}");
+                    }
+                }
+            }
             if (_widgetService != null)
             {
-                foreach (var clock in _widgetService.Clocks)
-                    if (!_openClockWindows.ContainsKey(clock.Id))
-                        OpenClockWindow(clock);
-                foreach (var cal in _widgetService.Calendars)
-                    if (!_openCalendarWindows.ContainsKey(cal.Id))
-                        OpenCalendarWindow(cal);
+                // ponytail: snapshot iteration — ShowClock's UpdateClock replaces the
+                // enumerated element and would abort the loop (same trap as the notes).
+                int i = 0;
+                foreach (var clock in _widgetService.Clocks.OrderBy(c => c.Y).ThenBy(c => c.X).ToList())
+                {
+                    double delay = baseDelayMs + i * HoverExpandBehavior.BatchStaggerMs;
+                    i++;
+                    try
+                    {
+                        if (_openClockWindows.TryGetValue(clock.Id, out var w) && w is ClockWidget cw)
+                        {
+                            // ponytail: 2026-08-23 — restore from the WINDOW state, not the
+                            // model alone: after "minimize all" the window is a RestoreButton
+                            // (content collapsed) and the model may lag in either direction.
+                            // ShowClock only runs when the window is not already fully expanded.
+                            bool collapsed = !cw.IsVisible
+                                || cw.MainContent.Visibility != Visibility.Visible
+                                || cw.RestoreButton.Visibility == Visibility.Visible;
+                            System.Diagnostics.Debug.WriteLine(
+                                $"[ShowAllWidgets] clock {clock.Id}: modelVisible={clock.IsVisible} winVisible={cw.IsVisible} content={cw.MainContent.Visibility} restore={cw.RestoreButton.Visibility} -> show={!clock.IsVisible || collapsed} delay={delay}");
+                            if (!clock.IsVisible || collapsed)
+                                cw.ShowClock(false, delay);
+                        }
+                        else
+                        {
+                            System.Diagnostics.Debug.WriteLine($"[ShowAllWidgets] clock {clock.Id}: opening new window delay={delay}");
+                            clock.IsVisible = true;
+                            OpenClockWindow(clock);
+                            if (delay > 0 && _openClockWindows.TryGetValue(clock.Id, out var nw) && nw is ClockWidget ncw)
+                                ncw.PlayEntranceAnimation(delay);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[ShowAllWidgets] clock {clock.Id} failed: {ex}");
+                    }
+                }
+                // ponytail: snapshot iteration — see the clock loop above.
+                int j = 0;
+                foreach (var cal in _widgetService.Calendars.OrderBy(c => c.Y).ThenBy(c => c.X).ToList())
+                {
+                    double delay = baseDelayMs + j * HoverExpandBehavior.BatchStaggerMs;
+                    j++;
+                    try
+                    {
+                        if (_openCalendarWindows.TryGetValue(cal.Id, out var w) && w is CalendarWidget caw)
+                        {
+                            bool collapsed = !caw.IsVisible
+                                || caw.MainContent.Visibility != Visibility.Visible
+                                || caw.RestoreButton.Visibility == Visibility.Visible;
+                            System.Diagnostics.Debug.WriteLine(
+                                $"[ShowAllWidgets] cal {cal.Id}: modelVisible={cal.IsVisible} winVisible={caw.IsVisible} content={caw.MainContent.Visibility} restore={caw.RestoreButton.Visibility} -> show={!cal.IsVisible || collapsed} delay={delay}");
+                            if (!cal.IsVisible || collapsed)
+                                caw.ShowCalendar(false, delay);
+                        }
+                        else
+                        {
+                            System.Diagnostics.Debug.WriteLine($"[ShowAllWidgets] cal {cal.Id}: opening new window delay={delay}");
+                            cal.IsVisible = true;
+                            OpenCalendarWindow(cal);
+                            if (delay > 0 && _openCalendarWindows.TryGetValue(cal.Id, out var nw) && nw is CalendarWidget ncw)
+                                ncw.PlayEntranceAnimation(delay);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[ShowAllWidgets] cal {cal.Id} failed: {ex}");
+                    }
+                }
             }
         }
         catch { }
         finally { _isBatchWidgetOperation = false; }
     }
 
-    void HideAllWidgets()
+    void HideAllWidgets(double baseDelayMs = 0)
     {
         if (_isBatchWidgetOperation) return;
         _isBatchWidgetOperation = true;
         try
         {
-            foreach (var w in _openClockWindows.Values.ToList()) w.Hide();
-            foreach (var w in _openCalendarWindows.Values.ToList()) w.Hide();
+            // ponytail: 2026-08-23 — route through the widgets' own hide methods instead
+            // of raw Window.Hide(). Raw Hide() left the model IsVisible=true, the
+            // HoverExpandBehavior expanded and the DWM acrylic enabled on the hidden
+            // HWND — and made ShowAllWidgets() skip the windows so they never came back.
+            // HideClock/HideCalendar/HideNote respect each widget's EnableRestoreButton
+            // (collapse to the RestoreButton, or full hide when disabled) and reset the
+            // acrylic gate correctly. Sweep the LIVE app windows (not just the dicts) so
+            // a window that lost its dictionary entry can never dodge "hide all".
+            //
+            // ponytail: batch wave — each window collapses with its OWN configured
+            // animation at its stagger slot (sorted by screen position), mirroring the
+            // "Show All" cascade.
+            var live = System.Windows.Application.Current.Windows.OfType<Window>()
+                .Where(w => w is ClockWidget or CalendarWidget or StickyNoteWindow)
+                .OrderBy(w => w.Top).ThenBy(w => w.Left)
+                .ToList();
+            int i = 0;
+            foreach (var w in live)
+            {
+                double delay = baseDelayMs + i * HoverExpandBehavior.BatchStaggerMs;
+                i++;
+                try
+                {
+                    switch (w)
+                    {
+                        case ClockWidget cw when cw.MainContent.Visibility == Visibility.Visible:
+                            cw.HideClock(delay);
+                            break;
+                        case CalendarWidget caw when caw.MainContent.Visibility == Visibility.Visible:
+                            caw.HideCalendar(delay);
+                            break;
+                        case StickyNoteWindow snw when snw.MainContent.Visibility == Visibility.Visible:
+                            snw.HideNote(delay);
+                            break;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[HideAllWidgets] {w.GetType().Name} failed: {ex}");
+                }
+            }
         }
         catch { }
         finally { _isBatchWidgetOperation = false; }
@@ -627,10 +776,41 @@ public partial class ManagementWindow : Window
         _isBatchWidgetOperation = true;
         try
         {
-            foreach (var w in _openClockWindows.Values.ToList()) w.Close();
+            // ponytail: 2026-08-23 — close every live widget window, including sticky
+            // notes (owned by NotesService, not the dicts above) and any window that
+            // lost its dictionary entry. Then persist IsVisible=false so the management
+            // rows, "Show All" and the next startup all agree.
+            foreach (var w in System.Windows.Application.Current.Windows.OfType<ClockWidget>().ToList())
+                try { w.Close(); } catch { }
+            foreach (var w in System.Windows.Application.Current.Windows.OfType<CalendarWidget>().ToList())
+                try { w.Close(); } catch { }
+            foreach (var w in System.Windows.Application.Current.Windows.OfType<StickyNoteWindow>().ToList())
+                try { w.Close(); } catch { }
             _openClockWindows.Clear();
-            foreach (var w in _openCalendarWindows.Values.ToList()) w.Close();
             _openCalendarWindows.Clear();
+            _notesService?.Windows.Clear();
+            // ponytail: snapshot iteration — UpdateNote/UpdateClock/UpdateCalendar
+            // replace the enumerated element and would abort the remaining loop
+            // (same "Collection was modified" trap as ShowAllWidgets).
+            if (_notesService != null)
+                foreach (var note in _notesService.Notes.ToList())
+                {
+                    note.IsVisible = false;
+                    _notesService.UpdateNote(note);
+                }
+            if (_widgetService != null)
+            {
+                foreach (var clock in _widgetService.Clocks.ToList())
+                {
+                    clock.IsVisible = false;
+                    _widgetService.UpdateClock(clock);
+                }
+                foreach (var cal in _widgetService.Calendars.ToList())
+                {
+                    cal.IsVisible = false;
+                    _widgetService.UpdateCalendar(cal);
+                }
+            }
         }
         catch { }
         finally { _isBatchWidgetOperation = false; }

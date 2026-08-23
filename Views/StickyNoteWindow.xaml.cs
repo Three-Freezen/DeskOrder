@@ -107,7 +107,12 @@ public partial class StickyNoteWindow : Window
         var latest = _notesService.Notes.FirstOrDefault(n => n.Id == _note.Id);
         if (latest != null) _note = latest;
         // ponytail: ghost-stamp lock — see ZoneWindow.OnZonesChanged for full rationale.
-        if (!_note.IsVisible && _hover != null && MainContent.Visibility == Visibility.Visible)
+        // 2026-08-23: only stamp when the behavior thinks it is still EXPANDED — during
+        // a legitimate animated collapse this used to snap the animation away instantly
+        // (see ClockWidget.OnClocksChanged); let the animation finish instead.
+        if (!_note.IsVisible && _hover != null && _hover.IsExpanded
+            && !_hover.IsCollapsePending
+            && MainContent.Visibility == Visibility.Visible)
             _hover.SnapToCollapsed();
         // ponytail: pull refreshed lock state from model (e.g. when another window unlocked this note)
         _vm.IsLocked = _note.IsLocked;
@@ -439,14 +444,26 @@ public partial class StickyNoteWindow : Window
 
     // ── Show / Hide (minimize-restore) ──
 
-    public void ShowNote()
+    public void ShowNote(double waveDelayMs = 0)
     {
         // Save dimensions before any reference swap can occur
         var savedW = _note.Width; var savedH = _note.Height;
         if (!IsVisible) Show();
         Left = _note.X; Top = _note.Y;
-        MainContent.Visibility = Visibility.Visible; RestoreButton.Visibility = Visibility.Collapsed;
-        _hover?.SnapToExpanded();
+        if (waveDelayMs > 0)
+        {
+            // ponytail: batch "Show All" wave — start collapsed and play the note's own
+            // configured animation at its stagger slot (see ZoneWindow.ShowZone).
+            MainContent.Visibility = Visibility.Visible; RestoreButton.Visibility = Visibility.Collapsed;
+            _hover?.SnapToCollapsed();
+            RestoreButton.Visibility = Visibility.Collapsed; // no button flash during the delay
+            _hover?.ShowAfterDelay(waveDelayMs);
+        }
+        else
+        {
+            MainContent.Visibility = Visibility.Visible; RestoreButton.Visibility = Visibility.Collapsed;
+            _hover?.SnapToExpanded();
+        }
         // ponytail: ghost-glass fix — re-apply acrylic AFTER SnapToExpanded so the
         // expanded-state gate sees IsExpanded == true and re-enables liquid glass when
         // showing from the collapsed button.
@@ -464,23 +481,60 @@ public partial class StickyNoteWindow : Window
         OnStateChanged?.Invoke();
     }
 
-    public void HideNote()
+    /// <summary>
+    /// Batch-wave entrance for a freshly created window: collapse the just-shown
+    /// content and play the note's own expand animation at the stagger slot.
+    /// </summary>
+    public void PlayEntranceAnimation(double waveDelayMs)
+    {
+        if (waveDelayMs <= 0) return;
+        _hover?.SnapToCollapsed();
+        RestoreButton.Visibility = Visibility.Collapsed;
+        _hover?.ShowAfterDelay(waveDelayMs);
+    }
+
+    public void HideNote(double waveDelayMs = 0)
     {
         _note.X = Left; _note.Y = Top; _note.Width = Width; _note.Height = Height;
-        AcrylicHelper.DisableBlur(this);
         NativeMethods.DisableRoundedCorners(this);
         if (!_note.EnableRestoreButton)
         {
-            MainContent.Visibility = Visibility.Collapsed;
-            MinWidth = 36; MinHeight = 36;
-            Width = 36; Height = 36;
-            Hide();
+            if (waveDelayMs > 0)
+            {
+                // ponytail: batch "Minimize All" wave — play the note's own collapse
+                // animation first (staggered), then finalize the full hide.
+                _hover?.CollapseAfterDelay(waveDelayMs, onComplete: () =>
+                {
+                    AcrylicHelper.DisableBlur(this);
+                    _hover?.SnapToFullHidden();
+                    MainContent.Visibility = Visibility.Collapsed;
+                    MinWidth = 36; MinHeight = 36;
+                    Width = 36; Height = 36;
+                    Hide();
+                });
+            }
+            else
+            {
+                // ponytail: 2026-08-23 — SnapToFullHidden resets the hover state so no
+                // later ApplyAcrylic call can re-enable the DWM glass on the hidden
+                // window (ghost "empty liquid glass" bug). See ZoneWindow.HideZone.
+                AcrylicHelper.DisableBlur(this);
+                _hover?.SnapToFullHidden();
+                MainContent.Visibility = Visibility.Collapsed;
+                MinWidth = 36; MinHeight = 36;
+                Width = 36; Height = 36;
+                Hide();
+            }
         }
         else
         {
             // ponytail: minimized — let HoverExpandBehavior handle visibility/scale
+            AcrylicHelper.DisableBlur(this);
             if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
-            _hover?.CollapseAnimated();
+            if (waveDelayMs > 0)
+                _hover?.CollapseAfterDelay(waveDelayMs, null);
+            else
+                _hover?.CollapseAnimated();
         }
         _note.IsVisible = false;
         _notesService.UpdateNote(_note);
@@ -493,6 +547,8 @@ public partial class StickyNoteWindow : Window
         NativeMethods.DisableRoundedCorners(this);
         if (!_note.EnableRestoreButton)
         {
+            // ponytail: 2026-08-23 — see HideNote for the SnapToFullHidden rationale.
+            _hover?.SnapToFullHidden();
             MainContent.Visibility = Visibility.Collapsed;
             MinWidth = 36; MinHeight = 36;
             Width = 36; Height = 36;
@@ -500,6 +556,12 @@ public partial class StickyNoteWindow : Window
         }
         else
         {
+            // ponytail: 2026-08-23 — restore the full window size after a previous
+            // full-hide shrank it to 36×36 (collapsed mode keeps the window at full
+            // size; mirror the ctor's own minimums).
+            MinWidth = 180; MinHeight = 120;
+            Width = _note.Width < 200 ? 260 : _note.Width;
+            Height = _note.Height < 150 ? 200 : _note.Height;
             // ponytail: minimized — window stays at full size, content collapses
             _hover?.SnapToCollapsed();
         }
@@ -529,7 +591,14 @@ public partial class StickyNoteWindow : Window
     void Restore_MouseUp(object s, MouseButtonEventArgs e)
     {
         RestoreButton.ReleaseMouseCapture();
+        // ponytail: 2026-08-23 — mark the model visible before UpdateNote fires
+        // NotesChanged so OnNotesChanged's ghost-stamp lock doesn't collapse the window
+        // right back mid-expand (see ClockWidget.Restore_MouseUp for the full rationale;
+        // without the persisted IsVisible=true, ANY later note edit would collapse this
+        // expanded note again via the collection's stale IsVisible=false).
+        _note.IsVisible = true;
         _hover?.ExpandAnimated(permanent: true);
+        _notesService.UpdateNote(_note);
     }
 
     void Restore_Enter(object s, MouseEventArgs e) { RestoreButton.Background = RestoreHoverBrush; }
@@ -764,9 +833,34 @@ public partial class StickyNoteWindow : Window
         try { DragMove(); if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this); } catch { }
     }
 
-    // ponytail: OS routes click normally now (drill-through removed). Pinned notes
-    // still skip because Topmost=true keeps them above everything.
-    void Window_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e) { }
+    // ponytail: 2026-08-23 — the note's title bar has no bare grab area (the title
+    // TextBox stretches across the space between the left margin and the four
+    // buttons, so at the default 260 px width every title-bar pixel belongs to an
+    // interactive element) and this window-level preview handler had been emptied
+    // ("drill-through removed") — leaving the note completely undraggable. Restore
+    // a drill-through drag on every non-interactive surface (background, padding,
+    // title-bar free area); editable text, buttons, combos and the resize grips keep
+    // their own clicks, and a locked note stays unmovable.
+    void Window_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (_vm?.IsLocked == true) return;
+        // The RestoreButton drives its own press/drag/expand — never steal it.
+        if (RestoreButton.Visibility == Visibility.Visible) return;
+        var src = e.OriginalSource as System.Windows.DependencyObject;
+        while (src != null && src != sender)
+        {
+            if (src is System.Windows.Controls.Button
+                || src is System.Windows.Controls.Primitives.TextBoxBase
+                || src is System.Windows.Controls.ComboBox
+                || (src is FrameworkElement fe && fe.Tag is string tag
+                    && (tag == "TL" || tag == "TR" || tag == "BL" || tag == "BR")))
+                return;
+            src = System.Windows.Media.VisualTreeHelper.GetParent(src);
+        }
+        try { DragMove(); if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this); } catch { }
+        // Prevent the bubbling TitleBar_Drag from running a second move loop.
+        e.Handled = true;
+    }
 
     void ResizeGrip_Down(object s, MouseButtonEventArgs e)
     {

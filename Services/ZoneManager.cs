@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.Linq;
 using DesktopZones.Models;
 using DesktopZones.Views;
+using DesktopZones.Views.Components;
 
 namespace DesktopZones.Services;
 
@@ -97,7 +98,7 @@ public class ZoneManager
         ZonesChanged?.Invoke();
     }
 
-    public void ShowZone(Zone zone)
+    public void ShowZone(Zone zone, double waveDelayMs = 0)
     {
         // If this zone is a sub-zone of a merged group, show the master instead
         if (zone.MergedGroupMembership.GroupId.HasValue && zone.MergedGroupMembership.SubZoneIds.Count == 0)
@@ -106,7 +107,7 @@ public class ZoneManager
             if (master != null)
             {
                 master.IsVisible = true;
-                ShowZone(master);
+                ShowZone(master, waveDelayMs);
                 // Try to set the master to show the requested sub-zone's items
                 if (_zoneWindows.TryGetValue(master.Id, out var masterWin) && masterWin?.IsLoaded == true)
                 {
@@ -122,29 +123,43 @@ public class ZoneManager
 
         if (_zoneWindows.ContainsKey(zone.Id))
         {
-            _zoneWindows[zone.Id].ShowZone();
+            _zoneWindows[zone.Id].ShowZone(waveDelayMs);
         }
         else
         {
             var window = new ZoneWindow(zone, this, new ShellIconService());
             window.Show();
             _zoneWindows[zone.Id] = window;
+            // ponytail: batch "Show All" wave — a freshly created window starts expanded
+            // from the ctor; re-collapse it and play its own entrance animation at the
+            // stagger slot so new windows join the cascade.
+            if (waveDelayMs > 0) window.PlayEntranceAnimation(waveDelayMs);
         }
         SaveConfig();
         ZonesChanged?.Invoke();
         ZoneVisibilityChanged?.Invoke(zone.Id, true);
     }
 
-    public void HideZone(Guid zoneId)
+    public void HideZone(Guid zoneId, double waveDelayMs = 0)
     {
         var zone = Zones.FirstOrDefault(z => z.Id == zoneId);
         if (_zoneWindows.TryGetValue(zoneId, out var window))
         {
-            window.HideZone();
+            window.HideZone(waveDelayMs);
             // If EnableRestoreButton is false, remove window from dictionary (like FullHideZone)
             if (zone != null && !zone.EnableRestoreButton)
             {
                 _zoneWindows.Remove(zoneId);
+                if (waveDelayMs <= 0)
+                {
+                    // ponytail: 2026-08-23 — close the removed window instead of leaking it.
+                    // A hidden-but-alive window keeps its HoverExpandBehavior poll timer and
+                    // ZonesChanged/LockChanged handlers running, and its stale state could
+                    // re-enable the DWM glass on the hidden HWND (ghost glass bug).
+                    // The batch-wave path (waveDelayMs > 0) closes itself after its collapse
+                    // animation finishes — closing now would kill the animation.
+                    window.Close();
+                }
             }
         }
         if (zone != null)
@@ -171,12 +186,18 @@ public class ZoneManager
         _isBatchOperation = true;
         try
         {
-            foreach (var zone in Zones)
+            // ponytail: 2026-08-23 batch wave — sort by screen position (row-major)
+            // and stagger each zone by BatchStaggerMs so "Show All" opens as a
+            // left-to-right / top-to-bottom cascade; each zone plays its OWN
+            // configured animation kind/speed/origin.
+            int i = 0;
+            foreach (var zone in Zones
+                         .Where(z => !(z.MergedGroupMembership.GroupId.HasValue
+                                       && z.MergedGroupMembership.SubZoneIds.Count == 0))
+                         .OrderBy(z => z.Y).ThenBy(z => z.X))
             {
-                // Skip sub-zones that belong to a merged group (handled by master)
-                if (zone.MergedGroupMembership.GroupId.HasValue && zone.MergedGroupMembership.SubZoneIds.Count == 0)
-                    continue;
-                ShowZone(zone);
+                ShowZone(zone, i * HoverExpandBehavior.BatchStaggerMs);
+                i++;
             }
         }
         finally { _isBatchOperation = false; }
@@ -188,8 +209,14 @@ public class ZoneManager
         _isBatchOperation = true;
         try
         {
-            foreach (var zone in Zones)
-                HideZone(zone.Id);
+            // ponytail: batch wave — mirror of ShowAll: each zone collapses with its
+            // own animation at its stagger slot (see ShowAll for the sort rationale).
+            int i = 0;
+            foreach (var zone in Zones.OrderBy(z => z.Y).ThenBy(z => z.X))
+            {
+                HideZone(zone.Id, i * HoverExpandBehavior.BatchStaggerMs);
+                i++;
+            }
         }
         finally { _isBatchOperation = false; }
     }

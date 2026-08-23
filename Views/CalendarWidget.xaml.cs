@@ -86,7 +86,12 @@ public partial class CalendarWidget : Window
         var latest = _widgetService.Calendars.FirstOrDefault(c => c.Id == _calendar.Id);
         if (latest != null) _calendar = latest;
         // ponytail: ghost-stamp lock — see ZoneWindow.OnZonesChanged for full rationale.
-        if (!_calendar.IsVisible && _hover != null && MainContent.Visibility == Visibility.Visible)
+        // 2026-08-23: only stamp when the behavior thinks it is still EXPANDED — during
+        // a legitimate animated collapse this used to snap the animation away instantly
+        // (see ClockWidget.OnClocksChanged); let the animation finish instead.
+        if (!_calendar.IsVisible && _hover != null && _hover.IsExpanded
+            && !_hover.IsCollapsePending
+            && MainContent.Visibility == Visibility.Visible)
             _hover.SnapToCollapsed();
         // ponytail: always sync FillRect, even when hidden — closes the
         // "model blue, screen yellow" desync that ShowCalendar used to reveal.
@@ -864,7 +869,7 @@ public partial class CalendarWidget : Window
         FillRect.InvalidateVisual();
     }
 
-    public void ShowCalendar(bool skipResync = false)
+    public void ShowCalendar(bool skipResync = false, double waveDelayMs = 0)
     {
         if (!IsVisible) Show();
         // ponytail: skipResync=true when called from the property window (was the style dialog).
@@ -873,18 +878,21 @@ public partial class CalendarWidget : Window
         //   - UpdateCalendar would fire CalendarsChanged → OnCalendarsChanged → SyncFillRect → same result.
         // Without this, the FillRect "snaps" to model the moment the property window opens, even
         // though the user hasn't touched anything.
-        if (!skipResync)
+        Left = _calendar.X; Top = _calendar.Y;
+        if (waveDelayMs > 0)
         {
-            _calendar.IsVisible = true;
-            _widgetService.UpdateCalendar(_calendar);
+            // ponytail: batch "Show All" wave — start collapsed and play the calendar's
+            // own configured animation at its stagger slot (see ZoneWindow.ShowZone).
+            MainContent.Visibility = Visibility.Visible; RestoreButton.Visibility = Visibility.Collapsed;
+            _hover?.SnapToCollapsed();
+            RestoreButton.Visibility = Visibility.Collapsed; // no button flash during the delay
+            _hover?.ShowAfterDelay(waveDelayMs);
         }
         else
         {
-            _calendar.IsVisible = true;
+            MainContent.Visibility = Visibility.Visible; RestoreButton.Visibility = Visibility.Collapsed;
+            _hover?.SnapToExpanded();
         }
-        Left = _calendar.X; Top = _calendar.Y;
-        MainContent.Visibility = Visibility.Visible; RestoreButton.Visibility = Visibility.Collapsed;
-        _hover?.SnapToExpanded();
         // ponytail: ghost-glass fix — re-apply acrylic AFTER SnapToExpanded so the
         // expanded-state gate sees IsExpanded == true and re-enables liquid glass when
         // showing from the collapsed button.
@@ -896,26 +904,76 @@ public partial class CalendarWidget : Window
         if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
         NativeMethods.SetRoundedCorners(this, 10);
         if (!_vm.IsLocked) Topmost = true;
+        // ponytail: 2026-08-23 — persist LAST so a failure in the model/event path can
+        // no longer abort the visual expansion (see ShowClock for the full rationale).
+        if (!skipResync)
+        {
+            _calendar.IsVisible = true;
+            _widgetService.UpdateCalendar(_calendar);
+        }
+        else
+        {
+            _calendar.IsVisible = true;
+        }
+        System.Diagnostics.Debug.WriteLine(
+            $"[ShowCalendar] done: winVisible={IsVisible} content={MainContent.Visibility} restore={RestoreButton.Visibility}");
         Activate();
     }
 
-    public void HideCalendar()
+    /// <summary>
+    /// Batch-wave entrance for a freshly created window: collapse the just-shown
+    /// content and play the calendar's own expand animation at the stagger slot.
+    /// </summary>
+    public void PlayEntranceAnimation(double waveDelayMs)
+    {
+        if (waveDelayMs <= 0) return;
+        _hover?.SnapToCollapsed();
+        RestoreButton.Visibility = Visibility.Collapsed;
+        _hover?.ShowAfterDelay(waveDelayMs);
+    }
+
+    public void HideCalendar(double waveDelayMs = 0)
     {
         _calendar.X = Left; _calendar.Y = Top; _calendar.Width = Width; _calendar.Height = Height;
-        AcrylicHelper.DisableBlur(this);
         NativeMethods.DisableRoundedCorners(this);
         if (!_calendar.EnableRestoreButton)
         {
-            MainContent.Visibility = Visibility.Collapsed;
-            MinWidth = 36; MinHeight = 36;
-            Width = 36; Height = 36;
-            Hide();
+            if (waveDelayMs > 0)
+            {
+                // ponytail: batch "Minimize All" wave — play the calendar's own collapse
+                // animation first (staggered), then finalize the full hide.
+                _hover?.CollapseAfterDelay(waveDelayMs, onComplete: () =>
+                {
+                    AcrylicHelper.DisableBlur(this);
+                    _hover?.SnapToFullHidden();
+                    MainContent.Visibility = Visibility.Collapsed;
+                    MinWidth = 36; MinHeight = 36;
+                    Width = 36; Height = 36;
+                    Hide();
+                });
+            }
+            else
+            {
+                // ponytail: 2026-08-23 — SnapToFullHidden resets the hover state so no
+                // later ApplyAcrylic call can re-enable the DWM glass on the hidden
+                // window (ghost "empty liquid glass" bug). See ZoneWindow.HideZone.
+                AcrylicHelper.DisableBlur(this);
+                _hover?.SnapToFullHidden();
+                MainContent.Visibility = Visibility.Collapsed;
+                MinWidth = 36; MinHeight = 36;
+                Width = 36; Height = 36;
+                Hide();
+            }
         }
         else
         {
             // ponytail: minimized — let HoverExpandBehavior handle visibility/scale
+            AcrylicHelper.DisableBlur(this);
             if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
-            _hover?.CollapseAnimated();
+            if (waveDelayMs > 0)
+                _hover?.CollapseAfterDelay(waveDelayMs, null);
+            else
+                _hover?.CollapseAnimated();
         }
         _calendar.IsVisible = false;
         _widgetService.UpdateCalendar(_calendar);
@@ -927,6 +985,8 @@ public partial class CalendarWidget : Window
         NativeMethods.DisableRoundedCorners(this);
         if (!_calendar.EnableRestoreButton)
         {
+            // ponytail: 2026-08-23 — see HideCalendar for the SnapToFullHidden rationale.
+            _hover?.SnapToFullHidden();
             MainContent.Visibility = Visibility.Collapsed;
             MinWidth = 36; MinHeight = 36;
             Width = 36; Height = 36;
@@ -934,6 +994,12 @@ public partial class CalendarWidget : Window
         }
         else
         {
+            // ponytail: 2026-08-23 — restore the full window size after a previous
+            // full-hide shrank it to 36×36 (collapsed mode keeps the window at full
+            // size, matching ShowCalendar's sizing).
+            MinWidth = 260; MinHeight = 460;
+            Width = _calendar.Width > 260 ? _calendar.Width : 320;
+            Height = _calendar.Height > 340 ? _calendar.Height : 440;
             // ponytail: minimized — window stays at full size, content collapses
             _hover?.SnapToCollapsed();
         }
@@ -963,7 +1029,15 @@ public partial class CalendarWidget : Window
     void Restore_MouseUp(object s, MouseButtonEventArgs e)
     {
         RestoreButton.ReleaseMouseCapture();
-        if (!_restoreDragging) { _hover?.ExpandAnimated(permanent: true); _widgetService.UpdateCalendar(_calendar); }
+        if (!_restoreDragging)
+        {
+            // ponytail: 2026-08-23 — flip the model to visible BEFORE UpdateCalendar fires
+            // CalendarsChanged; see ClockWidget.Restore_MouseUp for the ghost-stamp
+            // rationale ("button in the middle + liquid glass around" after expand).
+            _calendar.IsVisible = true;
+            _hover?.ExpandAnimated(permanent: true);
+            _widgetService.UpdateCalendar(_calendar);
+        }
     }
 
     void Restore_Enter(object s, MouseEventArgs e) { RestoreButton.Background = new SolidColorBrush(Color.FromArgb(0xFF, 0x2A, 0x2A, 0x4E)); }

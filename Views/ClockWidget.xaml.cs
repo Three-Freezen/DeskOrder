@@ -104,9 +104,15 @@ public partial class ClockWidget : Window
         var latest = _widgetService.Clocks.FirstOrDefault(c => c.Id == _clock.Id);
         if (latest != null) _clock = latest;
         // ponytail: ghost-stamp lock — see ZoneWindow.OnZonesChanged for full rationale.
-        // Model says widget should be hidden but MainContent is still visible → SnapToCollapsed
-        // synchronously before SyncFillRect/ApplyAcrylic paint into a phantom-visible window.
-        if (!_clock.IsVisible && _hover != null && MainContent.Visibility == Visibility.Visible)
+        // 2026-08-23: only stamp the window collapsed when the behavior still thinks it
+        // is EXPANDED. During a legitimate animated collapse (CollapseAnimated already
+        // set _isExpanded=false while the content visibility flips at the animation's
+        // end), HideClock's own UpdateClock fires ClocksChanged and this check used to
+        // snap the animation away instantly — the widget's collapse animation never
+        // played. Let the animation's completion handler finish the job instead.
+        if (!_clock.IsVisible && _hover != null && _hover.IsExpanded
+            && !_hover.IsCollapsePending
+            && MainContent.Visibility == Visibility.Visible)
             _hover.SnapToCollapsed();
         // ponytail: always sync FillRect, even when hidden — closes the
         // "model blue, screen yellow" desync that ShowClock used to reveal.
@@ -773,7 +779,7 @@ public partial class ClockWidget : Window
         FillRect.InvalidateVisual();
     }
 
-    public void ShowClock(bool skipResync = false)
+    public void ShowClock(bool skipResync = false, double waveDelayMs = 0)
     {
         if (!IsVisible) Show();
         ApplyMode();
@@ -783,20 +789,21 @@ public partial class ClockWidget : Window
         //   - UpdateClock would fire ClocksChanged → OnClocksChanged → SyncFillRect → same result.
         // Without this, the FillRect "snaps" to model the moment the property window opens, even
         // though the user hasn't touched anything.
-        if (!skipResync)
+        Left = _clock.X; Top = _clock.Y;
+        if (waveDelayMs > 0)
         {
-            _clock.IsVisible = true;
-            _widgetService.UpdateClock(_clock);
+            // ponytail: batch "Show All" wave — start collapsed and play the clock's own
+            // configured animation at its stagger slot (see ZoneWindow.ShowZone).
+            MainContent.Visibility = Visibility.Visible; RestoreButton.Visibility = Visibility.Collapsed;
+            _hover?.SnapToCollapsed();
+            RestoreButton.Visibility = Visibility.Collapsed; // no button flash during the delay
+            _hover?.ShowAfterDelay(waveDelayMs);
         }
         else
         {
-            // In-memory IsVisible flip only — Cancel branch will save it if user backs out,
-            // or the dialog's Apply path will save the new state if user commits.
-            _clock.IsVisible = true;
+            MainContent.Visibility = Visibility.Visible; RestoreButton.Visibility = Visibility.Collapsed;
+            _hover?.SnapToExpanded();
         }
-        Left = _clock.X; Top = _clock.Y;
-        MainContent.Visibility = Visibility.Visible; RestoreButton.Visibility = Visibility.Collapsed;
-        _hover?.SnapToExpanded();
         // ponytail: ghost-glass fix — re-apply acrylic AFTER SnapToExpanded so the
         // expanded-state gate sees IsExpanded == true and re-enables liquid glass when
         // showing from the collapsed button.
@@ -808,10 +815,39 @@ public partial class ClockWidget : Window
         if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
         NativeMethods.SetRoundedCorners(this, 10);
         if (!_vm.IsLocked) Topmost = true;
+        // ponytail: 2026-08-23 — persist LAST so a failure in the model/event path can
+        // no longer abort the visual expansion (which used to leave the clock stuck as
+        // a RestoreButton while the model already said visible — "Show All needs an
+        // extra click"). The window is on screen before any event can observe the model.
+        if (!skipResync)
+        {
+            _clock.IsVisible = true;
+            _widgetService.UpdateClock(_clock);
+        }
+        else
+        {
+            // In-memory IsVisible flip only — Cancel branch will save it if user backs out,
+            // or the dialog's Apply path will save the new state if user commits.
+            _clock.IsVisible = true;
+        }
+        System.Diagnostics.Debug.WriteLine(
+            $"[ShowClock] done: winVisible={IsVisible} content={MainContent.Visibility} restore={RestoreButton.Visibility}");
         Activate();
     }
 
-    public void HideClock()
+    /// <summary>
+    /// Batch-wave entrance for a freshly created window: collapse the just-shown
+    /// content and play the clock's own expand animation at the stagger slot.
+    /// </summary>
+    public void PlayEntranceAnimation(double waveDelayMs)
+    {
+        if (waveDelayMs <= 0) return;
+        _hover?.SnapToCollapsed();
+        RestoreButton.Visibility = Visibility.Collapsed;
+        _hover?.ShowAfterDelay(waveDelayMs);
+    }
+
+    public void HideClock(double waveDelayMs = 0)
     {
 #if DEBUG
         // ponytail: verbose HideClock trace for diagnosing widget-minimize regressions.
@@ -820,20 +856,46 @@ public partial class ClockWidget : Window
             $"[{DateTime.Now:HH:mm:ss.fff}] HideClock: EnableRestore={_clock.EnableRestoreButton}, W={Width}, H={Height}\n"); } catch { }
 #endif
         _clock.X = Left; _clock.Y = Top; _clock.Width = Width; _clock.Height = Height;
-        AcrylicHelper.DisableBlur(this);
         NativeMethods.DisableRoundedCorners(this);
         if (!_clock.EnableRestoreButton)
         {
-            MainContent.Visibility = Visibility.Collapsed;
-            MinWidth = 36; MinHeight = 36;
-            Width = 36; Height = 36;
-            Hide();
+            if (waveDelayMs > 0)
+            {
+                // ponytail: batch "Minimize All" wave — play the clock's own collapse
+                // animation first (staggered), then finalize the full hide.
+                _hover?.CollapseAfterDelay(waveDelayMs, onComplete: () =>
+                {
+                    AcrylicHelper.DisableBlur(this);
+                    _hover?.SnapToFullHidden();
+                    MainContent.Visibility = Visibility.Collapsed;
+                    MinWidth = 36; MinHeight = 36;
+                    Width = 36; Height = 36;
+                    Hide();
+                });
+            }
+            else
+            {
+                // ponytail: 2026-08-23 — SnapToFullHidden resets the hover state
+                // (IsExpanded=false, scale/opacity 0) so no later ApplyAcrylic /
+                // RefreshAppearance call can re-enable the DWM glass on the hidden
+                // window (ghost "empty liquid glass" bug). See ZoneWindow.HideZone.
+                AcrylicHelper.DisableBlur(this);
+                _hover?.SnapToFullHidden();
+                MainContent.Visibility = Visibility.Collapsed;
+                MinWidth = 36; MinHeight = 36;
+                Width = 36; Height = 36;
+                Hide();
+            }
         }
         else
         {
             // ponytail: minimized — window stays at full size, content collapses with animation
+            AcrylicHelper.DisableBlur(this);
             if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
-            _hover?.CollapseAnimated();
+            if (waveDelayMs > 0)
+                _hover?.CollapseAfterDelay(waveDelayMs, null);
+            else
+                _hover?.CollapseAnimated();
         }
         _clock.IsVisible = false;
         // Update AFTER Hide() to ensure correct state when event fires
@@ -846,6 +908,8 @@ public partial class ClockWidget : Window
         NativeMethods.DisableRoundedCorners(this);
         if (!_clock.EnableRestoreButton)
         {
+            // ponytail: 2026-08-23 — see HideClock for the SnapToFullHidden rationale.
+            _hover?.SnapToFullHidden();
             MainContent.Visibility = Visibility.Collapsed;
             MinWidth = 36; MinHeight = 36;
             Width = 36; Height = 36;
@@ -853,6 +917,12 @@ public partial class ClockWidget : Window
         }
         else
         {
+            // ponytail: 2026-08-23 — restore the full window size after a previous
+            // full-hide shrank it to 36×36 (collapsed mode keeps the window at full
+            // size, matching ShowClock's sizing).
+            MinWidth = 140; MinHeight = 80;
+            Width = _clock.Width > 140 ? _clock.Width : 320;
+            Height = _clock.Height > 80 ? _clock.Height : 140;
             // ponytail: minimized — window stays at full size, content collapses with animation
             _hover?.SnapToCollapsed();
         }
@@ -882,7 +952,18 @@ public partial class ClockWidget : Window
     void Restore_MouseUp(object s, MouseButtonEventArgs e)
     {
         RestoreButton.ReleaseMouseCapture();
-        if (!_restoreDragging) { _hover?.ExpandAnimated(permanent: true); _widgetService.UpdateClock(_clock); }
+        if (!_restoreDragging)
+        {
+            // ponytail: 2026-08-23 — flip the model to visible BEFORE UpdateClock fires
+            // ClocksChanged. OnClocksChanged's ghost-stamp lock ("model hidden but
+            // content visible → SnapToCollapsed") used to collapse the window right back
+            // mid-expand — and that snap never disables the acrylic — leaving the
+            // RestoreButton centered inside the still-on liquid glass. The model must
+            // agree with the window before any change event can observe it.
+            _clock.IsVisible = true;
+            _hover?.ExpandAnimated(permanent: true);
+            _widgetService.UpdateClock(_clock);
+        }
     }
 
     void Restore_Enter(object s, MouseEventArgs e) { RestoreButton.Background = RestoreHoverBrush; }

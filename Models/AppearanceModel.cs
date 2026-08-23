@@ -67,8 +67,9 @@ public abstract class AppearanceModel
     public HoverExpandAnimationKind HoverExpandAnimation { get; set; } = HoverExpandAnimationKind.ScaleExpand;
     public double HoverExpandSpeed { get; set; } = 1.0;
     /// <summary>
-    /// ponytail: Anchor point for the restore animation — see <see cref="HoverExpandOrigin"/>.
-    /// Default ButtonCenter keeps the original radial-from-button look.
+    /// ponytail: Anchor point + RestoreButton position for the restore animation — see
+    /// <see cref="HoverExpandOrigin"/>. Default ButtonCenter parks the button at the
+    /// window's center and expands from the middle.
     /// </summary>
     public HoverExpandOrigin HoverExpandOrigin { get; set; } = HoverExpandOrigin.ButtonCenter;
 

@@ -17,7 +17,7 @@
   "Motion.AnimationKind": "Animation",
   "Motion.AnimationKindHint": "How the zone appears on screen",
   "Motion.Origin": "Origin",
-  "Motion.OriginHint": "Where the animation starts from",
+  "Motion.OriginHint": "Button docks at the window corner or center; animation grows from it",
   "Motion.Speed": "Speed",
   "Motion.SpeedHint": "1.0 is the default speed",
   "Motion.Title": "Motion",
@@ -25,7 +25,7 @@
   "Motion.UnknownAnimation": "Pick an animation and origin first",
 
   "MotionAnimationBounceExpand": "Bounce",
-  "MotionAnimationDirectionalExpand": "Directional",
+  "MotionAnimationDirectionalExpand": "Horizontal",
   "MotionAnimationFade": "Fade",
   "MotionAnimationNone": "None",
   "MotionAnimationScaleExpand": "Scale",

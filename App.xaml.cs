@@ -495,8 +495,54 @@ public partial class App : System.Windows.Application
 
     private void TrayLeftClick() { /* no-op: don't auto-restore zones */ }
     private void TrayDoubleClick() => ShowManagementWindow();
-    private void TrayShowAll() => _zoneManager?.ShowAll();
-    private void TrayHideAll() => _zoneManager?.HideAll();
+    // ponytail: 2026-08-23 — the tray's 全部显示/全部隐藏 used to act on zones ONLY,
+    // so the sticky note (and any clock/calendar) stayed on the desktop after "hide
+    // all" — reported as "全部隐藏时便签不隐藏". Now they cover every window type:
+    // route through the management window's batch methods when it exists (those also
+    // open never-opened widgets on Show All), otherwise sweep the live app windows
+    // directly so the behavior holds even with StartMinimized.
+    private void TrayShowAll()
+    {
+        _zoneManager?.ShowAll();
+        if (_managementWindow != null)
+        {
+            _managementWindow.ShowAllWidgetsFromVm();
+        }
+        else
+        {
+            try
+            {
+                foreach (var w in System.Windows.Application.Current.Windows.OfType<ClockWidget>().ToList())
+                    w.ShowClock();
+                foreach (var w in System.Windows.Application.Current.Windows.OfType<CalendarWidget>().ToList())
+                    w.ShowCalendar();
+                foreach (var w in System.Windows.Application.Current.Windows.OfType<StickyNoteWindow>().ToList())
+                    w.ShowNote();
+            }
+            catch { }
+        }
+    }
+    private void TrayHideAll()
+    {
+        _zoneManager?.HideAll();
+        if (_managementWindow != null)
+        {
+            _managementWindow.HideAllWidgetsFromVm();
+        }
+        else
+        {
+            try
+            {
+                foreach (var w in System.Windows.Application.Current.Windows.OfType<ClockWidget>().ToList())
+                    if (w.MainContent.Visibility == Visibility.Visible) w.HideClock();
+                foreach (var w in System.Windows.Application.Current.Windows.OfType<CalendarWidget>().ToList())
+                    if (w.MainContent.Visibility == Visibility.Visible) w.HideCalendar();
+                foreach (var w in System.Windows.Application.Current.Windows.OfType<StickyNoteWindow>().ToList())
+                    if (w.MainContent.Visibility == Visibility.Visible) w.HideNote();
+            }
+            catch { }
+        }
+    }
     private void TrayNewZone() { _zoneManager?.CreateZone(); ShowManagementWindow(); }
     private void TrayNewNote()
     {

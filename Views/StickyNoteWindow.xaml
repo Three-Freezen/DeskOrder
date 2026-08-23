@@ -46,7 +46,8 @@
                                  FontSize="12" Foreground="#E0E0E0"
                                  Background="Transparent" BorderThickness="0"
                                  CaretBrush="#E0E0E0"
-                                 VerticalAlignment="Center" Margin="10,0,0,0"
+                                 VerticalAlignment="Center" HorizontalAlignment="Left"
+                                 Width="120" Margin="10,0,0,0"
                                  MaxWidth="180"
                                  LostFocus="TitleBox_LostFocus"
                                  KeyDown="TitleBox_KeyDown"/>
