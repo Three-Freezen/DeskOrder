@@ -279,4 +279,39 @@ public class PropertyWindowManager
         StickyNote => "Icon.Sticky",
         _ => "Icon.Settings",
     };
+
+    /// <summary>Move a tab from one strip to another. After move, if the source
+    /// strip is in a floating PropertyWindow with no tabs left, close that window
+    /// (with its existing close animation).</summary>
+    public void TransferTab(PropertyTabStrip fromStrip, PropertyTabStrip toStrip, string key)
+    {
+        if (fromStrip == null || toStrip == null || string.IsNullOrEmpty(key)) return;
+
+        // ponytail: capture title/icon from the source tab BEFORE removing it,
+        // so we can re-create it on the target strip with the same look.
+        PropertyTab? sourceTab = null;
+        for (int i = 0; i < fromStrip.Tabs.Count; i++)
+            if (fromStrip.Tabs[i].Key == key) { sourceTab = fromStrip.Tabs[i]; break; }
+
+        fromStrip.CloseTab(key);
+
+        if (sourceTab != null)
+            toStrip.OpenOrFocus(key, sourceTab.Title, sourceTab.IconKey);
+        else
+            toStrip.OpenOrFocus(key, key, "Icon.Settings");
+
+        CheckEmptyFloatingAndClose(fromStrip);
+    }
+
+    /// <summary>If the given strip belongs to a visible floating PropertyWindow
+    /// whose tab list is now empty, close that window (existing close animation).</summary>
+    public void CheckEmptyFloatingAndClose(PropertyTabStrip strip)
+    {
+        if (strip == null) return;
+        if (strip.Tabs.Count > 0) return;
+        if (Window.GetWindow(strip) is PropertyWindow pw && pw.IsVisible)
+        {
+            try { pw.Close(); } catch { /* close animation already running */ }
+        }
+    }
 }
