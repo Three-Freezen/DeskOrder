@@ -357,11 +357,12 @@ public partial class PropertyTabStrip : UserControl
             CleanupDragOutFeedback();
             CleanupDragGhost();
             PropertyWindowManager.Instance.TransferTab(this, _transferTarget, key);
-            // ponytail: scroll the newly-added tab into view on the target
-            // strip — TransferTab re-opens via OpenOrFocus which keeps the
-            // existing instance focused, but if it's a new entry in an
-            // overflowed strip we want it visible.
-            _transferTarget.ScrollIntoView(tab);
+            // ponytail: TransferTab calls OpenOrFocus which creates a NEW
+            // PropertyTab instance on the target strip (same Key). The old
+            // `tab` reference is from the source strip — ContainerFromItem
+            // on the target returns null for it. Look up the new tab by key.
+            var newTab = _transferTarget.Tabs.FirstOrDefault(t => t.Key == key);
+            if (newTab != null) _transferTarget.ScrollIntoView(newTab);
             ResetDrag();
             e.Handled = true;
             return;
