@@ -46,7 +46,7 @@ public class PropertyWindowManager
     /// gear button, panel settings button, etc.). Honours the "no duplicate
     /// editor per target" rule by reusing an existing floating or by detaching
     /// the docked panel's same target before opening a new floating.</summary>
-    public void PopOutTarget(object target, ConfigService configService, ManagementWindow main, Window? requester = null, Point? cursorScreen = null)
+    public void PopOutTarget(object target, ConfigService configService, ManagementWindow main, Window? requester = null, Point? cursorScreen = null, Size? initialSize = null)
     {
         if (target == null) return;
 
@@ -70,7 +70,7 @@ public class PropertyWindowManager
 
         // 3. Open fresh floating at requester (or persisted / main window) position.
         var pos = ResolvePopPosition(target, requester, main, configService, cursorScreen);
-        OpenFloating(target, configService, main, pos);
+        OpenFloating(target, configService, main, pos, initialSize);
     }
 
     /// <summary>Dock flow — caller is a workspace row click or a floating-title
@@ -106,12 +106,24 @@ public class PropertyWindowManager
         }
     }
 
-    void OpenFloating(object target, ConfigService configService, ManagementWindow main, (double x, double y) pos)
+    void OpenFloating(object target, ConfigService configService, ManagementWindow main, (double x, double y) pos, Size? initialSize = null)
     {
         var w = new PropertyWindow(target, configService) { Owner = main, Left = pos.x, Top = pos.y };
-        var config = configService.Load();
-        w.Width = config.PropertyWindowWidth > 0 ? config.PropertyWindowWidth : 360;
-        w.Height = config.PropertyWindowHeight > 0 ? config.PropertyWindowHeight : 600;
+        // ponytail: drag-out calls pass an explicit initialSize so the new
+        // floating starts at a known width/height instead of inheriting the
+        // persisted config size. Other callers leave it null and fall through
+        // to the persisted-then-default chain below.
+        if (initialSize.HasValue)
+        {
+            w.Width = initialSize.Value.Width;
+            w.Height = initialSize.Value.Height;
+        }
+        else
+        {
+            var config = configService.Load();
+            w.Width = config.PropertyWindowWidth > 0 ? config.PropertyWindowWidth : 360;
+            w.Height = config.PropertyWindowHeight > 0 ? config.PropertyWindowHeight : 600;
+        }
         w.LocationChanged += (_, _) =>
         {
                 PersistRect(target, w, configService);

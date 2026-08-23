@@ -427,6 +427,12 @@ public partial class ManagementWindow : Window
     public void OpenFloatingProperty(object target, Point cursorScreen) =>
         PropertyWindowManager.Instance.PopOutTarget(target, _configService, this, requester: null, cursorScreen: cursorScreen);
 
+    // ponytail: drag-out with explicit initial dimensions — overrides the
+    // persisted config size so a freshly dragged-out window starts at a known
+    // width/height instead of inheriting whatever the user last resized.
+    public void OpenFloatingProperty(object target, Point cursorScreen, Size initialSize) =>
+        PropertyWindowManager.Instance.PopOutTarget(target, _configService, this, requester: null, cursorScreen: cursorScreen, initialSize: initialSize);
+
     /// <summary>Make sure the docked property column is visible. Used by the
     /// workspace dock flow so a freshly-clicked list row lights up the right
     /// panel without the user having to manually un-collapse it first.</summary>
