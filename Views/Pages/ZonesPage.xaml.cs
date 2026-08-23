@@ -36,7 +36,14 @@ public partial class ZonesPage : UserControl
         _main = main;
         _zoneManager = zoneManager;
         if (_main.DockedPanel != null)
-            _main.DockedPanel.Persist = obj => { if (obj is Zone z) _zoneManager.UpdateZone(z); };
+            _main.DockedPanel.Persist = obj =>
+            {
+                if (obj is Zone z) _zoneManager.UpdateZone(z);
+                // ponytail: pin the docked tab so it survives preview cleanup
+                // when the user navigates to another section. Edit = intent
+                // to keep the panel visible for this target.
+                _main.DockedTabs?.PinTab(PropertyWindowManager.TargetKey(obj));
+            };
         Loaded += (_, _) =>
         {
             _zoneManager.ZonesChanged += RefreshList;
@@ -49,8 +56,10 @@ public partial class ZonesPage : UserControl
 
     public void RefreshList()
     {
+        var loc = LocalizationService.Instance;
+        var sortLabels = new[] { loc["Manage.Sort.Name"], loc["Manage.Sort.ItemCount"] };
         var zones = _zoneManager.Zones;
-        CountLabel.Text = $"{zones.Count} 项";
+        CountLabel.Text = $"{zones.Count} {loc["Manage.Count.Unit"]}";
         IEnumerable<Zone> sorted = _sortMode switch
         {
             1 => zones.OrderByDescending(z => z.Items.Count).ThenBy(z => z.Name),
@@ -59,22 +68,26 @@ public partial class ZonesPage : UserControl
         ListHost.ItemsSource = sorted.Select(BuildRow).ToList();
         EmptyHint.Visibility = zones.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         SetSelection(ListHost, _selected); // re-apply after rebuild (rename / lock toggle).
-        SortBtn.Content = $"⇅ {SortLabels[_sortMode]}";
+        SortBtn.Content = $"⇅ {sortLabels[_sortMode]}";
     }
 
-    void SortBtn_Click(object sender, RoutedEventArgs e) =>
-        ShowSortMenu(SortBtn, SortLabels, _sortMode, i => { _sortMode = i; RefreshList(); });
+    void SortBtn_Click(object sender, RoutedEventArgs e)
+    {
+        var loc = LocalizationService.Instance;
+        var sortLabels = new[] { loc["Manage.Sort.Name"], loc["Manage.Sort.ItemCount"] };
+        ShowSortMenu(SortBtn, sortLabels, _sortMode, i => { _sortMode = i; RefreshList(); });
+    }
 
-    static readonly string[] SortLabels = { "名称", "项目数" };
     int _sortMode;
 
     EditableListRow BuildRow(Zone z)
     {
+        var loc = LocalizationService.Instance;
         var row = new EditableListRow
         {
             Tag = z,
             Title = z.Name,
-            Subtitle = $"{(int)z.Width}×{(int)z.Height} · {z.Items.Count} 项",
+            Subtitle = $"{(int)z.Width}×{(int)z.Height} · {z.Items.Count} {loc["Manage.Count.Unit"]}",
             IconKey = "Icon.Zones",
             IconText = z.IconChar ?? "",
             IsLocked = z.IsLocked,
@@ -121,30 +134,35 @@ public partial class ZonesPage : UserControl
 
     void Select(Zone z)
     {
-        if (!ReferenceEquals(_selected, z))
-        {
-            _selected = z;
-            SetSelection(ListHost, z);
-        }
-        if (_main.DockedPanel != null) _main.DockedPanel.Target = z;
+        // ponytail: workspace direction — dock only. DockTarget closes any floating
+        // editor for the same target so we never have both editors showing the
+        // same zone at once (see PropertyWindowManager.DockTarget). Old code did
+        // _main.DockedPanel.Target = z unconditionally and let the row-click
+        // also call PropertyWindowService.OpenOrFocus separately, which produced
+        // the duplicate-editor bug.
+        PropertyWindowManager.Instance.DockTarget(z, _main);
+        _selected = z;
+        SetSelection(ListHost, z);
     }
 
     static void ApplyStatusBadge(EditableListRow row, Zone z)
     {
+        var loc = LocalizationService.Instance;
         // ponytail: one badge per row; locked beats hidden, hidden beats merged (most actionable first).
         if (z.IsLocked)
         {
-            row.HasStatusBadge = true; row.StatusBadge = "已锁定";
+            row.HasStatusBadge = true; row.StatusBadge = loc["Manage.Status.Locked"];
             row.StatusBadgeBrush = new SolidColorBrush(Color.FromArgb(0x40, 0xFF, 0xC1, 0x07));
         }
         else if (!z.IsVisible)
         {
-            row.HasStatusBadge = true; row.StatusBadge = "已隐藏";
+            row.HasStatusBadge = true; row.StatusBadge = loc["Manage.Status.Hidden"];
             row.StatusBadgeBrush = new SolidColorBrush(Color.FromArgb(0x40, 0xA0, 0xA0, 0xC0));
         }
         else if (z.MergedGroupMembership.SubZoneIds.Count > 0)
         {
-            row.HasStatusBadge = true; row.StatusBadge = $"合并 {z.MergedGroupMembership.SubZoneIds.Count + 1}";
+            row.HasStatusBadge = true;
+            row.StatusBadge = string.Format(loc["Manage.Status.Merged"], z.MergedGroupMembership.SubZoneIds.Count + 1);
             row.StatusBadgeBrush = new SolidColorBrush(Color.FromArgb(0x40, 0x7C, 0x3A, 0xED));
         }
         else
@@ -155,22 +173,23 @@ public partial class ZonesPage : UserControl
 
     void ShowZoneContextMenu(Zone z, EditableListRow row)
     {
+        var loc = LocalizationService.Instance;
         var items = new List<RowContextMenu.Item>
         {
-            new(z.IsVisible ? "隐藏" : "显示", () =>
+            new(z.IsVisible ? loc["Manage.Zone.Hide"] : loc["Manage.Zone.Show"], () =>
             {
                 if (z.IsVisible) { z.IsVisible = false; _zoneManager.HideZone(z.Id); }
                 else { z.IsVisible = true; _zoneManager.ShowZone(z); }
                 RefreshList();
             }),
-            new(z.IsLocked ? "解锁" : "锁定", () =>
+            new(z.IsLocked ? loc["Manage.Zone.Unlock"] : loc["Manage.Zone.Lock"], () =>
             {
                 z.IsLocked = !z.IsLocked; _zoneManager.UpdateZone(z); RefreshList();
             }),
         };
         var otherGroups = _zoneManager.Zones.Any(o => o.MergedGroupMembership.SubZoneIds.Count > 0 && o.Id != z.Id);
-        if (otherGroups) items.Add(new("添加到组合分区", () => _main.ShowMergeDialog(z)));
-        items.Add(new("删除", () => Delete(z), Danger: true));
+        if (otherGroups) items.Add(new(loc["Manage.Zone.AddToMerge"], () => _main.ShowMergeDialog(z)));
+        items.Add(new(loc["Manage.Zone.Delete"], () => Delete(z), Danger: true));
         RowContextMenu.Show(row, items);
     }
 
@@ -184,7 +203,9 @@ public partial class ZonesPage : UserControl
 
     void Delete(Zone z)
     {
-        if (MessageBox.Show($"删除分区「{z.Name}」？", "删除分区",
+        var loc = LocalizationService.Instance;
+        var msg = string.Format(loc["Manage.Zone.DeleteConfirm"], z.Name);
+        if (MessageBox.Show(msg, loc["Manage.Zone.DeleteTitle"],
             MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
         _zoneManager.DeleteZone(z.Id);
         if (ReferenceEquals(_selected, z)) _selected = null;

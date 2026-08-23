@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Threading;
 using System.Windows;
@@ -94,7 +95,7 @@ public partial class App : System.Windows.Application
         _widgetService = new WidgetService(_configService);
         _panelService = new PanelService(_zoneManager, _configService);
 
-        var appIcon = IconToImageSource(CreateAppIcon());
+        var appIcon = AppIcon;
 
         MainWindow = new Window
         {
@@ -268,8 +269,7 @@ public partial class App : System.Windows.Application
                     // Create instance without showing — only need it for TogglePanel
                     _managementWindow = new ManagementWindow(_zoneManager!, _configService!, _notesService, _widgetService, _panelService);
                     _managementWindow.Closed += (_, _) => _managementWindow = null;
-                    if (_appIconImage == null) _appIconImage = IconToImageSource(CreateAppIcon());
-                    _managementWindow.Icon = _appIconImage;
+                    _managementWindow.Icon = AppIcon;
                     _managementWindow.TogglePanel();
                 }
                 handled = true;
@@ -557,7 +557,11 @@ public partial class App : System.Windows.Application
         window.Show();
     }
 
-    private System.Windows.Media.ImageSource? _appIconImage;
+    // ponytail: tray + window title both want the same image. Exposed as a public
+    // static so XAML can bind via {x:Static Application.AppIcon} without a
+    // xaml-side indirection. Lazily resolved on first access.
+    public static System.Windows.Media.ImageSource AppIcon => _appIconImage ??= IconToImageSource(CreateAppIcon());
+    private static System.Windows.Media.ImageSource? _appIconImage;
 
     private void ShowManagementWindow()
     {
@@ -565,16 +569,14 @@ public partial class App : System.Windows.Application
         {
             _managementWindow = new ManagementWindow(_zoneManager!, _configService!, _notesService, _widgetService, _panelService);
             _managementWindow.Closed += (_, _) => _managementWindow = null;
-            // Set the custom icon
-            if (_appIconImage == null) _appIconImage = IconToImageSource(CreateAppIcon());
-            _managementWindow.Icon = _appIconImage;
+            _managementWindow.Icon = AppIcon;
         }
         _managementWindow.Show();
         _managementWindow.Activate();
         _managementWindow.WindowState = WindowState.Normal;
     }
 
-    private Icon CreateAppIcon()
+    private static Icon CreateAppIcon()
     {
         // Load icon from embedded resource or file
         string iconPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "Icons", "DesktopZones.ico");

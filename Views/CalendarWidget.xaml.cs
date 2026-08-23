@@ -64,10 +64,11 @@ public partial class CalendarWidget : Window
         ApplyLoc();
         // ponytail: hover-expand (Task 14d). Wired after InitializeComponent and
         // before any user interaction can occur.
-        _hover = new HoverExpandBehavior(this, RestoreButton, MainContent, ToggleExpandBtn,
+        _hover = new HoverExpandBehavior(this, RestoreButton, MainContent, null,
             () => _calendar.HoverExpandAnimation,
             () => _calendar.HoverExpandSpeed,
-            () => _calendar.HoverExpandOrigin)
+            () => _calendar.HoverExpandOrigin,
+            () => _calendar.HoverAutoExpand)
         { IsEnabled = _calendar.EnableRestoreButton };
         // ponytail: bug fix — see ZoneWindow ctor. Window.Show() (OpenCalendarWindow /
         // --spawn-widget) bypasses ShowCalendar, so SnapToExpanded never runs.
@@ -80,6 +81,9 @@ public partial class CalendarWidget : Window
         if (!IsLoaded) return;
         var latest = _widgetService.Calendars.FirstOrDefault(c => c.Id == _calendar.Id);
         if (latest != null) _calendar = latest;
+        // ponytail: ghost-stamp lock — see ZoneWindow.OnZonesChanged for full rationale.
+        if (!_calendar.IsVisible && _hover != null && MainContent.Visibility == Visibility.Visible)
+            _hover.SnapToCollapsed();
         // ponytail: always sync FillRect, even when hidden — closes the
         // "model blue, screen yellow" desync that ShowCalendar used to reveal.
         SyncFillRect();
@@ -837,13 +841,6 @@ public partial class CalendarWidget : Window
     {
         _widgetService.DeleteCalendar(_calendar.Id);
         Close();
-    }
-
-    void ToggleExpandBtn_Click(object s, RoutedEventArgs e)
-    {
-        // ponytail: hover-expand toggle button routes to the property window (spec §7.2).
-        PropertyWindowService.OpenOrFocus(_calendar);
-        e.Handled = true;
     }
 
     /// <summary>Snapshot the currently-displayed fill brush so the style dialog can restore it

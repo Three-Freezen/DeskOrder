@@ -46,4 +46,28 @@ public static class ThemeBrushes
     public static SolidColorBrush T2 => Get<SolidColorBrush>("T2");
     public static SolidColorBrush T3 => Get<SolidColorBrush>("T3");
     public static SolidColorBrush TDisabled => Get<SolidColorBrush>("TDisabled");
+
+    // ponytail: modern Brush.* keys. ApplySystemAccentIfApplicable replaces ONLY
+    // these (not the legacy keys above), so anything that needs to follow the live
+    // system accent in System mode must read from here. Legacy keys above still
+    // follow Light/Dark/HC swaps via RepaintBrushes, just not the accent overlay.
+    public static SolidColorBrush BgBaseModern => Get<SolidColorBrush>("Brush.Bg.Base");
+    public static SolidColorBrush BgChromeModern => Get<SolidColorBrush>("Brush.Bg.Chrome");
+    public static SolidColorBrush BgSurfaceModern => Get<SolidColorBrush>("Brush.Bg.Surface");
+    public static SolidColorBrush BgHoverModern => Get<SolidColorBrush>("Brush.Bg.Hover");
+    public static SolidColorBrush BgActiveModern => Get<SolidColorBrush>("Brush.Bg.Active");
+    public static SolidColorBrush BgInputModern => Get<SolidColorBrush>("Brush.Bg.Input");
+    public static SolidColorBrush BorderSubtleModern => Get<SolidColorBrush>("Brush.Border.Subtle");
+    public static SolidColorBrush BorderDefaultModern => Get<SolidColorBrush>("Brush.Border.Default");
+    public static SolidColorBrush BorderStrongModern => Get<SolidColorBrush>("Brush.Border.Strong");
+    public static SolidColorBrush TextPrimaryModern => Get<SolidColorBrush>("Brush.Text.Primary");
+    public static SolidColorBrush TextSecondaryModern => Get<SolidColorBrush>("Brush.Text.Secondary");
+    public static SolidColorBrush TextTertiaryModern => Get<SolidColorBrush>("Brush.Text.Tertiary");
+    public static SolidColorBrush TextDisabledModern => Get<SolidColorBrush>("Brush.Text.Disabled");
+    public static SolidColorBrush AccentWashModern => Get<SolidColorBrush>("Brush.Accent.Wash");
+    public static SolidColorBrush AccentSolidModern => Get<SolidColorBrush>("Brush.Accent.Solid");
+    public static SolidColorBrush AccentModern => Get<SolidColorBrush>("Brush.Accent");
+    public static SolidColorBrush DangerModern => Get<SolidColorBrush>("Brush.Danger");
+    public static SolidColorBrush SuccessModern => Get<SolidColorBrush>("Brush.Success");
+    public static SolidColorBrush WarningModern => Get<SolidColorBrush>("Brush.Warning");
 }

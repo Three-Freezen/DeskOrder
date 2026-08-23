@@ -9,7 +9,9 @@
       <Border x:Name="TabRoot" Padding="10,3" Margin="0,0,1,0"
               BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="0,0,1,0"
               Cursor="Hand"
-              MouseLeftButtonUp="TabRoot_MouseLeftButtonUp">
+              MouseLeftButtonDown="TabRoot_MouseLeftButtonDown"
+              MouseLeftButtonUp="TabRoot_MouseLeftButtonUp"
+              MouseMove="TabRoot_MouseMove">
         <Border.Style>
           <Style TargetType="Border">
             <Setter Property="Background" Value="{DynamicResource Brush.Bg.Base}"/>
@@ -80,6 +82,17 @@
                   <DataTrigger Binding="{Binding IsActive}" Value="True">
                     <Setter Property="Background" Value="{DynamicResource Brush.Accent}"/>
                   </DataTrigger>
+                  <!-- ponytail: preview tab gets a dashed 1-px tertiary line so it
+                       reads as "tentative, not pinned". Pinned+active wins over
+                       preview (active=accent solid bar). -->
+                  <MultiDataTrigger>
+                    <MultiDataTrigger.Conditions>
+                      <Condition Binding="{Binding IsPreview}" Value="True"/>
+                      <Condition Binding="{Binding IsActive}" Value="False"/>
+                    </MultiDataTrigger.Conditions>
+                    <Setter Property="Background" Value="{DynamicResource Brush.Text.Tertiary}"/>
+                    <Setter Property="Opacity" Value="0.5"/>
+                  </MultiDataTrigger>
                 </Style.Triggers>
               </Style>
             </Border.Style>
@@ -94,7 +107,8 @@
           Padding="0,4">
     <ScrollViewer x:Name="TabsScroller" HorizontalScrollBarVisibility="Hidden"
                   VerticalScrollBarVisibility="Disabled">
-      <ItemsControl x:Name="TabsHost" ItemTemplate="{StaticResource PropertyTabTemplate}">
+      <ItemsControl x:Name="TabsHost" ItemTemplate="{StaticResource PropertyTabTemplate}"
+                  MouseLeftButtonUp="TabsHost_MouseLeftButtonUp">
         <ItemsControl.ItemsPanel>
           <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
         </ItemsControl.ItemsPanel>

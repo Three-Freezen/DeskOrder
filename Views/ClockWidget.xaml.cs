@@ -78,10 +78,11 @@ public partial class ClockWidget : Window
         _widgetService.LockChanged += OnServiceLockChanged;
         // ponytail: hover-expand (Task 14d). Wired after InitializeComponent and
         // before any user interaction can occur.
-        _hover = new HoverExpandBehavior(this, RestoreButton, MainContent, ToggleExpandBtn,
+        _hover = new HoverExpandBehavior(this, RestoreButton, MainContent, null,
             () => _clock.HoverExpandAnimation,
             () => _clock.HoverExpandSpeed,
-            () => _clock.HoverExpandOrigin)
+            () => _clock.HoverExpandOrigin,
+            () => _clock.HoverAutoExpand)
         { IsEnabled = _clock.EnableRestoreButton };
         // ponytail: bug fix — see ZoneWindow ctor for full rationale. Window.Show()
         // (called by OpenClockWindow / --spawn-widget) doesn't route through
@@ -98,6 +99,11 @@ public partial class ClockWidget : Window
         // Re-fetch latest clock from collection (UpdateClock replaces the object)
         var latest = _widgetService.Clocks.FirstOrDefault(c => c.Id == _clock.Id);
         if (latest != null) _clock = latest;
+        // ponytail: ghost-stamp lock — see ZoneWindow.OnZonesChanged for full rationale.
+        // Model says widget should be hidden but MainContent is still visible → SnapToCollapsed
+        // synchronously before SyncFillRect/ApplyAcrylic paint into a phantom-visible window.
+        if (!_clock.IsVisible && _hover != null && MainContent.Visibility == Visibility.Visible)
+            _hover.SnapToCollapsed();
         // ponytail: always sync FillRect, even when hidden — closes the
         // "model blue, screen yellow" desync that ShowClock used to reveal.
         // Acrylic blur stays gated on visibility (needs valid HWND).
@@ -735,13 +741,6 @@ public partial class ClockWidget : Window
         _timer.Stop();
         _widgetService.DeleteClock(_clock.Id);
         Close();
-    }
-
-    void ToggleExpandBtn_Click(object s, RoutedEventArgs e)
-    {
-        // ponytail: hover-expand toggle button routes to the property window (spec §7.2).
-        PropertyWindowService.OpenOrFocus(_clock);
-        e.Handled = true;
     }
 
     protected override void OnMouseWheel(MouseWheelEventArgs e)

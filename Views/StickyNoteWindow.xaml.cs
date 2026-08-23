@@ -85,10 +85,11 @@ public partial class StickyNoteWindow : Window
         _initializing = false;
         // ponytail: hover-expand (Task 14d). Wired after InitializeComponent and
         // before any user interaction can occur.
-        _hover = new HoverExpandBehavior(this, RestoreButton, MainContent, ToggleExpandBtn,
+        _hover = new HoverExpandBehavior(this, RestoreButton, MainContent, null,
             () => _note.HoverExpandAnimation,
             () => _note.HoverExpandSpeed,
-            () => _note.HoverExpandOrigin)
+            () => _note.HoverExpandOrigin,
+            () => _note.HoverAutoExpand)
         { IsEnabled = _note.EnableRestoreButton };
         // ponytail: bug fix — see ZoneWindow ctor. ShowNoteFromService / OpenNoteWindow
         // call window.Show() without going through the equivalent of ShowZone, so
@@ -101,6 +102,9 @@ public partial class StickyNoteWindow : Window
         if (!IsLoaded) return;
         var latest = _notesService.Notes.FirstOrDefault(n => n.Id == _note.Id);
         if (latest != null) _note = latest;
+        // ponytail: ghost-stamp lock — see ZoneWindow.OnZonesChanged for full rationale.
+        if (!_note.IsVisible && _hover != null && MainContent.Visibility == Visibility.Visible)
+            _hover.SnapToCollapsed();
         // ponytail: pull refreshed lock state from model (e.g. when another window unlocked this note)
         _vm.IsLocked = _note.IsLocked;
         if (MainContent.Visibility == Visibility.Visible)
@@ -882,14 +886,6 @@ public partial class StickyNoteWindow : Window
         _notesService.DeleteNote(_note.Id);
         Close();
     }
-
-    void ToggleExpandBtn_Click(object s, RoutedEventArgs e)
-    {
-        // ponytail: hover-expand toggle button routes to the property window (spec §7.2).
-        PropertyWindowService.OpenOrFocus(_note);
-        e.Handled = true;
-    }
-
     void TitleBox_LostFocus(object s, RoutedEventArgs e)
     {
         _vm.Title = TitleBox.Text;

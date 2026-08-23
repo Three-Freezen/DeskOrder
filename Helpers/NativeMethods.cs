@@ -56,6 +56,19 @@ public static class NativeMethods
     public static extern bool SetWindowPos(IntPtr hwnd, IntPtr hwndInsertAfter,
         int x, int y, int cx, int cy, uint uFlags);
 
+    /// <summary>
+    /// ponytail: RDW_INVALIDATE | RDW_UPDATENOW — invalidate + immediate repaint.
+    /// Used to flush WPF's <c>AllowsTransparency=True</c> layered-window DWM cache
+    /// after inner Visibility flips that the renderer may otherwise leave stale
+    /// (the "ghost rectangle" symptom where only ZoneBorder outline + FillRect
+    /// translucent fill survive while the actual UI is supposed to be hidden).
+    /// </summary>
+    public const uint RDW_INVALIDATE = 0x0001;
+    public const uint RDW_UPDATENOW = 0x0100;
+
+    [DllImport("user32.dll")]
+    public static extern bool RedrawWindow(IntPtr hwnd, IntPtr lprcUpdate, IntPtr hrgnUpdate, uint flags);
+
     [DllImport("user32.dll")]
     public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 

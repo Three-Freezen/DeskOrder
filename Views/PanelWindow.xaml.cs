@@ -139,7 +139,9 @@ public partial class PanelWindow : Window
 
     void SettingsBtn_Click(object s, MouseButtonEventArgs e)
     {
-        PropertyWindowService.OpenOrFocus(_zoneManager.GetConfig());
+        // ponytail: pass `this` so the popped-out panel anchors at the panel's
+        // window position (offset 24,24) instead of jumping somewhere else.
+        PropertyWindowService.OpenOrFocus(_zoneManager.GetConfig(), this);
         e?.Handled = true;
     }
 

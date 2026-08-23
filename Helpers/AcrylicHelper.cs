@@ -6,6 +6,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
+using Microsoft.Win32;
 
 namespace DesktopZones.Helpers;
 
@@ -126,23 +127,38 @@ public static class AcrylicHelper
 
     private static uint GetSystemAccentARGB()
     {
+        // ponytail: same source as ThemeService — read the user's accent from
+        // HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Accent\AccentColorMenu
+        // (Win10/11). DwmGetColorizationColor returns the OS *colorization* color which
+        // is DWM's tint for surfaces, not the user-chosen accent — on Win11 they
+        // diverge and DWM often reads as a dim legacy color. Registry is the live
+        // value the user picks in Personalization → Colors.
         try
         {
-            int colorization;
-            bool opaque;
-            int hr = DwmGetColorizationColor(out colorization, out opaque);
-            if (hr == 0)
+            using var key = Registry.CurrentUser.OpenSubKey(
+                @"Software\Microsoft\Windows\CurrentVersion\Explorer\Accent");
+            if (key?.GetValue("AccentColorMenu") is int colorref)
             {
-                // colorization is 0xAARRGGBB
-                return (uint)colorization;
+                // COLORREF is 0x00BBGGRR → convert to 0xAARRGGBB (alpha = FF).
+                // G MUST be shifted left by 8 to land in bits 8-15; without it,
+                // G and B both OR into bits 0-7, which makes sage-green
+                // (R=G_byte0, G=byte1, B=byte2 where R and B are equal-ish) lose
+                // its G channel and render as a violet. Pure red/blue hid the bug
+                // because G | B == B when the unused channel is zero.
+                // Cast each shift result to uint so the OR doesn't sign-extend
+                // the int colorref (top bit is often set on Win11 sage accents).
+                return 0xFF000000u
+                    | ((uint)(colorref        & 0xFF) << 16)   // R: bits 16-23
+                    | ((uint)((colorref >>  8) & 0xFF) <<  8)  // G: bits  8-15
+                    |  (uint)((colorref >> 16) & 0xFF);        // B: bits  0-7
             }
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"[AcrylicHelper] DwmGetColorizationColor: {ex}");
+            System.Diagnostics.Debug.WriteLine($"[AcrylicHelper] ReadSystemAccent registry: {ex}");
         }
-        // Fallback: purple accent
-        return 0xFF_7C_3A_ED;
+        // Fallback: Win11 default blue.
+        return 0xFF_00_78_D4;
     }
 
     /// <summary>DWM blur-behind toggle. Logs + returns Fail on P/Invoke exception.</summary>
@@ -215,13 +231,24 @@ public static class AcrylicHelper
 
     private static readonly Dictionary<(string, int, int), int> _tintCache = new();
 
+    // ponytail: registry of windows that called EnableBlur, so OnSystemAccentChanged
+    // can re-apply blur to the windows that actually use the "Accent" preset. Keyed
+    // by window instance; entries get removed in DisableBlur.
+    private static readonly Dictionary<Window, (int blur, int opacity, int lum, string mode)> _registered = new();
+
     /// <summary>
     /// Build the GradientColor (ABGR format) from color mode + tint opacity + tint luminosity.
     /// </summary>
     public static int ResolveGlassTintColor(string colorMode, int tintOpacity, int tintLuminosity)
     {
-        var key = (colorMode, tintOpacity, tintLuminosity);
-        if (_tintCache.TryGetValue(key, out var cached)) return cached;
+        // ponytail: skip the cache for "Accent" — the system accent can change mid-session
+        // and every call must re-read GetSystemAccentARGB so the live tint follows. Other
+        // presets are static so caching them saves the luminosity+opacity math.
+        if (colorMode != "Accent")
+        {
+            var key = (colorMode, tintOpacity, tintLuminosity);
+            if (_tintCache.TryGetValue(key, out var cached)) return cached;
+        }
 
         uint argb = ResolveBaseColorARGB(colorMode);
 
@@ -245,8 +272,41 @@ public static class AcrylicHelper
 
         uint finalArgb = (alpha << 24) | (r << 16) | (g << 8) | b;
         int result = ArgbToAbgr(finalArgb);
-        _tintCache[key] = result;
+        if (colorMode != "Accent")
+            _tintCache[(colorMode, tintOpacity, tintLuminosity)] = result;
         return result;
+    }
+
+    /// <summary>
+    /// Drop every cached "Accent" entry and re-apply blur to every registered window
+    /// that uses the "Accent" color mode. Called by ThemeService.ApplySystemAccent
+    /// whenever the system accent color changes (WM_SETTINGCHANGE → ImmersiveColorSet
+    /// or the 1-second DispatcherTimer fallback) so live accent changes propagate
+    /// to the liquid glass tint without restarting the app.
+    /// </summary>
+    public static void OnSystemAccentChanged()
+    {
+        // Clear stale "Accent" cache entries so a fresh re-apply reads the current
+        // system accent. Other modes are static so we leave them alone.
+        var staleKeys = _tintCache.Keys.Where(k => k.Item1 == "Accent").ToList();
+        foreach (var k in staleKeys) _tintCache.Remove(k);
+
+        // Re-apply to every window registered with mode == "Accent". Snapshot first
+        // because EnableBlur may mutate the dict if the window is being torn down.
+        foreach (var entry in _registered.ToList())
+        {
+            var (window, settings) = (entry.Key, entry.Value);
+            if (settings.mode != "Accent") continue;
+            if (!window.IsLoaded) continue;
+            try
+            {
+                EnableBlur(window, settings.blur, settings.opacity, settings.lum, settings.mode);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[AcrylicHelper] OnSystemAccentChanged reapply: {ex}");
+            }
+        }
     }
 
     /// <summary>
@@ -261,6 +321,11 @@ public static class AcrylicHelper
     {
         var hwnd = new WindowInteropHelper(window).Handle;
         if (hwnd == IntPtr.Zero) return BlurResult.Fail("Window handle not created yet");
+
+        // ponytail: remember (window → settings) so OnSystemAccentChanged can re-apply
+        // when the system accent changes. Override existing entry if EnableBlur is
+        // called again with different params (e.g. user edited settings live).
+        _registered[window] = (blurAmount, tintOpacity, tintLuminosity, colorMode);
 
         // Check DWM is on
         bool dwmOn = true;
@@ -300,6 +365,10 @@ public static class AcrylicHelper
     {
         var hwnd = new WindowInteropHelper(window).Handle;
         if (hwnd == IntPtr.Zero) return BlurResult.Fail("Window handle not created yet");
+
+        // ponytail: drop the registry entry so OnSystemAccentChanged doesn't try to
+        // re-apply to a torn-down window.
+        _registered.Remove(window);
 
         var primary = TryBlurBehind(hwnd, false);
         var secondary = TrySetAccent(hwnd, ACCENT_DISABLED, 0, 0);

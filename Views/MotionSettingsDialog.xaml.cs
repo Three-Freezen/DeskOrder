@@ -11,9 +11,8 @@ namespace DesktopZones.Views;
 /// single instance. Reads from AppearanceModel.HoverExpandAnimation /
 /// HoverExpandSpeed / HoverExpandOrigin on open, writes back only on OK.
 /// Cancel discards edits.
-/// ponytail: Driven by EnableRestoreButton on the model — no separate
-/// HoverAutoExpand toggle (was confusing and conflicted with the restore
-/// button's own click-to-restore behaviour).
+/// HoverAutoExpand (the on/off for cursor-hover auto-expand) is a PropertyPanel
+/// checkbox, not a dialog knob — it's boolean and a single click toggles it.
 /// </summary>
 public partial class MotionSettingsDialog : Window
 {
@@ -51,14 +50,14 @@ public partial class MotionSettingsDialog : Window
         AnimationKindHint.Text = _loc["Motion.AnimationKindHint"];
         SpeedLabel.Text = _loc["Motion.Speed"];
         SpeedHint.Text = _loc["Motion.SpeedHint"];
-        ItemOriginCenter.Content = _loc["Motion.Origin.ButtonCenter"];
-        ItemOriginCorner.Content = _loc["Motion.Origin.ButtonCorner"];
-        ItemScaleExpand.Content = _loc["Motion.Animation.ScaleExpand"];
-        ItemFade.Content = _loc["Motion.Animation.Fade"];
-        ItemBounceExpand.Content = _loc["Motion.Animation.BounceExpand"];
-        ItemDirectionalExpand.Content = _loc["Motion.Animation.DirectionalExpand"];
-        ItemVerticalExpand.Content = _loc["Motion.Animation.VerticalExpand"];
-        ItemNone.Content = _loc["Motion.Animation.None"];
+        ItemOriginCenter.Content = _loc["MotionOriginButtonCenter"];
+        ItemOriginCorner.Content = _loc["MotionOriginButtonCorner"];
+        ItemScaleExpand.Content = _loc["MotionAnimationScaleExpand"];
+        ItemFade.Content = _loc["MotionAnimationFade"];
+        ItemBounceExpand.Content = _loc["MotionAnimationBounceExpand"];
+        ItemDirectionalExpand.Content = _loc["MotionAnimationDirectionalExpand"];
+        ItemVerticalExpand.Content = _loc["MotionAnimationVerticalExpand"];
+        ItemNone.Content = _loc["MotionAnimationNone"];
         CancelBtn.Content = _loc["Common.Cancel"];
         OkBtn.Content = _loc["Common.Save"];
     }

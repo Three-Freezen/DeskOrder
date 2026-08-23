@@ -81,6 +81,15 @@ public class AppConfig
     public bool PropertyWindowTopmost { get; set; } = true;
     public bool PropertyPanelCollapsed { get; set; } = false;
 
+    // ponytail: per-instance position persistence — spec §2.4 says "位置与尺寸
+    // 持久化,按实例 Id 记忆". Keys are stable target Ids (Zone.Id, Calendar.Id,
+    // Clock.Id, Note.Id, MergedGroup.Id). Kept here (not nested in Panel POCO)
+    // because it's keyed by domain instance, not panel chrome.
+    // Migration: on first load, copy the legacy global X/Y/Width/Height into
+    // PropertyWindowRects["__default__"] so existing single-window layouts
+    // survive the upgrade.
+    public Dictionary<string, RectLite> PropertyWindowRects { get; set; } = new();
+
     /// <summary>
     /// Captures top-level JSON fields with no matching property — used by
     /// <c>ConfigService</c> for one-time migration of legacy flat Panel* fields
@@ -94,4 +103,22 @@ public class CustomHotkey
 {
     public int Modifiers { get; set; }
     public int Key { get; set; }
+}
+
+/// <summary>
+/// Plain-data rectangle used in JSON-serialised config (no WPF dependency).
+/// Fields are public + settable so System.Text.Json round-trips them; an
+/// implicit conversion to/from <c>System.Windows.Rect</c> lives in
+/// <c>PropertyWindowManager</c> where the WPF ref is already present.
+/// ponytail: kept as a POCO instead of <c>[Serializable] struct</c> so
+/// older .NET config files (no struct ctor) still load via property setters.
+/// </summary>
+public class RectLite
+{
+    public double X { get; set; } = double.NaN;
+    public double Y { get; set; } = double.NaN;
+    public double Width { get; set; } = 360;
+    public double Height { get; set; } = 600;
+
+    public bool IsValid => !double.IsNaN(X) && !double.IsNaN(Y) && Width > 0 && Height > 0;
 }

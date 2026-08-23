@@ -12,6 +12,11 @@ using DesktopZones.Views;
 
 namespace DesktopZones.Views.Components;
 
+// ponytail: only the new "鼠标悬停自动展开" row is i18n-fetched; the rest of the
+// rows still use hardcoded Chinese strings (ROADMAP v1.1 will migrate them in
+// bulk — adding one now diverges from the surrounding style but is what the
+// user explicitly asked for).
+
 /// <summary>
 /// Host panel for instance field UI. Three vertical sections:
 /// header (instance name + undock/collapse), preview, field area.
@@ -27,6 +32,9 @@ public partial class PropertyPanel : UserControl
     public static readonly DependencyProperty TargetProperty = DependencyProperty.Register(
         nameof(Target), typeof(object), typeof(PropertyPanel),
         new PropertyMetadata(null, (d, _) => ((PropertyPanel)d).OnTargetChanged()));
+    public static readonly DependencyProperty IsFloatingProperty = DependencyProperty.Register(
+        nameof(IsFloating), typeof(bool), typeof(PropertyPanel),
+        new PropertyMetadata(false, (d, _) => ((PropertyPanel)d).OnIsFloatingChanged()));
 
     public string InstanceName
     {
@@ -39,6 +47,17 @@ public partial class PropertyPanel : UserControl
         set => SetValue(TargetProperty, value);
     }
 
+    /// <summary>True when the panel lives in a floating PropertyWindow; false when
+    /// docked in ManagementWindow's right column. Drives the dock/undock toggle
+    /// button: docked = undock icon + UndockRequested; floating = dock icon +
+    /// DockRequested. Toggled by the host (PropertyWindow sets true on show;
+    /// ManagementWindow leaves default false).</summary>
+    public bool IsFloating
+    {
+        get => (bool)GetValue(IsFloatingProperty);
+        set => SetValue(IsFloatingProperty, value);
+    }
+
     /// <summary>
     /// Optional sink for "save back to manager" calls. The page that owns
     /// the panel wires this up once; field controls call it after mutating
@@ -48,7 +67,26 @@ public partial class PropertyPanel : UserControl
     public Action<object>? Persist { get; set; }
 
     public event EventHandler? UndockRequested;
+    public event EventHandler? DockRequested;
     public event EventHandler? CollapseRequested;
+    /// <summary>Host wires this to its PropertyTabStrip.CloseActiveTab().</summary>
+    public event EventHandler? CloseTabRequested;
+
+    /// <summary>True when there's an active tab to close. Host (Mgmt/PropertyWindow)
+    /// binds this to the X button's Visibility.</summary>
+    public static readonly DependencyProperty IsCloseableProperty = DependencyProperty.Register(
+        nameof(IsCloseable), typeof(bool), typeof(PropertyPanel),
+        new PropertyMetadata(false, (d, _) => ((PropertyPanel)d).OnIsCloseableChanged()));
+    public bool IsCloseable
+    {
+        get => (bool)GetValue(IsCloseableProperty);
+        set => SetValue(IsCloseableProperty, value);
+    }
+
+    // ponytail: i18n for the one row that uses it. Read on every rebuild so a
+    // user-driven language switch reflects on the next Target change without us
+    // having to subscribe to LocalizationService.LangChanged.
+    readonly LocalizationService _loc = LocalizationService.Instance;
 
     /// <summary>Cached host Window resolved once on Loaded. Dialogs read this before
     /// ShowDialog — falls back to a fresh Window.GetWindow lookup, then refuses to open
@@ -60,10 +98,79 @@ public partial class PropertyPanel : UserControl
     {
         InitializeComponent();
         Loaded += (_, _) => CachedOwner = Window.GetWindow(this);
+        Unloaded += (_, _) => _loc.LanguageChanged -= OnLanguageChanged;
+        _loc.LanguageChanged += OnLanguageChanged;
     }
 
-    void UndockBtn_Click(object sender, RoutedEventArgs e) => UndockRequested?.Invoke(this, EventArgs.Empty);
+    void OnLanguageChanged(string _) => OnTargetChanged();
+
+    void ToggleBtn_Click(object sender, RoutedEventArgs e)
+    {
+        // ponytail: same button serves both directions — when docked it pops out,
+        // when floating it docks back. Routing is by IsFloating so the host
+        // doesn't need to swap event handlers.
+        if (IsFloating) DockRequested?.Invoke(this, EventArgs.Empty);
+        else UndockRequested?.Invoke(this, EventArgs.Empty);
+    }
+
     void CollapseBtn_Click(object sender, RoutedEventArgs e) => CollapseRequested?.Invoke(this, EventArgs.Empty);
+
+    void CloseTabBtn_Click(object sender, RoutedEventArgs e) => CloseTabRequested?.Invoke(this, EventArgs.Empty);
+
+    void OnIsCloseableChanged()
+    {
+        if (CloseTabBtn != null)
+            CloseTabBtn.Visibility = IsCloseable ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    void OnIsFloatingChanged()
+    {
+        // ponytail: do NOT swap the icon here — the phased flip below swaps it
+        // while the button is invisible (ScaleX=0 at the midpoint) so the
+        // transition reads as "the button flipped over and is now the new one".
+        if (ToggleBtn == null || ToggleIcon == null) return;
+        ToggleBtn.ToolTip = IsFloating ? _loc["Common.Dock"] : _loc["Common.Undock"];
+        AnimateToggleFlip();
+    }
+
+    void AnimateToggleFlip()
+    {
+        if (ToggleIconScale == null) return;
+        // ponytail: true horizontal mirror via ScaleX. Two phases:
+        //   1) collapse to ScaleX=0  (button "closes" like a clamshell)
+        //   2) swap icon while invisible, then expand to target ±1
+        // Phase 1 uses DecelSpline (ends slow — meets the icon swap); phase 2
+        // uses AccentSpline (starts fast — opens up from the invisible seam).
+        // NOTE: Motion.DecelSpline / Motion.AccentSpline are KeySpline values
+        // (consumed by SplineDoubleKeyFrame), NOT IEasingFunction — casting
+        // them to IEasingFunction throws InvalidCastException at runtime.
+        // Only Motion.StandardSpline (a CubicEase EaseOut) is an IEasingFunction;
+        // reuse it for both phases.
+        var toFloating = IsFloating;
+        var easing = (System.Windows.Media.Animation.IEasingFunction)FindResource("Motion.StandardSpline");
+        var phase1 = new System.Windows.Media.Animation.DoubleAnimation
+        {
+            To = 0,
+            Duration = TimeSpan.FromMilliseconds(140),
+            EasingFunction = easing,
+        };
+        phase1.Completed += (_, _) =>
+        {
+            if (ToggleIconScale == null) return;
+            // Swap icon while invisible (ScaleX=0).
+            ToggleIcon.Data = (System.Windows.Media.Geometry)FindResource(
+                toFloating ? "Icon.Dock" : "Icon.Undock");
+            var phase2 = new System.Windows.Media.Animation.DoubleAnimation
+            {
+                From = 0,
+                To = toFloating ? -1.0 : 1.0,
+                Duration = TimeSpan.FromMilliseconds(160),
+                EasingFunction = easing,
+            };
+            ToggleIconScale.BeginAnimation(System.Windows.Media.ScaleTransform.ScaleXProperty, phase2);
+        };
+        ToggleIconScale.BeginAnimation(System.Windows.Media.ScaleTransform.ScaleXProperty, phase1);
+    }
 
     void OnTargetChanged()
     {
@@ -79,7 +186,7 @@ public partial class PropertyPanel : UserControl
                 FieldScroller.Content = new TextBlock
                 {
                     Margin = new Thickness(16),
-                    Text = Target == null ? "（未选中目标）" : "（此类型暂未实现字段）",
+                    Text = Target == null ? _loc["PropertyPanel.NoTarget"] : _loc["PropertyPanel.NotImplemented"],
                     Foreground = (Brush)FindResource("Brush.Text.Tertiary"),
                 };
                 break;
@@ -121,30 +228,37 @@ public partial class PropertyPanel : UserControl
         var root = new StackPanel { Margin = new Thickness(16, 12, 16, 12) };
 
         // 开关区
-        var switches = MakeSection("开关区");
-        switches.Children.Add(MakeCheckRow("极简模式", z.QuickBarMode,
+        var switches = MakeSection(_loc["ZoneProp.Section.Switches"]);
+        switches.Children.Add(MakeCheckRow(_loc["ZoneProp.MinimalMode"], z.QuickBarMode,
             v => { z.QuickBarMode = v; Save(z); }));
-        var hoverRow = MakeCheckRowWithSideBtn("可恢复按钮", z.EnableRestoreButton,
+        var hoverRow = MakeCheckRowWithSideBtn(_loc["ZoneProp.RestoreButton"], z.EnableRestoreButton,
             v => { z.EnableRestoreButton = v; Save(z); },
-            "动效设置…", _ => OpenMotionDialog(z));
+            _loc["Motion.SettingsEllipsis"], _ => OpenMotionDialog(z));
         switches.Children.Add(hoverRow);
-        switches.Children.Add(MakeCheckRow("标题栏文字颜色自适应", z.TitleBarTextColorAdaptive,
+        // ponytail: hover-to-expand sub-toggle. Hidden when EnableRestoreButton
+        // is off would be a bigger UX change; we just leave it always editable.
+        // When EnableRestoreButton=false, EnableRestoreButton's own gate hides
+        // the RestoreButton so the toggle has no observable effect — the user
+        // can flip it ahead of time without anything bad happening.
+        switches.Children.Add(MakeCheckRow(_loc["Motion.HoverAutoExpand"], z.HoverAutoExpand,
+            v => { z.HoverAutoExpand = v; Save(z); }));
+        switches.Children.Add(MakeCheckRow(_loc["ZoneProp.TitleBarTextAdaptive"], z.TitleBarTextColorAdaptive,
             v => { z.TitleBarTextColorAdaptive = v; Save(z); }));
-        switches.Children.Add(MakeCheckRow("主体内容颜色自适应", z.TextColorAdaptive,
+        switches.Children.Add(MakeCheckRow(_loc["ZoneProp.BodyTextAdaptive"], z.TextColorAdaptive,
             v => { z.TextColorAdaptive = v; Save(z); }));
-        switches.Children.Add(MakeCheckRow("圆角", z.CornerRadius > 0,
+        switches.Children.Add(MakeCheckRow(_loc["ZoneProp.RoundedCorners"], z.CornerRadius > 0,
             v => { z.CornerRadius = v ? (z.CornerRadius > 0 ? z.CornerRadius : 8) : 0; Save(z); }));
         root.Children.Add(switches);
 
         // 基本
-        var basic = MakeSection("基本");
-        basic.Children.Add(MakeTextRow("名称", z.Name,
+        var basic = MakeSection(_loc["ZoneProp.Section.Basic"]);
+        basic.Children.Add(MakeTextRow(_loc["ZoneProp.Name"], z.Name,
             v => { z.Name = v ?? ""; Save(z); }));
-        basic.Children.Add(MakeColorRow("名称颜色", z.TitleTextColor,
+        basic.Children.Add(MakeColorRow(_loc["ZoneProp.NameColor"], z.TitleTextColor,
             v => { z.TitleTextColor = v; Save(z); }));
-        basic.Children.Add(MakeTextRow("图标", z.IconChar,
+        basic.Children.Add(MakeTextRow(_loc["ZoneProp.Icon"], z.IconChar,
             v => { z.IconChar = v ?? ""; Save(z); }, maxLen: 2));
-        basic.Children.Add(MakeColorRow("图标颜色",
+        basic.Children.Add(MakeColorRow(_loc["ZoneProp.IconColor"],
             string.IsNullOrEmpty(z.IconColor) ? "#FFFFFF" : z.IconColor,
             v => { z.IconColor = v; Save(z); }));
 
@@ -152,10 +266,10 @@ public partial class PropertyPanel : UserControl
         sizeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         sizeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(10) });
         sizeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        var widthGrid = MakeNumberSubBlock("宽度", z.Width, v => { z.Width = v; Save(z); });
+        var widthGrid = MakeNumberSubBlock(_loc["ZoneProp.Width"], z.Width, v => { z.Width = v; Save(z); });
         Grid.SetColumn(widthGrid, 0);
         sizeGrid.Children.Add(widthGrid);
-        var heightGrid = MakeNumberSubBlock("高度", z.Height, v => { z.Height = v; Save(z); });
+        var heightGrid = MakeNumberSubBlock(_loc["ZoneProp.Height"], z.Height, v => { z.Height = v; Save(z); });
         Grid.SetColumn(heightGrid, 2);
         sizeGrid.Children.Add(heightGrid);
         basic.Children.Add(sizeGrid);
@@ -164,14 +278,14 @@ public partial class PropertyPanel : UserControl
         gridGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         gridGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(10) });
         gridGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        var gridBlock = MakeNumberSubBlock("网格大小", z.GridSize,
+        var gridBlock = MakeNumberSubBlock(_loc["ZoneProp.GridSize"], z.GridSize,
             v => { z.GridSize = (int)v; Save(z); }, asInt: true);
         Grid.SetColumn(gridBlock, 0);
         gridGrid.Children.Add(gridBlock);
         var snapStack = new StackPanel { VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 18, 0, 4) };
-        snapStack.Children.Add(MakeCheckRow("吸附到网格", z.SnapToGrid,
+        snapStack.Children.Add(MakeCheckRow(_loc["ZoneProp.SnapToGrid"], z.SnapToGrid,
             v => { z.SnapToGrid = v; Save(z); }));
-        snapStack.Children.Add(MakeCheckRow("尺寸变化时自动重排", z.AutoArrange,
+        snapStack.Children.Add(MakeCheckRow(_loc["ZoneProp.AutoArrange"], z.AutoArrange,
             v => { z.AutoArrange = v; Save(z); }));
         Grid.SetColumn(snapStack, 2);
         gridGrid.Children.Add(snapStack);
@@ -180,43 +294,43 @@ public partial class PropertyPanel : UserControl
         root.Children.Add(basic);
 
         // 标题栏
-        var tb = MakeSection("标题栏");
-        tb.Children.Add(MakeColorRow("标题栏颜色", z.TitleBarFillColor,
+        var tb = MakeSection(_loc["ZoneProp.Section.TitleBar"]);
+        tb.Children.Add(MakeColorRow(_loc["ZoneProp.TitleBarColor"], z.TitleBarFillColor,
             v => { z.TitleBarFillColor = v; Save(z); }));
-        tb.Children.Add(MakeSliderRow("标题栏透明度", 0, 100, 5,
+        tb.Children.Add(MakeSliderRow(_loc["ZoneProp.TitleBarOpacity"], 0, 100, 5,
             ParsePercent(z.TitleBarFillColor, 6),
             p => { z.TitleBarFillColor = SetPercent(z.TitleBarFillColor, p, "FFFFFF"); Save(z); }));
-        tb.Children.Add(MakeSliderRow("按钮透明度", 5, 100, 5,
+        tb.Children.Add(MakeSliderRow(_loc["ZoneProp.ButtonOpacity"], 5, 100, 5,
             z.ControlOpacity,
             v => { z.ControlOpacity = v; Save(z); }));
         root.Children.Add(tb);
 
         // 边框与填充
-        var bf = MakeSection("边框与填充");
-        bf.Children.Add(MakeTextRow("边框粗细", z.BorderThickness.ToString("0.0", CultureInfo.InvariantCulture),
+        var bf = MakeSection(_loc["ZoneProp.Section.BorderFill"]);
+        bf.Children.Add(MakeTextRow(_loc["ZoneProp.BorderThickness"], z.BorderThickness.ToString("0.0", CultureInfo.InvariantCulture),
             v => { if (double.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out var d)) { z.BorderThickness = d; Save(z); } }));
-        bf.Children.Add(MakeColorRow("边框颜色", z.BorderColor,
+        bf.Children.Add(MakeColorRow(_loc["ZoneProp.BorderColor"], z.BorderColor,
             v => { z.BorderColor = v; Save(z); }));
-        bf.Children.Add(MakeSliderRow("边框透明度", 0, 100, 5,
+        bf.Children.Add(MakeSliderRow(_loc["ZoneProp.BorderOpacity"], 0, 100, 5,
             ParsePercent(z.BorderColor, 25),
             p => { z.BorderColor = SetPercent(z.BorderColor, p, "FFFFFF"); Save(z); }));
-        bf.Children.Add(MakeColorRow("内部填充颜色", z.FillColor,
+        bf.Children.Add(MakeColorRow(_loc["ZoneProp.FillColor"], z.FillColor,
             v => { z.FillColor = v; Save(z); }));
-        bf.Children.Add(MakeSliderRow("填充透明度", 0, 100, 5,
+        bf.Children.Add(MakeSliderRow(_loc["ZoneProp.FillOpacity"], 0, 100, 5,
             ParsePercent(z.FillColor, 8),
             p => { z.FillColor = SetPercent(z.FillColor, p, "000000"); Save(z); }));
         root.Children.Add(bf);
 
         // 液态玻璃
-        var lg = MakeSection("液态玻璃");
-        var lgRow = MakeCheckRowWithSideBtn("液态玻璃", z.EnableLiquidGlass,
+        var lg = MakeSection(_loc["ZoneProp.Section.LiquidGlass"]);
+        var lgRow = MakeCheckRowWithSideBtn(_loc["ZoneProp.LiquidGlass"], z.EnableLiquidGlass,
             v => { z.EnableLiquidGlass = v; Save(z); },
-            "液态玻璃设置…", _ => OpenLiquidGlassDialog(z));
+            _loc["ZoneProp.LiquidGlassSettingsEllipsis"], _ => OpenLiquidGlassDialog(z));
         lg.Children.Add(lgRow);
         root.Children.Add(lg);
 
         // 背景图片
-        var bg = MakeSection("背景图片");
+        var bg = MakeSection(_loc["ZoneProp.Section.BgImage"]);
         bg.Children.Add(MakeBgImageRow(z));
         root.Children.Add(bg);
 
@@ -530,13 +644,13 @@ public partial class PropertyPanel : UserControl
     void OpenLiquidGlassDialog(Zone z)
     {
         var owner = CachedOwner ?? Window.GetWindow(this);
-        if (owner == null) { MessageBox.Show("未找到宿主窗口"); return; }
+        if (owner == null) { MessageBox.Show(_loc["PropertyPanel.NoOwnerWindow"]); return; }
         int blur = z.GlassBlurAmount;
         int tint = z.GlassTintOpacity;
         int lum = z.GlassTintLuminosity;
         string mode = z.GlassColorMode;
         var cn = LocalizationService.Instance.CurrentLanguage == "zh";
-        if (!AcrylicHelper.ShowLiquidGlassDialog(owner, "液态玻璃设置",
+        if (!AcrylicHelper.ShowLiquidGlassDialog(owner, _loc["ZoneProp.Section.LiquidGlass"],
             ref blur, ref tint, ref lum, ref mode, cn)) return;
         z.GlassBlurAmount = blur;
         z.GlassTintOpacity = tint;

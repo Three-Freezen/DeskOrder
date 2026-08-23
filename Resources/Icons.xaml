@@ -56,7 +56,10 @@
   <Geometry x:Key="Icon.ChevronDown">M 4,6 L 8,10 L 12,6</Geometry>
   <Geometry x:Key="Icon.ChevronLeft">M 10,4 L 6,8 L 10,12</Geometry>
   <Geometry x:Key="Icon.ChevronRight">M 6,4 L 10,8 L 6,12</Geometry>
-  <Geometry x:Key="Icon.Undock">M 4,4 H 12 V 12 H 4 Z M 8,8 H 14 M 11,5 L 14,8 L 11,11</Geometry>
+  <!-- ponytail: 删掉原来的方框(原 `M 4,4 H 12 V 12 H 4 Z`),只保留箭头本体
+       —— 当 IsFloating=true 时整个按钮会被 ScaleX=-1 镜像,这个箭头就会自然
+       翻向成 Icon.Dock 的形状;中点的图标 swap 让动画过渡完整。 -->
+  <Geometry x:Key="Icon.Undock">M 8,8 H 14 M 11,5 L 14,8 L 11,11</Geometry>
   <Geometry x:Key="Icon.Dock">M 14,8 H 8 M 11,5 L 14,8 L 11,11</Geometry>
 
   <!-- ============================================================ -->

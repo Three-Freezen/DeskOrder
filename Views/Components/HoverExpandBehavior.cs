@@ -12,8 +12,13 @@ namespace DesktopZones.Views.Components;
 /// <summary>
 /// ponytail: Hover-to-show helper for the four floating windows (ZoneWindow /
 /// ClockWidget / CalendarWidget / StickyNoteWindow). Wired to the RestoreButton
-/// (the 36×36 circle visible when the zone is hidden) and driven by the host
-/// widget's EnableRestoreButton flag — no separate HoverAutoExpand toggle.
+/// (the 36×36 circle visible when the zone is hidden). Two gates:
+///   1. <c>IsEnabled</c> (driven by <c>EnableRestoreButton</c>) — master switch;
+///      when off the button is hidden and nothing animates.
+///   2. <c>hoverAutoExpandGetter()</c> (driven by <c>HoverAutoExpand</c>) — when
+///      false, cursor-hover on the RestoreButton does nothing; direct clicks
+///      still expand. Both are read live so a PropertyPanel toggle takes
+///      effect on the next hover/click.
 ///
 /// Behaviour matrix (all animations read live from
 /// <see cref="HoverExpandAnimationKind"/> / HoverExpandSpeed /
@@ -61,6 +66,7 @@ public class HoverExpandBehavior : IDisposable
     readonly Func<HoverExpandAnimationKind> _animationGetter;
     readonly Func<double> _speedGetter;
     readonly Func<HoverExpandOrigin> _originGetter;
+    readonly Func<bool> _hoverAutoExpandGetter;
     readonly ScaleTransform _scale;
     readonly TranslateTransform _translateBack;
     readonly TranslateTransform _translateToOrigin;
@@ -84,7 +90,8 @@ public class HoverExpandBehavior : IDisposable
         FrameworkElement? expandedModeElement,
         Func<HoverExpandAnimationKind> animationGetter,
         Func<double> speedGetter,
-        Func<HoverExpandOrigin> originGetter)
+        Func<HoverExpandOrigin> originGetter,
+        Func<bool> hoverAutoExpandGetter)
     {
         _window = window;
         _collapsedButton = collapsedButton;
@@ -93,6 +100,7 @@ public class HoverExpandBehavior : IDisposable
         _animationGetter = animationGetter;
         _speedGetter = speedGetter;
         _originGetter = originGetter;
+        _hoverAutoExpandGetter = hoverAutoExpandGetter;
 
         // ponytail: explicit composition to scale around (cx, cy):
         //   TransformGroup applies children last-to-first.
@@ -117,7 +125,12 @@ public class HoverExpandBehavior : IDisposable
         _pollTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(150) };
         _pollTimer.Tick += (_, _) => CheckMouseState();
 
-        _enterHandler = (_, _) => { if (IsEnabled) _enterTimer.Start(); };
+        // ponytail: IsEnabled gates the entire feature; hoverAutoExpandGetter further
+        // disables ONLY the hover trigger. Direct clicks on RestoreButton bypass
+        // the enter handler and go through ExpandAnimated(permanent: true), so they
+        // still work when HoverAutoExpand=false. The getter is invoked on every
+        // MouseEnter so toggling the PropertyPanel checkbox takes effect immediately.
+        _enterHandler = (_, _) => { if (IsEnabled && _hoverAutoExpandGetter()) _enterTimer.Start(); };
         _exitHandler = (_, _) => _enterTimer.Stop();
         collapsedButton.MouseEnter += _enterHandler;
         collapsedButton.MouseLeave += _exitHandler;
@@ -327,6 +340,31 @@ public class HoverExpandBehavior : IDisposable
         _exitTimer.Stop();
         ApplyOrigin();                                    // re-apply in case origin changed
         NormalizeFor(isExpanded: false);                  // snap stable axes BEFORE animation
+
+        // ponytail: safety net — WPF silently cancels in-flight animations when
+        // another BeginAnimation(null) / BeginAnimation(newAnim) runs (SetEnabled,
+        // NormalizeFor, MotionSettingsDialog OK path). When that happens the
+        // Completed event never fires and MainContent.Visibility stays Visible,
+        // producing the "ghost rectangle" symptom. Queue an idempotent flip on a
+        // delayed DispatcherTimer so even if Completed is lost, Visibility gets
+        // corrected after the animation's worst-case duration.
+        int delayMs = (int)Math.Max(260, 260.0 / Math.Max(0.1, _speedGetter()));
+        var safetyTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(delayMs)
+        };
+        safetyTimer.Tick += (_, _) =>
+        {
+            safetyTimer.Stop();
+            if (!_isExpanded)
+            {
+                _expandedContent.Visibility = Visibility.Collapsed;
+                _collapsedButton!.Visibility = Visibility.Visible;
+                if (_expandedModeElement != null) _expandedModeElement.Visibility = Visibility.Collapsed;
+            }
+        };
+        safetyTimer.Start();
+
         StartAnimation(isExpand: false, onComplete: () =>
         {
             _expandedContent.Visibility = Visibility.Collapsed;

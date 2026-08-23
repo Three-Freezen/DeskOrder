@@ -22,20 +22,6 @@ namespace DesktopZones.Views.Pages;
 /// </summary>
 public static class PageHelpers
 {
-    public static SolidColorBrush FgPrimary => ThemeBrushes.T1;
-    public static SolidColorBrush FgSecondary => ThemeBrushes.T2;
-    public static SolidColorBrush FgMuted => ThemeBrushes.DimTextFg;
-
-    public static Border MakeCardBorder() => new()
-    {
-        Background = ThemeBrushes.CardBg,
-        CornerRadius = new CornerRadius(8),
-        Padding = new Thickness(12),
-        Margin = new Thickness(0, 0, 0, 6),
-        BorderBrush = ThemeBrushes.CardBorder,
-        BorderThickness = new Thickness(1)
-    };
-
     public static void SetText(TextBlock tb, string cnText)
     {
         tb.Text = cnText; // ponytail: CN-only labels (2026-08); add bilingual once loc dictionary covers pages.
@@ -104,14 +90,17 @@ public sealed class RowContextMenu
             Placement = PlacementMode.Bottom,
         };
 
-        // ponytail: pull from ThemeBrushes so the menu follows the active palette.
-        // ThemeService.RepaintBrushes replaces the resource dictionary entries on every
-        // theme swap, so the next time the menu is opened it picks up the new color.
-        var hoverBrush = ThemeBrushes.HoverOverlay;
+        // ponytail: pull from modern Brush.* keys (not legacy BgSurface/Line/HoverOverlay)
+        // so the menu follows BOTH theme swaps AND live system accent. Legacy keys only
+        // get updated by RepaintBrushes on Light/Dark/HC swap — ApplySystemAccentIfApplicable
+        // overrides modern keys with accent color but leaves legacy ones at last OS theme,
+        // which is why the right-click menu stayed dark when the rest of the management
+        // shell turned sage-green / etc. in System mode.
+        var hoverBrush = ThemeBrushes.BgHoverModern;
         var menuBorder = new Border
         {
-            Background = ThemeBrushes.BgSurface,
-            BorderBrush = ThemeBrushes.Line,
+            Background = ThemeBrushes.BgSurfaceModern,
+            BorderBrush = ThemeBrushes.BorderDefaultModern,
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(6),
             Padding = new Thickness(4),
@@ -122,7 +111,7 @@ public sealed class RowContextMenu
         foreach (var it in items)
         {
             var captured = it;
-            var fg = captured.Danger ? ThemeBrushes.DangerBrush : ThemeBrushes.T1;
+            var fg = captured.Danger ? ThemeBrushes.DangerBrush : ThemeBrushes.TextPrimaryModern;
 
             var itemBorder = new Border
             {

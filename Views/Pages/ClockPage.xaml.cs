@@ -108,8 +108,10 @@ public partial class ClockPage : UserControl
                     parent = LogicalTreeHelper.GetParent(parent);
                 if (parent is Button) return;
             }
+            // ponytail: workspace direction (dock only). Old code also called
+            // PropertyWindowService.OpenOrFocus which created a duplicate
+            // floating editor while the docked panel already showed this clock.
             Select(clock);
-            PropertyWindowService.OpenOrFocus(clock);
         };
         row.PreviewMouseRightButtonUp += (_, e) =>
         {
@@ -121,6 +123,12 @@ public partial class ClockPage : UserControl
 
     void Select(DesktopClock clock)
     {
+        // ponytail: route through DockTarget so any pre-existing floating editor
+        // for this clock is closed before the docked panel takes over. Without
+        // this, clicking a different clock row would leave the previous
+        // floating window open while the docked panel switched targets —
+        // duplicate editor for the previously-selected clock.
+        PropertyWindowManager.Instance.DockTarget(clock, _main);
         if (!ReferenceEquals(_selected, clock))
         {
             _selected = clock;

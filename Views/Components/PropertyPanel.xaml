@@ -27,13 +27,25 @@
           <TextBlock x:Name="PersistErrorDot" Text="●" Foreground="#FF6666" FontSize="12"
                      VerticalAlignment="Center" Margin="0,0,8,0" ToolTip="{loc:Loc Key=PropertyPanel.SaveFailed}"
                      Visibility="Collapsed"/>
-          <Button x:Name="UndockBtn" Width="28" Height="28" Background="Transparent"
-                  BorderThickness="0" Cursor="Hand" ToolTip="{loc:Loc Key=Common.Undock}"
-                  Click="UndockBtn_Click">
-            <Path Width="14" Height="14"
+          <!-- ponytail: one toggle button that doubles as undock (when docked)
+               and dock-back (when floating). IsFloating DP swaps icon + tooltip
+               and rotates the icon 360° for a small "flip" feel. -->
+          <Button x:Name="ToggleBtn" Width="28" Height="28" Background="Transparent"
+                  BorderThickness="0" Cursor="Hand"
+                  ToolTip="{loc:Loc Key=Common.Undock}"
+                  Click="ToggleBtn_Click">
+            <!-- ponytail: ScaleX=-1 is a true horizontal mirror (flips the
+                 button over its vertical axis), not a Z-axis spin. Stays at
+                 -1 while floating, returns to 1 when docked back. -->
+            <Path x:Name="ToggleIcon" Width="14" Height="14"
                   Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
                   StrokeThickness="1.5" StrokeLineJoin="Round"
-                  Data="{StaticResource Icon.Undock}"/>
+                  RenderTransformOrigin="0.5,0.5"
+                  Data="{StaticResource Icon.Undock}">
+              <Path.RenderTransform>
+                <ScaleTransform x:Name="ToggleIconScale" ScaleX="1" ScaleY="1"/>
+              </Path.RenderTransform>
+            </Path>
           </Button>
           <Button x:Name="CollapseBtn" Width="28" Height="28" Background="Transparent"
                   BorderThickness="0" Cursor="Hand" ToolTip="{loc:Loc Key=Common.Collapse}"
@@ -42,6 +54,20 @@
                   Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
                   StrokeThickness="1.5" StrokeLineJoin="Round"
                   Data="{StaticResource Icon.ChevronLeft}"/>
+          </Button>
+          <!-- ponytail: explicit X to close the currently active tab. Host
+               (ManagementWindow or floating PropertyWindow) wires the click
+               to its PropertyTabStrip.CloseActiveTab(). Hidden when no active
+               tab (host sets the visibility via the property). -->
+          <Button x:Name="CloseTabBtn" Width="28" Height="28" Background="Transparent"
+                  BorderThickness="0" Cursor="Hand"
+                  ToolTip="{loc:Loc Key=Common.Close}"
+                  Visibility="Collapsed"
+                  Click="CloseTabBtn_Click">
+            <Path Width="14" Height="14"
+                  Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                  StrokeThickness="1.5" StrokeLineJoin="Round"
+                  Data="{StaticResource Icon.Close}"/>
           </Button>
         </StackPanel>
       </Grid>

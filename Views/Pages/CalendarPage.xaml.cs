@@ -105,8 +105,10 @@ public partial class CalendarPage : UserControl
                     parent = LogicalTreeHelper.GetParent(parent);
                 if (parent is Button) return;
             }
+            // ponytail: workspace direction (dock only). Old code also called
+            // PropertyWindowService.OpenOrFocus which created a duplicate
+            // floating editor while the docked panel already showed this calendar.
             Select(cal);
-            PropertyWindowService.OpenOrFocus(cal);
         };
         row.PreviewMouseRightButtonUp += (_, e) =>
         {
@@ -118,6 +120,9 @@ public partial class CalendarPage : UserControl
 
     void Select(DesktopCalendar cal)
     {
+        // ponytail: route through DockTarget so any pre-existing floating editor
+        // for this calendar is closed before the docked panel takes over.
+        PropertyWindowManager.Instance.DockTarget(cal, _main);
         if (!ReferenceEquals(_selected, cal))
         {
             _selected = cal;

@@ -38,6 +38,14 @@ public abstract class AppearanceModel
     public double BgImageOffsetX { get; set; } = 0;
     public double BgImageOffsetY { get; set; } = 0;
     public bool EnableRestoreButton { get; set; } = true;
+    /// <summary>
+    /// ponytail: true = restore button hover auto-expands after a short delay (existing behaviour);
+    /// false = hover does nothing, only direct click on the RestoreButton expands.
+    /// Always read live by HoverExpandBehavior via a getter so a PropertyPanel toggle takes
+    /// effect on the next hover without restarting the behavior.
+    /// Default false: opt-in, otherwise first-time users see the zone spring open unexpectedly.
+    /// </summary>
+    public bool HoverAutoExpand { get; set; } = false;
 
     // ── Text color adaptive ──
     /// <summary>
@@ -49,10 +57,12 @@ public abstract class AppearanceModel
     public bool TextColorAdaptive { get; set; } = true;
 
     // ── Hover restore animation (per-instance, spec §7.1 #2) ──
-    // ponytail: Driven by EnableRestoreButton (above) — no separate toggle.
-    // Hover the RestoreButton (1 s) or click it to animate the zone content
-    // back in; cursor leaves the expanded window for 3 s and it collapses
-    // again (unless triggered by click, which is permanent).
+    // ponytail: EnableRestoreButton (above) gates the entire feature — when off
+    // the RestoreButton is hidden and no hover/click animation runs. When on,
+    // HoverAutoExpand (above) further gates the HOVER trigger; direct clicks
+    // on the RestoreButton always expand regardless of HoverAutoExpand.
+    // The behavior decides on collapse: cursor outside for 2 s collapses a
+    // hover-expanded window, click-expanded windows stay open until next Hide.
     // PanelPresetConfig declares only HoverExpandSpeed (see spec §7.2).
     public HoverExpandAnimationKind HoverExpandAnimation { get; set; } = HoverExpandAnimationKind.ScaleExpand;
     public double HoverExpandSpeed { get; set; } = 1.0;

@@ -12,17 +12,6 @@
         Width="300" Height="490">
 
     <Grid>
-        <!-- ponytail: hover-expand toggle (Task 14d). Lives in root Grid so it stays
-             visible while MainContent is collapsed, hides on expand. -->
-        <Button x:Name="ToggleExpandBtn" Width="24" Height="24" Margin="4,4,0,0"
-                HorizontalAlignment="Left" VerticalAlignment="Top"
-                Panel.ZIndex="100" Cursor="Hand"
-                Background="Transparent" BorderThickness="0" Click="ToggleExpandBtn_Click">
-            <Path Width="14" Height="14" StrokeThickness="1.5" StrokeLineJoin="Round"
-                  Stroke="{DynamicResource Brush.Text.Tertiary}"
-                  Data="{StaticResource Icon.Panel}"/>
-        </Button>
-
         <Border x:Name="MainContent" Visibility="Visible" ClipToBounds="True" CornerRadius="10">
         <Grid>
         <Border x:Name="CalendarBorder" CornerRadius="10"

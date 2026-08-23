@@ -106,10 +106,11 @@ public partial class ZoneWindow : Window
         UpdateMergedTitle();
         // ponytail: hover-expand (Task 14d). Wire after InitComponent; the behavior
         // picks the right initial state from HoverAutoExpand.
-        _hover = new HoverExpandBehavior(this, RestoreButton, MainContent, ToggleExpandBtn,
+        _hover = new HoverExpandBehavior(this, RestoreButton, MainContent, null,
             () => _zone.HoverExpandAnimation,
             () => _zone.HoverExpandSpeed,
-            () => _zone.HoverExpandOrigin)
+            () => _zone.HoverExpandOrigin,
+            () => _zone.HoverAutoExpand)
         { IsEnabled = _zone.EnableRestoreButton };
         // ponytail: 2026-08-21 — pick up live changes from MotionSettingsDialog.
         _zone.HoverExpandSettingsChanged += OnHoverExpandSettingsChanged;
@@ -615,15 +616,10 @@ public partial class ZoneWindow : Window
     }
     void EditButton_Click(object s, MouseButtonEventArgs e)
     {
-        PropertyWindowService.OpenOrFocus(_zone);
-        e.Handled = true;
-    }
-
-    void ToggleExpandBtn_Click(object s, RoutedEventArgs e)
-    {
-        // ponytail: the toggle button is the property-window entry point (spec §7.2).
-        // Single click opens PropertyWindowService for this zone, same as the gear button.
-        PropertyWindowService.OpenOrFocus(_zone);
+        // ponytail: pass `this` so the popped-out panel anchors at the zone's
+        // position (offset 24,24) instead of jumping to a remembered location —
+        // see PropertyWindowManager.ResolvePopPosition.
+        PropertyWindowService.OpenOrFocus(_zone, this);
         e.Handled = true;
     }
 

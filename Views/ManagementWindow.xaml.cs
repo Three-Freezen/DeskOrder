@@ -103,9 +103,34 @@ public partial class ManagementWindow : Window
         DockedPanel.CollapseRequested += (_, _) => TogglePropertyPanel();
         DockedPanel.UndockRequested += (_, _) =>
         {
+            // ponytail: undock = pop-out flow. Clear the docked target first so
+            // the pop-out helper doesn't re-clear it (idempotent but cleaner).
             var target = DockedPanel.Target;
-            if (target != null)
-                PropertyWindowManager.Instance.OpenOrFocus(target, _configService, this);
+            if (target == null) return;
+            DockedPanel.Target = null;
+            PropertyWindowManager.Instance.PopOutTarget(target, _configService, this, requester: this);
+        };
+        // ponytail: header X in docked panel closes the active tab. When the
+        // last tab goes, fold the right column so the list takes the room.
+        DockedPanel.CloseTabRequested += (_, _) =>
+        {
+            var closed = DockedTabs.CloseActiveTab();
+            if (closed && DockedTabs.Tabs.Count == 0)
+            {
+                SetPropertyPanelVisible(false, persist: true);
+                DockedPanel.Target = null;
+            }
+            else DockedPanel.Target = DockedTabs.ActiveTab?.Key != null ? null : DockedPanel.Target;
+        };
+        // ponytail: keep docked panel target in sync with the active tab. When
+        // the tab strip says "show me zone X", the panel rebuilds for X.
+        DockedTabs.ActiveTabChanged += (_, _) =>
+        {
+            var active = DockedTabs.ActiveTab;
+            if (active == null) { DockedPanel.Target = null; return; }
+            var t = ResolveTargetFromKey(active.Key);
+            DockedPanel.Target = t;
+            DockedPanel.IsCloseable = DockedTabs.Tabs.Count > 0;
         };
 
         Loaded += (_, _) =>
@@ -283,9 +308,9 @@ public partial class ManagementWindow : Window
 
         var dlgBg = new Border
         {
-            Background = new SolidColorBrush(Color.FromRgb(0x10, 0x11, 0x1A)),
+            Background = ThemeBrushes.BgChromeModern,
             CornerRadius = new CornerRadius(10),
-            BorderBrush = new SolidColorBrush(Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF)),
+            BorderBrush = ThemeBrushes.BorderDefaultModern,
             BorderThickness = new Thickness(1)
         };
 
@@ -296,7 +321,7 @@ public partial class ManagementWindow : Window
 
         var titleBar = new Border
         {
-            Background = new SolidColorBrush(Color.FromRgb(0x10, 0x11, 0x1A)),
+            Background = ThemeBrushes.BgChromeModern,
             CornerRadius = new CornerRadius(10, 10, 0, 0),
             Padding = new Thickness(14, 8, 14, 8),
             Cursor = Cursors.SizeAll
@@ -307,7 +332,7 @@ public partial class ManagementWindow : Window
         titlePanel.Children.Add(new TextBlock
         {
             Text = title, FontSize = 14, FontWeight = FontWeights.SemiBold,
-            Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0)),
+            Foreground = ThemeBrushes.TextPrimaryModern,
             VerticalAlignment = VerticalAlignment.Center
         });
 
@@ -315,7 +340,7 @@ public partial class ManagementWindow : Window
         {
             Content = "✕", Width = 28, Height = 28, FontSize = 12,
             Cursor = Cursors.Hand, Background = Brushes.Transparent,
-            Foreground = new SolidColorBrush(Color.FromRgb(0x80, 0x80, 0xA0)),
+            Foreground = ThemeBrushes.TextSecondaryModern,
             BorderThickness = new Thickness(0),
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Center
@@ -330,7 +355,7 @@ public partial class ManagementWindow : Window
         var separator = new Border
         {
             Height = 1,
-            Background = new SolidColorBrush(Color.FromArgb(0x20, 0xFF, 0xFF, 0xFF)),
+            Background = ThemeBrushes.BorderSubtleModern,
             Margin = new Thickness(12, 0, 12, 0)
         };
 
@@ -391,7 +416,39 @@ public partial class ManagementWindow : Window
     // ── Dialog opening methods (called from Page code-behinds via callback) ──
 
     public void OpenFloatingProperty(object target) =>
-        PropertyWindowManager.Instance.OpenOrFocus(target, _configService, this);
+        PropertyWindowManager.Instance.PopOutTarget(target, _configService, this, requester: null);
+
+    public void OpenFloatingProperty(object target, Window? requester) =>
+        PropertyWindowManager.Instance.PopOutTarget(target, _configService, this, requester: requester);
+
+    /// <summary>Make sure the docked property column is visible. Used by the
+    /// workspace dock flow so a freshly-clicked list row lights up the right
+    /// panel without the user having to manually un-collapse it first.</summary>
+    public void EnsurePropertyPanelVisible()
+    {
+        if (!_propertyPanelVisible) SetPropertyPanelVisible(true, persist: false);
+    }
+
+    /// <summary>Resolve a domain target from a TabStrip key ("Type:Id"). Looks
+    /// up the matching instance in ZoneManager / widget services. Falls back
+    /// to null if the instance was deleted while the tab lingered.</summary>
+    object? ResolveTargetFromKey(string key)
+    {
+        if (string.IsNullOrEmpty(key)) return null;
+        var sep = key.IndexOf(':');
+        if (sep < 0) return null;
+        var typeName = key.Substring(0, sep);
+        var idStr = key.Substring(sep + 1);
+        if (!Guid.TryParse(idStr, out var id)) return null;
+        return typeName switch
+        {
+            nameof(Zone) => _zoneManager.Zones.FirstOrDefault(z => z.Id == id),
+            nameof(DesktopClock) => _widgetService?.Clocks.FirstOrDefault(c => c.Id == id),
+            nameof(DesktopCalendar) => _widgetService?.Calendars.FirstOrDefault(c => c.Id == id),
+            nameof(StickyNote) => _notesService?.Notes.FirstOrDefault(n => n.Id == id),
+            _ => null,
+        };
+    }
 
     public void DeleteZoneWithConfirm(Zone zone)
     {
@@ -651,7 +708,7 @@ public partial class ManagementWindow : Window
     {
         _propertyPanelVisible = visible;
         RightCol.Width = new GridLength(visible ? 360 : 0);
-        DockedPanel.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        RightPane.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
         if (!persist) return;
         try
         {
@@ -677,8 +734,8 @@ public partial class ManagementWindow : Window
 
             var border = new Border
             {
-                Background = new SolidColorBrush(Color.FromRgb(0x1A, 0x1A, 0x2E)),
-                BorderBrush = new SolidColorBrush(Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF)),
+                Background = ThemeBrushes.BgChromeModern,
+                BorderBrush = ThemeBrushes.BorderDefaultModern,
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(6),
                 Padding = new Thickness(4)
@@ -700,13 +757,13 @@ public partial class ManagementWindow : Window
                     Padding = new Thickness(8, 4, 8, 4),
                     CornerRadius = new CornerRadius(3),
                     Cursor = Cursors.Hand,
-                    Background = isCurrent ? new SolidColorBrush(Color.FromArgb(0x30, 0x7C, 0x3A, 0xED)) : Brushes.Transparent
+                    Background = isCurrent ? ThemeBrushes.AccentSolidModern : Brushes.Transparent
                 };
                 item.Child = new TextBlock
                 {
                     Text = label,
                     FontSize = 11,
-                    Foreground = isCurrent ? new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0)) : new SolidColorBrush(Color.FromRgb(0xA0, 0xA0, 0xC0))
+                    Foreground = isCurrent ? ThemeBrushes.TextPrimaryModern : ThemeBrushes.TextSecondaryModern
                 };
                 item.MouseLeftButtonDown += (_, _) =>
                 {
@@ -717,7 +774,7 @@ public partial class ManagementWindow : Window
                     if (System.Windows.Application.Current is App app) app.RefreshNoteHotkeys();
                     popup.IsOpen = false;
                 };
-                item.MouseEnter += (s3, _) => { if (s3 is Border b3 && !isCurrent) b3.Background = new SolidColorBrush(Color.FromArgb(0x30, 0x6C, 0x63, 0xFF)); };
+                item.MouseEnter += (s3, _) => { if (s3 is Border b3 && !isCurrent) b3.Background = ThemeBrushes.AccentWashModern; };
                 item.MouseLeave += (s3, _) => { if (s3 is Border b3 && !isCurrent) b3.Background = Brushes.Transparent; };
                 stack.Children.Add(item);
             }
@@ -725,7 +782,7 @@ public partial class ManagementWindow : Window
             var separator = new Border
             {
                 Height = 1,
-                Background = new SolidColorBrush(Color.FromArgb(0x20, 0xFF, 0xFF, 0xFF)),
+                Background = ThemeBrushes.BorderSubtleModern,
                 Margin = new Thickness(4, 4, 4, 4)
             };
             stack.Children.Add(separator);
@@ -741,14 +798,14 @@ public partial class ManagementWindow : Window
             {
                 Text = cn ? "新增..." : "New...",
                 FontSize = 11,
-                Foreground = new SolidColorBrush(Color.FromRgb(0x7C, 0x3A, 0xED))
+                Foreground = ThemeBrushes.AccentSolidModern
             };
             newItem.MouseLeftButtonDown += (_, _) =>
             {
                 popup.IsOpen = false;
                 ShowNoteHotkeyRecorderDialogImpl(note);
             };
-            newItem.MouseEnter += (s3, _) => { if (s3 is Border b3) b3.Background = new SolidColorBrush(Color.FromArgb(0x15, 0xFF, 0xFF, 0xFF)); };
+            newItem.MouseEnter += (s3, _) => { if (s3 is Border b3) b3.Background = ThemeBrushes.BgHoverModern; };
             newItem.MouseLeave += (s3, _) => { if (s3 is Border b3) b3.Background = Brushes.Transparent; };
             stack.Children.Add(newItem);
 
@@ -776,8 +833,8 @@ public partial class ManagementWindow : Window
 
         var mainBorder = new Border
         {
-            Background = new SolidColorBrush(Color.FromRgb(0x1A, 0x1A, 0x2E)),
-            BorderBrush = new SolidColorBrush(Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF)),
+            Background = ThemeBrushes.BgChromeModern,
+            BorderBrush = ThemeBrushes.BorderDefaultModern,
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(10)
         };
@@ -794,7 +851,7 @@ public partial class ManagementWindow : Window
         {
             Text = cn ? "录制快捷键" : "Record Hotkey",
             FontSize = 14, FontWeight = FontWeights.SemiBold,
-            Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0)),
+            Foreground = ThemeBrushes.TextPrimaryModern,
             VerticalAlignment = VerticalAlignment.Center
         };
         Grid.SetRow(titleBar, 0);
@@ -803,7 +860,7 @@ public partial class ManagementWindow : Window
         var instruction = new TextBlock
         {
             Text = cn ? "请按下快捷键组合..." : "Press hotkey combination...",
-            FontSize = 12, Foreground = new SolidColorBrush(Color.FromRgb(0xA0, 0xA0, 0xC0)),
+            FontSize = 12, Foreground = ThemeBrushes.TextSecondaryModern,
             HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, 12)
         };
         Grid.SetRow(instruction, 1);
@@ -812,9 +869,9 @@ public partial class ManagementWindow : Window
         var hotkeyDisplay = new TextBox
         {
             Text = "", IsReadOnly = true, FontSize = 16, FontWeight = FontWeights.Bold,
-            Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0)),
-            Background = new SolidColorBrush(Color.FromArgb(0x0A, 0xFF, 0xFF, 0xFF)),
-            BorderBrush = new SolidColorBrush(Color.FromArgb(0x15, 0xFF, 0xFF, 0xFF)),
+            Foreground = ThemeBrushes.TextPrimaryModern,
+            Background = ThemeBrushes.BgHoverModern,
+            BorderBrush = ThemeBrushes.BgHoverModern,
             BorderThickness = new Thickness(1),
             HorizontalContentAlignment = HorizontalAlignment.Center,
             Padding = new Thickness(8), Margin = new Thickness(0, 0, 0, 12)
@@ -826,18 +883,18 @@ public partial class ManagementWindow : Window
         var cancelButton = new Button
         {
             Content = cn ? "取消" : "Cancel", Width = 60, Height = 28, FontSize = 11, Cursor = Cursors.Hand,
-            Background = new SolidColorBrush(Color.FromArgb(0x15, 0xFF, 0xFF, 0xFF)),
-            Foreground = new SolidColorBrush(Color.FromRgb(0xA0, 0xA0, 0xC0)),
+            Background = ThemeBrushes.BgHoverModern,
+            Foreground = ThemeBrushes.TextSecondaryModern,
             BorderThickness = new Thickness(1),
-            BorderBrush = new SolidColorBrush(Color.FromArgb(0x25, 0xFF, 0xFF, 0xFF)),
+            BorderBrush = ThemeBrushes.BorderDefaultModern,
             Margin = new Thickness(0, 0, 8, 0)
         };
         cancelButton.Click += (_, _) => dlg.Close();
         var saveButton = new Button
         {
             Content = cn ? "保存" : "Save", Width = 60, Height = 28, FontSize = 11, Cursor = Cursors.Hand,
-            Background = new SolidColorBrush(Color.FromArgb(0x40, 0x7C, 0x3A, 0xED)),
-            Foreground = new SolidColorBrush(Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF)),
+            Background = ThemeBrushes.AccentSolidModern,
+            Foreground = ThemeBrushes.TextTertiaryModern,
             BorderThickness = new Thickness(0),
             IsEnabled = false
         };
@@ -869,7 +926,7 @@ public partial class ManagementWindow : Window
             recordedKey = KeyInterop.VirtualKeyFromKey(key);
             hotkeyDisplay.Text = GetHotkeyLabel(recordedModifiers, recordedKey);
             saveButton.IsEnabled = true;
-            saveButton.Background = new SolidColorBrush(Color.FromRgb(0x7C, 0x3A, 0xED));
+            saveButton.Background = ThemeBrushes.AccentSolidModern;
             saveButton.Foreground = Brushes.White;
             isRecording = false;
         };
@@ -899,14 +956,14 @@ public partial class ManagementWindow : Window
             StaysOpen = false
         };
 
-        var bgBrush = new SolidColorBrush(Color.FromRgb(0x10, 0x11, 0x1A));
-        var fgBrush = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0));
-        var hoverBrush = new SolidColorBrush(Color.FromArgb(0x30, 0x6C, 0x63, 0xFF));
+        var bgBrush = ThemeBrushes.BgChromeModern;
+        var fgBrush = ThemeBrushes.TextPrimaryModern;
+        var hoverBrush = ThemeBrushes.AccentWashModern;
 
         var menuBorder = new Border
         {
             Background = bgBrush,
-            BorderBrush = new SolidColorBrush(Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF)),
+            BorderBrush = ThemeBrushes.BorderDefaultModern,
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(6),
             Padding = new Thickness(4),
@@ -933,7 +990,7 @@ public partial class ManagementWindow : Window
         if (masterZone.MergedGroupMembership.SubZoneIds.Count > 0)
             stack.Children.Add(MakeItem(cn ? "分离单个分区" : "Disband Single Zone", () => DisbandSingleZoneImpl(masterZone)));
         stack.Children.Add(MakeItem(cn ? "解散组合分区" : "Disband Entire Group", () => DisbandEntireGroup(masterZone)));
-        stack.Children.Add(new Border { Height = 1, Background = new SolidColorBrush(Color.FromArgb(0x20, 0xFF, 0xFF, 0xFF)), Margin = new Thickness(6, 4, 6, 4) });
+        stack.Children.Add(new Border { Height = 1, Background = ThemeBrushes.BorderSubtleModern, Margin = new Thickness(6, 4, 6, 4) });
         stack.Children.Add(MakeItem(cn ? "添加分区到组合" : "Add Zone to Group", () => ShowMergeDialogImpl(masterZone)));
         if (_zoneManager.Zones.Any(z => z.MergedGroupMembership.SubZoneIds.Count > 0 && z.Id != masterZone.Id))
             stack.Children.Add(MakeItem(cn ? "与其他组合合并" : "Merge with Another Group", () => MergeWithAnotherGroupImpl(masterZone)));
@@ -964,7 +1021,7 @@ public partial class ManagementWindow : Window
 
         var bgBorder = new Border
         {
-            Background = new SolidColorBrush(Color.FromRgb(0x10, 0x11, 0x1A)),
+            Background = ThemeBrushes.BgChromeModern,
             CornerRadius = new CornerRadius(8), Padding = new Thickness(16), Child = new Grid()
         };
 
@@ -977,7 +1034,7 @@ public partial class ManagementWindow : Window
         {
             Text = cn ? "选择要从组合中分离的分区：" : "Select zone to remove from group:",
             FontSize = 13, FontWeight = FontWeights.SemiBold,
-            Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0)),
+            Foreground = ThemeBrushes.TextPrimaryModern,
             Margin = new Thickness(0, 0, 0, 12)
         };
         Grid.SetRow(header, 0);
@@ -985,9 +1042,9 @@ public partial class ManagementWindow : Window
 
         var listBox = new ListBox
         {
-            Background = new SolidColorBrush(Color.FromArgb(0x08, 0xFF, 0xFF, 0xFF)),
-            Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0)),
-            BorderBrush = new SolidColorBrush(Color.FromArgb(0x10, 0xFF, 0xFF, 0xFF)),
+            Background = ThemeBrushes.BgHoverModern,
+            Foreground = ThemeBrushes.TextPrimaryModern,
+            BorderBrush = ThemeBrushes.BorderSubtleModern,
             BorderThickness = new Thickness(1), FontSize = 12, Margin = new Thickness(0, 0, 0, 12)
         };
         foreach (var subId in masterZone.MergedGroupMembership.SubZoneIds)
@@ -997,8 +1054,8 @@ public partial class ManagementWindow : Window
             {
                 var itemPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(4) };
                 if (!string.IsNullOrEmpty(subZone.IconChar))
-                    itemPanel.Children.Add(new TextBlock { Text = subZone.IconChar, FontSize = 14, Foreground = new SolidColorBrush(Color.FromArgb(0xC0, 0xFF, 0xFF, 0xFF)), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
-                itemPanel.Children.Add(new TextBlock { Text = subZone.Name, VerticalAlignment = VerticalAlignment.Center, Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0)) });
+                    itemPanel.Children.Add(new TextBlock { Text = subZone.IconChar, FontSize = 14, Foreground = ThemeBrushes.TextTertiaryModern, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
+                itemPanel.Children.Add(new TextBlock { Text = subZone.Name, VerticalAlignment = VerticalAlignment.Center, Foreground = ThemeBrushes.TextPrimaryModern });
                 listBox.Items.Add(new ListBoxItem { Content = itemPanel, Tag = subZone, Padding = new Thickness(6, 4, 6, 4) });
             }
         }
@@ -1007,9 +1064,9 @@ public partial class ManagementWindow : Window
         grid.Children.Add(listBox);
 
         var btnRow = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-        var cancelBtn = new Button { Content = cn ? "取消" : "Cancel", Width = 70, Height = 28, Background = new SolidColorBrush(Color.FromArgb(0x15, 0xFF, 0xFF, 0xFF)), Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0)), BorderThickness = new Thickness(0), FontSize = 11, Cursor = Cursors.Hand, Margin = new Thickness(0, 0, 8, 0) };
+        var cancelBtn = new Button { Content = cn ? "取消" : "Cancel", Width = 70, Height = 28, Background = ThemeBrushes.BgHoverModern, Foreground = ThemeBrushes.TextPrimaryModern, BorderThickness = new Thickness(0), FontSize = 11, Cursor = Cursors.Hand, Margin = new Thickness(0, 0, 8, 0) };
         cancelBtn.Click += (_, _) => dialog.Close();
-        var disbandBtn = new Button { Content = cn ? "分离" : "Disband", Width = 80, Height = 28, Background = new SolidColorBrush(Color.FromRgb(0x7C, 0x3A, 0xED)), Foreground = Brushes.White, BorderThickness = new Thickness(0), FontSize = 11, Cursor = Cursors.Hand };
+        var disbandBtn = new Button { Content = cn ? "分离" : "Disband", Width = 80, Height = 28, Background = ThemeBrushes.AccentSolidModern, Foreground = Brushes.White, BorderThickness = new Thickness(0), FontSize = 11, Cursor = Cursors.Hand };
         disbandBtn.Click += (_, _) =>
         {
             if (listBox.SelectedItem is ListBoxItem item && item.Tag is Zone selectedZone)
@@ -1041,23 +1098,23 @@ public partial class ManagementWindow : Window
         var mergeTargetTitle = cn ? "选择要合并的目标组合" : "Select Target Group to Merge";
         var dialog = new Window { Title = mergeTargetTitle, Width = 360, Height = 300, WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = this, ResizeMode = ResizeMode.NoResize };
 
-        var bgBorder = new Border { Background = new SolidColorBrush(Color.FromRgb(0x10, 0x11, 0x1A)), CornerRadius = new CornerRadius(8), Padding = new Thickness(16), Child = new Grid() };
+        var bgBorder = new Border { Background = ThemeBrushes.BgChromeModern, CornerRadius = new CornerRadius(8), Padding = new Thickness(16), Child = new Grid() };
         var grid = (Grid)bgBorder.Child;
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        var header = new TextBlock { Text = cn ? "选择要合并的目标组合：" : "Select target group to merge with:", FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0)), Margin = new Thickness(0, 0, 0, 12) };
+        var header = new TextBlock { Text = cn ? "选择要合并的目标组合：" : "Select target group to merge with:", FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = ThemeBrushes.TextPrimaryModern, Margin = new Thickness(0, 0, 0, 12) };
         Grid.SetRow(header, 0);
         grid.Children.Add(header);
 
-        var listBox = new ListBox { Background = new SolidColorBrush(Color.FromArgb(0x08, 0xFF, 0xFF, 0xFF)), Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0)), BorderBrush = new SolidColorBrush(Color.FromArgb(0x10, 0xFF, 0xFF, 0xFF)), BorderThickness = new Thickness(1), FontSize = 12, Margin = new Thickness(0, 0, 0, 12) };
+        var listBox = new ListBox { Background = ThemeBrushes.BgHoverModern, Foreground = ThemeBrushes.TextPrimaryModern, BorderBrush = ThemeBrushes.BorderSubtleModern, BorderThickness = new Thickness(1), FontSize = 12, Margin = new Thickness(0, 0, 0, 12) };
         foreach (var targetGroup in otherGroups)
         {
             var itemPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(4) };
             if (!string.IsNullOrEmpty(targetGroup.MergedGroupMembership.Icon))
-                itemPanel.Children.Add(new TextBlock { Text = targetGroup.MergedGroupMembership.Icon, FontSize = 14, Foreground = new SolidColorBrush(Color.FromArgb(0xC0, 0xFF, 0xFF, 0xFF)), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
-            itemPanel.Children.Add(new TextBlock { Text = targetGroup.MergedGroupMembership.DisplayName, VerticalAlignment = VerticalAlignment.Center, Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0)) });
+                itemPanel.Children.Add(new TextBlock { Text = targetGroup.MergedGroupMembership.Icon, FontSize = 14, Foreground = ThemeBrushes.TextTertiaryModern, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
+            itemPanel.Children.Add(new TextBlock { Text = targetGroup.MergedGroupMembership.DisplayName, VerticalAlignment = VerticalAlignment.Center, Foreground = ThemeBrushes.TextPrimaryModern });
             listBox.Items.Add(new ListBoxItem { Content = itemPanel, Tag = targetGroup, Padding = new Thickness(6, 4, 6, 4) });
         }
         if (listBox.Items.Count > 0) listBox.SelectedIndex = 0;
@@ -1065,9 +1122,9 @@ public partial class ManagementWindow : Window
         grid.Children.Add(listBox);
 
         var btnRow = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-        var cancelBtn = new Button { Content = cn ? "取消" : "Cancel", Width = 70, Height = 28, Background = new SolidColorBrush(Color.FromArgb(0x15, 0xFF, 0xFF, 0xFF)), Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0)), BorderThickness = new Thickness(0), FontSize = 11, Cursor = Cursors.Hand, Margin = new Thickness(0, 0, 8, 0) };
+        var cancelBtn = new Button { Content = cn ? "取消" : "Cancel", Width = 70, Height = 28, Background = ThemeBrushes.BgHoverModern, Foreground = ThemeBrushes.TextPrimaryModern, BorderThickness = new Thickness(0), FontSize = 11, Cursor = Cursors.Hand, Margin = new Thickness(0, 0, 8, 0) };
         cancelBtn.Click += (_, _) => dialog.Close();
-        var mergeBtn = new Button { Content = cn ? "合并" : "Merge", Width = 80, Height = 28, Background = new SolidColorBrush(Color.FromRgb(0x7C, 0x3A, 0xED)), Foreground = Brushes.White, BorderThickness = new Thickness(0), FontSize = 11, Cursor = Cursors.Hand };
+        var mergeBtn = new Button { Content = cn ? "合并" : "Merge", Width = 80, Height = 28, Background = ThemeBrushes.AccentSolidModern, Foreground = Brushes.White, BorderThickness = new Thickness(0), FontSize = 11, Cursor = Cursors.Hand };
         mergeBtn.Click += (_, _) =>
         {
             if (listBox.SelectedItem is ListBoxItem item && item.Tag is Zone targetGroup)
@@ -1109,19 +1166,19 @@ public partial class ManagementWindow : Window
         }
 
         var dlg = new Window { Title = _loc["Merge.Title"], Width = 360, Height = 380, WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = this, ResizeMode = ResizeMode.NoResize };
-        var bgBorder = new Border { Background = new SolidColorBrush(Color.FromRgb(0x10, 0x11, 0x1A)), CornerRadius = new CornerRadius(8), Padding = new Thickness(16), Child = new Grid() };
+        var bgBorder = new Border { Background = ThemeBrushes.BgChromeModern, CornerRadius = new CornerRadius(8), Padding = new Thickness(16), Child = new Grid() };
         var grid = (Grid)bgBorder.Child;
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        var header = new TextBlock { Text = cn ? "选择要合并的分区（可多选）：" : "Select zones to merge (multi-select):", FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0)), Margin = new Thickness(0, 0, 0, 12) };
+        var header = new TextBlock { Text = cn ? "选择要合并的分区（可多选）：" : "Select zones to merge (multi-select):", FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = ThemeBrushes.TextPrimaryModern, Margin = new Thickness(0, 0, 0, 12) };
         Grid.SetRow(header, 0);
         grid.Children.Add(header);
 
         var selectAllPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
-        var selectAllCheckBox = new CheckBox { Content = cn ? "全选" : "Select All", Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0)), FontSize = 12, IsChecked = false };
+        var selectAllCheckBox = new CheckBox { Content = cn ? "全选" : "Select All", Foreground = ThemeBrushes.TextPrimaryModern, FontSize = 12, IsChecked = false };
         selectAllPanel.Children.Add(selectAllCheckBox);
         Grid.SetRow(selectAllPanel, 1);
         grid.Children.Add(selectAllPanel);
@@ -1133,9 +1190,9 @@ public partial class ManagementWindow : Window
         {
             var itemPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(4) };
             if (!string.IsNullOrEmpty(z.IconChar))
-                itemPanel.Children.Add(new TextBlock { Text = z.IconChar, FontSize = 14, Foreground = new SolidColorBrush(Color.FromArgb(0xC0, 0xFF, 0xFF, 0xFF)), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
-            itemPanel.Children.Add(new TextBlock { Text = z.Name, VerticalAlignment = VerticalAlignment.Center, Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0)) });
-            var checkBox = new CheckBox { Content = itemPanel, Tag = z, Margin = new Thickness(0, 2, 0, 2), Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0)), FontSize = 12 };
+                itemPanel.Children.Add(new TextBlock { Text = z.IconChar, FontSize = 14, Foreground = ThemeBrushes.TextTertiaryModern, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
+            itemPanel.Children.Add(new TextBlock { Text = z.Name, VerticalAlignment = VerticalAlignment.Center, Foreground = ThemeBrushes.TextPrimaryModern });
+            var checkBox = new CheckBox { Content = itemPanel, Tag = z, Margin = new Thickness(0, 2, 0, 2), Foreground = ThemeBrushes.TextPrimaryModern, FontSize = 12 };
             checkBoxes.Add(checkBox);
             zonesPanel.Children.Add(checkBox);
         }
@@ -1147,9 +1204,9 @@ public partial class ManagementWindow : Window
         selectAllCheckBox.Unchecked += (_, _) => { foreach (var cb in checkBoxes) cb.IsChecked = false; };
 
         var btnRow = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-        var cancelBtn = new Button { Content = _loc["Rename.Cancel"], Width = 70, Height = 28, Background = new SolidColorBrush(Color.FromArgb(0x15, 0xFF, 0xFF, 0xFF)), Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0)), BorderThickness = new Thickness(0), FontSize = 11, Cursor = Cursors.Hand, Margin = new Thickness(0, 0, 8, 0) };
+        var cancelBtn = new Button { Content = _loc["Rename.Cancel"], Width = 70, Height = 28, Background = ThemeBrushes.BgHoverModern, Foreground = ThemeBrushes.TextPrimaryModern, BorderThickness = new Thickness(0), FontSize = 11, Cursor = Cursors.Hand, Margin = new Thickness(0, 0, 8, 0) };
         cancelBtn.Click += (_, _) => dlg.Close();
-        var mergeBtn = new Button { Content = _loc["Merge.MergeBtn"], Width = 80, Height = 28, Background = new SolidColorBrush(Color.FromRgb(0x7C, 0x3A, 0xED)), Foreground = Brushes.White, BorderThickness = new Thickness(0), FontSize = 11, Cursor = Cursors.Hand };
+        var mergeBtn = new Button { Content = _loc["Merge.MergeBtn"], Width = 80, Height = 28, Background = ThemeBrushes.AccentSolidModern, Foreground = Brushes.White, BorderThickness = new Thickness(0), FontSize = 11, Cursor = Cursors.Hand };
         mergeBtn.Click += (_, _) =>
         {
             var selected = checkBoxes.Where(cb => cb.IsChecked == true).Select(cb => cb.Tag as Zone).Where(z => z != null).ToList();
@@ -1217,6 +1274,10 @@ public partial class ManagementWindow : Window
         try { MainContent.Content = page; ApplyLoc(); } catch { }
         try { UpdateBreadcrumb(section, GetSectionCountLabel(section)); _lastSection = section; _lastCountLabel = GetSectionCountLabel(section); } catch { }
         try { if (SideNav != null) SideNav.ActiveSection = section; } catch { }
+        // ponytail: section switch drops preview tabs so the strip doesn't carry
+        // stale entries from the previous page. Pinned tabs (edited before)
+        // survive — they're "real" interest, not browse-previews.
+        try { DockedTabs?.CloseAllPreviewTabs(); } catch { }
     }
 
     private void SideNav_SectionChanged(object sender, string section)

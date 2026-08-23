@@ -174,10 +174,32 @@ public static class ThemeService
         _resolved = mode == AppThemeMode.System
             ? ResolveSystemState()
             : (mode == AppThemeMode.Light ? ResolvedTheme.Light : ResolvedTheme.Dark);
+        // ponytail: invalidate the accent cache on every mode change. Without this
+        // the System → Light → System path would skip the second accent apply
+        // because _lastAppliedAccent still holds the value from the first System
+        // session and the cache short-circuit returns early.
+        _lastAppliedAccent = null;
         SwapColors(_resolved);
         RepaintBrushes();
         RebindOpenWindows();
         Changed?.Invoke(mode);
+    }
+
+    /// <summary>
+    /// Force re-apply the system accent right now. Called from the Win32
+    /// WM_SETTINGCHANGE hook in App.xaml.cs (ImmersiveColorSet /
+    /// UserPreferences / WindowsThemeElement) so live accent changes don't have
+    /// to wait for the 1-second DispatcherTimer poll. Invalidates the cache first
+    /// because WM_SETTINGCHANGE already confirmed the accent changed; relying on
+    /// the read-vs-cached comparison would race against the registry write.
+    /// Also notifies AcrylicHelper so the "跟随系统" liquid glass preset
+    /// re-tints its registered windows with the new accent.
+    /// </summary>
+    public static void ApplySystemAccent()
+    {
+        _lastAppliedAccent = null;
+        ApplySystemAccentIfApplicable();
+        AcrylicHelper.OnSystemAccentChanged();
     }
 
     static ResolvedTheme ResolveSystemState()
@@ -282,23 +304,70 @@ public static class ThemeService
         if (_lastAppliedAccent.HasValue && _lastAppliedAccent.Value == c.Value) return;
         _lastAppliedAccent = c.Value;
         var accentColor = c.Value;
-        // ponytail: accent drives the background; contrast color (AdaptiveTextColor's
-        // HSL flip) drives text and any brush that needs to stand out against the new
-        // bg. Result: the whole palette inverts around the user's accent — light
-        // accent → dark text on light bg, dark accent → light text on dark bg.
-        var contrastColor = AdaptiveTextColor.ResolveTextColor(accentColor);
-        var wash = Color.FromArgb(0x33, accentColor.R, accentColor.G, accentColor.B);
+        // ponytail: pick text color by WCAG contrast ratio, not luminance threshold.
+        // Compare accent against pure black and pure white; whichever gives the
+        // higher contrast wins. Guarantees that whichever side wins has at least
+        // 4.5:1-ish (always picks the more readable of the two). Pure black or
+        // pure white only — no gray, no chromatic tint.
+        double Linear(byte v) { var s = v / 255.0; return s <= 0.03928 ? s / 12.92 : Math.Pow((s + 0.055) / 1.055, 2.4); }
+        double Luminance(Color c) => 0.2126 * Linear(c.R) + 0.7152 * Linear(c.G) + 0.0722 * Linear(c.B);
+        double Contrast(Color a, Color b)
+        {
+            var la = Luminance(a); var lb = Luminance(b);
+            var hi = Math.Max(la, lb); var lo = Math.Min(la, lb);
+            return (hi + 0.05) / (lo + 0.05);
+        }
+        var textColor = Contrast(accentColor, Colors.Black) >= Contrast(accentColor, Colors.White)
+            ? Colors.Black
+            : Colors.White;
+
         var brushesDict = Application.Current?.Resources.MergedDictionaries
             .Cast<ResourceDictionary>()
             .FirstOrDefault(d => d.Source?.OriginalString.EndsWith("Theme.Brushes.xaml", StringComparison.OrdinalIgnoreCase) == true);
         if (brushesDict == null) return;
-        brushesDict["Brush.Bg.Base"]        = new SolidColorBrush(accentColor);
-        brushesDict["Brush.Bg.Surface"]     = new SolidColorBrush(accentColor);
-        brushesDict["Brush.Text.Primary"]   = new SolidColorBrush(contrastColor);
-        brushesDict["Brush.Text.Secondary"] = new SolidColorBrush(contrastColor);
-        brushesDict["Brush.Accent"]         = new SolidColorBrush(contrastColor);
-        brushesDict["Brush.Accent.Wash"]    = new SolidColorBrush(wash);
-        brushesDict["Brush.Accent.Solid"]   = new SolidColorBrush(contrastColor);
+
+        // Backgrounds: accent color everywhere.
+        brushesDict["Brush.Bg.Base"]            = new SolidColorBrush(accentColor);
+        brushesDict["Brush.Bg.Chrome"]          = new SolidColorBrush(accentColor);
+        brushesDict["Brush.Bg.Surface"]         = new SolidColorBrush(accentColor);
+        brushesDict["Brush.Bg.Input"]           = new SolidColorBrush(accentColor);
+        // Hover / Active: text color with low alpha so they read as subtle overlays
+        // on the accent bg instead of disappearing (accent-on-accent).
+        brushesDict["Brush.Bg.Hover"]           = new SolidColorBrush(Color.FromArgb(0x22, textColor.R, textColor.G, textColor.B));
+        brushesDict["Brush.Bg.Active"]          = new SolidColorBrush(Color.FromArgb(0x33, textColor.R, textColor.G, textColor.B));
+
+        // Borders: text color at rising alphas so dividers and card outlines
+        // remain visible against the accent bg.
+        brushesDict["Brush.Border.Subtle"]      = new SolidColorBrush(Color.FromArgb(0x40, textColor.R, textColor.G, textColor.B));
+        brushesDict["Brush.Border.Default"]     = new SolidColorBrush(Color.FromArgb(0x55, textColor.R, textColor.G, textColor.B));
+        brushesDict["Brush.Border.Strong"]      = new SolidColorBrush(Color.FromArgb(0x77, textColor.R, textColor.G, textColor.B));
+
+        // Text: black or white, fading through alpha so the hierarchy reads.
+        brushesDict["Brush.Text.Primary"]       = new SolidColorBrush(textColor);
+        brushesDict["Brush.Text.Secondary"]     = new SolidColorBrush(Color.FromArgb(0xC0, textColor.R, textColor.G, textColor.B));
+        brushesDict["Brush.Text.Tertiary"]      = new SolidColorBrush(Color.FromArgb(0x80, textColor.R, textColor.G, textColor.B));
+        brushesDict["Brush.Text.Disabled"]      = new SolidColorBrush(Color.FromArgb(0x55, textColor.R, textColor.G, textColor.B));
+
+        // Accent variants: keep aligned with the inverted palette so primary
+        // buttons (Brush.Accent.Solid) contrast against the accent bg.
+        // Brush.Accent itself is NOT overridden — it stays at the configured brand
+        // color so the top-left brand icon (which uses Brush.Accent for its stroke)
+        // keeps its original look regardless of accent. Semantic brushes
+        // (Success / Warning / Danger / Close.Hover) also stay so status indicators,
+        // danger markers, and the close button keep meaning.
+        brushesDict["Brush.Accent.Wash"]        = new SolidColorBrush(Color.FromArgb(0x33, textColor.R, textColor.G, textColor.B));
+        brushesDict["Brush.Accent.Solid"]       = new SolidColorBrush(textColor);
+        brushesDict["Brush.Accent.Solid.Hover"] = new SolidColorBrush(textColor);
+        brushesDict["Brush.Accent.Solid.Press"] = new SolidColorBrush(Color.FromArgb(0xC0, textColor.R, textColor.G, textColor.B));
+        brushesDict["Brush.Accent.On"]          = new SolidColorBrush(accentColor);
+        brushesDict["Brush.Accent.2"]           = new SolidColorBrush(textColor);
+
+        // ponytail: DynamicResource references in XAML re-evaluate automatically
+        // when the dictionary entry is replaced, but PropertyPanel builds elements
+        // in code with FindResource (Local value) so those capture one brush at
+        // construction time. Walk the management tree and re-bind those so a live
+        // accent change reaches every element without a restart.
+        RebindOpenWindows();
     }
 
     /// <summary>

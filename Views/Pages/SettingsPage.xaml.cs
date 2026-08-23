@@ -26,6 +26,7 @@ public partial class SettingsPage : UserControl
         InitializeComponent();
         _configService = configService;
         BuildHotkeys();
+        LocalizationService.Instance.LanguageChanged += _ => RebuildHotkeys();
         Loaded += (_, _) => SyncFromConfig();
     }
 
@@ -33,15 +34,22 @@ public partial class SettingsPage : UserControl
 
     void BuildHotkeys()
     {
-        HotkeyStack.Children.Add(MakeHotkeyRow("控制面板", () =>
+        var loc = LocalizationService.Instance;
+        HotkeyStack.Children.Add(MakeHotkeyRow(loc["Settings.Hotkey.Panel"], () =>
         {
             var c = _configService.Load();
             return c.PanelHotkey.PanelHotkeyEnabled
                 ? ManagementWindow.GetHotkeyLabel(c.PanelHotkey.PanelHotkeyModifiers, c.PanelHotkey.PanelHotkeyKey)
-                : "未设置";
+                : loc["Settings.Hotkey.NotSet"];
         }));
-        HotkeyStack.Children.Add(MakeHotkeyRow("全部显示", () => "Ctrl+Shift+A"));
-        HotkeyStack.Children.Add(MakeHotkeyRow("全部隐藏", () => "Ctrl+Shift+H"));
+        HotkeyStack.Children.Add(MakeHotkeyRow(loc["Settings.Hotkey.ShowAll"], () => "Ctrl+Shift+A"));
+        HotkeyStack.Children.Add(MakeHotkeyRow(loc["Settings.Hotkey.HideAll"], () => "Ctrl+Shift+H"));
+    }
+
+    void RebuildHotkeys()
+    {
+        HotkeyStack.Children.Clear();
+        BuildHotkeys();
     }
 
     UIElement MakeHotkeyRow(string label, Func<string> getCurrent)
@@ -133,7 +141,9 @@ public partial class SettingsPage : UserControl
 
     void CheckUpdate_Click(object sender, RoutedEventArgs e)
     {
-        MessageBox.Show("已是最新版本 v0.9.0", "检查更新", MessageBoxButton.OK, MessageBoxImage.Information);
+        var loc = LocalizationService.Instance;
+        MessageBox.Show(loc["Settings.UpToDate"], loc["Settings.CheckUpdate"],
+            MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
     void UpdateStartupShortcut(bool create)
