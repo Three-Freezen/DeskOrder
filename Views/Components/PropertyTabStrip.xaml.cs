@@ -96,7 +96,6 @@ public partial class PropertyTabStrip : UserControl
     AdornerLayer? _dragGhostLayer;
     int _dragInsertIndex = -1;
     bool _isTransferring;
-    Border? _dropIndicator;
     PropertyTabStrip? _transferTarget;
 
     // ── Transfer drop indicator (called by source strip's drag loop) ──
