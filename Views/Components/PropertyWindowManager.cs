@@ -296,6 +296,10 @@ public class PropertyWindowManager
         DesktopClock => "Icon.Clock",
         DesktopCalendar => "Icon.Calendar",
         StickyNote => "Icon.Sticky",
+        // ponytail 2026-08-24: Panel singleton gets its own tab icon instead
+        // of the generic Settings gear so the docked/undocked panel tab is
+        // visually distinct from the four property editors.
+        PanelConfig => "Icon.Panel",
         _ => "Icon.Settings",
     };
 

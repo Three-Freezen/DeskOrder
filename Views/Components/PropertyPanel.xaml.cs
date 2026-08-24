@@ -181,6 +181,29 @@ public partial class PropertyPanel : UserControl
                 InstanceName = z.Name;
                 BuildZoneFields(z);
                 break;
+            // ponytail 2026-08-24: Clock/Calendar/Note/Panel targets now build
+            // their own field trees. Previously they fell through to default and
+            // showed "暂未实现". Each builder reuses MakeSection/MakeCheckRow/
+            // MakeColorRow/MakeTextRow/MakeNumberSubBlock/MakeSliderRow from
+            // BuildZoneFields above. Background-image crop picker stays Zone-only
+            // (MakeBgImageRow is Zone-typed); each live widget already exposes its
+            // own bg-image UI, so editing it from the right panel is optional.
+            case DesktopClock c:
+                InstanceName = $"Clock · {c.Mode}";
+                BuildClockFields(c);
+                break;
+            case DesktopCalendar cal:
+                InstanceName = $"Calendar · {cal.DisplayYear}-{cal.DisplayMonth:D2}";
+                BuildCalendarFields(cal);
+                break;
+            case StickyNote note:
+                InstanceName = string.IsNullOrEmpty(note.Title) ? "便签" : note.Title;
+                BuildNoteFields(note);
+                break;
+            case PanelConfig p:
+                InstanceName = "控制面板";
+                BuildPanelFields(p);
+                break;
             default:
                 InstanceName = "";
                 FieldScroller.Content = new TextBlock
@@ -333,6 +356,248 @@ public partial class PropertyPanel : UserControl
         var bg = MakeSection(_loc["ZoneProp.Section.BgImage"]);
         bg.Children.Add(MakeBgImageRow(z));
         root.Children.Add(bg);
+
+        FieldScroller.Content = root;
+    }
+
+    // ── Field tree for DesktopClock ──
+    //
+    // ponytail 2026-08-24: Clock field tree. Sections 开关 / 基本 / 显示 / 外观.
+    // Mode is not editable here — the live ClockWidget has its own context menu
+    // for Digital↔Analog switching; rebuilding the panel on Mode change would
+    // require the widget to re-init its visual tree, which is overkill for a
+    // property-panel convenience editor.
+    void BuildClockFields(DesktopClock c)
+    {
+        var root = new StackPanel { Margin = new Thickness(16, 12, 16, 12) };
+
+        // 开关
+        var switches = MakeSection("开关");
+        switches.Children.Add(MakeCheckRow("24 小时制", c.Use24Hour,
+            v => { c.Use24Hour = v; Save(c); }));
+        switches.Children.Add(MakeCheckRow("显示秒", c.ShowSeconds,
+            v => { c.ShowSeconds = v; Save(c); }));
+        switches.Children.Add(MakeCheckRow("显示日期", c.ShowDate,
+            v => { c.ShowDate = v; Save(c); }));
+        root.Children.Add(switches);
+
+        // 基本
+        var basic = MakeSection("基本");
+        var sizeGrid = new Grid { Margin = new Thickness(0, 6, 0, 0) };
+        sizeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        sizeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(10) });
+        sizeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var wGrid = MakeNumberSubBlock("宽度", c.Width, v => { c.Width = v; Save(c); });
+        Grid.SetColumn(wGrid, 0); sizeGrid.Children.Add(wGrid);
+        var hGrid = MakeNumberSubBlock("高度", c.Height, v => { c.Height = v; Save(c); });
+        Grid.SetColumn(hGrid, 2); sizeGrid.Children.Add(hGrid);
+        basic.Children.Add(sizeGrid);
+
+        var xyGrid = new Grid { Margin = new Thickness(0, 6, 0, 0) };
+        xyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        xyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(10) });
+        xyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var xGrid = MakeNumberSubBlock("X", c.X, v => { c.X = v; Save(c); });
+        Grid.SetColumn(xGrid, 0); xyGrid.Children.Add(xGrid);
+        var yGrid = MakeNumberSubBlock("Y", c.Y, v => { c.Y = v; Save(c); });
+        Grid.SetColumn(yGrid, 2); xyGrid.Children.Add(yGrid);
+        basic.Children.Add(xyGrid);
+        root.Children.Add(basic);
+
+        // 显示
+        var display = MakeSection("显示");
+        display.Children.Add(MakeTextRow("字体", c.FontFamily,
+            v => { c.FontFamily = string.IsNullOrEmpty(v) ? "Segoe UI" : v; Save(c); }));
+        display.Children.Add(MakeNumberSubBlock("字号", c.FontSize,
+            v => { c.FontSize = v; Save(c); }, asInt: true));
+        display.Children.Add(MakeColorRow("文字颜色", c.TextColor,
+            v => { c.TextColor = v; Save(c); }));
+        display.Children.Add(MakeColorRow("强调色", c.AccentColor,
+            v => { c.AccentColor = v; Save(c); }));
+        root.Children.Add(display);
+
+        // 外观
+        var appearance = MakeSection("外观");
+        appearance.Children.Add(MakeCheckRow("使用全局外观", c.UseGlobalAppearance,
+            v => { c.UseGlobalAppearance = v; Save(c); }));
+        appearance.Children.Add(MakeTextRow("边框粗细", c.BorderThickness.ToString("0.0", CultureInfo.InvariantCulture),
+            v => { if (double.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out var d)) { c.BorderThickness = d; Save(c); } }));
+        appearance.Children.Add(MakeColorRow("数字模式填充", c.DigitalFillColor,
+            v => { c.DigitalFillColor = v; Save(c); }));
+        appearance.Children.Add(MakeColorRow("指针模式填充", c.AnalogFillColor,
+            v => { c.AnalogFillColor = v; Save(c); }));
+        appearance.Children.Add(MakeSliderRow("不透明度", 0, 100, 5,
+            Math.Round(c.Opacity * 100),
+            v => { c.Opacity = v / 100.0; Save(c); }));
+        root.Children.Add(appearance);
+
+        FieldScroller.Content = root;
+    }
+
+    // ── Field tree for DesktopCalendar ──
+    void BuildCalendarFields(DesktopCalendar cal)
+    {
+        var root = new StackPanel { Margin = new Thickness(16, 12, 16, 12) };
+
+        // 开关
+        var switches = MakeSection("开关");
+        switches.Children.Add(MakeCheckRow("显示周数", cal.ShowWeekNumbers,
+            v => { cal.ShowWeekNumbers = v; Save(cal); }));
+        switches.Children.Add(MakeCheckRow("周一开头", cal.StartOnMonday,
+            v => { cal.StartOnMonday = v; Save(cal); }));
+        root.Children.Add(switches);
+
+        // 基本
+        var basic = MakeSection("基本");
+        var sizeGrid = new Grid { Margin = new Thickness(0, 6, 0, 0) };
+        sizeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        sizeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(10) });
+        sizeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var wGrid = MakeNumberSubBlock("宽度", cal.Width, v => { cal.Width = v; Save(cal); });
+        Grid.SetColumn(wGrid, 0); sizeGrid.Children.Add(wGrid);
+        var hGrid = MakeNumberSubBlock("高度", cal.Height, v => { cal.Height = v; Save(cal); });
+        Grid.SetColumn(hGrid, 2); sizeGrid.Children.Add(hGrid);
+        basic.Children.Add(sizeGrid);
+
+        var xyGrid = new Grid { Margin = new Thickness(0, 6, 0, 0) };
+        xyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        xyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(10) });
+        xyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var xGrid = MakeNumberSubBlock("X", cal.X, v => { cal.X = v; Save(cal); });
+        Grid.SetColumn(xGrid, 0); xyGrid.Children.Add(xGrid);
+        var yGrid = MakeNumberSubBlock("Y", cal.Y, v => { cal.Y = v; Save(cal); });
+        Grid.SetColumn(yGrid, 2); xyGrid.Children.Add(yGrid);
+        basic.Children.Add(xyGrid);
+        root.Children.Add(basic);
+
+        // 显示
+        var display = MakeSection("显示");
+        display.Children.Add(MakeNumberSubBlock("字号", cal.FontSize,
+            v => { cal.FontSize = v; Save(cal); }, asInt: true));
+        display.Children.Add(MakeColorRow("文字颜色", cal.TextColor,
+            v => { cal.TextColor = v; Save(cal); }));
+        display.Children.Add(MakeColorRow("今天高亮", cal.TodayColor,
+            v => { cal.TodayColor = v; Save(cal); }));
+        root.Children.Add(display);
+
+        // 外观
+        var appearance = MakeSection("外观");
+        appearance.Children.Add(MakeCheckRow("使用全局外观", cal.UseGlobalAppearance,
+            v => { cal.UseGlobalAppearance = v; Save(cal); }));
+        appearance.Children.Add(MakeTextRow("边框粗细", cal.BorderThickness.ToString("0.0", CultureInfo.InvariantCulture),
+            v => { if (double.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out var d)) { cal.BorderThickness = d; Save(cal); } }));
+        appearance.Children.Add(MakeSliderRow("不透明度", 0, 100, 5,
+            Math.Round(cal.Opacity * 100),
+            v => { cal.Opacity = v / 100.0; Save(cal); }));
+        root.Children.Add(appearance);
+
+        FieldScroller.Content = root;
+    }
+
+    // ── Field tree for StickyNote ──
+    void BuildNoteFields(StickyNote note)
+    {
+        var root = new StackPanel { Margin = new Thickness(16, 12, 16, 12) };
+
+        // 行为
+        var behavior = MakeSection("行为");
+        behavior.Children.Add(MakeCheckRow("置顶", note.PinnedTop,
+            v => { note.PinnedTop = v; Save(note); }));
+        behavior.Children.Add(MakeCheckRow("标题文字自适应", note.TitleBarTextColorAdaptive,
+            v => { note.TitleBarTextColorAdaptive = v; Save(note); }));
+        behavior.Children.Add(MakeCheckRow("正文文字自适应", note.TextColorAdaptive,
+            v => { note.TextColorAdaptive = v; Save(note); }));
+        root.Children.Add(behavior);
+
+        // 基本
+        var basic = MakeSection("基本");
+        basic.Children.Add(MakeTextRow("标题", note.Title,
+            v => { note.Title = v ?? ""; Save(note); }));
+        basic.Children.Add(MakeNumberSubBlock("字号", note.FontSize,
+            v => { note.FontSize = v; Save(note); }, asInt: true));
+        var sizeGrid = new Grid { Margin = new Thickness(0, 6, 0, 0) };
+        sizeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        sizeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(10) });
+        sizeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var wGrid = MakeNumberSubBlock("宽度", note.Width, v => { note.Width = v; Save(note); });
+        Grid.SetColumn(wGrid, 0); sizeGrid.Children.Add(wGrid);
+        var hGrid = MakeNumberSubBlock("高度", note.Height, v => { note.Height = v; Save(note); });
+        Grid.SetColumn(hGrid, 2); sizeGrid.Children.Add(hGrid);
+        basic.Children.Add(sizeGrid);
+        root.Children.Add(basic);
+
+        // 标题栏
+        var tb = MakeSection("标题栏");
+        tb.Children.Add(MakeColorRow("标题栏填充", note.TitleBarFillColor,
+            v => { note.TitleBarFillColor = v; Save(note); }));
+        tb.Children.Add(MakeColorRow("标题文字颜色", note.TitleTextColor,
+            v => { note.TitleTextColor = v; Save(note); }));
+        tb.Children.Add(MakeSliderRow("控件不透明度", 5, 100, 5,
+            note.ControlOpacity,
+            v => { note.ControlOpacity = v; Save(note); }));
+        root.Children.Add(tb);
+
+        // 外观
+        var appearance = MakeSection("外观");
+        appearance.Children.Add(MakeCheckRow("使用全局外观", note.UseGlobalAppearance,
+            v => { note.UseGlobalAppearance = v; Save(note); }));
+        appearance.Children.Add(MakeTextRow("边框粗细", note.BorderThickness.ToString("0.0", CultureInfo.InvariantCulture),
+            v => { if (double.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out var d)) { note.BorderThickness = d; Save(note); } }));
+        root.Children.Add(appearance);
+
+        FieldScroller.Content = root;
+    }
+
+    // ── Field tree for PanelConfig ──
+    void BuildPanelFields(PanelConfig p)
+    {
+        var root = new StackPanel { Margin = new Thickness(16, 12, 16, 12) };
+
+        // 基本
+        var basic = MakeSection("基本");
+        var sizeGrid = new Grid { Margin = new Thickness(0, 6, 0, 0) };
+        sizeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        sizeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(10) });
+        sizeGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var wGrid = MakeNumberSubBlock("宽度", p.PanelWidth, v => { p.PanelWidth = v; Save(p); });
+        Grid.SetColumn(wGrid, 0); sizeGrid.Children.Add(wGrid);
+        var hGrid = MakeNumberSubBlock("高度", p.PanelHeight, v => { p.PanelHeight = v; Save(p); });
+        Grid.SetColumn(hGrid, 2); sizeGrid.Children.Add(hGrid);
+        basic.Children.Add(sizeGrid);
+
+        var xyGrid = new Grid { Margin = new Thickness(0, 6, 0, 0) };
+        xyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        xyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(10) });
+        xyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var xGrid = MakeNumberSubBlock("X", p.PanelX, v => { p.PanelX = v; Save(p); });
+        Grid.SetColumn(xGrid, 0); xyGrid.Children.Add(xGrid);
+        var yGrid = MakeNumberSubBlock("Y", p.PanelY, v => { p.PanelY = v; Save(p); });
+        Grid.SetColumn(yGrid, 2); xyGrid.Children.Add(yGrid);
+        basic.Children.Add(xyGrid);
+
+        basic.Children.Add(MakeSliderRow("悬停展开速度", 0.1, 3.0, 0.1,
+            p.PanelHoverExpandSpeed,
+            v => { p.PanelHoverExpandSpeed = v; Save(p); }));
+        root.Children.Add(basic);
+
+        // 外观
+        var appearance = MakeSection("外观");
+        appearance.Children.Add(MakeCheckRow("使用全局外观", p.PanelUseGlobalAppearance,
+            v => { p.PanelUseGlobalAppearance = v; Save(p); }));
+        appearance.Children.Add(MakeCheckRow("标题文字自适应", p.PanelTitleBarTextColorAdaptive,
+            v => { p.PanelTitleBarTextColorAdaptive = v; Save(p); }));
+        appearance.Children.Add(MakeCheckRow("正文文字自适应", p.PanelTextColorAdaptive,
+            v => { p.PanelTextColorAdaptive = v; Save(p); }));
+        appearance.Children.Add(MakeColorRow("标题栏填充", p.PanelTitleBarFillColor,
+            v => { p.PanelTitleBarFillColor = v; Save(p); }));
+        appearance.Children.Add(MakeColorRow("填充颜色", p.PanelFillColor,
+            v => { p.PanelFillColor = v; Save(p); }));
+        appearance.Children.Add(MakeColorRow("边框颜色", p.PanelBorderColor,
+            v => { p.PanelBorderColor = v; Save(p); }));
+        appearance.Children.Add(MakeSliderRow("控件不透明度", 5, 100, 5,
+            p.PanelControlOpacity,
+            v => { p.PanelControlOpacity = v; Save(p); }));
+        root.Children.Add(appearance);
 
         FieldScroller.Content = root;
     }
@@ -575,9 +840,9 @@ public partial class PropertyPanel : UserControl
         return grid;
     }
 
-    void Save(Zone z)
+    void Save(object target)
     {
-        try { Persist?.Invoke(z); }
+        try { Persist?.Invoke(target); }
         catch (Exception ex)
         {
             // ponytail: surface to debug + show inline error dot in panel header (not a popup)

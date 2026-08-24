@@ -7,6 +7,19 @@
        Open:   border.accent, chevron rotated 180°
        Popup:  bg.surface, 1px border.default, 6px corner radius,
                AllowsTransparency=True, PopupAnimation=None
+       — ponytail 2026-08-24:
+         (1) ToggleButton now fills the entire surface (was 28px on the right).
+             ContentSite sits on top with IsHitTestVisible=False so clicks
+             anywhere on the row fall through to ToggleButton and toggle the
+             dropdown. Chevron is still right-aligned via Grid alignment inside
+             ToggleButton's own template.
+         (2) Chevron Path has RenderTransformOrigin="0.5,0.5" so the
+             RotateTransform Angle=180 spins around the icon center instead of
+             the top-left (which used to make the arrow visibly jump on toggle).
+         (3) DropDownBorder is wrapped in a Grid that carries a ScaleTransform
+             (RenderTransformOrigin 0.5,0 top) so opening plays a "expand down"
+             storyboard — Opacity 0→1 + ScaleY 0.92→1, Motion.Fast + StandardSpline.
+             Closing reverses via ExitActions.
        ═══════════════════════════════════════════ -->
 
   <Style TargetType="ComboBox">
@@ -30,28 +43,28 @@
                     BorderThickness="{TemplateBinding BorderThickness}"
                     CornerRadius="4">
               <Grid>
-                <ContentPresenter x:Name="ContentSite"
-                                  Content="{TemplateBinding SelectionBoxItem}"
-                                  ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
-                                  Margin="{TemplateBinding Padding}"
-                                  HorizontalAlignment="Left"
-                                  VerticalAlignment="Center"
-                                  IsHitTestVisible="False"/>
-                <!-- Chevron: reserved 28px right gutter, 12x12 icon -->
+                <!-- ToggleButton fills the entire surface: clicks anywhere
+                     on the row (including over ContentSite text) fall through
+                     to it because ContentSite is IsHitTestVisible=False. -->
                 <ToggleButton x:Name="ToggleButton"
-                              Width="28" Height="32"
-                              HorizontalAlignment="Right"
+                              HorizontalAlignment="Stretch"
+                              VerticalAlignment="Stretch"
                               Focusable="False"
                               IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
                               ClickMode="Press">
                   <ToggleButton.Template>
                     <ControlTemplate TargetType="ToggleButton">
                       <Grid Background="Transparent">
+                        <!-- Chevron: right-aligned in the right gutter; origin
+                             (0.5,0.5) so the rotate transform doesn't make it
+                             shift position. -->
                         <Path x:Name="Chevron"
                               Width="12" Height="12"
-                              HorizontalAlignment="Center"
+                              HorizontalAlignment="Right"
                               VerticalAlignment="Center"
+                              Margin="0,0,10,0"
                               Stretch="Uniform"
+                              RenderTransformOrigin="0.5,0.5"
                               Stroke="{DynamicResource Brush.Text.Secondary}"
                               StrokeThickness="1.5"
                               StrokeLineJoin="Round"
@@ -71,6 +84,14 @@
                     </ControlTemplate>
                   </ToggleButton.Template>
                 </ToggleButton>
+                <!-- ContentSite: hit-test transparent so clicks fall through to ToggleButton. -->
+                <ContentPresenter x:Name="ContentSite"
+                                  Content="{TemplateBinding SelectionBoxItem}"
+                                  ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                  Margin="{TemplateBinding Padding}"
+                                  HorizontalAlignment="Left"
+                                  VerticalAlignment="Center"
+                                  IsHitTestVisible="False"/>
               </Grid>
             </Border>
 
@@ -83,17 +104,33 @@
                    PopupAnimation="None"
                    HorizontalOffset="0"
                    VerticalOffset="2">
-              <Border x:Name="DropDownBorder"
-                      Background="{DynamicResource Brush.Bg.Surface}"
-                      BorderBrush="{DynamicResource Brush.Border.Default}"
-                      BorderThickness="1"
-                      CornerRadius="6"
-                      MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}"
-                      MaxHeight="280">
-                <ScrollViewer Padding="0,4" CanContentScroll="True">
-                  <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained"/>
-                </ScrollViewer>
-              </Border>
+              <!-- Wrap in a Grid that carries a ScaleTransform at top-center
+                   so the open animation can scale the popup out from its
+                   top edge ("expand down"). -->
+              <Grid x:Name="DropDownRoot"
+                    RenderTransformOrigin="0.5,0"
+                    Opacity="0">
+                <Grid.RenderTransform>
+                  <ScaleTransform ScaleX="1" ScaleY="0.92"/>
+                </Grid.RenderTransform>
+                <!-- ponytail 2026-08-24: TemplateBind to ComboBox chrome so callers
+                     that want a locked dropdown (e.g. StickyNoteWindow's FontSizeCombo
+                     which sets LockedDark brushes) get the popup chrome matching the
+                     closed state. ComboBoxes without explicit overrides still resolve
+                     via the Style setter above (Brush.Bg.Input / Brush.Border.Default)
+                     so existing call sites are unaffected. -->
+                <Border x:Name="DropDownBorder"
+                        Background="{TemplateBinding Background}"
+                        BorderBrush="{TemplateBinding BorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="6"
+                        MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}"
+                        MaxHeight="280">
+                  <ScrollViewer Padding="0,4" CanContentScroll="True">
+                    <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained"/>
+                  </ScrollViewer>
+                </Border>
+              </Grid>
             </Popup>
           </Grid>
 
@@ -103,6 +140,36 @@
             </Trigger>
             <Trigger Property="IsDropDownOpen" Value="True">
               <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Brush.Accent}"/>
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="DropDownRoot"
+                                     Storyboard.TargetProperty="Opacity"
+                                     From="0" To="1"
+                                     Duration="{StaticResource Motion.Fast}"
+                                     EasingFunction="{StaticResource Motion.StandardSpline}"/>
+                    <DoubleAnimation Storyboard.TargetName="DropDownRoot"
+                                     Storyboard.TargetProperty="(RenderTransform).(ScaleTransform.ScaleY)"
+                                     From="0.92" To="1"
+                                     Duration="{StaticResource Motion.Fast}"
+                                     EasingFunction="{StaticResource Motion.StandardSpline}"/>
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="DropDownRoot"
+                                     Storyboard.TargetProperty="Opacity"
+                                     To="0"
+                                     Duration="{StaticResource Motion.Fast}"/>
+                    <DoubleAnimation Storyboard.TargetName="DropDownRoot"
+                                     Storyboard.TargetProperty="(RenderTransform).(ScaleTransform.ScaleY)"
+                                     To="0.92"
+                                     Duration="{StaticResource Motion.Fast}"/>
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
             </Trigger>
             <Trigger Property="IsEnabled" Value="False">
               <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Bg.Base}"/>

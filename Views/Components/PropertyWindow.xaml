@@ -55,9 +55,7 @@
       <Border x:Name="TitleBar" DockPanel.Dock="Top"
               Background="{DynamicResource Brush.Bg.Chrome}"
               BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="0,0,0,1"
-              PreviewMouseLeftButtonDown="TitleBar_MouseLeftButtonDown"
-            PreviewMouseMove="TitleBar_PreviewMouseMove"
-            PreviewMouseLeftButtonUp="TitleBar_PreviewMouseLeftButtonUp">
+              PreviewMouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
         <controls:PropertyTabStrip x:Name="TabStrip"/>
       </Border>
       <controls:PropertyPanel x:Name="BodyPanel" Margin="0"/>

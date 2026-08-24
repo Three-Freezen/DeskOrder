@@ -33,6 +33,11 @@ public partial class ClockPage : UserControl
         InitializeComponent();
         _main = main;
         _widgetService = widgetService;
+        // ponytail 2026-08-24: wire Persist so the right-side PropertyPanel
+        // can mutate clocks via the same WidgetService path the row toggle
+        // buttons use (UpdateClock fires ClocksChanged → live ClockWidget
+        // refreshes + config persists).
+        _main.DockedPanel.Persist = obj => { if (obj is DesktopClock c) _widgetService?.UpdateClock(c); };
         Loaded += (_, _) =>
         {
             if (_widgetService != null)

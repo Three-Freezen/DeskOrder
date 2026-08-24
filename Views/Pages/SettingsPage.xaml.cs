@@ -27,6 +27,13 @@ public partial class SettingsPage : UserControl
         _configService = configService;
         BuildHotkeys();
         LocalizationService.Instance.LanguageChanged += _ => RebuildHotkeys();
+        // ponytail: two-way bind to ThemeService so the title-bar cycle button
+        // (ManagementWindow.ThemeBtn_Click) and any other runtime theme flip
+        // (System accent change, UserPreferenceChanged → Apply(System)) keeps
+        // these radios in sync. _suppress in SyncThemeRadios breaks the echo:
+        // Apply → Changed → SyncThemeRadios → IsChecked setter → ThemeRb_Changed
+        // → _suppress guard exits before writing back to cfg.
+        ThemeService.Changed += SyncThemeRadios;
         Loaded += (_, _) => SyncFromConfig();
     }
 
@@ -80,9 +87,37 @@ public partial class SettingsPage : UserControl
             StartWithWindowsBox.IsChecked = cfg.StartWithWindows;
             StartMinimizedBox.IsChecked = cfg.StartMinimized;
             SelectComboByTag(LanguageCombo, cfg.Language);
-            ThemeSystemRb.IsChecked = (cfg.ThemeMode ?? "System") == "System";
-            ThemeLightRb.IsChecked = cfg.ThemeMode == "Light";
-            ThemeDarkRb.IsChecked = cfg.ThemeMode == "Dark";
+            SyncThemeRadios(cfg.ThemeMode switch
+            {
+                "Light" => AppThemeMode.Light,
+                "Dark"  => AppThemeMode.Dark,
+                _       => AppThemeMode.System,
+            });
+        }
+        finally { _suppress = false; }
+    }
+
+    // Shared by initial SyncFromConfig and the live ThemeService.Changed listener.
+    // _suppress is the guard that breaks the round-trip: Apply → Changed →
+    // SyncThemeRadios → IsChecked=true → ThemeRb_Changed → _suppress → return.
+    void SyncThemeRadios(AppThemeMode mode)
+    {
+        // Read current suppress state; if we're already mid-sync (e.g. from
+        // SyncFromConfig), don't nest the try/finally or we'd drop _suppress
+        // back to false before the outer block finishes writing other controls.
+        if (_suppress)
+        {
+            ThemeSystemRb.IsChecked = mode == AppThemeMode.System;
+            ThemeLightRb.IsChecked = mode == AppThemeMode.Light;
+            ThemeDarkRb.IsChecked = mode == AppThemeMode.Dark;
+            return;
+        }
+        _suppress = true;
+        try
+        {
+            ThemeSystemRb.IsChecked = mode == AppThemeMode.System;
+            ThemeLightRb.IsChecked = mode == AppThemeMode.Light;
+            ThemeDarkRb.IsChecked = mode == AppThemeMode.Dark;
         }
         finally { _suppress = false; }
     }

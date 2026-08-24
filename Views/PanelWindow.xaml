@@ -16,6 +16,22 @@
         DragEnter="Panel_DragEnter"
         DragOver="Panel_DragOver"
         Drop="Panel_Drop">
+    <Window.Resources>
+        <!-- ponytail 2026-08-24: locked dark-theme dropdown chrome. Same hex
+             palette StickyNoteWindow uses so the Panel's zone-selector popup
+             reads as dark regardless of whether the surrounding chrome is
+             light (user-uploaded bg image, etc.). Brushes mirror Theme.Colors
+             .Dark.xaml and are NOT bound to Brush.* DynamicResources — the
+             dropdown stays dark even when the management UI flips to Light/HC. -->
+        <SolidColorBrush x:Key="LockedDark.Bg"        Color="#262626"/>
+        <SolidColorBrush x:Key="LockedDark.Input"     Color="#2A2A2A"/>
+        <SolidColorBrush x:Key="LockedDark.Border"    Color="#454545"/>
+        <SolidColorBrush x:Key="LockedDark.BgHover"   Color="#2E2E2E"/>
+        <SolidColorBrush x:Key="LockedDark.Text"      Color="#ECECEC"/>
+        <SolidColorBrush x:Key="LockedDark.TextDim"   Color="#A8A8A8"/>
+        <SolidColorBrush x:Key="LockedDark.Accent"    Color="#2E97F0"/>
+        <SolidColorBrush x:Key="LockedDark.AccentWash" Color="#242E97F0"/>
+    </Window.Resources>
 
     <Grid>
         <Border x:Name="PanelBorder" CornerRadius="10"
@@ -74,8 +90,35 @@
                                            Foreground="#E8E8F0"
                                            VerticalAlignment="Center" Margin="0,0,8,0"/>
                                 <ComboBox x:Name="ZoneSelector" Width="100" Height="24"
-                                          FontSize="11" SelectedIndex="0"
-                                          SelectionChanged="ZoneSelector_Changed"/>
+                                          FontSize="11" Foreground="#FFFFFF"
+                                          Background="{StaticResource LockedDark.Input}"
+                                          BorderBrush="{StaticResource LockedDark.Border}"
+                                          BorderThickness="1" Padding="4,0"
+                                          SelectedIndex="0"
+                                          SelectionChanged="ZoneSelector_Changed">
+                                    <!-- ponytail 2026-08-24: local ComboBoxItem style
+                                         overrides the implicit one so dropdown items
+                                         stay on the locked dark palette. The user's
+                                         background image + Panel chrome may go light,
+                                         so we don't let Theme.Brush.* DynamicResources
+                                         bleed into the popup. Items are added in code
+                                         (ZoneSelector_Changed) but the implicit Style
+                                         still applies via TargetType. -->
+                                    <ComboBox.Resources>
+                                        <Style TargetType="ComboBoxItem">
+                                            <Setter Property="Background" Value="Transparent"/>
+                                            <Setter Property="Foreground" Value="{StaticResource LockedDark.Text}"/>
+                                            <Style.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter Property="Background" Value="{StaticResource LockedDark.BgHover}"/>
+                                                </Trigger>
+                                                <Trigger Property="IsSelected" Value="True">
+                                                    <Setter Property="Background" Value="{StaticResource LockedDark.AccentWash}"/>
+                                                </Trigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </ComboBox.Resources>
+                                </ComboBox>
                             </StackPanel>
 
                             <!-- Search bar -->

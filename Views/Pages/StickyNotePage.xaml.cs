@@ -31,6 +31,10 @@ public partial class StickyNotePage : UserControl
         InitializeComponent();
         _main = main;
         _notesService = notesService;
+        // ponytail 2026-08-24: Persist for the right-side property panel;
+        // mutations go through NotesService.UpdateNote which stamps ModifiedAt
+        // and fires NotesChanged → live StickyNoteWindow refreshes.
+        _main.DockedPanel.Persist = obj => { if (obj is StickyNote n) _notesService?.UpdateNote(n); };
         Loaded += (_, _) =>
         {
             if (_notesService != null)

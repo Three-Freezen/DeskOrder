@@ -1,9 +1,11 @@
 using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Threading;
 using DesktopZones.Helpers;
 using DesktopZones.Models;
 using DesktopZones.Services;
@@ -120,10 +122,23 @@ public partial class PropertyWindow : Window
 
     public event EventHandler<DockBackEventArgs>? DockBackRequested;
 
-    // ── Title-bar drag — Win32 move during drag, WPF sync on release only ──
+    // ── Title-bar drag — Timer-driven cursor polling + Win32 move ──
+    // ponytail: previous design drove moves off PreviewMouseMove, which on WPF
+    // fires at the mouse's input rate (125-1000Hz). SetWindowPos + WM_WINDOWPOSCHANGED
+    // + render invalidation on each tick saturated the UI thread and produced
+    // visible stutter ("拖动一卡一卡的"). The new design polls Win32 cursor state
+    // on a 16ms timer (locked to the render rate) and uses GetAsyncKeyState for
+    // release detection — works across all windows, no Mouse.Capture, no routed-
+    // event dependency.
 
-    Point _dragStartScreen;
-    double _dragLeft, _dragTop; // tracked position during drag (avoids WPF overhead)
+    [DllImport("user32.dll")] static extern bool GetCursorPos(out POINT lpPoint);
+    [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vKey);
+    [StructLayout(LayoutKind.Sequential)] struct POINT { public int X; public int Y; }
+    const int VK_LBUTTON = 0x01;
+
+    DispatcherTimer? _dragTimer;
+    Point _dragGrabOffset;          // cursor - window-Left/Top at drag start
+    double _dragLeft, _dragTop;     // tracked position during drag
     bool _isDragging;
     bool _dockBackRaised;
 
@@ -137,27 +152,53 @@ public partial class PropertyWindow : Window
             e.Handled = true;
             return;
         }
-        _dragStartScreen = PointToScreen(e.GetPosition(this));
+        // Snapshot initial cursor (screen) and offset relative to window.
+        GetCursorPos(out var pt);
+        var cursorScreen = new Point(pt.X, pt.Y);
+        _dragGrabOffset = new Point(cursorScreen.X - Left, cursorScreen.Y - Top);
         _dragLeft = Left;
         _dragTop = Top;
         _isDragging = true;
         _dockBackRaised = false;
+        StartDragTimer();
     }
 
-    void TitleBar_PreviewMouseMove(object sender, MouseEventArgs e)
+    void StartDragTimer()
     {
-        if (!_isDragging || e.LeftButton != MouseButtonState.Pressed) return;
+        if (_dragTimer != null) return;
+        _dragTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
+        _dragTimer.Tick += OnDragTick;
+        _dragTimer.Start();
+    }
 
-        var cursorScreen = PointToScreen(e.GetPosition(this));
-        var dx = cursorScreen.X - _dragStartScreen.X;
-        var dy = cursorScreen.Y - _dragStartScreen.Y;
+    void StopDragTimer()
+    {
+        if (_dragTimer == null) return;
+        _dragTimer.Stop();
+        _dragTimer.Tick -= OnDragTick;
+        _dragTimer = null;
+    }
 
-        // Track logical position (cheap — just field assignments).
-        _dragLeft += dx;
-        _dragTop += dy;
-        _dragStartScreen = cursorScreen;
+    void OnDragTick(object? sender, EventArgs e)
+    {
+        if (!_isDragging) { StopDragTimer(); return; }
 
-        // Win32 move — bypasses WPF layout/render pipeline, no stutter.
+        // Release detection via Win32 — works regardless of cursor location.
+        if ((GetAsyncKeyState(VK_LBUTTON) & 0x8000) == 0)
+        {
+            Left = _dragLeft;
+            Top = _dragTop;
+            _isDragging = false;
+            StopDragTimer();
+            return;
+        }
+
+        if (!GetCursorPos(out var pt)) return;
+        var cursorScreen = new Point(pt.X, pt.Y);
+
+        // Win32 move — bypasses WPF layout/render pipeline.
+        _dragLeft = cursorScreen.X - _dragGrabOffset.X;
+        _dragTop = cursorScreen.Y - _dragGrabOffset.Y;
         var hwnd = new WindowInteropHelper(this).Handle;
         if (hwnd != IntPtr.Zero)
         {
@@ -166,30 +207,22 @@ public partial class PropertyWindow : Window
                 NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
         }
 
-        // Real-time dock-back detection using tracked position.
-        var bounds = new Rect(_dragLeft, _dragTop, ActualWidth, ActualHeight);
-        if (!bounds.Contains(cursorScreen) && !_dockBackRaised)
+        // Dock-back detection: dragged window's own bounds check removed (it
+        // fired whenever cursor left the dragged window — wrong). Subscribers
+        // (PropertyWindowManager) check the main window's right-column zone
+        // themselves; one shot per drag.
+        if (!_dockBackRaised)
         {
-            _dockBackRaised = true;
             var args = new DockBackEventArgs(cursorScreen);
             DockBackRequested?.Invoke(this, args);
             if (args.Handled)
             {
                 _isDragging = false;
-                _dockBackRaised = false;
+                StopDragTimer();
+                return;
             }
+            _dockBackRaised = true;
         }
-    }
-
-    void TitleBar_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
-    {
-        if (!_isDragging) return;
-        _isDragging = false;
-        _dockBackRaised = false;
-
-        // Sync WPF properties once on release (so persistence/bindings work).
-        Left = _dragLeft;
-        Top = _dragTop;
     }
 
     // ── Safety nets ──

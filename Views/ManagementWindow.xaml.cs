@@ -458,6 +458,13 @@ public partial class ManagementWindow : Window
             nameof(DesktopClock) => _widgetService?.Clocks.FirstOrDefault(c => c.Id == id),
             nameof(DesktopCalendar) => _widgetService?.Calendars.FirstOrDefault(c => c.Id == id),
             nameof(StickyNote) => _notesService?.Notes.FirstOrDefault(n => n.Id == id),
+            // ponytail 2026-08-24: Panel is a singleton (no Id), so PanelPage
+            // doesn't go through DockTarget's per-Id key — it sets Target via
+            // the cfg.Panel instance directly. ResolveTargetFromKey is still
+            // called when the tab strip needs to refresh after the user drags
+            // a panel tab elsewhere; return the live PanelConfig from AppConfig
+            // so the same instance keeps flowing through Persist.
+            nameof(PanelConfig) => _configService.Load().Panel,
             _ => null,
         };
     }

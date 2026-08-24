@@ -32,6 +32,19 @@ public partial class PanelPage : UserControl
         _main = main;
         _configService = configService;
         _panelService = panelService;
+        // ponytail 2026-08-24: Persist for the right-side property panel.
+        // PanelConfig is held by reference inside AppConfig so mutating its
+        // fields via the panel is already mutating cfg.Panel — just Save and
+        // refresh the live PanelWindow if it's open so it picks up the new
+        // appearance immediately.
+        _main.DockedPanel.Persist = obj =>
+        {
+            if (obj is PanelConfig)
+            {
+                _configService.Save(_configService.Load());
+                _panelService?.RefreshAppearance();
+            }
+        };
         Loaded += (_, _) => RefreshList();
     }
 
@@ -51,6 +64,7 @@ public partial class PanelPage : UserControl
     {
         var row = new EditableListRow
         {
+            Tag = cfg.Panel,
             Title = "控制面板",
             Subtitle = $"快捷键 {ManagementWindow.GetHotkeyLabel(cfg.PanelHotkey.PanelHotkeyModifiers, cfg.PanelHotkey.PanelHotkeyKey)}",
             IconKey = "Icon.Panel",
@@ -68,8 +82,27 @@ public partial class PanelPage : UserControl
         });
         row.DeleteCommand = new RelayCommand(_ => { /* panel cannot be deleted */ });
         row.RenameCommand = new RelayCommand(_ => { /* panel has no name */ });
+        // ponytail 2026-08-24: Panel row previously had no click handler — the
+        // right-side PropertyPanel never opened for the singleton panel.
+        // Mirror ClockPage/CalendarPage: route through DockTarget with the
+        // PanelConfig instance as the target so the existing PropertyPanel
+        // dispatcher can build its field tree.
+        row.PreviewMouseLeftButtonUp += (_, e) =>
+        {
+            if (e.OriginalSource is DependencyObject src)
+            {
+                var parent = src;
+                while (parent != null && parent is not Button)
+                    parent = LogicalTreeHelper.GetParent(parent);
+                if (parent is Button) return;
+            }
+            Select();
+        };
         return row;
     }
+
+    void Select() =>
+        PropertyWindowManager.Instance.DockTarget(_configService.Load().Panel, _main);
 
     static void ApplyStatusBadge(EditableListRow row, AppConfig cfg)
     {

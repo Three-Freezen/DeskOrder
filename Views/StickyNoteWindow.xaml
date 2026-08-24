@@ -9,6 +9,24 @@
         ShowInTaskbar="False"
         SnapsToDevicePixels="True"
         PreviewMouseLeftButtonDown="Window_PreviewMouseLeftButtonDown">
+    <Window.Resources>
+        <!-- ponytail 2026-08-24: locked dark-theme dropdown chrome. The sticky note
+             sits over user-picked fill colors (yellow / custom image / etc.) so its
+             own chrome ignores the management interface theme palette; the dropdowns
+             (font size + font color picker) need a stable dark background that
+             stays readable regardless of the surrounding note color. These
+             brushes intentionally mirror Theme.Colors.Dark.xaml hex values and
+             are NOT bound to Brush.* — when the management UI flips to Light/HC
+             the dropdowns keep this dark look. -->
+        <SolidColorBrush x:Key="LockedDark.Bg"        Color="#262626"/>
+        <SolidColorBrush x:Key="LockedDark.Input"     Color="#2A2A2A"/>
+        <SolidColorBrush x:Key="LockedDark.Border"    Color="#454545"/>
+        <SolidColorBrush x:Key="LockedDark.BgHover"   Color="#2E2E2E"/>
+        <SolidColorBrush x:Key="LockedDark.Text"      Color="#ECECEC"/>
+        <SolidColorBrush x:Key="LockedDark.TextDim"   Color="#A8A8A8"/>
+        <SolidColorBrush x:Key="LockedDark.Accent"    Color="#2E97F0"/>
+        <SolidColorBrush x:Key="LockedDark.AccentWash" Color="#242E97F0"/>
+    </Window.Resources>
     <Grid>
         <!-- Main content wrapper -->
         <Border x:Name="MainContent" Visibility="Visible" ClipToBounds="True" CornerRadius="10">
@@ -82,24 +100,44 @@
                 <Border Grid.Row="1" Background="#10000000" Padding="4,2">
                     <StackPanel Orientation="Horizontal">
                         <!-- Font Size — locked white regardless of adaptive: the number itself
-                             (10/12/14/…) is a label, not an icon, and shouldn't compete with bg. -->
+                             (10/12/14/…) is a label, not an icon, and shouldn't compete with bg.
+                             ponytail 2026-08-24: chrome locked to dark-theme hex via Window.Resources
+                             LockedDark.* brushes (independent of ThemeService). ComboBoxItems get a
+                             local Style override that mirrors the dark-theme hover/selected states
+                             so the dropdown stays consistently dark even when the management UI
+                             flips to Light/HC. -->
                         <ComboBox x:Name="FontSizeCombo" Width="50" Height="22"
                                    FontSize="11" Foreground="#FFFFFF"
-                                   Background="#1E1E36" BorderBrush="#30FFFFFF"
+                                   Background="{StaticResource LockedDark.Input}"
+                                   BorderBrush="{StaticResource LockedDark.Border}"
                                    BorderThickness="1" Padding="2,0"
                                    SelectedIndex="2"
                                    SelectionChanged="FontSizeCombo_SelectionChanged">
-                            <ComboBoxItem Content="10" Tag="10" Background="#1E1E36" Foreground="#E0E0E0"/>
-                            <ComboBoxItem Content="12" Tag="12" Background="#1E1E36" Foreground="#E0E0E0"/>
-                            <ComboBoxItem Content="14" Tag="14" Background="#1E1E36" Foreground="#E0E0E0"/>
-                            <ComboBoxItem Content="16" Tag="16" Background="#1E1E36" Foreground="#E0E0E0"/>
-                            <ComboBoxItem Content="18" Tag="18" Background="#1E1E36" Foreground="#E0E0E0"/>
-                            <ComboBoxItem Content="20" Tag="20" Background="#1E1E36" Foreground="#E0E0E0"/>
-                            <ComboBoxItem Content="24" Tag="24" Background="#1E1E36" Foreground="#E0E0E0"/>
-                            <ComboBoxItem Content="28" Tag="28" Background="#1E1E36" Foreground="#E0E0E0"/>
-                            <ComboBoxItem Content="32" Tag="32" Background="#1E1E36" Foreground="#E0E0E0"/>
-                            <ComboBoxItem Content="36" Tag="36" Background="#1E1E36" Foreground="#E0E0E0"/>
-                            <ComboBoxItem Content="48" Tag="48" Background="#1E1E36" Foreground="#E0E0E0"/>
+                            <ComboBox.Resources>
+                                <Style TargetType="ComboBoxItem">
+                                    <Setter Property="Background" Value="Transparent"/>
+                                    <Setter Property="Foreground" Value="{StaticResource LockedDark.Text}"/>
+                                    <Style.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter Property="Background" Value="{StaticResource LockedDark.BgHover}"/>
+                                        </Trigger>
+                                        <Trigger Property="IsSelected" Value="True">
+                                            <Setter Property="Background" Value="{StaticResource LockedDark.AccentWash}"/>
+                                        </Trigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </ComboBox.Resources>
+                            <ComboBoxItem Content="10" Tag="10"/>
+                            <ComboBoxItem Content="12" Tag="12"/>
+                            <ComboBoxItem Content="14" Tag="14"/>
+                            <ComboBoxItem Content="16" Tag="16"/>
+                            <ComboBoxItem Content="18" Tag="18"/>
+                            <ComboBoxItem Content="20" Tag="20"/>
+                            <ComboBoxItem Content="24" Tag="24"/>
+                            <ComboBoxItem Content="28" Tag="28"/>
+                            <ComboBoxItem Content="32" Tag="32"/>
+                            <ComboBoxItem Content="36" Tag="36"/>
+                            <ComboBoxItem Content="48" Tag="48"/>
                         </ComboBox>
 
                         <Rectangle Width="1" Fill="#20FFFFFF" Margin="4,2"/>
@@ -169,16 +207,22 @@
                         <Popup x:Name="FontColorPopup" StaysOpen="False"
                                PlacementTarget="{Binding ElementName=FontColorBtn}"
                                Placement="Bottom" AllowsTransparency="True">
-                            <Border Background="#F01A1A2E" CornerRadius="8"
-                                    BorderBrush="#30FFFFFF" BorderThickness="1"
+                            <!-- ponytail 2026-08-24: popup chrome uses LockedDark.* brushes from
+                                 Window.Resources (independent of ThemeService). Preset swatch
+                                 Background values stay hardcoded — they ARE the colors they
+                                 represent. Preset borders + ColorCustomBtn all use the same
+                                 locked brushes so the popup looks consistent regardless of
+                                 the management interface theme. -->
+                            <Border Background="{StaticResource LockedDark.Bg}" CornerRadius="8"
+                                    BorderBrush="{StaticResource LockedDark.Border}" BorderThickness="1"
                                     Padding="8">
                                 <StackPanel>
                                     <TextBlock Text="Text Color" FontSize="10"
-                                               Foreground="#8888A0" Margin="0,0,0,6"/>
+                                               Foreground="{StaticResource LockedDark.TextDim}" Margin="0,0,0,6"/>
                                     <WrapPanel x:Name="ColorPresetsPanel" Width="200">
                                         <Border x:Name="PresetTransparent" Width="24" Height="24" CornerRadius="12"
                                                 Margin="0,0,4,4" Cursor="Hand" Tag="#01000000"
-                                                BorderBrush="#30FFFFFF" BorderThickness="1"
+                                                BorderBrush="{StaticResource LockedDark.Border}" BorderThickness="1"
                                                 MouseLeftButtonDown="ColorPreset_Click" ToolTip="Transparent">
                                             <Border.Background>
                                                 <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
@@ -190,48 +234,48 @@
                                         </Border>
                                         <Border x:Name="PresetBlack" Width="24" Height="24" CornerRadius="12"
                                                 Margin="0,0,4,4" Cursor="Hand" Tag="#000000"
-                                                Background="#000000" BorderBrush="#30FFFFFF" BorderThickness="1"
+                                                Background="#000000" BorderBrush="{StaticResource LockedDark.Border}" BorderThickness="1"
                                                 MouseLeftButtonDown="ColorPreset_Click"/>
                                         <Border x:Name="PresetWhite" Width="24" Height="24" CornerRadius="12"
                                                 Margin="0,0,4,4" Cursor="Hand" Tag="#FFFFFF"
-                                                Background="#FFFFFF" BorderBrush="#30FFFFFF" BorderThickness="1"
+                                                Background="#FFFFFF" BorderBrush="{StaticResource LockedDark.Border}" BorderThickness="1"
                                                 MouseLeftButtonDown="ColorPreset_Click"/>
                                         <Border x:Name="PresetGray" Width="24" Height="24" CornerRadius="12"
                                                 Margin="0,0,4,4" Cursor="Hand" Tag="#808080"
-                                                Background="#808080" BorderBrush="#30FFFFFF" BorderThickness="1"
+                                                Background="#808080" BorderBrush="{StaticResource LockedDark.Border}" BorderThickness="1"
                                                 MouseLeftButtonDown="ColorPreset_Click"/>
                                         <Border x:Name="PresetRed" Width="24" Height="24" CornerRadius="12"
                                                 Margin="0,0,4,4" Cursor="Hand" Tag="#FF0000"
-                                                Background="#FF0000" BorderBrush="#30FFFFFF" BorderThickness="1"
+                                                Background="#FF0000" BorderBrush="{StaticResource LockedDark.Border}" BorderThickness="1"
                                                 MouseLeftButtonDown="ColorPreset_Click"/>
                                         <Border x:Name="PresetOrange" Width="24" Height="24" CornerRadius="12"
                                                 Margin="0,0,4,4" Cursor="Hand" Tag="#FF7D00"
-                                                Background="#FF7D00" BorderBrush="#30FFFFFF" BorderThickness="1"
+                                                Background="#FF7D00" BorderBrush="{StaticResource LockedDark.Border}" BorderThickness="1"
                                                 MouseLeftButtonDown="ColorPreset_Click"/>
                                         <Border x:Name="PresetYellow" Width="24" Height="24" CornerRadius="12"
                                                 Margin="0,0,4,4" Cursor="Hand" Tag="#FFFF00"
-                                                Background="#FFFF00" BorderBrush="#30FFFFFF" BorderThickness="1"
+                                                Background="#FFFF00" BorderBrush="{StaticResource LockedDark.Border}" BorderThickness="1"
                                                 MouseLeftButtonDown="ColorPreset_Click"/>
                                         <Border x:Name="PresetGreen" Width="24" Height="24" CornerRadius="12"
                                                 Margin="0,0,4,4" Cursor="Hand" Tag="#00FF00"
-                                                Background="#00FF00" BorderBrush="#30FFFFFF" BorderThickness="1"
+                                                Background="#00FF00" BorderBrush="{StaticResource LockedDark.Border}" BorderThickness="1"
                                                 MouseLeftButtonDown="ColorPreset_Click"/>
                                         <Border x:Name="PresetBlue" Width="24" Height="24" CornerRadius="12"
                                                 Margin="0,0,4,4" Cursor="Hand" Tag="#0000FF"
-                                                Background="#0000FF" BorderBrush="#30FFFFFF" BorderThickness="1"
+                                                Background="#0000FF" BorderBrush="{StaticResource LockedDark.Border}" BorderThickness="1"
                                                 MouseLeftButtonDown="ColorPreset_Click"/>
                                         <Border x:Name="PresetIndigo" Width="24" Height="24" CornerRadius="12"
                                                 Margin="0,0,4,4" Cursor="Hand" Tag="#00FFFF"
-                                                Background="#00FFFF" BorderBrush="#30FFFFFF" BorderThickness="1"
+                                                Background="#00FFFF" BorderBrush="{StaticResource LockedDark.Border}" BorderThickness="1"
                                                 MouseLeftButtonDown="ColorPreset_Click"/>
                                         <Border x:Name="PresetViolet" Width="24" Height="24" CornerRadius="12"
                                                 Margin="0,0,4,4" Cursor="Hand" Tag="#FF00FF"
-                                                Background="#FF00FF" BorderBrush="#30FFFFFF" BorderThickness="1"
+                                                Background="#FF00FF" BorderBrush="{StaticResource LockedDark.Border}" BorderThickness="1"
                                                 MouseLeftButtonDown="ColorPreset_Click"/>
                                         <!-- Custom -->
                                         <Button x:Name="ColorCustomBtn" Content="..." Width="24" Height="24"
-                                                FontSize="9" Foreground="#8888A0"
-                                                Background="#1E1E36" BorderBrush="#404060"
+                                                FontSize="9" Foreground="{StaticResource LockedDark.TextDim}"
+                                                Background="{StaticResource LockedDark.Input}" BorderBrush="{StaticResource LockedDark.Border}"
                                                 BorderThickness="1" Cursor="Hand"
                                                 Click="ColorCustomBtn_Click">
                                             <Button.Resources>
