@@ -9,7 +9,6 @@ namespace DesktopZones.Models;
 /// </summary>
 public class PanelConfig
 {
-    public bool PanelUseGlobalAppearance { get; set; } = true;
     public bool PanelEnabled { get; set; } = false;
     public double PanelX { get; set; }
     public double PanelY { get; set; }
@@ -20,7 +19,20 @@ public class PanelConfig
     public bool PanelTextColorAdaptive { get; set; } = true;
     public bool PanelTitleBarTextColorAdaptive { get; set; } = true;
     public string PanelBorderColor { get; set; } = "#40FFFFFF";
+    // ponytail 2026-08-25: per-panel border thickness. Previously hardcoded 1.5 in
+    // PanelWindow.ApplyStyle (the old global-appearance default). Own field now so
+    // the 面板设置 editor can drive it like every other component.
+    public double PanelBorderThickness { get; set; } = 1.5;
     public double PanelControlOpacity { get; set; } = 40;
+    // ── Liquid glass (per-panel; migrated from AppConfig-level globals) ──
+    public bool PanelEnableLiquidGlass { get; set; } = true;
+    public int PanelGlassBlurAmount { get; set; } = 18;
+    public int PanelGlassTintOpacity { get; set; } = 50;
+    public int PanelGlassTintLuminosity { get; set; } = 100;
+    public string PanelGlassColorMode { get; set; } = "Default";
+    /// <summary>One-shot migration flag: legacy configs kept liquid-glass on AppConfig;
+    /// on first load those values are copied into the Panel POCO and this flag is set.</summary>
+    public bool PanelGlassMigrated { get; set; } = false;
     // ── Panel Background Image ──
     public string PanelBackgroundImagePath { get; set; } = "";
     public string PanelBgImageStretch { get; set; } = "UniformToFill";

@@ -32,10 +32,9 @@ public partial class CalendarPage : UserControl
         InitializeComponent();
         _main = main;
         _widgetService = widgetService;
-        // ponytail 2026-08-24: Persist for the right-side property panel;
-        // mutations go through WidgetService.UpdateCalendar which fires
-        // CalendarsChanged → live CalendarWidget refreshes.
-        _main.DockedPanel.Persist = obj => { if (obj is DesktopCalendar c) _widgetService?.UpdateCalendar(c); };
+        // ponytail 2026-08-25: Persist is wired centrally in ManagementWindow
+        // (WirePropertyPanelPersist) — one dispatcher for all target types,
+        // docked and floating. Pages no longer overwrite it.
         Loaded += (_, _) =>
         {
             if (_widgetService != null)

@@ -320,33 +320,6 @@ public class ZoneManager
     /// <summary>Notify all listeners that zones have changed (for item-level changes).</summary>
     public void NotifyChanged() => ZonesChanged?.Invoke();
 
-    /// <summary>Save global appearance and sync all open zone windows.</summary>
-    public void SaveGlobalAppearance(string borderColor, string fillColor, double borderThickness)
-    {
-        _config.GlobalBorderColor = borderColor;
-        _config.GlobalFillColor = fillColor;
-        _config.GlobalBorderThickness = borderThickness;
-        _config.UseGlobalAppearance = true;
-        SaveConfig();
-
-        // Sync all open windows
-        foreach (var kv in _zoneWindows)
-        {
-            kv.Value.ApplyStyle();
-        }
-    }
-
-    /// <summary>Toggle whether zones use global or per-zone appearance.</summary>
-    public void SetUseGlobalAppearance(bool useGlobal)
-    {
-        _config.UseGlobalAppearance = useGlobal;
-        SaveConfig();
-        foreach (var kv in _zoneWindows)
-        {
-            kv.Value.ApplyStyle();
-        }
-    }
-
     public void UpdateConfig(AppConfig config)
     {
         _config = config;

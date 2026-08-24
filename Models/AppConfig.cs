@@ -31,13 +31,6 @@ public class AppConfig
     // ── Language ──
     public string Language { get; set; } = "zh"; // "zh" / "en"
 
-    // ── Global appearance (all zones share these by default) ──
-    public string GlobalBorderColor { get; set; } = "#40FFFFFF";
-    public string GlobalFillColor { get; set; } = "#08000000";
-    public double GlobalBorderThickness { get; set; } = 1.5;
-    public bool UseGlobalAppearance { get; set; } = true;
-    /// <summary>Spec §7.1 #1: global → per-instance migration completed. Set true after first migration run; never unset.</summary>
-    public bool GlobalAppearanceMigrated { get; set; } = false;
     // ── Liquid Glass (ZenDesktop-style) ──
     public bool EnableLiquidGlass { get; set; } = true;
     public int GlassBlurAmount { get; set; } = 18;       // 0-60, default 18 = ZenDesktop standard

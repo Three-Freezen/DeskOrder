@@ -427,16 +427,26 @@ public partial class PropertyTabStrip : UserControl
         if (sep < 0) return;
         var typeName = tab.Key.Substring(0, sep);
         var idStr = tab.Key.Substring(sep + 1);
-        if (!Guid.TryParse(idStr, out var id)) return;
 
-        object? target = typeName switch
+        object? target;
+        if (typeName == nameof(PanelConfig))
         {
-            nameof(Zone) => main.Zones.FirstOrDefault(z => z.Id == id),
-            nameof(DesktopClock) => main.WidgetService?.Clocks.FirstOrDefault(c => c.Id == id),
-            nameof(DesktopCalendar) => main.WidgetService?.Calendars.FirstOrDefault(c => c.Id == id),
-            nameof(StickyNote) => main.NotesService?.Notes.FirstOrDefault(n => n.Id == id),
-            _ => null,
-        };
+            // ponytail 2026-08-25: Panel singleton uses the literal "panel" key
+            // (no Guid) — resolve via the live AppConfig's Panel POCO.
+            target = main.LiveConfig.Panel;
+        }
+        else
+        {
+            if (!Guid.TryParse(idStr, out var id)) return;
+            target = typeName switch
+            {
+                nameof(Zone) => main.Zones.FirstOrDefault(z => z.Id == id),
+                nameof(DesktopClock) => main.WidgetService?.Clocks.FirstOrDefault(c => c.Id == id),
+                nameof(DesktopCalendar) => main.WidgetService?.Calendars.FirstOrDefault(c => c.Id == id),
+                nameof(StickyNote) => main.NotesService?.Notes.FirstOrDefault(n => n.Id == id),
+                _ => null,
+            };
+        }
 
         if (target == null) return;
 

@@ -92,7 +92,7 @@ public partial class PropertyWindow : Window
         BuildCloseStoryboard();
         Closed += (_, _) => { _isClosing = false; TabStrip.CancelDrag(); };
         Target = target;
-        Title = target is Zone z ? z.Name : target?.GetType().Name;
+        Title = PropertyWindowManager.TitleOf(target);
     }
 
     public PropertyWindow()
@@ -110,8 +110,8 @@ public partial class PropertyWindow : Window
         if (Target != null)
             TabStrip.OpenOrFocus(
                 PropertyWindowManager.TargetKey(Target),
-                Target is Zone z ? z.Name : Target.GetType().Name,
-                Target is Zone ? "Icon.Zones" : "Icon.Settings");
+                PropertyWindowManager.TitleOf(Target),
+                PropertyWindowManager.IconOf(Target));
     }
 
     public new event CancelEventHandler? Closing

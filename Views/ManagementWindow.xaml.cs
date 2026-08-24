@@ -101,6 +101,12 @@ public partial class ManagementWindow : Window
         };
 
         DockedPanel.CollapseRequested += (_, _) => TogglePropertyPanel();
+        // ponytail 2026-08-25: central Persist wiring for BOTH panels. Pages
+        // previously overwrote DockedPanel.Persist with a type-specific handler,
+        // so editing a Clock tab while the Zones page was active silently
+        // dropped every change. One dispatcher handles all target types;
+        // floating editors get the same via PropertyWindowManager.OpenFloating.
+        WirePropertyPanelPersist(DockedPanel);
         DockedPanel.UndockRequested += (_, _) =>
         {
             // ponytail: undock = pop-out flow. Clear the docked target first so
@@ -441,6 +447,46 @@ public partial class ManagementWindow : Window
         if (!_propertyPanelVisible) SetPropertyPanelVisible(true, persist: false);
     }
 
+    /// <summary>
+    /// Central Persist wiring for property panels. The docked panel is wired by
+    /// the active page (same handlers as the row toggles); floating editors
+    /// (gear-button pop-outs, drag-out tabs) had NO Persist — edits were
+    /// in-memory only. PropertyWindowManager.OpenFloating calls this so every
+    /// editor instance pushes edits through the owning service.
+    /// </summary>
+    public void WirePropertyPanelPersist(Components.PropertyPanel panel)
+    {
+        panel.Persist = obj =>
+        {
+            switch (obj)
+            {
+                case Zone z:
+                    _zoneManager.UpdateZone(z);
+                    break;
+                case DesktopClock c:
+                    _widgetService?.UpdateClock(c);
+                    break;
+                case DesktopCalendar cal:
+                    _widgetService?.UpdateCalendar(cal);
+                    break;
+                case StickyNote n:
+                    _notesService?.UpdateNote(n);
+                    break;
+                case PanelConfig p:
+                    // Panel POCO is mutated in place on the LIVE AppConfig —
+                    // save that instance, then repaint the live panel window.
+                    _configService.Save(LiveConfig);
+                    _panelService?.RefreshAppearance();
+                    break;
+            }
+            // ponytail: edit = intent to keep the docked tab (previously ZonesPage
+            // pinned on every edit). Pin the tab for the edited target so it
+            // survives preview cleanup when navigating to another section.
+            if (panel == DockedPanel && DockedTabs != null)
+                DockedTabs.PinTab(Components.PropertyWindowManager.TargetKey(obj));
+        };
+    }
+
     /// <summary>Resolve a domain target from a TabStrip key ("Type:Id"). Looks
     /// up the matching instance in ZoneManager / widget services. Falls back
     /// to null if the instance was deleted while the tab lingered.</summary>
@@ -451,6 +497,12 @@ public partial class ManagementWindow : Window
         if (sep < 0) return null;
         var typeName = key.Substring(0, sep);
         var idStr = key.Substring(sep + 1);
+        // ponytail 2026-08-25: PanelConfig is a singleton with a fixed literal
+        // key ("PanelConfig:panel"), not a Guid — resolve it BEFORE the Guid
+        // parse. Previously the hashcode-based key fell into Guid.TryParse,
+        // failed, and the docked panel silently showed no field tree.
+        if (typeName == nameof(PanelConfig))
+            return LiveConfig.Panel;
         if (!Guid.TryParse(idStr, out var id)) return null;
         return typeName switch
         {
@@ -458,16 +510,13 @@ public partial class ManagementWindow : Window
             nameof(DesktopClock) => _widgetService?.Clocks.FirstOrDefault(c => c.Id == id),
             nameof(DesktopCalendar) => _widgetService?.Calendars.FirstOrDefault(c => c.Id == id),
             nameof(StickyNote) => _notesService?.Notes.FirstOrDefault(n => n.Id == id),
-            // ponytail 2026-08-24: Panel is a singleton (no Id), so PanelPage
-            // doesn't go through DockTarget's per-Id key — it sets Target via
-            // the cfg.Panel instance directly. ResolveTargetFromKey is still
-            // called when the tab strip needs to refresh after the user drags
-            // a panel tab elsewhere; return the live PanelConfig from AppConfig
-            // so the same instance keeps flowing through Persist.
-            nameof(PanelConfig) => _configService.Load().Panel,
             _ => null,
         };
     }
+
+    /// <summary>The live AppConfig instance held by ZoneManager — the canonical
+    /// reference the Panel POCO and its property editor must mutate in place.</summary>
+    public AppConfig LiveConfig => _zoneManager.GetConfig();
 
     public void DeleteZoneWithConfirm(Zone zone)
     {

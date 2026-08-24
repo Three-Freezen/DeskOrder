@@ -802,14 +802,11 @@ public partial class ZoneWindow : Window
     /// </summary>
     ResolvedZoneStyle ResolveStyle()
     {
-        var config = _mgr.GetConfig();
-        bool useGlobal = config.UseGlobalAppearance;
-
         // Step 1: regular zone defaults.
         var regular = new ResolvedZoneStyle(
-            FillColor:        useGlobal ? config.GlobalFillColor       : _zone.FillColor,
-            BorderColor:      useGlobal ? config.GlobalBorderColor     : _zone.BorderColor,
-            BorderThickness:  useGlobal ? config.GlobalBorderThickness : _zone.BorderThickness,
+            FillColor:        _zone.FillColor,
+            BorderColor:      _zone.BorderColor,
+            BorderThickness:  _zone.BorderThickness,
             TitleBarFillColor: _zone.TitleBarFillColor,
             TitleTextColor:   _zone.TitleTextColor,
             IconColor:        _zone.IconColor,
@@ -1068,8 +1065,6 @@ public partial class ZoneWindow : Window
     /// sub-zone's FillColor; otherwise zone.FillColor or global.</summary>
     string ResolveEffectiveBodyFill()
     {
-        var config = _mgr.GetConfig();
-        bool useGlobal = config.UseGlobalAppearance;
         if (_zone.MergedGroupMembership.SubZoneIds.Count > 0 || _zone.MergedGroupMembership.GroupId.HasValue)
         {
             if (_zone.MergedGroupStyle.UseUnifiedFill)
@@ -1082,10 +1077,10 @@ public partial class ZoneWindow : Window
             {
                 var subZone = _mgr.Zones.FirstOrDefault(z => z.Id == _vm.SelectedSubZoneId.Value);
                 if (subZone != null)
-                    return useGlobal ? config.GlobalFillColor : subZone.FillColor;
+                    return subZone.FillColor;
             }
         }
-        return useGlobal ? config.GlobalFillColor : _zone.FillColor;
+        return _zone.FillColor;
     }
 
     /// <summary>Re-apply both body and title bar adaptive text colors. Called from

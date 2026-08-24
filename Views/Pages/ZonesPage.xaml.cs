@@ -35,15 +35,9 @@ public partial class ZonesPage : UserControl
         InitializeComponent();
         _main = main;
         _zoneManager = zoneManager;
-        if (_main.DockedPanel != null)
-            _main.DockedPanel.Persist = obj =>
-            {
-                if (obj is Zone z) _zoneManager.UpdateZone(z);
-                // ponytail: pin the docked tab so it survives preview cleanup
-                // when the user navigates to another section. Edit = intent
-                // to keep the panel visible for this target.
-                _main.DockedTabs?.PinTab(PropertyWindowManager.TargetKey(obj));
-            };
+        // ponytail 2026-08-25: Persist is wired centrally in ManagementWindow
+        // (WirePropertyPanelPersist, which also pins the docked tab on edit).
+        // Pages no longer overwrite it.
         Loaded += (_, _) =>
         {
             _zoneManager.ZonesChanged += RefreshList;

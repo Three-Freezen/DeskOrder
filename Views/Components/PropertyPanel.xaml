@@ -18,11 +18,22 @@
             BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="0,0,0,1"
             Padding="16,0">
       <Grid>
-        <TextBlock x:Name="InstanceNameText"
-                   Text="{Binding InstanceName, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                   FontSize="13" FontWeight="Medium"
-                   Foreground="{DynamicResource Brush.Text.Primary}"
-                   VerticalAlignment="Center" HorizontalAlignment="Left"/>
+        <!-- ponytail 2026-08-25: icon + window name header, matching the tab
+             strip and the zone editor. Zone previously had no icon here — the
+             code-behind assigns Icon.Zones / Icon.Clock / Icon.Calendar /
+             Icon.Sticky / Icon.Panel per target and collapses it for the
+             NoTarget / NotImplemented placeholders. -->
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center">
+          <Path x:Name="InstanceIcon" Width="14" Height="14" Margin="0,0,8,0"
+                Stretch="Uniform" StrokeThickness="1.5" StrokeLineJoin="Round"
+                Stroke="{DynamicResource Brush.Text.Primary}"
+                Data="{StaticResource Icon.Zones}"/>
+          <TextBlock x:Name="InstanceNameText"
+                     Text="{Binding InstanceName, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                     FontSize="13" FontWeight="Medium"
+                     Foreground="{DynamicResource Brush.Text.Primary}"
+                     VerticalAlignment="Center"/>
+        </StackPanel>
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
           <TextBlock x:Name="PersistErrorDot" Text="●" Foreground="#FF6666" FontSize="12"
                      VerticalAlignment="Center" Margin="0,0,8,0" ToolTip="{loc:Loc Key=PropertyPanel.SaveFailed}"

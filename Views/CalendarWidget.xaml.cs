@@ -48,6 +48,7 @@ public partial class CalendarWidget : Window
 
         _vm.DisplayYear = DateTime.Now.Year;
         _vm.DisplayMonth = DateTime.Now.Month;
+        _lastStartOnMonday = calendar.StartOnMonday;
         RebuildDisplay();
 
         ApplyStyle();
@@ -70,6 +71,9 @@ public partial class CalendarWidget : Window
             () => _calendar.HoverExpandOrigin,
             () => _calendar.HoverAutoExpand)
         { IsEnabled = _calendar.EnableRestoreButton };
+        // ponytail 2026-08-25: pick up live changes from the 动效设置 dialog
+        // (property panel) — mirrors ZoneWindow's subscription.
+        _calendar.HoverExpandSettingsChanged += OnHoverExpandSettingsChanged;
         // ponytail: ghost-glass fix — see ZoneWindow. Acrylic follows the expand state so a
         // collapsed calendar shows ONLY the RestoreButton (no full-window glass rectangle).
         _hover.Expanded += ApplyAcrylic;
@@ -79,6 +83,18 @@ public partial class CalendarWidget : Window
         if (_calendar.IsVisible) _hover.SnapToExpanded();
     }
     private Action<string>? _langChanged;
+
+    void OnHoverExpandSettingsChanged()
+    {
+        // Re-apply origin + snap baseline for the current kind without forcing
+        // a state change (mirrors ZoneWindow.OnHoverExpandSettingsChanged).
+        _hover?.SetEnabled(_calendar.EnableRestoreButton);
+    }
+
+    // ponytail 2026-08-25: last applied StartOnMonday — OnCalendarsChanged uses
+    // it to detect a first-of-week change and rebuild the day grid (the weekday
+    // header + cells must re-arrange together).
+    private bool _lastStartOnMonday;
 
     void OnCalendarsChanged()
     {
@@ -93,6 +109,15 @@ public partial class CalendarWidget : Window
             && !_hover.IsCollapsePending
             && MainContent.Visibility == Visibility.Visible)
             _hover.SnapToCollapsed();
+        // ponytail 2026-08-25: 周一开头 flip changes the whole day-grid layout —
+        // rebuild cells + weekday header so the toggle applies immediately
+        // instead of waiting for the next month navigation.
+        if (_lastStartOnMonday != _calendar.StartOnMonday)
+        {
+            _lastStartOnMonday = _calendar.StartOnMonday;
+            _vm.RebuildCells();
+        }
+        ApplyWeekdayHeader();
         // ponytail: always sync FillRect, even when hidden — closes the
         // "model blue, screen yellow" desync that ShowCalendar used to reveal.
         SyncFillRect();
@@ -100,6 +125,7 @@ public partial class CalendarWidget : Window
             ApplyAcrylic();
         ApplyBackgroundImage();
         ApplyStyle();
+        _hover?.SetEnabled(_calendar.EnableRestoreButton);
     }
 
     void OnLoad(object s, RoutedEventArgs e)
@@ -133,8 +159,7 @@ public partial class CalendarWidget : Window
     // Closes the "model blue, screen yellow" desync window when the widget is hidden.
     void SyncFillRect()
     {
-        var config = _widgetService.GetConfig();
-        string fillColorStr = _calendar.UseGlobalAppearance ? config.GlobalFillColor : _calendar.FillColor;
+        string fillColorStr = _calendar.FillColor;
         try
         {
             FillRect.Fill = new SolidColorBrush(
@@ -262,8 +287,7 @@ public partial class CalendarWidget : Window
         if (sender is not ItemContainerGenerator gen) return;
         if (gen.Status != System.Windows.Controls.Primitives.GeneratorStatus.ContainersGenerated) return;
         // Containers ready — re-run adaptive to color any cells that were added/regenerated.
-        var config = _widgetService.GetConfig();
-        string fillColorStr = _calendar.UseGlobalAppearance ? config.GlobalFillColor : _calendar.FillColor;
+        string fillColorStr = _calendar.FillColor;
         ApplyBodyTextColorAdaptive(fillColorStr);
     }
 
@@ -294,8 +318,7 @@ public partial class CalendarWidget : Window
     /// adaptive toggle changes (e.g. settings dialog live preview).</summary>
     public void RefreshTextColorAdaptive()
     {
-        var config = _widgetService.GetConfig();
-        string fillColorStr = _calendar.UseGlobalAppearance ? config.GlobalFillColor : _calendar.FillColor;
+        string fillColorStr = _calendar.FillColor;
         if (_calendar.TextColorAdaptive) ApplyBodyTextColorAdaptive(fillColorStr);
         else ApplyDefaultTextColors();
     }
@@ -325,9 +348,8 @@ public partial class CalendarWidget : Window
     {
         SyncFillRect();
 
-        var config = _widgetService.GetConfig();
-        string borderColorStr = _calendar.UseGlobalAppearance ? config.GlobalBorderColor : _calendar.BorderColor;
-        double borderThickness = _calendar.UseGlobalAppearance ? config.GlobalBorderThickness : _calendar.BorderThickness;
+        string borderColorStr = _calendar.BorderColor;
+        double borderThickness = _calendar.BorderThickness;
 
         // ponytail: ghost-glass fix — see ZoneWindow/ClockWidget. A collapsed calendar keeps
         // its full-size window, so enabling blur here would paint the tint across the whole
@@ -339,6 +361,13 @@ public partial class CalendarWidget : Window
                 _calendar.GlassTintLuminosity, _calendar.GlassColorMode);
             if (!blurResult.Success)
                 System.Diagnostics.Debug.WriteLine($"[CalendarWidget] EnableBlur failed: {blurResult.Error}");
+            // ponytail 2026-08-25: liquid-glass chromatic border branch — mirrors
+            // ClockWidget.ApplyAcrylic (the only component that had it).
+            if (_calendar.EnableLiquidGlass)
+            {
+                CalendarBorder.BorderBrush = AcrylicHelper.CreateChromaticBorder();
+                CalendarBorder.BorderThickness = new Thickness(Math.Max(1.0, borderThickness));
+            }
         }
         else
         {
@@ -418,6 +447,22 @@ public partial class CalendarWidget : Window
         // invalidate directly — InvalidateMeasure+InvalidateVisual clears the cache.
         CalendarBorder.InvalidateMeasure();
         CalendarBorder.InvalidateVisual();
+
+        ApplyQuickBar();
+    }
+
+    // ponytail 2026-08-25: 极简模式 + 按钮透明度 (日历设置 spec). Zone-style:
+    // QuickBarMode collapses the minimize/lock buttons, ControlOpacity drives
+    // their opacity.
+    void ApplyQuickBar()
+    {
+        if (LockBtn == null || HideBtn == null) return;
+        var vis = _calendar.QuickBarMode ? Visibility.Collapsed : Visibility.Visible;
+        LockBtn.Visibility = vis;
+        HideBtn.Visibility = vis;
+        var op = Math.Max(0.05, _calendar.ControlOpacity / 100.0);
+        LockBtn.Opacity = op;
+        HideBtn.Opacity = op;
     }
 
     /// <summary>Refresh all visual styles from the current _calendar model (for live preview).
@@ -432,7 +477,12 @@ public partial class CalendarWidget : Window
         // RebuildCells first: a preset load may change StartOnMonday (Sun-first vs Mon-first
         // arrangement) or Notes (dot indicators). Without this the day grid keeps its
         // previous layout even though _calendar has changed.
-        if (rebuildCells) _vm?.RebuildCells();
+        if (rebuildCells)
+        {
+            _lastStartOnMonday = _calendar.StartOnMonday;
+            _vm?.RebuildCells();
+            ApplyWeekdayHeader();
+        }
         // ponytail: ApplyAcrylic's EnableBlur guards on IntPtr.Zero internally —
         // safe to run regardless of MainContent visibility so live preview reaches
         // the widget even when hidden.
@@ -448,14 +498,36 @@ public partial class CalendarWidget : Window
         AddNoteBtn.ToolTip = _loc["Calendar.AddNote"];
         NotesDateLabel.Text = _loc["Common.Notes"];
         CtxDelete.Header = _loc["Calendar.Delete"];
-        Dow0.Text = _loc["Calendar.Weekday.1"];
-        Dow1.Text = _loc["Calendar.Weekday.2"];
-        Dow2.Text = _loc["Calendar.Weekday.3"];
-        Dow3.Text = _loc["Calendar.Weekday.4"];
-        Dow4.Text = _loc["Calendar.Weekday.5"];
-        Dow5.Text = _loc["Calendar.Weekday.6"];
-        Dow6.Text = _loc["Calendar.Weekday.0"];
+        ApplyWeekdayHeader();
         MonthTitleText.Text = _loc.Get("Calendar.MonthYear", _vm.DisplayYear, _vm.DisplayMonth);
+    }
+
+    // ponytail 2026-08-25: weekday header follows StartOnMonday — Mon-first
+    // (Weekday.1..6,0) or Sun-first (Weekday.0..6). Previously the header was
+    // hardcoded Mon-first while the cells re-arranged Sun-first, misaligning
+    // the whole grid when 周一开头 was off.
+    void ApplyWeekdayHeader()
+    {
+        if (_calendar.StartOnMonday)
+        {
+            Dow0.Text = _loc["Calendar.Weekday.1"];
+            Dow1.Text = _loc["Calendar.Weekday.2"];
+            Dow2.Text = _loc["Calendar.Weekday.3"];
+            Dow3.Text = _loc["Calendar.Weekday.4"];
+            Dow4.Text = _loc["Calendar.Weekday.5"];
+            Dow5.Text = _loc["Calendar.Weekday.6"];
+            Dow6.Text = _loc["Calendar.Weekday.0"];
+        }
+        else
+        {
+            Dow0.Text = _loc["Calendar.Weekday.0"];
+            Dow1.Text = _loc["Calendar.Weekday.1"];
+            Dow2.Text = _loc["Calendar.Weekday.2"];
+            Dow3.Text = _loc["Calendar.Weekday.3"];
+            Dow4.Text = _loc["Calendar.Weekday.4"];
+            Dow5.Text = _loc["Calendar.Weekday.5"];
+            Dow6.Text = _loc["Calendar.Weekday.6"];
+        }
     }
 
     void ToggleRestore_Click(object s, RoutedEventArgs e)
@@ -1049,6 +1121,7 @@ public partial class CalendarWidget : Window
         if (_langChanged != null) _loc.LanguageChanged -= _langChanged;
         _langChanged = null;
         _widgetService.LockChanged -= OnServiceLockChanged;
+        _calendar.HoverExpandSettingsChanged -= OnHoverExpandSettingsChanged;
         _widgetService.UpdateCalendar(_calendar);
         _hover?.Dispose();
         base.OnClosed(e);

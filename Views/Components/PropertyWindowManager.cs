@@ -138,6 +138,11 @@ public class PropertyWindowManager
         // same button that pops out can also dock back. DockTarget closes this
         // window (via _floating.Remove on Closed) and sets the docked target.
         w.Body.IsFloating = true;
+        // ponytail 2026-08-25: floating editors previously had no Persist —
+        // edits vanished on close. Wire the central dispatcher so every field
+        // change flows to the owning service (ZoneManager / WidgetService /
+        // NotesService / panel live config).
+        main.WirePropertyPanelPersist(w.Body);
         w.Body.DockRequested += (_, _) => DockTarget(target, main);
         // ponytail: drag-out dock-back. When the user drags the title bar
         // toward the main window's right column, dock instead of repositioning.
@@ -272,10 +277,17 @@ public class PropertyWindowManager
 
     /// <summary>Stable string key for a target so positions survive across
     /// runs. Falls back to type+identity hashcode for types without a stable Id
-    /// property — still better than losing all state on each save.</summary>
+    /// property — still better than losing all state on each save.
+    /// ponytail 2026-08-25: PanelConfig is a singleton with NO Id property; the
+    /// hashcode fallback produced a non-Guid key that ResolveTargetFromKey's
+    /// Guid.TryParse rejected, so the docked panel resolved to null and showed
+    /// nothing. Use the fixed literal "panel" so the key round-trips through
+    /// every parse site.</summary>
     public static string TargetKey(object target)
     {
         if (target == null) return "";
+        if (target is PanelConfig)
+            return nameof(PanelConfig) + ":panel";
         // Models expose `Id` — try reflection so we don't need a hard dep.
         var prop = target.GetType().GetProperty("Id");
         if (prop?.GetValue(target) is { } idVal && idVal != null)
@@ -283,14 +295,24 @@ public class PropertyWindowManager
         return target.GetType().Name + ":" + System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(target);
     }
 
-    static string TitleOf(object target)
+    // ponytail 2026-08-25: window names mirror the management list rows and
+    // the property-panel header (icon + name, Zone-style — no "某某设置"
+    // labels). Notes keep their per-instance title when set.
+    public static string TitleOf(object target)
     {
-        var prop = target.GetType().GetProperty("Name");
-        if (prop?.GetValue(target) is string s && !string.IsNullOrEmpty(s)) return s;
-        return target.GetType().Name;
+        if (target is StickyNote n && !string.IsNullOrEmpty(n.Title)) return n.Title;
+        return target switch
+        {
+            Zone z => z.Name,
+            DesktopClock c => c.Mode == ClockDisplayMode.Digital ? "Clock (数字)" : "Clock (钟表)",
+            DesktopCalendar cal => $"Calendar {cal.DisplayYear}-{cal.DisplayMonth:D2}",
+            StickyNote => "便签",
+            PanelConfig => "控制面板",
+            _ => target.GetType().Name,
+        };
     }
 
-    static string IconOf(object target) => target switch
+    public static string IconOf(object target) => target switch
     {
         Zone => "Icon.Zones",
         DesktopClock => "Icon.Clock",

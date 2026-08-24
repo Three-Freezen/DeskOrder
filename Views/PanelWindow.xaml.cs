@@ -141,7 +141,9 @@ public partial class PanelWindow : Window
     {
         // ponytail: pass `this` so the popped-out panel anchors at the panel's
         // window position (offset 24,24) instead of jumping somewhere else.
-        PropertyWindowService.OpenOrFocus(_zoneManager.GetConfig(), this);
+        // Target is the live PanelConfig POCO (not AppConfig) so the property
+        // editor dispatches to the 面板设置 field tree.
+        PropertyWindowService.OpenOrFocus(_zoneManager.GetConfig().Panel, this);
         e?.Handled = true;
     }
 
@@ -191,9 +193,11 @@ public partial class PanelWindow : Window
         var config = _zoneManager.GetConfig();
         string fillColorStr = config.Panel.PanelFillColor;
 
-        if (config.EnableLiquidGlass || config.GlassBlurAmount > 0)
+        if (config.Panel.PanelEnableLiquidGlass || config.Panel.PanelGlassBlurAmount > 0)
         {
-            var blurResult = AcrylicHelper.EnableBlur(this, config.GlassBlurAmount, config.GlassTintOpacity, config.GlassTintLuminosity, config.GlassColorMode);
+            var blurResult = AcrylicHelper.EnableBlur(this, config.Panel.PanelGlassBlurAmount,
+                config.Panel.PanelGlassTintOpacity, config.Panel.PanelGlassTintLuminosity,
+                config.Panel.PanelGlassColorMode);
             if (!blurResult.Success)
                 System.Diagnostics.Debug.WriteLine($"[PanelWindow] EnableBlur failed: {blurResult.Error}");
         }
@@ -207,11 +211,9 @@ public partial class PanelWindow : Window
     {
         var config = _zoneManager.GetConfig();
         string fillColorStr = config.Panel.PanelFillColor;
-        // Use PanelBorderColor when panel opts out of global appearance (mirrors
-        // ClockWidget/CalendarWidget ApplyAcrylic pattern). Otherwise fall back to
-        // GlobalBorderColor for visual consistency with other global-styled widgets.
-        string borderColorStr = config.Panel.PanelUseGlobalAppearance ? config.GlobalBorderColor : config.Panel.PanelBorderColor;
-        double borderThickness = config.Panel.PanelUseGlobalAppearance ? config.GlobalBorderThickness : config.GlobalBorderThickness;
+        // Use PanelBorderColor directly (panel no longer follows a global appearance toggle).
+        string borderColorStr = config.Panel.PanelBorderColor;
+        double borderThickness = config.Panel.PanelBorderThickness;
 
         // Fill
         try
@@ -251,6 +253,14 @@ public partial class PanelWindow : Window
             if (SearchPlaceholder != null) SearchPlaceholder.Foreground = tbBrush;
             if (SearchBox != null) SearchBox.Foreground = tbBrush;
         }
+
+        // 按钮透明度 — top-bar control chrome rides PanelControlOpacity, Zone-style.
+        var controlOpacity = Math.Max(0.05, config.Panel.PanelControlOpacity / 100.0);
+        if (GridToggleBtn != null) GridToggleBtn.Opacity = controlOpacity;
+        if (ListToggleBtn != null) ListToggleBtn.Opacity = controlOpacity;
+        if (ImportBtn != null) ImportBtn.Opacity = controlOpacity;
+        if (SettingsBtn != null) SettingsBtn.Opacity = controlOpacity;
+        if (HideBtn != null) HideBtn.Opacity = controlOpacity;
     }
 
     /// <summary>Re-apply full style. Replaces the old RefreshTextColorAdaptive (which only

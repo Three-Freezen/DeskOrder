@@ -14,7 +14,6 @@ namespace DesktopZones.Models;
 /// Excluded fields (kept per-model because their defaults diverge):
 /// - BorderThickness (Zone=1.5, others=1.0)
 /// - BackgroundImageOpacity (Zone=40, others=30)
-/// - UseGlobalAppearance (Zone has none, others have one)
 ///
 /// Excluded fields (model-specific):
 /// - TitleBarFillColor / TitleBarOpacity / ControlOpacity / TitleTextColor

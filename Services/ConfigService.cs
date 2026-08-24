@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using DesktopZones.Models;
@@ -71,9 +70,27 @@ public class ConfigService
             return new AppConfig();
         }
 
-        MigrateGlobalAppearance(config);
         MigrateOrphanPanelFields(config);
+        MigratePanelGlass(config);
         return config;
+    }
+
+    // ── One-time migration: AppConfig-level liquid glass → Panel POCO ──
+    // Legacy configs stored the panel's liquid-glass knobs on AppConfig
+    // (EnableLiquidGlass / GlassBlurAmount / GlassTintOpacity /
+    // GlassTintLuminosity / GlassColorMode). They now live on PanelConfig so
+    // the 面板设置 property editor can drive them per-instance like every
+    // other component. Copy the legacy values once (PanelGlassMigrated flag
+    // prevents re-copying over user edits on later loads).
+    private static void MigratePanelGlass(AppConfig config)
+    {
+        if (config.Panel.PanelGlassMigrated) return;
+        config.Panel.PanelEnableLiquidGlass = config.EnableLiquidGlass;
+        config.Panel.PanelGlassBlurAmount = config.GlassBlurAmount;
+        config.Panel.PanelGlassTintOpacity = config.GlassTintOpacity;
+        config.Panel.PanelGlassTintLuminosity = config.GlassTintLuminosity;
+        config.Panel.PanelGlassColorMode = config.GlassColorMode;
+        config.Panel.PanelGlassMigrated = true;
     }
 
     // ── One-time migration of legacy flat Panel*/PanelHotkey* fields ──
@@ -102,7 +119,6 @@ public class ConfigService
         Move<double>("PanelWidth", v => p.PanelWidth = v);
         Move<double>("PanelHeight", v => p.PanelHeight = v);
         Move<bool>("PanelEnabled", v => p.PanelEnabled = v);
-        Move<bool>("PanelUseGlobalAppearance", v => p.PanelUseGlobalAppearance = v);
         Move<string>("PanelTitleBarFillColor", v => p.PanelTitleBarFillColor = v);
         Move<string>("PanelFillColor", v => p.PanelFillColor = v);
         Move<bool>("PanelTextColorAdaptive", v => p.PanelTextColorAdaptive = v);
@@ -142,60 +158,6 @@ public class ConfigService
                 Debug.WriteLine($"[ConfigService] Save failed: {ex}");
                 SaveFailed?.Invoke(ex);
             }
-        }
-    }
-
-    // ── One-time global → per-instance migration (spec §7.1 #1) ──
-    // Ponytail: reflection walks each instance for BorderColor/FillColor and
-    // back-fills from the global value if empty. Idempotent: guarded by
-    // GlobalAppearanceMigrated flag. Adds EnableRestoreButton=false to panel
-    // presets (spec §7.2 removed the restore button).
-    private void MigrateGlobalAppearance(AppConfig config)
-    {
-        if (config.GlobalAppearanceMigrated) return;
-
-        var globalBorder = config.GlobalBorderColor;
-        var globalFill = config.GlobalFillColor;
-
-        foreach (var z in config.Zones)
-        {
-            EnsureAppearance(z, globalBorder, globalFill);
-        }
-        foreach (var n in config.Notes)
-        {
-            EnsureAppearance(n, globalBorder, globalFill);
-        }
-        foreach (var c in config.Clocks)
-        {
-            EnsureAppearance(c, globalBorder, globalFill);
-        }
-        foreach (var cal in config.Calendars)
-        {
-            EnsureAppearance(cal, globalBorder, globalFill);
-        }
-
-        // Panel never has a restore button (spec §7.2).
-        if (config.Panel.PanelHoverExpandSpeed <= 0) config.Panel.PanelHoverExpandSpeed = 1.0;
-
-        config.GlobalAppearanceMigrated = true;
-        Save(config);
-    }
-
-    private static void EnsureAppearance(object model, string globalBorder, string globalFill)
-    {
-        if (model is null) return;
-        var t = model.GetType();
-        var borderProp = t.GetProperty("BorderColor", BindingFlags.Public | BindingFlags.Instance);
-        var fillProp = t.GetProperty("FillColor", BindingFlags.Public | BindingFlags.Instance);
-        if (borderProp?.CanWrite == true)
-        {
-            var current = borderProp.GetValue(model) as string;
-            if (string.IsNullOrEmpty(current)) borderProp.SetValue(model, globalBorder);
-        }
-        if (fillProp?.CanWrite == true)
-        {
-            var current = fillProp.GetValue(model) as string;
-            if (string.IsNullOrEmpty(current)) fillProp.SetValue(model, globalFill);
         }
     }
 }

@@ -84,6 +84,9 @@ public partial class ClockWidget : Window
             () => _clock.HoverExpandOrigin,
             () => _clock.HoverAutoExpand)
         { IsEnabled = _clock.EnableRestoreButton };
+        // ponytail 2026-08-25: pick up live changes from the 动效设置 dialog
+        // (property panel) — mirrors ZoneWindow's subscription.
+        _clock.HoverExpandSettingsChanged += OnHoverExpandSettingsChanged;
         // ponytail: ghost-glass fix — see ZoneWindow. Acrylic follows the expand state so a
         // collapsed clock shows ONLY the RestoreButton (no full-window glass rectangle).
         _hover.Expanded += ApplyAcrylic;
@@ -96,6 +99,13 @@ public partial class ClockWidget : Window
         if (_clock.IsVisible) _hover.SnapToExpanded();
     }
     private Action<string>? _langChanged;
+
+    void OnHoverExpandSettingsChanged()
+    {
+        // Re-apply origin + snap baseline for the current kind without forcing
+        // a state change (mirrors ZoneWindow.OnHoverExpandSettingsChanged).
+        _hover?.SetEnabled(_clock.EnableRestoreButton);
+    }
 
     void OnClocksChanged()
     {
@@ -328,19 +338,13 @@ public partial class ClockWidget : Window
         ApplyBodyTextColorAdaptive(fillColorStr);
     }
 
-    /// <summary>Pick the fill color for the active widget. Honors <see cref="DesktopClock.UseGlobalAppearance"/>
-    /// by falling back to <see cref="Models.AppConfig.GlobalFillColor"/>. ponytail: previous version
-    /// routed through DigitalFillColor/AnalogFillColor with a "fall back to FillColor when empty"
-    /// branch — but those per-mode fields ship with a non-empty default ("#08000000"), so the fallback
-    /// never fired and changing FillColor in the settings dialog never reached the adaptive path.
-    /// Per-mode fields are dead code (no UI exposes them; preset JSON keeps them at the default value),
-    /// so just use FillColor directly here. Field stays on the model for backward-compat with existing
-    /// preset/serialized data.</summary>
-    string ResolveEffectiveFill()
-    {
-        var config = _widgetService.GetConfig();
-        return _clock.UseGlobalAppearance ? config.GlobalFillColor : _clock.FillColor;
-    }
+    /// <summary>Pick the fill color for the active widget.
+    /// ponytail 2026-08-25: per-mode fills (DigitalFillColor / AnalogFillColor)
+    /// are the live fields — 时钟设置 exposes independent fills per mode, so
+    /// resolve by the active mode. Previously this always returned the shared
+    /// FillColor, which made the per-mode rows in the settings UI dead edits.</summary>
+    string ResolveEffectiveFill() =>
+        _clock.Mode == ClockDisplayMode.Analog ? _clock.AnalogFillColor : _clock.DigitalFillColor;
 
     /// <summary>Adaptive text/icon color based on the widget's effective fill.
     /// When <see cref="DesktopClock.TextColorAdaptive"/> is true, overrides the user-set
@@ -443,9 +447,8 @@ public partial class ClockWidget : Window
     {
         SyncFillRect();
 
-        var config = _widgetService.GetConfig();
-        string borderColorStr = _clock.UseGlobalAppearance ? config.GlobalBorderColor : _clock.BorderColor;
-        double borderThickness = _clock.UseGlobalAppearance ? config.GlobalBorderThickness : _clock.BorderThickness;
+        string borderColorStr = _clock.BorderColor;
+        double borderThickness = _clock.BorderThickness;
 
         // ponytail: ghost-glass fix — acrylic follows the expand state: a collapsed clock
         // keeps its full-size window (only the RestoreButton shows), so enabling blur here
@@ -517,6 +520,23 @@ public partial class ClockWidget : Window
         // invalidate directly — InvalidateMeasure+InvalidateVisual clears the cache.
         ClockBorder.InvalidateMeasure();
         ClockBorder.InvalidateVisual();
+
+        ApplyQuickBar();
+    }
+
+    // ponytail 2026-08-25: 极简模式 + 按钮透明度 (时钟设置 spec). Applies in BOTH
+    // digital and analog modes — the lock/hide buttons live on the outer grid
+    // shared by both mode panels. Zone-style: QuickBarMode collapses the
+    // control buttons, ControlOpacity drives their opacity (5-100).
+    void ApplyQuickBar()
+    {
+        if (LockBtn == null || HideBtn == null) return;
+        var vis = _clock.QuickBarMode ? Visibility.Collapsed : Visibility.Visible;
+        LockBtn.Visibility = vis;
+        HideBtn.Visibility = vis;
+        var op = Math.Max(0.05, _clock.ControlOpacity / 100.0);
+        LockBtn.Opacity = op;
+        HideBtn.Opacity = op;
     }
 
     private string _lastDateText = "";
@@ -576,6 +596,9 @@ public partial class ClockWidget : Window
                 grip.Visibility = Visibility.Visible;
             ApplyDigitalBackgroundImage();
         }
+        // ponytail 2026-08-25: re-apply 极简模式/按钮透明度 after the mode
+        // switch rebuilds the mode panels.
+        ApplyQuickBar();
     }
 
     void AnalogDrag(object s, MouseButtonEventArgs e)
@@ -975,6 +998,7 @@ public partial class ClockWidget : Window
         if (_langChanged != null) _loc.LanguageChanged -= _langChanged;
         _langChanged = null;
         _widgetService.LockChanged -= OnServiceLockChanged;
+        _clock.HoverExpandSettingsChanged -= OnHoverExpandSettingsChanged;
         _hover?.Dispose();
         base.OnClosed(e);
     }

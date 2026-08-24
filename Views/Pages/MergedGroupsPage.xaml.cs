@@ -32,8 +32,9 @@ public partial class MergedGroupsPage : UserControl
         InitializeComponent();
         _main = main;
         _zoneManager = zoneManager;
-        if (_main.DockedPanel != null)
-            _main.DockedPanel.Persist = obj => { if (obj is Zone z) _zoneManager.UpdateZone(z); };
+        // ponytail 2026-08-25: Persist is wired centrally in ManagementWindow
+        // (WirePropertyPanelPersist) — one dispatcher for all target types.
+        // Pages no longer overwrite it.
         Loaded += (_, _) =>
         {
             _zoneManager.ZonesChanged += RefreshList;

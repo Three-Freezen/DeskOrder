@@ -22,7 +22,6 @@ public class StickyNote : AppearanceModel
     public bool PinnedTop { get; set; } = false;
     // ── Appearance (most fields inherited from AppearanceModel) ──
     public double BorderThickness { get; set; } = 1.0;
-    public bool UseGlobalAppearance { get; set; } = true;
     // ── Title bar / button appearance ──
     public string TitleBarFillColor { get; set; } = "#10FFFFFF";
     public double TitleBarOpacity { get; set; } = 6;
@@ -51,7 +50,7 @@ public class StickyNote : AppearanceModel
             X = X, Y = Y, Width = Width, Height = Height,
             NoteColor = NoteColor, FontSize = FontSize,
             IsVisible = IsVisible, IsLocked = IsLocked, PinnedTop = PinnedTop,
-            BorderThickness = BorderThickness, UseGlobalAppearance = UseGlobalAppearance,
+            BorderThickness = BorderThickness,
             TitleBarFillColor = TitleBarFillColor, TitleBarOpacity = TitleBarOpacity,
             ControlOpacity = ControlOpacity, TitleTextColor = TitleTextColor,
             TitleBarTextColorAdaptive = TitleBarTextColorAdaptive,
@@ -82,6 +81,10 @@ public class DesktopClock : AppearanceModel
     public bool ShowSeconds { get; set; } = true;
     public bool ShowDate { get; set; } = true;
     public bool Use24Hour { get; set; } = true;
+    /// <summary>极简模式 — hides the minimize + lock buttons in BOTH digital and analog modes.</summary>
+    public bool QuickBarMode { get; set; } = false;
+    /// <summary>Opacity of the title-bar control buttons (lock / hide), 5-100. Zone-style.</summary>
+    public double ControlOpacity { get; set; } = 40;
     public string TextColor { get; set; } = "#EEFFFFFF";
     public double FontSize { get; set; } = 48;
     public string FontFamily { get; set; } = "Segoe UI";
@@ -90,7 +93,6 @@ public class DesktopClock : AppearanceModel
     public string AccentColor { get; set; } = "#FFFFFFFF";
     // ── Appearance (most fields inherited from AppearanceModel) ──
     public double BorderThickness { get; set; } = 1.0;
-    public bool UseGlobalAppearance { get; set; } = true;
     // ── Mode-independent fill ──
     public string AnalogFillColor { get; set; } = "#08000000";
     public string DigitalFillColor { get; set; } = "#08000000";
@@ -112,9 +114,10 @@ public class DesktopClock : AppearanceModel
             IsLocked = IsLocked,
             ShowSeconds = ShowSeconds, ShowDate = ShowDate,
             Use24Hour = Use24Hour, TextColor = TextColor,
+            QuickBarMode = QuickBarMode, ControlOpacity = ControlOpacity,
             FontSize = FontSize, FontFamily = FontFamily,
             Opacity = Opacity, Mode = Mode, AccentColor = AccentColor,
-            BorderThickness = BorderThickness, UseGlobalAppearance = UseGlobalAppearance,
+            BorderThickness = BorderThickness,
             AnalogFillColor = AnalogFillColor, DigitalFillColor = DigitalFillColor,
             BackgroundImageOpacity = BackgroundImageOpacity,
             DigitalBackgroundImagePath = DigitalBackgroundImagePath,
@@ -168,13 +171,16 @@ public class DesktopCalendar : AppearanceModel
     public bool IsLocked { get; set; } = false;
     public bool ShowWeekNumbers { get; set; } = false;
     public bool StartOnMonday { get; set; } = true;
+    /// <summary>极简模式 — hides the minimize + lock buttons.</summary>
+    public bool QuickBarMode { get; set; } = false;
+    /// <summary>Opacity of the title-bar control buttons (lock / hide), 5-100. Zone-style.</summary>
+    public double ControlOpacity { get; set; } = 40;
     public string TextColor { get; set; } = "#EEFFFFFF";
     public string TodayColor { get; set; } = "#FF6C63FF";
     public double FontSize { get; set; } = 14;
     public double Opacity { get; set; } = 1.0;
     // ── Appearance (most fields inherited from AppearanceModel) ──
     public double BorderThickness { get; set; } = 1.0;
-    public bool UseGlobalAppearance { get; set; } = true;
     // ── Background image (Opacity stays per-model — 30 default) ──
     public double BackgroundImageOpacity { get; set; } = 30;
     // Notes keyed by "yyyy-MM-dd"
@@ -197,9 +203,10 @@ public class DesktopCalendar : AppearanceModel
             Id = Id, X = X, Y = Y, Width = Width, Height = Height, IsVisible = IsVisible,
             IsLocked = IsLocked,
             ShowWeekNumbers = ShowWeekNumbers, StartOnMonday = StartOnMonday,
+            QuickBarMode = QuickBarMode, ControlOpacity = ControlOpacity,
             TextColor = TextColor, TodayColor = TodayColor,
             FontSize = FontSize, Opacity = Opacity,
-            BorderThickness = BorderThickness, UseGlobalAppearance = UseGlobalAppearance,
+            BorderThickness = BorderThickness,
             BackgroundImageOpacity = BackgroundImageOpacity,
             Notes = Notes.ToDictionary(kvp => kvp.Key, kvp => new List<CalendarNote>(kvp.Value.Select(n => n.Clone())))
         };

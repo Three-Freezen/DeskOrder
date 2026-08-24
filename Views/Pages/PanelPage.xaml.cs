@@ -32,19 +32,10 @@ public partial class PanelPage : UserControl
         _main = main;
         _configService = configService;
         _panelService = panelService;
-        // ponytail 2026-08-24: Persist for the right-side property panel.
-        // PanelConfig is held by reference inside AppConfig so mutating its
-        // fields via the panel is already mutating cfg.Panel — just Save and
-        // refresh the live PanelWindow if it's open so it picks up the new
-        // appearance immediately.
-        _main.DockedPanel.Persist = obj =>
-        {
-            if (obj is PanelConfig)
-            {
-                _configService.Save(_configService.Load());
-                _panelService?.RefreshAppearance();
-            }
-        };
+        // ponytail 2026-08-25: Persist is wired centrally in ManagementWindow
+        // (WirePropertyPanelPersist) — one dispatcher for all target types,
+        // docked and floating. Panel edits save the LIVE AppConfig and repaint
+        // the live PanelWindow. Pages no longer overwrite it.
         Loaded += (_, _) => RefreshList();
     }
 
@@ -52,7 +43,10 @@ public partial class PanelPage : UserControl
 
     public void RefreshList()
     {
-        var cfg = _configService.Load();
+        // ponytail: row + editor must share the LIVE Panel instance (held by
+        // ZoneManager's AppConfig) — a fresh Load() copy would desync the
+        // property editor from what PanelService/PanelWindow actually read.
+        var cfg = _main.LiveConfig;
         var hotkey = cfg.PanelHotkey.PanelHotkeyEnabled
             ? ManagementWindow.GetHotkeyLabel(cfg.PanelHotkey.PanelHotkeyModifiers, cfg.PanelHotkey.PanelHotkeyKey)
             : "未设置";
@@ -85,7 +79,7 @@ public partial class PanelPage : UserControl
         // ponytail 2026-08-24: Panel row previously had no click handler — the
         // right-side PropertyPanel never opened for the singleton panel.
         // Mirror ClockPage/CalendarPage: route through DockTarget with the
-        // PanelConfig instance as the target so the existing PropertyPanel
+        // live PanelConfig instance as the target so the existing PropertyPanel
         // dispatcher can build its field tree.
         row.PreviewMouseLeftButtonUp += (_, e) =>
         {
@@ -102,7 +96,7 @@ public partial class PanelPage : UserControl
     }
 
     void Select() =>
-        PropertyWindowManager.Instance.DockTarget(_configService.Load().Panel, _main);
+        PropertyWindowManager.Instance.DockTarget(_main.LiveConfig.Panel, _main);
 
     static void ApplyStatusBadge(EditableListRow row, AppConfig cfg)
     {

@@ -8,14 +8,14 @@ namespace DesktopZones.Models;
 /// </summary>
 public class PanelPresetConfig
 {
-    public bool PanelUseGlobalAppearance { get; set; } = true;
     public double PanelX { get; set; }
     public double PanelY { get; set; }
     public double PanelWidth { get; set; } = 340;
     public double PanelHeight { get; set; } = 500;
     public string PanelTitleBarFillColor { get; set; } = "#10FFFFFF";
     public string PanelFillColor { get; set; } = "#08000000";
-    public string PanelBorderColor { get; set; } = "#40FFFFFF"; // matches GlobalBorderColor default
+    public string PanelBorderColor { get; set; } = "#40FFFFFF";
+    public double PanelBorderThickness { get; set; } = 1.5;
     public bool PanelTextColorAdaptive { get; set; } = true;
     public bool PanelTitleBarTextColorAdaptive { get; set; } = true;
     public double PanelControlOpacity { get; set; } = 40;
@@ -25,7 +25,12 @@ public class PanelPresetConfig
     public double PanelBgImageZoom { get; set; } = 1.0;
     public double PanelBgImageOffsetX { get; set; } = 0;
     public double PanelBgImageOffsetY { get; set; } = 0;
-    /// <summary>GlassColorMode inherited from global AppConfig — included in preset so the panel preview card can render the same iridescence.</summary>
+    // ── Liquid glass (per-panel POCO fields, mirrors PanelConfig) ──
+    public bool EnableLiquidGlass { get; set; } = true;
+    public int GlassBlurAmount { get; set; } = 18;
+    public int GlassTintOpacity { get; set; } = 50;
+    public int GlassTintLuminosity { get; set; } = 100;
+    /// <summary>GlassColorMode included in preset so the panel preview card can render the same iridescence.</summary>
     public string GlassColorMode { get; set; } = "Default";
 
     // ── Hover expand (panel excluded from auto-expand per spec §7.2; speed is the only knob) ──
@@ -35,7 +40,6 @@ public class PanelPresetConfig
 
     public PanelPresetConfig Clone() => new()
     {
-        PanelUseGlobalAppearance = PanelUseGlobalAppearance,
         PanelX = PanelX,
         PanelY = PanelY,
         PanelWidth = PanelWidth,
@@ -43,6 +47,7 @@ public class PanelPresetConfig
         PanelTitleBarFillColor = PanelTitleBarFillColor,
         PanelFillColor = PanelFillColor,
         PanelBorderColor = PanelBorderColor,
+        PanelBorderThickness = PanelBorderThickness,
         PanelTextColorAdaptive = PanelTextColorAdaptive,
         PanelTitleBarTextColorAdaptive = PanelTitleBarTextColorAdaptive,
         PanelControlOpacity = PanelControlOpacity,
@@ -52,6 +57,10 @@ public class PanelPresetConfig
         PanelBgImageZoom = PanelBgImageZoom,
         PanelBgImageOffsetX = PanelBgImageOffsetX,
         PanelBgImageOffsetY = PanelBgImageOffsetY,
+        EnableLiquidGlass = EnableLiquidGlass,
+        GlassBlurAmount = GlassBlurAmount,
+        GlassTintOpacity = GlassTintOpacity,
+        GlassTintLuminosity = GlassTintLuminosity,
         GlassColorMode = GlassColorMode,
         HoverExpandSpeed = HoverExpandSpeed,
         EnableRestoreButton = EnableRestoreButton
@@ -60,7 +69,6 @@ public class PanelPresetConfig
     /// <summary>Snapshot the Panel POCO off an AppConfig instance (ponytail: reads from Panel POCO instead of 19 loose fields).</summary>
     public static PanelPresetConfig FromConfig(AppConfig cfg) => new()
     {
-        PanelUseGlobalAppearance = cfg.Panel.PanelUseGlobalAppearance,
         PanelX = cfg.Panel.PanelX,
         PanelY = cfg.Panel.PanelY,
         PanelWidth = cfg.Panel.PanelWidth,
@@ -68,6 +76,7 @@ public class PanelPresetConfig
         PanelTitleBarFillColor = cfg.Panel.PanelTitleBarFillColor,
         PanelFillColor = cfg.Panel.PanelFillColor,
         PanelBorderColor = cfg.Panel.PanelBorderColor,
+        PanelBorderThickness = cfg.Panel.PanelBorderThickness,
         PanelTextColorAdaptive = cfg.Panel.PanelTextColorAdaptive,
         PanelTitleBarTextColorAdaptive = cfg.Panel.PanelTitleBarTextColorAdaptive,
         PanelControlOpacity = cfg.Panel.PanelControlOpacity,
@@ -77,7 +86,11 @@ public class PanelPresetConfig
         PanelBgImageZoom = cfg.Panel.PanelBgImageZoom,
         PanelBgImageOffsetX = cfg.Panel.PanelBgImageOffsetX,
         PanelBgImageOffsetY = cfg.Panel.PanelBgImageOffsetY,
-        GlassColorMode = cfg.GlassColorMode,
+        EnableLiquidGlass = cfg.Panel.PanelEnableLiquidGlass,
+        GlassBlurAmount = cfg.Panel.PanelGlassBlurAmount,
+        GlassTintOpacity = cfg.Panel.PanelGlassTintOpacity,
+        GlassTintLuminosity = cfg.Panel.PanelGlassTintLuminosity,
+        GlassColorMode = cfg.Panel.PanelGlassColorMode,
         HoverExpandSpeed = cfg.Panel.PanelHoverExpandSpeed,
         EnableRestoreButton = false
     };
@@ -85,7 +98,6 @@ public class PanelPresetConfig
     /// <summary>Apply this preset's fields back to a target AppConfig's Panel POCO. Caller is responsible for Save() + repaint.</summary>
     public void ApplyTo(AppConfig cfg)
     {
-        cfg.Panel.PanelUseGlobalAppearance = PanelUseGlobalAppearance;
         cfg.Panel.PanelX = PanelX;
         cfg.Panel.PanelY = PanelY;
         cfg.Panel.PanelWidth = PanelWidth;
@@ -93,6 +105,7 @@ public class PanelPresetConfig
         cfg.Panel.PanelTitleBarFillColor = PanelTitleBarFillColor;
         cfg.Panel.PanelFillColor = PanelFillColor;
         cfg.Panel.PanelBorderColor = PanelBorderColor;
+        cfg.Panel.PanelBorderThickness = PanelBorderThickness;
         cfg.Panel.PanelTextColorAdaptive = PanelTextColorAdaptive;
         cfg.Panel.PanelTitleBarTextColorAdaptive = PanelTitleBarTextColorAdaptive;
         cfg.Panel.PanelControlOpacity = PanelControlOpacity;
@@ -102,7 +115,11 @@ public class PanelPresetConfig
         cfg.Panel.PanelBgImageZoom = PanelBgImageZoom;
         cfg.Panel.PanelBgImageOffsetX = PanelBgImageOffsetX;
         cfg.Panel.PanelBgImageOffsetY = PanelBgImageOffsetY;
-        cfg.GlassColorMode = GlassColorMode;
+        cfg.Panel.PanelEnableLiquidGlass = EnableLiquidGlass;
+        cfg.Panel.PanelGlassBlurAmount = GlassBlurAmount;
+        cfg.Panel.PanelGlassTintOpacity = GlassTintOpacity;
+        cfg.Panel.PanelGlassTintLuminosity = GlassTintLuminosity;
+        cfg.Panel.PanelGlassColorMode = GlassColorMode;
         cfg.Panel.PanelHoverExpandSpeed = HoverExpandSpeed;
     }
 }

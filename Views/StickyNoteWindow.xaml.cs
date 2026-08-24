@@ -91,6 +91,9 @@ public partial class StickyNoteWindow : Window
             () => _note.HoverExpandOrigin,
             () => _note.HoverAutoExpand)
         { IsEnabled = _note.EnableRestoreButton };
+        // ponytail 2026-08-25: pick up live changes from the 动效设置 dialog
+        // (property panel) — mirrors ZoneWindow's subscription.
+        _note.HoverExpandSettingsChanged += OnHoverExpandSettingsChanged;
         // ponytail: ghost-glass fix — see ZoneWindow. Acrylic follows the expand state so a
         // collapsed note shows ONLY the RestoreButton (no full-window glass rectangle).
         _hover.Expanded += ApplyAcrylic;
@@ -99,6 +102,13 @@ public partial class StickyNoteWindow : Window
         // call window.Show() without going through the equivalent of ShowZone, so
         // SnapToExpanded never runs.
         if (_note.IsVisible) _hover.SnapToExpanded();
+    }
+
+    void OnHoverExpandSettingsChanged()
+    {
+        // Re-apply origin + snap baseline for the current kind without forcing
+        // a state change (mirrors ZoneWindow.OnHoverExpandSettingsChanged).
+        _hover?.SetEnabled(_note.EnableRestoreButton);
     }
 
     void OnNotesChanged()
@@ -116,6 +126,21 @@ public partial class StickyNoteWindow : Window
             _hover.SnapToCollapsed();
         // ponytail: pull refreshed lock state from model (e.g. when another window unlocked this note)
         _vm.IsLocked = _note.IsLocked;
+        // ponytail 2026-08-25: 便签设置 live-sync — title text (便签名称) and
+        // 置顶 state flow from the property panel through UpdateNote; re-apply
+        // them so edits are visible immediately.
+        _vm.PinnedTop = _note.PinnedTop;
+        if (TitleBox != null) TitleBox.Text = _note.Title;
+        // ponytail 2026-08-26: re-pin / Topmost only while the window is still up.
+        // OnClosed → UpdateNote → NotesChanged re-enters this handler while
+        // WmDestroy is tearing the window down; PinToDesktop would call
+        // WindowInteropHelper.EnsureHandle → "关闭窗口后，无法设置可见性…"
+        // InvalidOperationException (crash when 全部隐藏 closes note windows).
+        if (IsVisible)
+        {
+            if (_note.PinnedTop) Topmost = true;
+            else if (!_note.IsLocked) NativeMethods.PinToDesktop(this);
+        }
         if (MainContent.Visibility == Visibility.Visible)
             ApplyAcrylic();
         ApplyBackgroundImage();
@@ -123,6 +148,7 @@ public partial class StickyNoteWindow : Window
         ApplyTitleBar();
         RefreshTextColorAdaptive();
         ApplyLockState();
+        _hover?.SetEnabled(_note.EnableRestoreButton);
     }
 
     private void LoadContent(string content)
@@ -608,10 +634,9 @@ public partial class StickyNoteWindow : Window
 
     void ApplyAcrylic()
     {
-        var config = _notesService.GetConfig();
-        string fillColorStr = _note.UseGlobalAppearance ? config.GlobalFillColor : _note.FillColor;
-        string borderColorStr = _note.UseGlobalAppearance ? config.GlobalBorderColor : _note.BorderColor;
-        double borderThickness = _note.UseGlobalAppearance ? config.GlobalBorderThickness : _note.BorderThickness;
+        string fillColorStr = _note.FillColor;
+        string borderColorStr = _note.BorderColor;
+        double borderThickness = _note.BorderThickness;
 
         // ponytail: ghost-glass fix — see ZoneWindow. A collapsed note keeps its full-size
         // window, so enabling blur here would paint the tint across the whole window.
@@ -623,6 +648,13 @@ public partial class StickyNoteWindow : Window
                 _note.GlassTintLuminosity, _note.GlassColorMode);
             if (!blurResult.Success)
                 System.Diagnostics.Debug.WriteLine($"[StickyNoteWindow] EnableBlur failed: {blurResult.Error}");
+            // ponytail 2026-08-25: liquid-glass chromatic border branch — mirrors
+            // ClockWidget.ApplyAcrylic (the only component that had it).
+            if (_note.EnableLiquidGlass)
+            {
+                NoteBorder.BorderBrush = AcrylicHelper.CreateChromaticBorder();
+                NoteBorder.BorderThickness = new Thickness(Math.Max(1.0, borderThickness));
+            }
             try
             {
                 // Use fillColor directly — its ARGB alpha controls transparency
@@ -677,12 +709,10 @@ public partial class StickyNoteWindow : Window
             if (_note.TitleBarTextColorAdaptive)
             {
                 // ponytail: TitleBarFillColor is a translucent layer over the body fill, so
-                // pick the bottom layer (GlobalFillColor if UseGlobal, else FillColor) and
-                // composite before running the adaptive HSL flip — otherwise the algorithm
-                // sees a near-transparent color and produces a contrasting brush against the
-                // wrong background.
-                var cfg = _notesService.GetConfig();
-                string bottom = _note.UseGlobalAppearance ? cfg.GlobalFillColor : _note.FillColor;
+                // pick the bottom layer (FillColor) and composite before running the adaptive
+                // HSL flip — otherwise the algorithm sees a near-transparent color and
+                // produces a contrasting brush against the wrong background.
+                string bottom = _note.FillColor;
                 var brush = AdaptiveTextColor.ResolveBrushOver(_note.TitleBarFillColor, bottom);
                 _titleBarAdaptiveBrush = brush; // cache for Leave/Click handlers
                 // Title bar buttons (SaveBtn/PinBtn/HideBtn live inside TitleBarBorder)
@@ -704,6 +734,13 @@ public partial class StickyNoteWindow : Window
                 if (LockBtn != null)
                     LockBtn.Foreground = new SolidColorBrush(Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF));
             }
+            // ponytail 2026-08-25: 按钮透明度 (便签设置 spec) — title-bar buttons
+            // ride ControlOpacity, Zone-style.
+            var ctl = Math.Max(0.05, _note.ControlOpacity / 100.0);
+            if (SaveBtn != null) SaveBtn.Opacity = ctl;
+            if (PinBtn != null) PinBtn.Opacity = ctl;
+            if (HideBtn != null) HideBtn.Opacity = ctl;
+            if (LockBtn != null) LockBtn.Opacity = ctl;
         }
         catch { }
     }
@@ -1025,6 +1062,7 @@ public partial class StickyNoteWindow : Window
         _notesService.UpdateNote(_note);
         _notesService.LockChanged -= OnServiceLockChanged;
         _notesService.NotesChanged -= OnNotesChanged;
+        _note.HoverExpandSettingsChanged -= OnHoverExpandSettingsChanged;
         _hover?.Dispose();
         base.OnClosed(e);
     }
