@@ -28,6 +28,10 @@ public static class NativeMethods
     public const uint SWP_NOACTIVATE = 0x0010;
     public const uint SWP_SHOWWINDOW = 0x0040;
     public const uint SWP_FRAMECHANGED = 0x0020;
+    // ponytail 2026-08-25: 移动窗口时不触发 WM_PAINT — PropertyWindow 16ms 拖动定时器必备。
+    // 不加这个 flag，每次 SetWindowPos 都会让 WPF 收到 paint 消息，重新走一遍 layout/render，
+    // 在 layered window (AllowsTransparency=True) 上会触发现有 layered surface 的重栅格化。
+    public const uint SWP_NOREDRAW = 0x0008;
 
     // ShowWindow
     public const int SW_HIDE = 0;
@@ -39,6 +43,7 @@ public static class NativeMethods
     public const uint SHGFI_SMALLICON = 0x1;
     public const uint SHGFI_SYSICONINDEX = 0x4000;
     public const uint SHGFI_LINKOVERLAY = 0x8000;
+    public const uint SHGFI_DISPLAYNAME = 0x200;
 
     public const uint FILE_ATTRIBUTE_NORMAL = 0x80;
     public const uint FILE_ATTRIBUTE_DIRECTORY = 0x10;
@@ -122,6 +127,10 @@ public static class NativeMethods
     public static extern IntPtr SHGetFileInfo(string pszPath, uint dwFileAttributes,
         ref SHFILEINFO psfi, uint cbSizeFileInfo, uint uFlags);
 
+    // Resolve a known-folder GUID (Desktop/Documents/...) to its real folder path.
+    [DllImport("shell32.dll")]
+    public static extern int SHGetKnownFolderPath(ref Guid rfid, uint dwFlags, IntPtr hToken, out IntPtr ppszPath);
+
     [DllImport("user32.dll")]
     public static extern bool DestroyIcon(IntPtr hIcon);
 
@@ -151,7 +160,11 @@ public static class NativeMethods
 
         try
         {
-            int cornerPref = DWMWCP_ROUND;
+            // ponytail 2026-08-26: radius ≤ 0 means the zone is in sharp-corner
+            // mode — DWM must stop rounding the HWND surface, otherwise Win11
+            // clips the sharp WPF corners into a residual rounded "bite"
+            // ("尖角裁切不干净"). radius > 0 → DWM round corners.
+            int cornerPref = radius > 0 ? DWMWCP_ROUND : DWMWCP_DONOTROUND;
             DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref cornerPref, sizeof(int));
         }
         catch { /* older Windows — sharp corners, no clipping */ }
@@ -245,6 +258,31 @@ public static class NativeMethods
     [DllImport("shell32.dll")]
     public static extern int ExtractIconEx(string lpszFile, int nIconIndex,
         out IntPtr phiconLarge, out IntPtr phiconSmall, int nIcons);
+
+    // Recycle Bin state: i64NumItems > 0 means the bin is full (has items).
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SHQUERYRBINFO
+    {
+        public uint cbSize;
+        public long i64Size;
+        public long i64NumItems;
+    }
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    public static extern int SHQueryRecycleBinW(string? pszRootPath, ref SHQUERYRBINFO pSHQueryRBInfo);
+
+    /// <summary>Extract a sized icon from an icon location ("file.dll,-index") — the same way the desktop resolves DefaultIcon entries.</summary>
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    public static extern int SHDefExtractIconW(string pszIconFile, int iIconIndex, uint uFlags,
+        out IntPtr phiconLarge, out IntPtr phiconSmall, uint nIconSize);
+
+    // Empty the Recycle Bin (quietly, no confirmation/progress/sound).
+    public const uint SHERB_NOCONFIRMATION = 0x00000001;
+    public const uint SHERB_NOPROGRESSUI = 0x00000002;
+    public const uint SHERB_NOSOUND = 0x00000004;
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    public static extern int SHEmptyRecycleBinW(IntPtr hwnd, string? pszRootPath, uint dwFlags);
 
     // Set window as a tool window (hides from taskbar)
     public static void SetToolWindow(Window window)

@@ -96,12 +96,24 @@
                     </Button.Resources>
                 </Button>
                 <Button x:Name="OkBtn" Content="{loc:Loc Key=Preset.Save}"
-                        Background="{DynamicResource Brush.Accent}" Foreground="White"
+                        Background="{DynamicResource Brush.Accent.Solid}" Foreground="{DynamicResource Brush.Accent.On}"
                         BorderThickness="0" Padding="14,6" Margin="8,0,0,0"
                         Cursor="Hand" IsDefault="True" Click="Ok_Click">
                     <Button.Resources>
                         <Style TargetType="Border"><Setter Property="CornerRadius" Value="4"/></Style>
                     </Button.Resources>
+                    <Button.Style>
+                      <!-- ponytail 2026-08-25: 镂空 + 禁用态淡化 -->
+                      <Style TargetType="Button">
+                        <Style.Triggers>
+                          <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Background" Value="{DynamicResource Brush.Accent.Solid.Disabled}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.Accent.On.Disabled}"/>
+                            <Setter Property="Cursor" Value="Arrow"/>
+                          </Trigger>
+                        </Style.Triggers>
+                      </Style>
+                    </Button.Style>
                 </Button>
             </StackPanel>
         </Grid>

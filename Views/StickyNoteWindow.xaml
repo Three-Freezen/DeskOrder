@@ -47,6 +47,10 @@
                     <RowDefinition Height="*"/>
                 </Grid.RowDefinitions>
 
+                <!-- Body fill (excludes the title bar when TitleBarFillIndependent) -->
+                <Rectangle x:Name="BodyFillRect" Grid.RowSpan="3" IsHitTestVisible="False"
+                           Fill="#08000000"/>
+
                 <!-- Background image -->
                 <Border x:Name="NoteBgBorder" Grid.RowSpan="3" ClipToBounds="True" IsHitTestVisible="False"
                         HorizontalAlignment="Stretch" VerticalAlignment="Stretch">

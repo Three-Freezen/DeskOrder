@@ -21,9 +21,10 @@
           <ControlTemplate TargetType="Button">
             <Border x:Name="Root" Background="{TemplateBinding Background}" CornerRadius="6">
               <Grid>
+                <!-- ponytail 2026-08-25: 选中态左侧指示条 = Accent.Solid（深 accent）-->
                 <Border x:Name="Bar" Width="3" Height="16" HorizontalAlignment="Left"
                         Margin="0" CornerRadius="2"
-                        Background="{DynamicResource Brush.Accent}"
+                        Background="{DynamicResource Brush.Accent.Solid}"
                         Visibility="Collapsed" VerticalAlignment="Center"
                         RenderTransformOrigin="0.5,0.5">
                   <Border.RenderTransform>
@@ -78,9 +79,10 @@
           <ControlTemplate TargetType="Button">
             <Border x:Name="Root" Background="{TemplateBinding Background}" CornerRadius="6">
               <Grid>
+                <!-- ponytail 2026-08-25: 选中态左侧指示条 = Accent.Solid -->
                 <Border x:Name="Bar" Width="3" Height="16" HorizontalAlignment="Left"
                         Margin="0" CornerRadius="2"
-                        Background="{DynamicResource Brush.Accent}"
+                        Background="{DynamicResource Brush.Accent.Solid}"
                         Visibility="Collapsed" VerticalAlignment="Center"
                         RenderTransformOrigin="0.5,0.5">
                   <Border.RenderTransform>

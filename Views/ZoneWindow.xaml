@@ -41,6 +41,7 @@
                         <ContextMenu>
                             <MenuItem x:Name="CtxImport" Header="Import Files..." Click="ImportFiles_Click"/>
                             <MenuItem x:Name="CtxImportFolder" Header="Import Folder..." Click="ImportFolder_Click"/>
+                            <MenuItem x:Name="CtxImportShell" Header="Import System Items..." Click="ImportShellItems_Click"/>
                             <Separator/>
                             <MenuItem x:Name="CtxNew" Header="New">
                                 <MenuItem x:Name="CtxNewFolder" Header="New Folder..." Click="NewFolder_Click"/>
@@ -74,17 +75,23 @@
                                 Background="#10FFFFFF"
                                 CornerRadius="8,8,0,0"
                                 Cursor="SizeAll"
+                                RenderTransformOrigin="0.5,0.5"
                                 MouseLeftButtonDown="TitleBar_Drag">
+                            <Border.RenderTransform>
+                                <ScaleTransform x:Name="TitleBarScale" ScaleX="1" ScaleY="1"/>
+                            </Border.RenderTransform>
                             <Grid>
                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,0,0">
                                     <TextBlock x:Name="TitleIconChar" Text="" FontSize="12"
                                                Foreground="#A0FFFFFF" VerticalAlignment="Center" Margin="0,0,4,0"/>
                                     <TextBox x:Name="ZoneTitleText" Text="New Zone"
+                                             AllowDrop="False"
                                              FontSize="11" Foreground="#A0FFFFFF"
                                              Background="Transparent" BorderThickness="0"
                                              CaretBrush="#A0FFFFFF"
                                              VerticalAlignment="Center"
                                              MaxWidth="160"
+                                             PreviewMouseLeftButtonDown="ZoneTitle_PreviewMouseLeftButtonDown"
                                              LostFocus="ZoneTitle_LostFocus"
                                              KeyDown="ZoneTitle_KeyDown"/>
                                 </StackPanel>
@@ -112,6 +119,7 @@
                                         <ContextMenu>
                                             <MenuItem x:Name="CtxImportFiles" Header="Import Files..." Click="ImportFiles_Click"/>
                                             <MenuItem x:Name="CtxImportFolder2" Header="Import Folder..." Click="ImportFolder_Click"/>
+                                            <MenuItem x:Name="CtxImportShell2" Header="Import System Items..." Click="ImportShellItems_Click"/>
                                             <Separator/>
                                             <MenuItem x:Name="CtxNew2" Header="New">
                                                 <MenuItem x:Name="CtxNewFolder2" Header="New Folder..." Click="NewFolder_Click"/>
@@ -159,15 +167,17 @@
                         </Border>
 
                         <!-- Items (scrollable) -->
-                        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Hidden"
+                        <ScrollViewer x:Name="ItemsViewport" Grid.Row="2" VerticalScrollBarVisibility="Hidden"
                                       HorizontalScrollBarVisibility="Hidden" Background="Transparent">
+                            <ScrollViewer.RenderTransform>
+                                <TranslateTransform x:Name="ItemsViewportTranslate" X="0"/>
+                            </ScrollViewer.RenderTransform>
+                        <Grid>
                         <ItemsControl x:Name="ItemsHost" ItemsSource="{Binding Items}">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
                                     <Canvas x:Name="ItemCanvas"
-                                            AllowDrop="True" Background="Transparent"
-                                            DragEnter="Canvas_DragEnter" DragLeave="Canvas_DragLeave"
-                                            Drop="Canvas_Drop" DragOver="Canvas_DragOver"/>
+                                            Background="Transparent"/>
                                 </ItemsPanelTemplate>
                             </ItemsControl.ItemsPanel>
                             <ItemsControl.ItemContainerStyle>
@@ -178,7 +188,7 @@
                             </ItemsControl.ItemContainerStyle>
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <Grid Width="72" Height="88"
+                                    <Grid Width="{Binding ItemSize}" Height="{Binding ItemSize}"
                                           Background="Transparent"
                                           MouseLeftButtonDown="Item_MouseDown"
                                           MouseMove="Item_MouseMove"
@@ -187,38 +197,40 @@
                                           MouseLeave="Item_Leave"
                                           Cursor="Hand">
                                         <Grid.ContextMenu>
-                                            <ContextMenu>
+                                            <ContextMenu Opened="ItemMenu_Opened">
                                                 <MenuItem Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.Open]}" Click="ItemOpen_Click"/>
                                                 <MenuItem Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.OpenLocation]}" Click="ItemOpenLocation_Click"/>
+                                                <MenuItem x:Name="CtxEmptyRecycle" Visibility="Collapsed"
+                                                          Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.EmptyRecycleBin]}"
+                                                          Click="ItemEmptyRecycle_Click"/>
                                                 <MenuItem Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.Rename]}" Click="ItemRename_Click"/>
                                                 <Separator/>
                                                 <MenuItem Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.Delete]}" Click="ItemDelete_Click" Foreground="#FF6666"/>
                                             </ContextMenu>
                                         </Grid.ContextMenu>
-                                        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Background="Transparent">
-                                            <Image Source="{Binding Icon}" Width="{Binding IconSize}" Height="{Binding IconSize}"
-                                                   Stretch="Uniform"
-                                                   RenderOptions.BitmapScalingMode="HighQuality"
-                                                   HorizontalAlignment="Center"/>
-                                            <!-- ponytail: no DropShadowEffect — hardcoded black shadow
-                                                 would mask the adaptive brush on light bg and bleed into
-                                                 dark bg, making item names look "locked white". Foreground
-                                                 gets re-brushed by ApplyItemTextColorAdaptive via
-                                                 ApplyBrushToTree(ItemsHost, brush). -->
-                                            <TextBlock Text="{Binding Name}" FontSize="11"
-                                                       Foreground="#E0FFFFFF" TextAlignment="Center"
-                                                       TextTrimming="CharacterEllipsis"
-                                                       MaxWidth="68" Margin="0,2,0,0"
-                                                       HorizontalAlignment="Center"/>
-                                        </StackPanel>
+
+                                        <!-- Icon centered in its grid cell, filling it with a small inset;
+                                             the name overlays the bottom edge so the icon stays large. -->
+                                        <Image Source="{Binding Icon}" Width="{Binding IconSize}" Height="{Binding IconSize}"
+                                               Stretch="Uniform"
+                                               RenderOptions.BitmapScalingMode="HighQuality"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        <TextBlock Text="{Binding Name}" FontSize="10"
+                                                   Foreground="#FFFFFFFF" TextAlignment="Center"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   MaxWidth="{Binding ItemSize}"
+                                                   Background="#99000000" Padding="4,1" Margin="2,0,2,2"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Bottom"/>
                                     </Grid>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
+                        <Canvas x:Name="DropIndicatorLayer" IsHitTestVisible="False" Background="Transparent"/>
+                        </Grid>
                         </ScrollViewer>
 
                         <!-- Bottom bar (no move — only visual) -->
-                        <Border Grid.Row="3" Height="8"
+                        <Border x:Name="BottomBarBg" Grid.Row="3" Height="8"
                                 Background="#08FFFFFF"
                                 CornerRadius="0,0,8,8"/>
                     </Grid>

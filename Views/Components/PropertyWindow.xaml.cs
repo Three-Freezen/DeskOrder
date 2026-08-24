@@ -5,7 +5,6 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
-using System.Windows.Threading;
 using DesktopZones.Helpers;
 using DesktopZones.Models;
 using DesktopZones.Services;
@@ -90,7 +89,10 @@ public partial class PropertyWindow : Window
     {
         InitializeComponent();
         BuildCloseStoryboard();
-        Closed += (_, _) => { _isClosing = false; TabStrip.CancelDrag(); };
+        Closed += (_, _) => { _isClosing = false; TabStrip.CancelDrag(); StopDragLoop(); };
+        // ponytail: header X closes the floating window itself (dock-back stays
+        // on the toggle button). Close() runs the standard fade+scale animation.
+        Body.CloseWindowRequested += (_, _) => Close();
         Target = target;
         Title = PropertyWindowManager.TitleOf(target);
     }
@@ -99,7 +101,8 @@ public partial class PropertyWindow : Window
     {
         InitializeComponent();
         BuildCloseStoryboard();
-        Closed += (_, _) => { _isClosing = false; TabStrip.CancelDrag(); };
+        Closed += (_, _) => { _isClosing = false; TabStrip.CancelDrag(); StopDragLoop(); };
+        Body.CloseWindowRequested += (_, _) => Close();
     }
 
     // ── Target sync ──
@@ -107,6 +110,10 @@ public partial class PropertyWindow : Window
     void OnTargetChanged()
     {
         Body.Target = Target;
+        // ponytail: floating X is visible whenever the window has a target
+        // (it closes the window, not the tab — docked semantics stay with the
+        // docked host wiring CloseTabRequested).
+        Body.IsCloseable = Target != null;
         if (Target != null)
             TabStrip.OpenOrFocus(
                 PropertyWindowManager.TargetKey(Target),
@@ -122,29 +129,44 @@ public partial class PropertyWindow : Window
 
     public event EventHandler<DockBackEventArgs>? DockBackRequested;
 
-    // ── Title-bar drag — Timer-driven cursor polling + Win32 move ──
-    // ponytail: previous design drove moves off PreviewMouseMove, which on WPF
-    // fires at the mouse's input rate (125-1000Hz). SetWindowPos + WM_WINDOWPOSCHANGED
-    // + render invalidation on each tick saturated the UI thread and produced
-    // visible stutter ("拖动一卡一卡的"). The new design polls Win32 cursor state
-    // on a 16ms timer (locked to the render rate) and uses GetAsyncKeyState for
-    // release detection — works across all windows, no Mouse.Capture, no routed-
-    // event dependency.
+    // ── Title-bar drag — per-frame cursor polling + Win32 move ──
+    // ponytail: the earlier designs both stuttered. PreviewMouseMove fires at the
+    // mouse's input rate (125-1000Hz) and saturated the UI thread; the 16ms
+    // DispatcherTimer ran at Background priority, so its ticks were delayed and
+    // batched under load ("拖动一卡一卡"). Movement is now driven by
+    // CompositionTarget.Rendering — exactly one update per compositor frame,
+    // vsync-aligned — with GetAsyncKeyState release detection that works
+    // regardless of where the cursor is (no Mouse.Capture, no routed events).
+    //
+    // DPI note: GetCursorPos returns physical pixels while Window.Left/Top are
+    // DIPs. The grab offset is therefore computed in physical px (window origin
+    // converted via the window's current DPI) and every SetWindowPos is fed
+    // physical px. The old mixed math (px - DIPs) made the window drift away
+    // from the grab point on scaled displays ("拖动不跟手"), and writing the
+    // physical value back into Left/Top on release made it jump once more.
 
     [DllImport("user32.dll")] static extern bool GetCursorPos(out POINT lpPoint);
     [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vKey);
     [StructLayout(LayoutKind.Sequential)] struct POINT { public int X; public int Y; }
     const int VK_LBUTTON = 0x01;
 
-    DispatcherTimer? _dragTimer;
-    Point _dragGrabOffset;          // cursor - window-Left/Top at drag start
-    double _dragLeft, _dragTop;     // tracked position during drag
+    bool _dragLoopActive;
+    Point _dragGrabOffsetPx;          // cursor - window origin at drag start, physical px
+    double _dragLeftPx, _dragTopPx;   // tracked window origin, physical px
+    int _lastMoveX = int.MinValue, _lastMoveY = int.MinValue;
     bool _isDragging;
     bool _dockBackRaised;
 
     void TitleBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (e.ChangedButton != MouseButton.Left) return;
+
+        // ponytail: a press on a tab belongs to the tab strip (reorder /
+        // drag-out). Arming the window drag too made the whole floating window
+        // chase the cursor while the user was dragging a tab — the two drag
+        // systems fought each other and the window lurched around.
+        if (IsOnPropertyTab(e.OriginalSource as DependencyObject)) return;
+
         if (e.ClickCount == 2)
         {
             WindowState = WindowState == WindowState.Maximized
@@ -152,59 +174,104 @@ public partial class PropertyWindow : Window
             e.Handled = true;
             return;
         }
-        // Snapshot initial cursor (screen) and offset relative to window.
+
+        // Snapshot the initial cursor (screen px) and the window origin converted
+        // to the same unit system (physical px).
         GetCursorPos(out var pt);
-        var cursorScreen = new Point(pt.X, pt.Y);
-        _dragGrabOffset = new Point(cursorScreen.X - Left, cursorScreen.Y - Top);
-        _dragLeft = Left;
-        _dragTop = Top;
+        var cursorPx = new Point(pt.X, pt.Y);
+        var dpi = VisualTreeHelper.GetDpi(this);
+        var leftPx = Left * dpi.DpiScaleX;
+        var topPx = Top * dpi.DpiScaleY;
+        _dragGrabOffsetPx = new Point(cursorPx.X - leftPx, cursorPx.Y - topPx);
+        _dragLeftPx = leftPx;
+        _dragTopPx = topPx;
+        _lastMoveX = int.MinValue;
+        _lastMoveY = int.MinValue;
         _isDragging = true;
         _dockBackRaised = false;
-        StartDragTimer();
+        StartDragLoop();
     }
 
-    void StartDragTimer()
+    /// <summary>True when the press landed on a tab item (or anything inside it).</summary>
+    static bool IsOnPropertyTab(DependencyObject? d)
     {
-        if (_dragTimer != null) return;
-        _dragTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
-        _dragTimer.Tick += OnDragTick;
-        _dragTimer.Start();
+        while (d != null)
+        {
+            if (d is FrameworkElement { DataContext: PropertyTab })
+                return true;
+            d = VisualTreeHelper.GetParent(d);
+        }
+        return false;
     }
 
-    void StopDragTimer()
+    void StartDragLoop()
     {
-        if (_dragTimer == null) return;
-        _dragTimer.Stop();
-        _dragTimer.Tick -= OnDragTick;
-        _dragTimer = null;
+        if (_dragLoopActive) return;
+        _dragLoopActive = true;
+        CompositionTarget.Rendering += OnDragFrame;
     }
 
-    void OnDragTick(object? sender, EventArgs e)
+    void StopDragLoop()
     {
-        if (!_isDragging) { StopDragTimer(); return; }
+        if (!_dragLoopActive) return;
+        _dragLoopActive = false;
+        CompositionTarget.Rendering -= OnDragFrame;
+    }
+
+    void OnDragFrame(object? sender, EventArgs e)
+    {
+        // Window closed / visual detached mid-drag — bail out.
+        if (PresentationSource.FromVisual(this) == null)
+        {
+            _isDragging = false;
+            StopDragLoop();
+            return;
+        }
+
+        if (!_isDragging) { StopDragLoop(); return; }
 
         // Release detection via Win32 — works regardless of cursor location.
         if ((GetAsyncKeyState(VK_LBUTTON) & 0x8000) == 0)
         {
-            Left = _dragLeft;
-            Top = _dragTop;
+            // Land exactly under the cursor before letting go (all physical px,
+            // no DIP mixing). WPF picks Left/Top (DIPs) up from the
+            // WM_WINDOWPOSCHANGED this move sends.
+            if (GetCursorPos(out var rel))
+            {
+                var hwnd = new WindowInteropHelper(this).Handle;
+                if (hwnd != IntPtr.Zero)
+                    NativeMethods.SetWindowPos(hwnd, IntPtr.Zero,
+                        (int)(rel.X - _dragGrabOffsetPx.X), (int)(rel.Y - _dragGrabOffsetPx.Y),
+                        0, 0,
+                        NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_NOREDRAW);
+            }
             _isDragging = false;
-            StopDragTimer();
+            StopDragLoop();
             return;
         }
 
         if (!GetCursorPos(out var pt)) return;
         var cursorScreen = new Point(pt.X, pt.Y);
 
-        // Win32 move — bypasses WPF layout/render pipeline.
-        _dragLeft = cursorScreen.X - _dragGrabOffset.X;
-        _dragTop = cursorScreen.Y - _dragGrabOffset.Y;
-        var hwnd = new WindowInteropHelper(this).Handle;
-        if (hwnd != IntPtr.Zero)
+        _dragLeftPx = pt.X - _dragGrabOffsetPx.X;
+        _dragTopPx = pt.Y - _dragGrabOffsetPx.Y;
+        int x = (int)_dragLeftPx, y = (int)_dragTopPx;
+
+        // Skip no-op moves — each SetWindowPos round-trips through WPF's
+        // WM_WINDOWPOSCHANGED, and doing that redundantly every frame adds jank.
+        if (x != _lastMoveX || y != _lastMoveY)
         {
-            NativeMethods.SetWindowPos(hwnd, IntPtr.Zero,
-                (int)_dragLeft, (int)_dragTop, 0, 0,
-                NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
+            _lastMoveX = x;
+            _lastMoveY = y;
+            var hwnd = new WindowInteropHelper(this).Handle;
+            if (hwnd != IntPtr.Zero)
+            {
+                // ponytail 2026-08-25: SWP_NOREDRAW keeps WPF from re-rasterizing
+                // the layered window surface on every move (the other historical
+                // "拖动一卡一卡" source).
+                NativeMethods.SetWindowPos(hwnd, IntPtr.Zero, x, y, 0, 0,
+                    NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_NOREDRAW);
+            }
         }
 
         // Dock-back detection: dragged window's own bounds check removed (it
@@ -218,7 +285,7 @@ public partial class PropertyWindow : Window
             if (args.Handled)
             {
                 _isDragging = false;
-                StopDragTimer();
+                StopDragLoop();
                 return;
             }
             _dockBackRaised = true;

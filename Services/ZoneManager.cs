@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using DesktopZones.Helpers;
 using DesktopZones.Models;
 using DesktopZones.Views;
 using DesktopZones.Views.Components;
@@ -404,6 +405,7 @@ public class ZoneManager
         {
             z.MergedGroupMembership.GroupId = null;
             z.MergedGroupMembership.SubZoneIds.Clear();
+            z.MergedGroupMembership.TabOrder.Clear();
             z.MergedGroupMembership.DisplayName = "";
             z.MergedGroupMembership.Icon = "";
         }
@@ -427,12 +429,14 @@ public class ZoneManager
         if (master != null)
         {
             master.MergedGroupMembership.SubZoneIds.Remove(zoneId);
+            master.MergedGroupMembership.TabOrder.Remove(zoneId);
             if (master.MergedGroupMembership.SubZoneIds.Count == 0)
             {
                 // Only master remains — clear its merge state
                 master.MergedGroupMembership.GroupId = null;
                 master.MergedGroupMembership.DisplayName = "";
                 master.MergedGroupMembership.Icon = "";
+                master.MergedGroupMembership.TabOrder.Clear();
                 if (_zoneWindows.TryGetValue(master.Id, out var win))
                     win.RefreshZone(master);
             }
@@ -447,9 +451,170 @@ public class ZoneManager
         zone.MergedGroupMembership.GroupId = null;
         zone.MergedGroupMembership.DisplayName = "";
         zone.MergedGroupMembership.Icon = "";
+        zone.MergedGroupMembership.TabOrder.Clear();
 
         SaveConfig();
         ZonesChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// Merge the dragged zone into the target zone's merged group (creating one when
+    /// the target is standalone). The target stays the group master and its name comes
+    /// first; the dragged zone is appended, and when the dragged zone is itself a group
+    /// master its whole group is folded in (order preserved). Fires a single save/refresh.
+    /// </summary>
+    public Guid MergeZoneInto(Guid targetZoneId, Guid draggedZoneId)
+    {
+        var target = Zones.FirstOrDefault(z => z.Id == targetZoneId);
+        var dragged = Zones.FirstOrDefault(z => z.Id == draggedZoneId);
+        if (target == null || dragged == null || target.Id == dragged.Id)
+            return Guid.Empty;
+
+        // Defensive: a hidden sub-zone target can't be dropped onto (its window is
+        // closed), but redirect it to its master just in case.
+        if (target.MergedGroupMembership.GroupId.HasValue && target.MergedGroupMembership.SubZoneIds.Count == 0)
+        {
+            var tm = Zones.FirstOrDefault(z => z.MergedGroupMembership.GroupId == target.MergedGroupMembership.GroupId
+                                               && z.MergedGroupMembership.SubZoneIds.Count > 0);
+            if (tm != null) target = tm;
+        }
+
+        // Payload = dragged first, then its subs in order when it's a master.
+        var payload = new List<Zone> { dragged };
+        if (dragged.MergedGroupMembership.SubZoneIds.Count > 0)
+        {
+            foreach (var subId in dragged.MergedGroupMembership.SubZoneIds.ToList())
+            {
+                var sub = Zones.FirstOrDefault(z => z.Id == subId);
+                if (sub != null && sub.Id != target.Id) payload.Add(sub);
+            }
+        }
+
+        // Detach payload zones from their current groups, subs first so a dragged
+        // master never needs a mid-flight promotion. No per-zone events here — the
+        // single SaveConfig/ZonesChanged at the end is the only refresh.
+        for (int i = payload.Count - 1; i >= 0; i--)
+            DetachZoneFromGroup(payload[i]);
+
+        bool targetWasMerged = target.MergedGroupMembership.GroupId.HasValue;
+
+        // Ensure the target is a master (new group when standalone).
+        Guid groupId;
+        Zone master;
+        if (target.MergedGroupMembership.GroupId.HasValue)
+        {
+            groupId = target.MergedGroupMembership.GroupId.Value;
+            master = Zones.FirstOrDefault(z => z.MergedGroupMembership.GroupId == groupId
+                                               && z.MergedGroupMembership.SubZoneIds.Count > 0) ?? target;
+        }
+        else
+        {
+            groupId = Guid.NewGuid();
+            target.MergedGroupMembership.GroupId = groupId;
+            master = target;
+        }
+
+        // Normalize the master's display order BEFORE the fold so an existing
+        // user-arranged order survives, then append the incoming members at the end.
+        var order = master.MergedGroupMembership.TabOrder;
+        if (order.Count != master.MergedGroupMembership.SubZoneIds.Count + 1
+            || !order.Contains(master.Id)
+            || master.MergedGroupMembership.SubZoneIds.Any(id => !order.Contains(id)))
+        {
+            order.Clear();
+            order.Add(master.Id);
+            order.AddRange(master.MergedGroupMembership.SubZoneIds);
+        }
+
+        foreach (var z in payload)
+        {
+            if (z.Id == master.Id) continue;
+            z.MergedGroupMembership.SubZoneIds.Clear();
+            z.MergedGroupMembership.GroupId = groupId;
+            master.MergedGroupMembership.SubZoneIds.Add(z.Id);
+            order.Add(z.Id);
+        }
+
+        // New groups get the generated "target + sub + sub" default; adding to an
+        // existing group appends the incoming names to its current (possibly
+        // user-edited) display name instead of clobbering it.
+        string groupName;
+        if (targetWasMerged)
+        {
+            var added = payload.Where(z => z.Id != master.Id).Select(z => z.Name).ToList();
+            var current = string.IsNullOrWhiteSpace(master.MergedGroupMembership.DisplayName)
+                ? master.Name
+                : master.MergedGroupMembership.DisplayName;
+            groupName = added.Count > 0 ? current + " + " + string.Join(" + ", added) : current;
+        }
+        else
+        {
+            groupName = BuildMergedGroupName(master);
+        }
+        master.MergedGroupMembership.DisplayName = groupName;
+        foreach (var m in Zones.Where(z => z.MergedGroupMembership.GroupId == groupId))
+            m.MergedGroupMembership.DisplayName = groupName;
+
+        // Hide payload windows (the dragged window closes; already-hidden subs are no-ops).
+        foreach (var z in payload)
+            if (z.Id != master.Id) FullHideZone(z.Id);
+
+        if (_zoneWindows.TryGetValue(master.Id, out var masterWin))
+            masterWin.RefreshZone(master);
+
+        SaveConfig();
+        ZonesChanged?.Invoke();
+        return groupId;
+    }
+
+    /// <summary>Detach a zone from its current group without firing save/refresh events.
+    /// Handles both sub-zones and masters (a detached master promotes its first sub).</summary>
+    private void DetachZoneFromGroup(Zone zone)
+    {
+        if (!zone.MergedGroupMembership.GroupId.HasValue) return;
+        var groupId = zone.MergedGroupMembership.GroupId.Value;
+        var master = Zones.FirstOrDefault(m => m.MergedGroupMembership.GroupId == groupId && m.MergedGroupMembership.SubZoneIds.Count > 0);
+
+        if (master != null)
+        {
+            if (master.Id == zone.Id)
+            {
+                var subs = zone.MergedGroupMembership.SubZoneIds.ToList();
+                var newMaster = Zones.FirstOrDefault(m => m.Id == subs.FirstOrDefault());
+                if (newMaster != null)
+                {
+                    newMaster.MergedGroupMembership.GroupId = groupId;
+                    newMaster.MergedGroupMembership.SubZoneIds = subs.Skip(1).ToList();
+                    newMaster.MergedGroupMembership.DisplayName = BuildMergedGroupName(newMaster);
+                    newMaster.MergedGroupMembership.Icon = zone.MergedGroupMembership.Icon;
+                    newMaster.MergedGroupMembership.TabOrder.Clear();
+                    newMaster.MergedGroupMembership.TabOrder.Add(newMaster.Id);
+                    newMaster.MergedGroupMembership.TabOrder.AddRange(newMaster.MergedGroupMembership.SubZoneIds);
+                }
+            }
+            else
+            {
+                master.MergedGroupMembership.SubZoneIds.Remove(zone.Id);
+                master.MergedGroupMembership.TabOrder.Remove(zone.Id);
+                if (master.MergedGroupMembership.SubZoneIds.Count == 0)
+                {
+                    master.MergedGroupMembership.GroupId = null;
+                    master.MergedGroupMembership.DisplayName = "";
+                    master.MergedGroupMembership.Icon = "";
+                    master.MergedGroupMembership.TabOrder.Clear();
+                }
+                else
+                {
+                    master.MergedGroupMembership.DisplayName = BuildMergedGroupName(master);
+                }
+            }
+        }
+
+        zone.MergedGroupMembership.GroupId = null;
+        zone.MergedGroupMembership.SubZoneIds.Clear();
+        zone.MergedGroupMembership.TabOrder.Clear();
+        zone.MergedGroupMembership.DisplayName = "";
+        zone.MergedGroupMembership.Icon = "";
     }
 
     private string BuildMergedGroupName(Zone master)
@@ -466,6 +631,116 @@ public class ZoneManager
     /// <summary>Get all zones in a merged group.</summary>
     public List<Zone> GetMergedGroupZones(Guid groupId)
         => Zones.Where(z => z.MergedGroupMembership.GroupId == groupId).ToList();
+
+    /// <summary>
+    /// Detach a zone from its merged group while keeping the group window alive.
+    /// Sub-zones use the plain removal. Detaching the MASTER promotes the first
+    /// remaining member in display order to the new master (or dissolves the group
+    /// when only one member remains), transfers the group style to the new host and
+    /// re-keys the current group window to it. The detached zone is not shown here —
+    /// the caller positions and shows it (drag-out drops it at the cursor).
+    /// </summary>
+    public void DetachZoneAt(Guid zoneId)
+    {
+        var zone = Zones.FirstOrDefault(z => z.Id == zoneId);
+        if (zone == null || !zone.MergedGroupMembership.GroupId.HasValue) return;
+
+        // Sub-zone: plain detach (auto-dissolves when only the master remains).
+        if (zone.MergedGroupMembership.SubZoneIds.Count == 0)
+        {
+            RemoveFromMergedGroup(zoneId);
+            return;
+        }
+
+        var groupId = zone.MergedGroupMembership.GroupId.Value;
+
+        // Remaining members in display order.
+        var remaining = new List<Guid>(zone.MergedGroupMembership.TabOrder);
+        if (remaining.Count != zone.MergedGroupMembership.SubZoneIds.Count + 1
+            || !remaining.Contains(zone.Id)
+            || zone.MergedGroupMembership.SubZoneIds.Any(id => !remaining.Contains(id)))
+        {
+            remaining.Clear();
+            remaining.Add(zone.Id);
+            remaining.AddRange(zone.MergedGroupMembership.SubZoneIds);
+        }
+        remaining.Remove(zone.Id);
+
+        var host = Zones.FirstOrDefault(z => z.Id == remaining.FirstOrDefault());
+        if (host == null) return;
+
+        // Re-key the current group window to the successor so it stays on screen.
+        _zoneWindows.Remove(zone.Id, out var window);
+        if (window != null)
+        {
+            host.X = window.Left; host.Y = window.Top;
+            host.Width = window.Width; host.Height = window.Height;
+        }
+
+        zone.MergedGroupMembership.GroupId = null;
+        zone.MergedGroupMembership.SubZoneIds.Clear();
+        zone.MergedGroupMembership.TabOrder.Clear();
+        zone.MergedGroupMembership.DisplayName = "";
+        zone.MergedGroupMembership.Icon = "";
+        zone.IsVisible = false;
+
+        if (remaining.Count == 1)
+        {
+            // Only one member left → the group dissolves; it keeps the window standalone.
+            host.MergedGroupMembership.GroupId = null;
+            host.MergedGroupMembership.SubZoneIds.Clear();
+            host.MergedGroupMembership.TabOrder.Clear();
+            host.MergedGroupMembership.DisplayName = "";
+            host.MergedGroupMembership.Icon = "";
+            host.IsVisible = true;
+            AdoptWindow(host, window, merged: false);
+        }
+        else
+        {
+            // Promote the first remaining member to the new master.
+            host.MergedGroupMembership.GroupId = groupId;
+            host.MergedGroupMembership.SubZoneIds = remaining.Skip(1).ToList();
+            host.MergedGroupMembership.TabOrder = new List<Guid>(remaining);
+            host.MergedGroupMembership.DisplayName = BuildMergedGroupName(host);
+            host.MergedGroupMembership.Icon = zone.MergedGroupMembership.Icon;
+            // Keep the group's merged style on the new host.
+            CloneHelper.CopyBaseProperties<MergedGroupStyle>(zone.MergedGroupStyle, host.MergedGroupStyle);
+            host.IsVisible = true;
+            AdoptWindow(host, window, merged: true);
+        }
+
+        SaveConfig();
+        ZonesChanged?.Invoke();
+    }
+
+    /// <summary>Point the existing group window at the new host zone (or open one
+    /// when the window wasn't open), refreshing items and selection accordingly.</summary>
+    private void AdoptWindow(Zone host, ZoneWindow? window, bool merged)
+    {
+        if (window == null)
+        {
+            ShowZone(host);
+            return;
+        }
+        _zoneWindows[host.Id] = window;
+        if (window.DataContext is ViewModels.ZoneViewModel vm)
+        {
+            if (merged) vm.SelectedSubZoneId = host.Id; // refreshes merged items
+            else { vm.RefreshZone(host); vm.SelectedSubZoneId = null; }
+        }
+        window.RefreshZone(host);
+    }
+
+    /// <summary>Persist a merged master's sub-zone order after a tab reorder and notify
+    /// listeners. The combined display name is intentionally left untouched — it is
+    /// user-editable once generated.</summary>
+    public void SaveSubZoneOrder(Guid masterZoneId)
+    {
+        var master = Zones.FirstOrDefault(z => z.Id == masterZoneId);
+        if (master == null || master.MergedGroupMembership.SubZoneIds.Count == 0) return;
+        SaveConfig();
+        ZonesChanged?.Invoke();
+    }
 
     // ── Lock ──
 

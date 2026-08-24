@@ -7,7 +7,7 @@
         Background="Transparent"
         Topmost="True"
         ShowInTaskbar="False"
-        Width="360" MinHeight="480"
+        Width="420" MinHeight="480"
         WindowStartupLocation="Manual"
         Opacity="0"
         Deactivated="Window_Deactivated"
@@ -45,9 +45,10 @@
         </BeginStoryboard>
       </EventTrigger>
     </Border.Triggers>
-    <Border.Effect>
-      <DropShadowEffect BlurRadius="24" ShadowDepth="0" Color="Black" Opacity="0.45"/>
-    </Border.Effect>
+    <!-- ponytail 2026-08-25: DropShadowEffect 拆了 — 之前 BlurRadius=24 是软件渲染（CPU 位图卷积），
+         在 AllowsTransparency=True 的窗口上每帧都要重栅格化 layered window DIBSection，
+         拖动时 WPF 渲染线程和 UI 线程打爆，PropertyWindow 拖动一卡一卡的。
+         Win11 DWM 自带的窗口阴影（HWND 层渲染，GPU 加速）取代之；视觉差异几乎不可见。 -->
     <DockPanel>
       <!-- ponytail: top border is the title bar — MouseLeftButtonDown on it
            drives DragMove; double-click toggles maximize. Original code had no

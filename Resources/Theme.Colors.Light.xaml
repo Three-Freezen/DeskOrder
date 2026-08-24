@@ -15,10 +15,15 @@
   <Color x:Key="Color.Text.Disabled">#B0B5BD</Color>
   <Color x:Key="Color.Accent">#1E88E5</Color>
   <Color x:Key="Color.Accent.Wash">#1A1E88E5</Color>
-  <Color x:Key="Color.Accent.Solid">#1976D2</Color>
-  <Color x:Key="Color.Accent.Solid.Hover">#1565C0</Color>
-  <Color x:Key="Color.Accent.Solid.Press">#124E96</Color>
-  <Color x:Key="Color.Accent.On">#FFFFFF</Color>
+  <!-- ponytail 2026-08-25: 镂空算法静态值 — Solid = mix(#1E88E5, black, 20%) = #1370BB;
+       On = mix(#1E88E5, #F5F6F8, 50%) = #8AB1C2.
+       Brush.Accent.Solid/On = {DynamicResource Color.Accent.Solid/On} 自动跟随主题切换。-->
+  <Color x:Key="Color.Accent.Solid">#1370BB</Color>
+  <Color x:Key="Color.Accent.Solid.Hover">#0E5A99</Color>
+  <Color x:Key="Color.Accent.Solid.Press">#1F86CC</Color>
+  <Color x:Key="Color.Accent.Solid.Disabled">#991370BB</Color>
+  <Color x:Key="Color.Accent.On">#8AB1C2</Color>
+  <Color x:Key="Color.Accent.On.Disabled">#551370BB</Color>
   <Color x:Key="Color.Accent.2">#00ACC1</Color>
   <Color x:Key="Color.Success">#3D9E4F</Color>
   <Color x:Key="Color.Warning">#B36A00</Color>

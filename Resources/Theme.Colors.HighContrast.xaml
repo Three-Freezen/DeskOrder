@@ -15,10 +15,13 @@
   <Color x:Key="Color.Text.Disabled">#808080</Color>
   <Color x:Key="Color.Accent">#FFFF00</Color>
   <Color x:Key="Color.Accent.Wash">#33FFFF00</Color>
-  <Color x:Key="Color.Accent.Solid">#FFFF00</Color>
-  <Color x:Key="Color.Accent.Solid.Hover">#FFFF66</Color>
-  <Color x:Key="Color.Accent.Solid.Press">#CCCC00</Color>
+  <!-- ponytail 2026-08-25: HC 主题下 Solid = mix(#FFFF00, black, 20%) = #CCCC00; On 保留 #000000 黑（高对比）-->
+  <Color x:Key="Color.Accent.Solid">#CCCC00</Color>
+  <Color x:Key="Color.Accent.Solid.Hover">#B3B300</Color>
+  <Color x:Key="Color.Accent.Solid.Press">#E6E600</Color>
+  <Color x:Key="Color.Accent.Solid.Disabled">#AACCCC00</Color>
   <Color x:Key="Color.Accent.On">#000000</Color>
+  <Color x:Key="Color.Accent.On.Disabled">#66000000</Color>
   <Color x:Key="Color.Accent.2">#00FFFF</Color>
   <Color x:Key="Color.Success">#00FF00</Color>
   <Color x:Key="Color.Warning">#FFFF00</Color>

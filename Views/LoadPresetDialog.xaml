@@ -13,16 +13,10 @@
         Background="Transparent">
 
     <Window.Resources>
-        <!-- Chrome brush aliases (point at global Brush.* tokens). Kept under the legacy
-             keys so per-card DataTemplate references still resolve while inheriting the
-             theme-aware colors. -->
-        <SolidColorBrush x:Key="Bg"  Color="{DynamicResource Color.Bg.Chrome}"/>
-        <SolidColorBrush x:Key="Acc" Color="{DynamicResource Color.Accent.Solid}"/>
-        <SolidColorBrush x:Key="T1"  Color="{DynamicResource Color.Text.Primary}"/>
-        <SolidColorBrush x:Key="T2"  Color="{DynamicResource Color.Text.Secondary}"/>
-        <SolidColorBrush x:Key="T3"  Color="{DynamicResource Color.Text.Tertiary}"/>
-        <SolidColorBrush x:Key="IBg" Color="{DynamicResource Color.Bg.Input}"/>
-        <SolidColorBrush x:Key="IBd" Color="{DynamicResource Color.Border.Subtle}"/>
+        <!-- ponytail: no local chrome brush aliases — chrome fields below use
+             {DynamicResource Brush.*} directly so ThemeService.RepaintBrushes'
+             dict-instance swap actually reaches them (StaticResource would freeze
+             to the old brush reference and never repaint on theme change). -->
 
         <!-- Shared card preview backing: same gradient every card uses as its base canvas
              (matches the gradient placeholder ZoneCard originally drew on top of FillColor).
@@ -154,8 +148,8 @@
                         </Grid>
                     </Border>
                     <StackPanel Grid.Row="1" Margin="12,4,12,8" VerticalAlignment="Top">
-                        <TextBlock Text="{Binding Name}" Foreground="{StaticResource T1}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                        <TextBlock Text="{Binding CreatedAt, StringFormat=yyyy-MM-dd}" Foreground="{StaticResource T3}" FontSize="10" Margin="0,2,0,0"/>
+                        <TextBlock Text="{Binding Name}" Foreground="{DynamicResource Brush.Text.Primary}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Text="{Binding CreatedAt, StringFormat=yyyy-MM-dd}" Foreground="{DynamicResource Brush.Text.Tertiary}" FontSize="10" Margin="0,2,0,0"/>
                     </StackPanel>
                 </Grid>
             </Border>
@@ -235,11 +229,11 @@
                         </Grid>
                     </Border>
                     <StackPanel Grid.Row="1" Margin="12,4,12,8" VerticalAlignment="Top">
-                        <TextBlock Text="{Binding Name}" Foreground="{StaticResource T1}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Text="{Binding Name}" Foreground="{DynamicResource Brush.Text.Primary}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
                         <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
-                            <TextBlock Text="Digital" Foreground="{StaticResource T2}" FontSize="10"/>
-                            <TextBlock Text=" · " Foreground="{StaticResource T3}" FontSize="10"/>
-                            <TextBlock Text="{Binding CreatedAt, StringFormat=yyyy-MM-dd}" Foreground="{StaticResource T3}" FontSize="10"/>
+                            <TextBlock Text="Digital" Foreground="{DynamicResource Brush.Text.Secondary}" FontSize="10"/>
+                            <TextBlock Text=" · " Foreground="{DynamicResource Brush.Text.Tertiary}" FontSize="10"/>
+                            <TextBlock Text="{Binding CreatedAt, StringFormat=yyyy-MM-dd}" Foreground="{DynamicResource Brush.Text.Tertiary}" FontSize="10"/>
                         </StackPanel>
                     </StackPanel>
                 </Grid>
@@ -333,11 +327,11 @@
                         </Grid>
                     </Border>
                     <StackPanel Grid.Row="1" Margin="12,4,12,8" VerticalAlignment="Top">
-                        <TextBlock Text="{Binding Name}" Foreground="{StaticResource T1}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Text="{Binding Name}" Foreground="{DynamicResource Brush.Text.Primary}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
                         <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
-                            <TextBlock Text="Analog" Foreground="{StaticResource T2}" FontSize="10"/>
-                            <TextBlock Text=" · " Foreground="{StaticResource T3}" FontSize="10"/>
-                            <TextBlock Text="{Binding CreatedAt, StringFormat=yyyy-MM-dd}" Foreground="{StaticResource T3}" FontSize="10"/>
+                            <TextBlock Text="Analog" Foreground="{DynamicResource Brush.Text.Secondary}" FontSize="10"/>
+                            <TextBlock Text=" · " Foreground="{DynamicResource Brush.Text.Tertiary}" FontSize="10"/>
+                            <TextBlock Text="{Binding CreatedAt, StringFormat=yyyy-MM-dd}" Foreground="{DynamicResource Brush.Text.Tertiary}" FontSize="10"/>
                         </StackPanel>
                     </StackPanel>
                 </Grid>
@@ -547,8 +541,8 @@
                         </Grid>
                     </Border>
                     <StackPanel Grid.Row="1" Margin="12,4,12,8" VerticalAlignment="Top">
-                        <TextBlock Text="{Binding Name}" Foreground="{StaticResource T1}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                        <TextBlock Text="{Binding CreatedAt, StringFormat=yyyy-MM-dd}" Foreground="{StaticResource T3}" FontSize="10" Margin="0,2,0,0"/>
+                        <TextBlock Text="{Binding Name}" Foreground="{DynamicResource Brush.Text.Primary}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Text="{Binding CreatedAt, StringFormat=yyyy-MM-dd}" Foreground="{DynamicResource Brush.Text.Tertiary}" FontSize="10" Margin="0,2,0,0"/>
                     </StackPanel>
                 </Grid>
             </Border>
@@ -652,8 +646,8 @@
                         </Grid>
                     </Border>
                     <StackPanel Grid.Row="1" Margin="12,4,12,8" VerticalAlignment="Top">
-                        <TextBlock Text="{Binding Name}" Foreground="{StaticResource T1}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                        <TextBlock Text="{Binding CreatedAt, StringFormat=yyyy-MM-dd}" Foreground="{StaticResource T3}" FontSize="10" Margin="0,2,0,0"/>
+                        <TextBlock Text="{Binding Name}" Foreground="{DynamicResource Brush.Text.Primary}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Text="{Binding CreatedAt, StringFormat=yyyy-MM-dd}" Foreground="{DynamicResource Brush.Text.Tertiary}" FontSize="10" Margin="0,2,0,0"/>
                     </StackPanel>
                 </Grid>
             </Border>
@@ -763,8 +757,8 @@
                         </Grid>
                     </Border>
                     <StackPanel Grid.Row="1" Margin="12,4,12,8" VerticalAlignment="Top">
-                        <TextBlock Text="{Binding Name}" Foreground="{StaticResource T1}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                        <TextBlock Text="{Binding CreatedAt, StringFormat=yyyy-MM-dd}" Foreground="{StaticResource T3}" FontSize="10" Margin="0,2,0,0"/>
+                        <TextBlock Text="{Binding Name}" Foreground="{DynamicResource Brush.Text.Primary}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Text="{Binding CreatedAt, StringFormat=yyyy-MM-dd}" Foreground="{DynamicResource Brush.Text.Tertiary}" FontSize="10" Margin="0,2,0,0"/>
                     </StackPanel>
                 </Grid>
             </Border>
@@ -875,8 +869,8 @@
                         </Grid>
                     </Border>
                     <StackPanel Grid.Row="1" Margin="12,4,12,8" VerticalAlignment="Top">
-                        <TextBlock Text="{Binding Name}" Foreground="{StaticResource T1}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                        <TextBlock Text="{Binding CreatedAt, StringFormat=yyyy-MM-dd}" Foreground="{StaticResource T3}" FontSize="10" Margin="0,2,0,0"/>
+                        <TextBlock Text="{Binding Name}" Foreground="{DynamicResource Brush.Text.Primary}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Text="{Binding CreatedAt, StringFormat=yyyy-MM-dd}" Foreground="{DynamicResource Brush.Text.Tertiary}" FontSize="10" Margin="0,2,0,0"/>
                     </StackPanel>
                 </Grid>
             </Border>
@@ -892,7 +886,7 @@
                 PanelTemplate="{StaticResource PanelCardTemplate}"/>
     </Window.Resources>
 
-    <Border Background="{StaticResource Bg}" CornerRadius="12" BorderBrush="#15FFFFFF" BorderThickness="1">
+    <Border Background="{DynamicResource Brush.Bg.Chrome}" CornerRadius="12" BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1">
         <Border.Effect>
             <DropShadowEffect BlurRadius="24" ShadowDepth="0" Color="#AA000000" Opacity="0.6"/>
         </Border.Effect>
@@ -905,13 +899,13 @@
 
             <TextBlock x:Name="DialogTitle" Text="{loc:Loc Key=Preset.LoadButton}"
                        FontSize="16" FontWeight="SemiBold"
-                       Foreground="{StaticResource T1}" Margin="0,2,0,12"/>
+                       Foreground="{DynamicResource Brush.Text.Primary}" Margin="0,2,0,12"/>
 
             <Grid Grid.Row="1">
                 <StackPanel x:Name="EmptyHint" VerticalAlignment="Center" HorizontalAlignment="Center" Visibility="Collapsed">
-                    <TextBlock Text="ℹ" FontSize="32" Foreground="{StaticResource T3}" HorizontalAlignment="Center"/>
+                    <TextBlock Text="ℹ" FontSize="32" Foreground="{DynamicResource Brush.Text.Tertiary}" HorizontalAlignment="Center"/>
                     <TextBlock x:Name="EmptyHintText" Text="{loc:Loc Key=Preset.Empty}"
-                               Foreground="{StaticResource T2}" FontSize="14"
+                               Foreground="{DynamicResource Brush.Text.Secondary}" FontSize="14"
                                Margin="0,8,0,0" HorizontalAlignment="Center"/>
                 </StackPanel>
 
@@ -934,8 +928,8 @@
 
             <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
                 <Button x:Name="CancelButton" Content="{loc:Loc Key=Preset.Cancel}"
-                        Background="#15FFFFFF" Foreground="{StaticResource T2}"
-                        BorderBrush="{StaticResource IBd}" BorderThickness="1"
+                        Background="{DynamicResource Brush.Bg.Surface}" Foreground="{DynamicResource Brush.Text.Secondary}"
+                        BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1"
                         Padding="20,8" Cursor="Hand" FontSize="12"
                         Click="CancelButton_Click">
                     <Button.Resources>
@@ -945,7 +939,7 @@
                     </Button.Resources>
                 </Button>
                 <Button x:Name="ApplyButton" Content="{loc:Loc Key=Preset.Apply}"
-                        Background="{StaticResource Acc}" Foreground="White"
+                        Background="{DynamicResource Brush.Accent.Solid}" Foreground="{DynamicResource Brush.Accent.On}"
                         BorderThickness="0" Padding="20,8" Margin="8,0,0,0"
                         Cursor="Hand" FontSize="12" FontWeight="SemiBold"
                         IsDefault="True" IsEnabled="False"
@@ -955,6 +949,18 @@
                             <Setter Property="CornerRadius" Value="6"/>
                         </Style>
                     </Button.Resources>
+                    <Button.Style>
+                      <!-- ponytail 2026-08-25: 镂空 + 禁用态淡化 -->
+                      <Style TargetType="Button">
+                        <Style.Triggers>
+                          <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Background" Value="{DynamicResource Brush.Accent.Solid.Disabled}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.Accent.On.Disabled}"/>
+                            <Setter Property="Cursor" Value="Arrow"/>
+                          </Trigger>
+                        </Style.Triggers>
+                      </Style>
+                    </Button.Style>
                 </Button>
             </StackPanel>
         </Grid>

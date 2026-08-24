@@ -16,8 +16,10 @@ public class PanelPresetConfig
     public string PanelFillColor { get; set; } = "#08000000";
     public string PanelBorderColor { get; set; } = "#40FFFFFF";
     public double PanelBorderThickness { get; set; } = 1.5;
+    public int PanelCornerRadius { get; set; } = 10;
     public bool PanelTextColorAdaptive { get; set; } = true;
     public bool PanelTitleBarTextColorAdaptive { get; set; } = true;
+    public bool PanelTitleBarFillIndependent { get; set; } = false;
     public double PanelControlOpacity { get; set; } = 40;
     public string PanelBackgroundImagePath { get; set; } = "";
     public string PanelBgImageStretch { get; set; } = "UniformToFill";
@@ -48,8 +50,10 @@ public class PanelPresetConfig
         PanelFillColor = PanelFillColor,
         PanelBorderColor = PanelBorderColor,
         PanelBorderThickness = PanelBorderThickness,
+        PanelCornerRadius = PanelCornerRadius,
         PanelTextColorAdaptive = PanelTextColorAdaptive,
         PanelTitleBarTextColorAdaptive = PanelTitleBarTextColorAdaptive,
+        PanelTitleBarFillIndependent = PanelTitleBarFillIndependent,
         PanelControlOpacity = PanelControlOpacity,
         PanelBackgroundImagePath = PanelBackgroundImagePath,
         PanelBgImageStretch = PanelBgImageStretch,
@@ -77,8 +81,10 @@ public class PanelPresetConfig
         PanelFillColor = cfg.Panel.PanelFillColor,
         PanelBorderColor = cfg.Panel.PanelBorderColor,
         PanelBorderThickness = cfg.Panel.PanelBorderThickness,
+        PanelCornerRadius = cfg.Panel.PanelCornerRadius,
         PanelTextColorAdaptive = cfg.Panel.PanelTextColorAdaptive,
         PanelTitleBarTextColorAdaptive = cfg.Panel.PanelTitleBarTextColorAdaptive,
+        PanelTitleBarFillIndependent = cfg.Panel.PanelTitleBarFillIndependent,
         PanelControlOpacity = cfg.Panel.PanelControlOpacity,
         PanelBackgroundImagePath = cfg.Panel.PanelBackgroundImagePath,
         PanelBgImageStretch = cfg.Panel.PanelBgImageStretch,
@@ -106,8 +112,10 @@ public class PanelPresetConfig
         cfg.Panel.PanelFillColor = PanelFillColor;
         cfg.Panel.PanelBorderColor = PanelBorderColor;
         cfg.Panel.PanelBorderThickness = PanelBorderThickness;
+        cfg.Panel.PanelCornerRadius = PanelCornerRadius;
         cfg.Panel.PanelTextColorAdaptive = PanelTextColorAdaptive;
         cfg.Panel.PanelTitleBarTextColorAdaptive = PanelTitleBarTextColorAdaptive;
+        cfg.Panel.PanelTitleBarFillIndependent = PanelTitleBarFillIndependent;
         cfg.Panel.PanelControlOpacity = PanelControlOpacity;
         cfg.Panel.PanelBackgroundImagePath = PanelBackgroundImagePath;
         cfg.Panel.PanelBgImageStretch = PanelBgImageStretch;

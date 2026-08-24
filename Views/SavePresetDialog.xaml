@@ -83,6 +83,18 @@
                             <Setter Property="CornerRadius" Value="6"/>
                         </Style>
                     </Button.Resources>
+                    <Button.Style>
+                      <!-- ponytail 2026-08-25: 镂空 + 禁用态淡化 -->
+                      <Style TargetType="Button">
+                        <Style.Triggers>
+                          <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Background" Value="{DynamicResource Brush.Accent.Solid.Disabled}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.Accent.On.Disabled}"/>
+                            <Setter Property="Cursor" Value="Arrow"/>
+                          </Trigger>
+                        </Style.Triggers>
+                      </Style>
+                    </Button.Style>
                 </Button>
                 </StackPanel>
             </Grid>

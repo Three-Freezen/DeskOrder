@@ -131,6 +131,7 @@
                                                FontSize="11" Foreground="#606080"
                                                VerticalAlignment="Center"/>
                                     <TextBox x:Name="SearchBox" FontSize="11"
+                                             AllowDrop="False"
                                              Foreground="#E8E8F0" Background="Transparent"
                                              BorderThickness="0" CaretBrush="#E8E8F0"
                                              VerticalAlignment="Center"

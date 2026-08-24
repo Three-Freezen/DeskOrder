@@ -17,7 +17,7 @@ public class Zone : AppearanceModel
     public int CornerRadius { get; set; } = 8;
     public bool IsVisible { get; set; } = true;
     public bool IsLocked { get; set; } = false;
-    public int GridSize { get; set; } = 80;
+    public int GridSize { get; set; } = 56;
     public bool SnapToGrid { get; set; } = true;
     public string IconChar { get; set; } = "";
     public string TitleBarFillColor { get; set; } = "#10FFFFFF"; // title bar background
@@ -50,6 +50,8 @@ public class Zone : AppearanceModel
     // ── Title bar text color adaptive ──
     /// <summary>Auto-pick zone title bar text color based on <see cref="TitleBarFillColor"/>.</summary>
     public bool TitleBarTextColorAdaptive { get; set; } = true;
+    /// <summary>标题栏填充单独设置 — 勾选后主体填充(FillColor)不再铺到标题栏下方。</summary>
+    public bool TitleBarFillIndependent { get; set; } = false;
 
     // Display state — not persisted
     [JsonIgnore]
@@ -79,10 +81,12 @@ public class Zone : AppearanceModel
             IconColor = IconColor,
             TitleTextColor = TitleTextColor,
             QuickBarMode = QuickBarMode,
+            TitleBarFillIndependent = TitleBarFillIndependent,
             MergedGroupMembership = new MergedGroupMembership
             {
                 GroupId = MergedGroupMembership.GroupId,
                 SubZoneIds = new List<Guid>(MergedGroupMembership.SubZoneIds),
+                TabOrder = new List<Guid>(MergedGroupMembership.TabOrder),
                 DisplayName = MergedGroupMembership.DisplayName,
                 Icon = MergedGroupMembership.Icon,
             },
@@ -100,6 +104,7 @@ public class Zone : AppearanceModel
                 UseUnifiedFill = MergedGroupStyle.UseUnifiedFill,
                 QuickBarMode = MergedGroupStyle.QuickBarMode,
                 TitleBarTextColorAdaptive = MergedGroupStyle.TitleBarTextColorAdaptive,
+                TitleBarFillIndependent = MergedGroupStyle.TitleBarFillIndependent,
                 BackgroundImagePath = MergedGroupStyle.BackgroundImagePath,
                 BgImageStretch = MergedGroupStyle.BgImageStretch,
                 BgImageOffsetX = MergedGroupStyle.BgImageOffsetX,

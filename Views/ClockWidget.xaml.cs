@@ -29,6 +29,7 @@ public partial class ClockWidget : Window
     private readonly DispatcherTimer _timer;
     private readonly LocalizationService _loc = LocalizationService.Instance;
     private HoverExpandBehavior? _hover;
+    private SnapDrag? _snapDrag;
 
     private bool _restoreDragging;
     private Point _restoreDown;
@@ -97,6 +98,9 @@ public partial class ClockWidget : Window
         // early-returns. Mirror the existing "if !IsVisible ApplyHidden()" symmetry
         // by snapping expanded when visible at construction.
         if (_clock.IsVisible) _hover.SnapToExpanded();
+
+        // ponytail: 自适应对齐 — 替换 DragMove 的手动拖拽循环。
+        _snapDrag = new SnapDrag(this);
     }
     private Action<string>? _langChanged;
 
@@ -150,7 +154,7 @@ public partial class ClockWidget : Window
         ApplyBackgroundImage();
         ApplyDigitalBackgroundImage();
         // Set rounded corners LAST after all sizing is complete
-        NativeMethods.SetRoundedCorners(this, 10);
+        NativeMethods.SetRoundedCorners(this, _clock.CornerRadius);
         ApplyLockState();
         if (!_clock.IsVisible) ApplyHidden();
     }
@@ -160,7 +164,7 @@ public partial class ClockWidget : Window
     {
         if (MainContent.Visibility != Visibility.Visible) return;
         _clock.Width = Width; _clock.Height = Height;
-        NativeMethods.UpdateRoundedCorners(this, 10);
+        NativeMethods.UpdateRoundedCorners(this, _clock.CornerRadius);
     }
 
     // ── Background image (analog clock face) ──
@@ -521,6 +525,15 @@ public partial class ClockWidget : Window
         ClockBorder.InvalidateMeasure();
         ClockBorder.InvalidateVisual();
 
+        // ponytail 2026-08-26: 圆角/尖角 switch — drive every corner-bearing
+        // element + the OS DWM preference from the resolved radius (0 = sharp).
+        int r = _clock.CornerRadius;
+        MainContent.CornerRadius = new CornerRadius(r);
+        ClockBorder.CornerRadius = new CornerRadius(r);
+        FillRect.RadiusX = FillRect.RadiusY = r;
+        if (System.Windows.PresentationSource.FromVisual(this) != null)
+            NativeMethods.SetRoundedCorners(this, r);
+
         ApplyQuickBar();
     }
 
@@ -616,7 +629,11 @@ public partial class ClockWidget : Window
                 src = VisualTreeHelper.GetParent(src);
             }
         }
-        try { DragMove(); if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this); } catch { }
+        _snapDrag?.Start(e, () =>
+        {
+            if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
+            _clock.X = Left; _clock.Y = Top;
+        });
     }
 
     static IEnumerable<Border> FindResizeGrips(DependencyObject parent)
@@ -648,7 +665,11 @@ public partial class ClockWidget : Window
     void Window_Drag(object s, MouseButtonEventArgs e)
     {
         if (_vm?.IsLocked == true) return;
-        try { DragMove(); if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this); } catch { }
+        _snapDrag?.Start(e, () =>
+        {
+            if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
+            _clock.X = Left; _clock.Y = Top;
+        });
     }
 
     void Window_PreviewMouseLeftButtonDown(object s, MouseButtonEventArgs e)
@@ -665,7 +686,11 @@ public partial class ClockWidget : Window
         if (RestoreButton.Visibility == Visibility.Visible) return;
         if (_vm?.IsLocked == true) return;
         // ponytail: OS routes click normally now (drill-through removed).
-        try { DragMove(); } catch { }
+        _snapDrag?.Start(e, () =>
+        {
+            if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
+            _clock.X = Left; _clock.Y = Top;
+        });
     }
 
     void Window_PreviewMouseRightButtonDown(object s, MouseButtonEventArgs e)
@@ -967,8 +992,11 @@ public partial class ClockWidget : Window
         {
             _restoreDragging = true;
             RestoreButton.ReleaseMouseCapture();
-            try { DragMove(); } catch { }
-            _clock.X = Left; _clock.Y = Top;
+            _snapDrag?.Start(e, () =>
+            {
+                if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
+                _clock.X = Left; _clock.Y = Top;
+            });
         }
     }
 
@@ -999,6 +1027,7 @@ public partial class ClockWidget : Window
         _langChanged = null;
         _widgetService.LockChanged -= OnServiceLockChanged;
         _clock.HoverExpandSettingsChanged -= OnHoverExpandSettingsChanged;
+        _snapDrag?.Detach();
         _hover?.Dispose();
         base.OnClosed(e);
     }

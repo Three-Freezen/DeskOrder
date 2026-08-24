@@ -4,6 +4,8 @@ using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
+using DesktopZones.Helpers;
+using DesktopZones.Services;
 
 namespace DesktopZones.Views.Components;
 
@@ -35,6 +37,8 @@ public class HexToBrushConverter : IValueConverter
 /// </summary>
 public partial class ColorSwatchButton : UserControl
 {
+    readonly LocalizationService _loc = LocalizationService.Instance;
+
     public static readonly DependencyProperty CurrentColorProperty = DependencyProperty.Register(
         nameof(CurrentColor), typeof(string), typeof(ColorSwatchButton),
         new FrameworkPropertyMetadata("#00000000", FrameworkPropertyMetadataOptions.BindsTwoWayByDefault));
@@ -64,14 +68,25 @@ public partial class ColorSwatchButton : UserControl
         foreach (var hex in Presets)
         {
             Brush brush;
-            try
+            bool isTransparent = false;
+            if (hex == "Transparent")
             {
-                var color = (Color)ColorConverter.ConvertFromString(hex);
-                brush = new SolidColorBrush(color);
-            }
-            catch
-            {
+                // ponytail 2026-08-25: 透明预设就是 Brushes.Transparent —
+                // 直接显示下层 popup 背景（Brush.Bg.Surface），周围 Border 仍然区分得出格子边界。
+                isTransparent = true;
                 brush = Brushes.Transparent;
+            }
+            else
+            {
+                try
+                {
+                    var color = (Color)ColorConverter.ConvertFromString(hex);
+                    brush = new SolidColorBrush(color);
+                }
+                catch
+                {
+                    brush = Brushes.Transparent;
+                }
             }
 
             var btn = new Button
@@ -88,6 +103,9 @@ public partial class ColorSwatchButton : UserControl
             {
                 Setters = { new Setter(Border.CornerRadiusProperty, new CornerRadius(3)) },
             });
+            // ponytail 2026-08-25: 透明预设鼠标悬浮显示「透明」提示，避免用户以为是空格/不可点。
+            if (isTransparent)
+                ToolTipService.SetToolTip(btn, _loc["Common.Transparent"]);
             var captured = hex;
             btn.Click += (_, _) =>
             {

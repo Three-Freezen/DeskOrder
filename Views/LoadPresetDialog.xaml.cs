@@ -335,9 +335,30 @@ public partial class LoadPresetDialog : Window, INotifyPropertyChanged
 
     private static void SetCardSelectedStyle(Border card, bool selected)
     {
-        card.BorderBrush = new SolidColorBrush(
-            (Color)ColorConverter.ConvertFromString(selected ? "#FF7C3AED" : "#15787878")!);
-        card.BorderThickness = new Thickness(selected ? 2 : 1);
+        // ponytail: matches EditableListRow.IsSelected — accent border + DropShadowEffect
+        // outer glow, no Storyboard (animated feel lives on the management list row;
+        // preset card selection is instant). Color comes from app theme so dark/light/
+        // high-contrast all keep their accent.
+        if (selected)
+        {
+            card.BorderBrush = new SolidColorBrush(
+                (Color)Application.Current.Resources["Color.Accent"]);
+            card.BorderThickness = new Thickness(3);
+            card.Effect = new System.Windows.Media.Effects.DropShadowEffect
+            {
+                Color = (Color)Application.Current.Resources["Color.Accent"],
+                BlurRadius = 12,
+                ShadowDepth = 0,
+                Opacity = 0.55,
+            };
+        }
+        else
+        {
+            card.BorderBrush = new SolidColorBrush(
+                (Color)ColorConverter.ConvertFromString("#15787878")!);
+            card.BorderThickness = new Thickness(1);
+            card.Effect = null;
+        }
     }
 
     // ── Buttons ──

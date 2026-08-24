@@ -15,10 +15,15 @@
   <Color x:Key="Color.Text.Disabled">#565656</Color>
   <Color x:Key="Color.Accent">#2E97F0</Color>
   <Color x:Key="Color.Accent.Wash">#242E97F0</Color>
-  <Color x:Key="Color.Accent.Solid">#2E97F0</Color>
-  <Color x:Key="Color.Accent.Solid.Hover">#4AA6F4</Color>
-  <Color x:Key="Color.Accent.Solid.Press">#1B7FD4</Color>
-  <Color x:Key="Color.Accent.On">#08243A</Color>
+  <!-- ponytail 2026-08-25: 镂空算法静态值（避免运行时 brush dict 替换导致 ApplyBtn 镂空丢失）。
+       Solid = mix(#2E97F0, black, 20%) = #256FC8; On = mix(#2E97F0, #1C1C1C, 50%) = #255A86.
+       Theme.Brushes.xaml 里 Brush.Accent.Solid = {DynamicResource Color.Accent.Solid} 会自动跟随。-->
+  <Color x:Key="Color.Accent.Solid">#256FC8</Color>
+  <Color x:Key="Color.Accent.Solid.Hover">#1F5DAB</Color>
+  <Color x:Key="Color.Accent.Solid.Press">#2E83D5</Color>
+  <Color x:Key="Color.Accent.Solid.Disabled">#99256FC8</Color>
+  <Color x:Key="Color.Accent.On">#255A86</Color>
+  <Color x:Key="Color.Accent.On.Disabled">#55256FC8</Color>
   <Color x:Key="Color.Accent.2">#14BFD4</Color>
   <Color x:Key="Color.Success">#5BC46E</Color>
   <Color x:Key="Color.Warning">#FFB020</Color>

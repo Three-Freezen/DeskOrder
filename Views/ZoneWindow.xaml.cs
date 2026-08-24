@@ -1,10 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Interop;
 using DesktopZones.Helpers;
@@ -22,6 +24,12 @@ public partial class ZoneWindow : Window
     [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
     const uint WM_NCLBUTTONDOWN = 0x00A1;
     const int HTTOPLEFT = 13, HTTOPRIGHT = 14, HTBOTTOMLEFT = 16, HTBOTTOMRIGHT = 17;
+
+    // Sub-zone tab drag (browser-like, mirrors PropertyTabStrip's Win32 polling loop)
+    [DllImport("user32.dll")] static extern bool GetCursorPos(out Win32Point lpPoint);
+    [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vKey);
+    [StructLayout(LayoutKind.Sequential)] struct Win32Point { public int X; public int Y; }
+    const int VK_LBUTTON = 0x01;
 
     private Zone _zone;
     private readonly ZoneManager _mgr;
@@ -45,13 +53,37 @@ public partial class ZoneWindow : Window
     private Canvas? _itemCanvas;
     private Action<string>? _langChanged;
 
-    private bool _dragging, _fileOver;
+    private bool _dragging;
     private Point _ds, _is;
     private ZoneItemViewModel? _dv;
     private FrameworkElement? _de;
+    private System.Windows.Shapes.Rectangle? _dropIndicator;
+    private const double BarThickness = 3, BarLength = 56;
+    // The item footprint is one grid cell (square); the icon is centered inside it.
+    double ItemW => _zone.GridSize;
+    double ItemH => _zone.GridSize;
     private readonly System.Windows.Threading.DispatcherTimer _saveDebounce = new() { Interval = TimeSpan.FromMilliseconds(500) };
     private bool _savePending;
+    private readonly System.Windows.Threading.DispatcherTimer _recycleTimer = new() { Interval = TimeSpan.FromSeconds(2.5) };
+    private bool _recycleStateInit;
+    private bool _recycleFullLast;
     private HoverExpandBehavior? _hover;
+    private SnapDrag? _snapDrag;
+
+    // ── Title-bar drag-to-merge ──
+    private ZoneWindow? _mergeTarget;
+    private bool _titleDragMoved;
+
+    // ── Sub-zone tab drag (reorder + drag-out detach) ──
+    private Border? _dragTab;
+    private Guid _dragTabZoneId;
+    private Point _dragTabOrigin;
+    private int _dragTabFromIndex = -1;
+    private int _dragTabInsertIndex = -1;
+    private bool _dragTabArmed, _dragTabCompleted, _isDragTabOut;
+    private double _dragTabGrabOffset;
+    private System.Windows.Threading.DispatcherTimer? _tabDragTimer;
+    private readonly Dictionary<FrameworkElement, double> _pendingTabSlide = new();
     // ponytail: extracted from inline lambdas so OnClosed can unsubscribe with the same
     // delegate reference. WPF event -= requires reference equality; lambdas can't be
     // removed once added.
@@ -78,6 +110,8 @@ public partial class ZoneWindow : Window
         LocationChanged += (_, _) => { _zone.X = Left; _zone.Y = Top; ScheduleSave(); };
         SizeChanged += OnSize;
         _saveDebounce.Tick += (_, _) => { _saveDebounce.Stop(); if (_savePending) { _savePending = false; _mgr.SaveConfig(); } };
+        _recycleTimer.Tick += RecycleTimer_Tick;
+        _recycleTimer.Start();
         _langChanged = _ => ApplyLoc();
         _loc.LanguageChanged += _langChanged;
         _mgr.ZonesChanged += OnZonesChanged;
@@ -126,6 +160,9 @@ public partial class ZoneWindow : Window
         // `if (!_zone.IsVisible) ApplyHidden()` symmetry: if visible at construction,
         // snap the hover-expand state to expanded so the first Hide actually fires.
         if (_zone.IsVisible) _hover.SnapToExpanded();
+
+        // ponytail: 自适应对齐 — 替换 DragMove 的手动拖拽循环。
+        _snapDrag = new SnapDrag(this);
     }
 
     void OnHoverExpandSettingsChanged()
@@ -144,6 +181,8 @@ public partial class ZoneWindow : Window
         CtxImportFolder.Header = cn ? "导入文件夹..." : "Import Folder...";
         CtxImportFiles.Header = cn ? "导入文件..." : "Import Files...";
         CtxImportFolder2.Header = cn ? "导入文件夹..." : "Import Folder...";
+        CtxImportShell.Header = _loc["Zone.ImportShellItems"];
+        CtxImportShell2.Header = _loc["Zone.ImportShellItems"];
         CtxNew.Header = _loc["Zone.New"];
         CtxNew2.Header = _loc["Zone.New"];
         CtxNewFolder.Header = cn ? "新建文件夹... / New Folder..." : "New Folder...";
@@ -186,13 +225,98 @@ public partial class ZoneWindow : Window
     { if (m == NativeMethods.WM_DROPFILES) { DoDrop(w); hd = true; } return IntPtr.Zero; }
 
     void DoDrop(IntPtr drop)
-    { try { uint n = NativeMethods.DragQueryFile(drop, 0xFFFFFFFF, null, 0); var (sx, sy) = FindFreeSpot(); for (uint i = 0; i < n; i++) { var sb = new System.Text.StringBuilder(260); NativeMethods.DragQueryFile(drop, i, sb, 260); if (!string.IsNullOrEmpty(sb.ToString())) { Add(sb.ToString(), sx, sy); sx += 80; if (sx > _zone.Width - 80) { sx = 10; sy += 90; } } } UpdateCanvasSize(); } finally { NativeMethods.DragFinish(drop); } }
+    { try { uint n = NativeMethods.DragQueryFile(drop, 0xFFFFFFFF, null, 0); for (uint i = 0; i < n; i++) { var sb = new System.Text.StringBuilder(260); NativeMethods.DragQueryFile(drop, i, sb, 260); if (!string.IsNullOrEmpty(sb.ToString())) { var (sx, sy) = FindFreeSpot(); Add(sb.ToString(), sx, sy); } } UpdateCanvasSize(); } finally { NativeMethods.DragFinish(drop); } }
 
     void Add(string path, double x, double y)
-    { var t = Dir(path) ? ItemType.Folder : Path.GetExtension(path).ToLowerInvariant() switch { ".lnk" => ItemType.Shortcut, ".exe" => ItemType.Application, _ => ItemType.Shortcut }; var nm = Path.GetFileNameWithoutExtension(path); var cx = Math.Max(0, Math.Min(Snap(x), Math.Max(0, _zone.Width - 72))); var cy = Math.Max(0, Math.Min(Snap(y - 40), Math.Max(0, _zone.Height - 88))); _vm.AddItem(new ZoneItem(nm, path, t, cx, cy)); }
+    { var t = Dir(path) ? ItemType.Folder : Path.GetExtension(path).ToLowerInvariant() switch { ".lnk" => ItemType.Shortcut, ".exe" => ItemType.Application, _ => ItemType.Shortcut }; AddItem(new ZoneItem(Path.GetFileNameWithoutExtension(path), path, t, 0, 0), x, y); }
+
+    /// <summary>
+    /// Clamp import coordinates to the zone without grid-snapping: import flows place
+    /// items on a fixed 80×90 cell grid, so snapping to the zone grid could collapse
+    /// two cells onto one grid point (overlapping icons) whenever GridSize differs
+    /// from the cell size. Y is stored as the item's real top-left (same convention as
+    /// manual drag) so collision detection below sees the true bounds.
+    /// </summary>
+    void AddItem(ZoneItem item, double x, double y)
+    {
+        item.X = Math.Max(0, Math.Min(x, Math.Max(0, _zone.Width - ItemW)));
+        item.Y = Math.Max(0, Math.Min(y, Math.Max(0, _zone.Height - ItemH)));
+        _vm.AddItem(item);
+    }
+
     static bool Dir(string p) => Directory.Exists(p);
     double Clamp(double v, double max) => Math.Max(0, Math.Min(Snap(v), max));
     double Snap(double v) => _zone.SnapToGrid ? ZoneViewModel.SnapToGrid(v, _zone.GridSize) : v;
+
+    // ── Virtual shell objects (Recycle Bin, This PC, ...) ──
+
+    void ImportShellItems_Click(object s, RoutedEventArgs e)
+    {
+        var dlg = new ShellLocationPickerWindow { Owner = this };
+        if (dlg.ShowDialog() == true && dlg.SelectedItems.Count > 0)
+            AddShellItems(dlg.SelectedItems);
+    }
+
+    void AddShellItems(IEnumerable<(string Name, string Spec)> items)
+    {
+        foreach (var (name, spec) in items)
+        {
+            var (sx, sy) = FindFreeSpot();
+            AddItem(new ZoneItem(name, spec, ItemType.ShellLocation, 0, 0), sx, sy);
+        }
+        UpdateCanvasSize();
+    }
+
+    // ── External file drops (WPF AllowDrop — shows "not allowed" for non-file drags) ──
+
+    void Window_DragEnter(object s, DragEventArgs e)
+    {
+        if (e.Data.GetDataPresent(DataFormats.FileDrop)) { e.Effects = DragDropEffects.Copy; e.Handled = true; }
+    }
+
+    void Window_DragOver(object s, DragEventArgs e)
+    {
+        if (e.Data.GetDataPresent(DataFormats.FileDrop)) { e.Effects = DragDropEffects.Copy; e.Handled = true; }
+    }
+
+    void Window_Drop(object s, DragEventArgs e)
+    {
+        if (e.Data.GetData(DataFormats.FileDrop) is not string[] { Length: > 0 } files) return;
+        foreach (var f in files)
+        {
+            var (sx, sy) = FindFreeSpot();
+            Add(f, sx, sy);
+        }
+        UpdateCanvasSize();
+        e.Handled = true;
+    }
+
+    // ── Recycle Bin icon state (empty ⇄ full) ──
+
+    void RecycleTimer_Tick(object? s, EventArgs e)
+    {
+        try
+        {
+            bool hasRecycle = false;
+            foreach (var item in _vm.Items)
+            {
+                if (item.Type == ItemType.ShellLocation && ShellIconService.IsRecycleBin(item.TargetPath))
+                { hasRecycle = true; break; }
+            }
+            if (!hasRecycle) { _recycleStateInit = false; return; }
+
+            bool full = ShellIconService.RecycleBinHasItems();
+            if (_recycleStateInit && full == _recycleFullLast) return;
+            _recycleStateInit = true;
+            _recycleFullLast = full;
+            foreach (var item in _vm.Items)
+            {
+                if (item.Type == ItemType.ShellLocation && ShellIconService.IsRecycleBin(item.TargetPath))
+                    item.RefreshIcon();
+            }
+        }
+        catch { }
+    }
 
     // ── Show / Hide ──
 
@@ -333,9 +457,17 @@ public partial class ZoneWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _saveDebounce?.Stop();
+        _recycleTimer.Stop();
         _vm.Items.CollectionChanged -= _vmItemsChangedHandler;
         ItemsHost.ItemContainerGenerator.StatusChanged -= _itemsHostStatusChangedHandler;
         _zone.HoverExpandSettingsChanged -= OnHoverExpandSettingsChanged;
+        if (_tabDragTimer != null)
+        {
+            _tabDragTimer.Stop();
+            _tabDragTimer.Tick -= OnTabDragTick;
+            _tabDragTimer = null;
+        }
+        _snapDrag?.Detach();
         _hover?.Dispose();
         var h = new WindowInteropHelper(this).Handle;
         _mgr.ZonesChanged -= OnZonesChanged;
@@ -366,7 +498,81 @@ public partial class ZoneWindow : Window
     {
         var vm = DataContext as ZoneViewModel;
         if (vm?.IsLocked == true) return;
-        try { ControlPoint.Opacity = 0.6; DragMove(); ControlPoint.Opacity = 0.4; if (vm?.IsLocked != true) NativeMethods.PinToDesktop(this); } catch { }
+        if (_snapDrag == null || _snapDrag.IsActive) return;
+
+        var restOpacity = ControlPoint.Opacity;
+        ControlPoint.Opacity = 0.6;
+        _mergeTarget = null;
+        _titleDragMoved = false;
+        _snapDrag.DragMoved += OnTitleBarDragMoved;
+        _snapDrag.Start(e, () => OnTitleBarDragCompleted(restOpacity, vm));
+    }
+
+    void OnTitleBarDragMoved(Point screenPos)
+    {
+        _titleDragMoved = true;
+        var target = ZoneMergeRouter.FindTitleBarTarget(this, screenPos);
+        if (ReferenceEquals(target, _mergeTarget)) return;
+        _mergeTarget?.SetMergeHover(false);
+        _mergeTarget = target;
+        _mergeTarget?.SetMergeHover(true);
+        // Ghost the dragged window while over a valid target so the target's title bar
+        // (and its enlarge animation) stays visible underneath.
+        Opacity = target != null ? 0.55 : 1.0;
+    }
+
+    void OnTitleBarDragCompleted(double restOpacity, ZoneViewModel? vm)
+    {
+        _snapDrag!.DragMoved -= OnTitleBarDragMoved;
+        var wasClick = !_titleDragMoved;
+        _titleDragMoved = false;
+        var target = _mergeTarget;
+        _mergeTarget = null;
+        if (target != null) target.SetMergeHover(false);
+        ControlPoint.Opacity = restOpacity;
+        Opacity = 1.0;
+
+        // Dropped on another zone's title bar → create/extend a merged group.
+        if (target != null)
+        {
+            _mgr.MergeZoneInto(target.ZoneId, _zone.Id);
+            return;
+        }
+
+        // Click (no drag) on a merged master's title bar → switch back to the master view.
+        if (wasClick && _zone.MergedGroupMembership.SubZoneIds.Count > 0)
+        {
+            SelectSubZone(_zone.Id);
+            return;
+        }
+
+        if (vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
+        _zone.X = Left; _zone.Y = Top;
+        _mgr.SaveConfig();
+    }
+
+    // ── Merge drop-target surface ──
+
+    public Guid ZoneId => _zone.Id;
+
+    public bool CanAcceptMerge =>
+        IsVisible && MainContent.Visibility == Visibility.Visible && !_zone.IsLocked;
+
+    public Rect TitleBarHitRect()
+    {
+        if (TitleBarBg.Visibility != Visibility.Visible || TitleBarBg.ActualWidth <= 0 || TitleBarBg.ActualHeight <= 0)
+            return Rect.Empty;
+        var topLeft = TitleBarBg.TransformToAncestor(this).Transform(new Point(0, 0));
+        return new Rect(topLeft, new Size(TitleBarBg.ActualWidth, TitleBarBg.ActualHeight));
+    }
+
+    public void SetMergeHover(bool on)
+    {
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+        TitleBarScale.BeginAnimation(ScaleTransform.ScaleXProperty,
+            new DoubleAnimation(on ? 1.06 : 1.0, TimeSpan.FromMilliseconds(140)) { EasingFunction = ease });
+        TitleBarScale.BeginAnimation(ScaleTransform.ScaleYProperty,
+            new DoubleAnimation(on ? 1.24 : 1.0, TimeSpan.FromMilliseconds(140)) { EasingFunction = ease });
     }
 
     // ── Window-level mouse: resize grips only ──
@@ -432,23 +638,11 @@ public partial class ZoneWindow : Window
 
     void ImportArranged(string[] paths)
     {
-        var (sx, sy) = FindFreeSpot();
-        foreach (var f in paths) { Add(f, sx, sy); sx += 80; if (sx > _zone.Width - 80) { sx = 10; sy += 90; } }
+        foreach (var f in paths) { var (sx, sy) = FindFreeSpot(); Add(f, sx, sy); }
         UpdateCanvasSize();
     }
 
-    (double, double) FindFreeSpot()
-    {
-        if (_zone.Items.Count == 0) return (10, 10);
-        int gs = _zone.GridSize;
-        double maxY = 0;
-        foreach (var i in _zone.Items) { if (i.Y > maxY) maxY = i.Y; }
-        double maxX = 0;
-        foreach (var i in _zone.Items) { if (Math.Abs(i.Y - maxY) < 10 && i.X > maxX) maxX = i.X; }
-        double sx = maxX + gs, sy = maxY;
-        if (sx > _zone.Width - gs) { sx = 10; sy = maxY + gs; }
-        return (sx, sy);
-    }
+    (double, double) FindFreeSpot() => ZoneLayout.FindFreeSpot(_vm.GetPlacementItems(), _zone.Width, _zone.Height, _zone.GridSize, _zone.GridSize);
 
     void RearrangeAll()
     {
@@ -603,7 +797,7 @@ public partial class ZoneWindow : Window
         CreateNewFile(".xlsx", "Excel Worksheet|*.xlsx|All Files|*.*");
     }
 
-    // Minimized state drag — uses DragMove() like title bar
+    // Minimized state drag — uses SnapDrag (manual drag loop) like title bar
     private bool _restoreDragging;
     private Point _restoreDown;
 
@@ -623,8 +817,11 @@ public partial class ZoneWindow : Window
         {
             _restoreDragging = true;
             RestoreButton.ReleaseMouseCapture();
-            try { DragMove(); } catch { }
-            _zone.X = Left; _zone.Y = Top; _mgr.SaveConfig();
+            _snapDrag?.Start(e, () =>
+            {
+                if ((DataContext as ZoneViewModel)?.IsLocked != true) NativeMethods.PinToDesktop(this);
+                _zone.X = Left; _zone.Y = Top; _mgr.SaveConfig();
+            });
         }
     }
 
@@ -699,31 +896,277 @@ public partial class ZoneWindow : Window
         // ponytail: pass `this` so the popped-out panel anchors at the zone's
         // position (offset 24,24) instead of jumping to a remembered location —
         // see PropertyWindowManager.ResolvePopPosition.
-        PropertyWindowService.OpenOrFocus(_zone, this);
+        // ponytail 2026-08-26: a merged window's gear opens the standalone
+        // merged-group editor; standalone windows keep the per-zone editor.
+        if (_zone.MergedGroupMembership.SubZoneIds.Count > 0)
+            PropertyWindowService.OpenOrFocus(MergedGroupTarget.For(_zone), this);
+        else
+            PropertyWindowService.OpenOrFocus(_zone, this);
         e.Handled = true;
     }
 
-    // ── File drops (WPF) ──
-
-    void Canvas_DragEnter(object s, DragEventArgs e) { if (e.Data.GetDataPresent(DataFormats.FileDrop)) { _fileOver = true; e.Effects = DragDropEffects.Link; e.Handled = true; } }
-    void Canvas_DragLeave(object s, DragEventArgs e) => _fileOver = false;
-    void Canvas_DragOver(object s, DragEventArgs e) { if (_fileOver) { e.Effects = DragDropEffects.Link; e.Handled = true; } }
-    void Canvas_Drop(object s, DragEventArgs e) { _fileOver = false; if (e.Data.GetData(DataFormats.FileDrop) is not string[] { Length: > 0 } fs) return; var (sx, sy) = FindFreeSpot(); foreach (var f in fs) { Add(f, sx, sy); sx += 80; if (sx > _zone.Width - 80) { sx = 10; sy += 90; } } e.Handled = true; }
-
-    // ── Window-level drag-drop (fallback for transparent windows) ──
-
-    void Window_DragEnter(object s, DragEventArgs e) { if (e.Data.GetDataPresent(DataFormats.FileDrop)) { e.Effects = DragDropEffects.Link; e.Handled = true; } }
-    void Window_DragOver(object s, DragEventArgs e) { if (e.Data.GetDataPresent(DataFormats.FileDrop)) { e.Effects = DragDropEffects.Link; e.Handled = true; } }
-    void Window_Drop(object s, DragEventArgs e) { if (e.Data.GetData(DataFormats.FileDrop) is not string[] { Length: > 0 } fs) return; var (sx, sy) = FindFreeSpot(); foreach (var f in fs) { Add(f, sx, sy); sx += 80; if (sx > _zone.Width - 80) { sx = 10; sy += 90; } } UpdateCanvasSize(); e.Handled = true; }
+    // ── File drops ──
+    // Handled by the WPF AllowDrop handlers above (Window_DragEnter/Over/Drop).
 
     // ── Item drag ──
 
     void Item_MouseDown(object s, MouseButtonEventArgs e)
     { if (e.ClickCount == 2) { if (s is FrameworkElement fe && fe.DataContext is ZoneItemViewModel iv) Open(iv); e.Handled = true; return; } if (s is FrameworkElement el && el.DataContext is ZoneItemViewModel vm) { _dv = vm; _de = el; _ds = e.GetPosition(this); _is = new Point(vm.X, vm.Y); _dragging = false; el.CaptureMouse(); e.Handled = true; } }
     void Item_MouseMove(object s, MouseEventArgs e)
-    { if (_dv == null || _de == null) return; var d = e.GetPosition(this) - _ds; if (!_dragging) { if (Math.Abs(d.X) < SystemParameters.MinimumHorizontalDragDistance && Math.Abs(d.Y) < SystemParameters.MinimumVerticalDragDistance) return; _dragging = true; _de.Opacity = 0.7; } _dv.X = Math.Max(0, Math.Min(_is.X + d.X, _zone.Width - 72)); _dv.Y = Math.Max(0, Math.Min(_is.Y + d.Y, _zone.Height - 88)); }
+    {
+        if (_dv == null || _de == null) return;
+        var d = e.GetPosition(this) - _ds;
+        if (!_dragging)
+        {
+            if (Math.Abs(d.X) < SystemParameters.MinimumHorizontalDragDistance && Math.Abs(d.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+            _dragging = true;
+            _de.Opacity = 0.7;
+        }
+        _dv.X = Math.Max(0, Math.Min(_is.X + d.X, _zone.Width - ItemW));
+        _dv.Y = Math.Max(0, Math.Min(_is.Y + d.Y, _zone.Height - ItemH));
+        UpdateDropIndicator(_dv);
+    }
+
     void Item_MouseUp(object s, MouseButtonEventArgs e)
-    { if (_dv == null) return; if (_de != null) { _de.ReleaseMouseCapture(); _de.Opacity = 1.0; } if (_dragging) { _vm.MoveItem(_dv.Id, _dv.X, _dv.Y, _zone.SnapToGrid); _vm.RefreshItems(); } _dv = null; _de = null; _dragging = false; }
+    {
+        if (_dv == null) return;
+        if (_de != null) { _de.ReleaseMouseCapture(); _de.Opacity = 1.0; }
+        if (_dragging)
+        {
+            if (_zone.SnapToGrid) ReorderItemInto(_dv, _dv.X, _dv.Y);
+            else { _vm.MoveItem(_dv.Id, _dv.X, _dv.Y, snapToGrid: false); _vm.RefreshMergedItems(); }
+        }
+        HideDropIndicator();
+        _dv = null; _de = null; _dragging = false;
+    }
+
+    // ── Item reorder (SnapToGrid) + drop indicator ──
+
+    Zone? OwnerZoneOf(ZoneItemViewModel vm)
+    {
+        if (vm.SourceZoneId == Guid.Empty || vm.SourceZoneId == _zone.Id) return _zone;
+        return _mgr.Zones.FirstOrDefault(z => z.Id == vm.SourceZoneId);
+    }
+
+    static int ComputeInsertIndex(List<ZoneItem> others, double dropX, double dropY, int gs)
+    {
+        int row = (int)Math.Round((dropY - 10) / gs);
+        int col = (int)Math.Round((dropX - 10) / gs);
+        int k = 0;
+        foreach (var o in others)
+        {
+            int r = (int)Math.Round((o.Y - 10) / gs);
+            int c = (int)Math.Round((o.X - 10) / gs);
+            if (r < row || (r == row && c < col)) k++;
+        }
+        return k;
+    }
+
+    void ReorderItemInto(ZoneItemViewModel dragged, double dropX, double dropY)
+    {
+        var owner = OwnerZoneOf(dragged);
+        if (owner == null) return;
+        var item = owner.Items.FirstOrDefault(i => i.Id == dragged.Id);
+        if (item == null) return;
+
+        var others = owner.Items.Where(i => i.Id != dragged.Id)
+                                .OrderBy(i => i.Y).ThenBy(i => i.X).ToList();
+        if (others.Count == 0)
+        {
+            // No neighbours to reorder around — keep the previous free cell snapping.
+            _vm.MoveItem(dragged.Id, dropX, dropY, snapToGrid: true);
+            _vm.RefreshMergedItems();
+            return;
+        }
+
+        int gs = owner.GridSize;
+        double zw = _zone.Width;
+        if (double.IsNaN(zw) || zw < gs + 10) zw = gs + 10;
+        int cols = Math.Max(1, (int)Math.Floor((zw - 10) / gs));
+        int k = Math.Clamp(ComputeInsertIndex(others, dropX, dropY, gs), 0, others.Count);
+
+        var ordered = new List<ZoneItem>(others.Count + 1);
+        ordered.AddRange(others.Take(k));
+        ordered.Add(item);
+        ordered.AddRange(others.Skip(k));
+
+        // Capture each item's current visual position before rewriting the model.
+        var oldPos = new Dictionary<Guid, (double X, double Y)>();
+        foreach (var it in ordered)
+        {
+            var vm = _vm.Items.FirstOrDefault(v => v.Id == it.Id);
+            if (vm != null) oldPos[it.Id] = (vm.X, vm.Y);
+        }
+
+        double x = 10, y = 10;
+        foreach (var it in ordered)
+        {
+            it.X = ZoneViewModel.SnapToGrid(x, gs);
+            it.Y = ZoneViewModel.SnapToGrid(y, gs);
+            x += gs;
+            if (x > zw - gs) { x = 10; y += gs; }
+        }
+
+        owner.Items.Clear();
+        owner.Items.AddRange(ordered);
+        _mgr.SaveConfig();
+
+        // Animate every affected icon (including the dragged one) sliding into its
+        // new cell. No RefreshMergedItems here — rebuilding the VM list would destroy
+        // the containers mid-animation; the VM order is irrelevant because positions
+        // are absolute Canvas coordinates.
+        foreach (var it in ordered)
+        {
+            var vm = _vm.Items.FirstOrDefault(v => v.Id == it.Id);
+            if (vm == null || !oldPos.TryGetValue(it.Id, out var old)) continue;
+            vm.X = it.X;
+            vm.Y = it.Y;
+            AnimateItemTo(vm, old.X, old.Y, it.X, it.Y);
+        }
+    }
+
+    void AnimateItemTo(ZoneItemViewModel vm, double fromX, double fromY, double toX, double toY)
+    {
+        if (ItemsHost.ItemContainerGenerator.ContainerFromItem(vm) is not FrameworkElement fe) return;
+        var duration = TimeSpan.FromMilliseconds(170);
+        var easing = new CubicEase { EasingMode = EasingMode.EaseOut };
+
+        var ax = new DoubleAnimation(fromX, toX, duration) { EasingFunction = easing };
+        ax.Completed += (_, _) => { fe.BeginAnimation(Canvas.LeftProperty, null); vm.X = toX; };
+        var ay = new DoubleAnimation(fromY, toY, duration) { EasingFunction = easing };
+        ay.Completed += (_, _) => { fe.BeginAnimation(Canvas.TopProperty, null); vm.Y = toY; };
+
+        fe.BeginAnimation(Canvas.LeftProperty, ax);
+        fe.BeginAnimation(Canvas.TopProperty, ay);
+    }
+
+    void UpdateDropIndicator(ZoneItemViewModel dragged)
+    {
+        if (!_zone.SnapToGrid) { HideDropIndicator(); return; }
+        var owner = OwnerZoneOf(dragged);
+        if (owner == null) { HideDropIndicator(); return; }
+
+        var others = owner.Items.Where(i => i.Id != dragged.Id)
+                                .OrderBy(i => i.Y).ThenBy(i => i.X).ToList();
+        if (others.Count == 0) { HideDropIndicator(); return; }
+
+        int gs = owner.GridSize;
+        double zw = _zone.Width;
+        if (double.IsNaN(zw) || zw < gs + 10) zw = gs + 10;
+        int cols = Math.Max(1, (int)Math.Floor((zw - 10) / gs));
+        int k = Math.Clamp(ComputeInsertIndex(others, dragged.X, dragged.Y, gs), 0, others.Count);
+
+        // The bar is centred in the actual visual gap between the two icons that
+        // flank the insertion point (icon edge ↔ icon edge), so it keeps the same
+        // moderate distance from the icon on every side — left/right and top/bottom
+        // stay symmetric, and it follows the dragged icon instead of hugging the
+        // neighbour cell edge. Falls back to the cell boundary when the icons
+        // overlap/touch (no room left for the bar).
+        double iconSize = Math.Max(24, gs - 8);
+        double inset = (gs - iconSize) / 2;
+        (double L, double T, double R, double B) Bounds(ZoneItem it)
+            => (it.X + inset, it.Y + inset, it.X + gs - inset, it.Y + gs - inset);
+
+        double dInset = Math.Max(0, (dragged.ItemSize - dragged.IconSize) / 2);
+        double dL = dragged.X + dInset, dT = dragged.Y + dInset;
+        double dR = dragged.X + dragged.ItemSize - dInset;
+        double dB = dragged.Y + dragged.ItemSize - dInset;
+
+        double GapCenter(double a, double b, double fallback)
+            => b - a >= BarThickness ? (a + b) / 2 : fallback;
+
+        // The bar marks the insertion gap in reading order: vertical when the gap
+        // sits between two columns, horizontal when it sits between two rows.
+        double barX, barY;
+        bool vertical;
+
+        if (k == 0)
+        {
+            // Insert before the first item → caret in the gap between the dragged
+            // icon and that item (on its left side).
+            var first = others[0];
+            var fb = Bounds(first);
+            vertical = true;
+            barX = GapCenter(dR, fb.L, first.X);
+            barY = first.Y;
+        }
+        else if (k == others.Count)
+        {
+            // Insert after the last item.
+            var prev = others[others.Count - 1];
+            int prevCol = (int)Math.Round((prev.X - 10) / gs);
+            var pb = Bounds(prev);
+            if (prevCol < cols - 1)
+            {
+                vertical = true;      // same row, to its right
+                barX = GapCenter(pb.R, dL, prev.X + gs);
+                barY = prev.Y;
+            }
+            else
+            {
+                vertical = false;     // wraps to a new row below
+                barX = 10;
+                barY = GapCenter(pb.B, dT, prev.Y + gs);
+            }
+        }
+        else
+        {
+            var prev = others[k - 1];
+            var next = others[k];
+            int prevRow = (int)Math.Round((prev.Y - 10) / gs);
+            int nextRow = (int)Math.Round((next.Y - 10) / gs);
+            var pb = Bounds(prev);
+            var nb = Bounds(next);
+            if (prevRow == nextRow)
+            {
+                vertical = true;      // gap between two columns
+                barX = GapCenter(pb.R, nb.L, next.X);
+                barY = next.Y;
+            }
+            else
+            {
+                vertical = false;     // gap between two rows
+                barX = 10;
+                barY = GapCenter(pb.B, nb.T, next.Y);
+            }
+        }
+
+        var bar = EnsureDropIndicator();
+        if (vertical)
+        {
+            bar.Width = BarThickness; bar.Height = BarLength;
+            Canvas.SetLeft(bar, barX - BarThickness / 2);
+            Canvas.SetTop(bar, barY + (ItemH - BarLength) / 2);
+        }
+        else
+        {
+            bar.Width = BarLength; bar.Height = BarThickness;
+            Canvas.SetLeft(bar, barX + (ItemW - BarLength) / 2);
+            Canvas.SetTop(bar, barY - BarThickness / 2);
+        }
+        bar.Visibility = Visibility.Visible;
+    }
+
+    System.Windows.Shapes.Rectangle EnsureDropIndicator()
+    {
+        if (_dropIndicator == null)
+        {
+            _dropIndicator = new System.Windows.Shapes.Rectangle
+            {
+                RadiusX = 1.5,
+                RadiusY = 1.5,
+                Opacity = 0.95,
+                IsHitTestVisible = false,
+                Visibility = Visibility.Collapsed
+            };
+            _dropIndicator.SetResourceReference(System.Windows.Shapes.Shape.FillProperty, "Brush.Accent");
+            DropIndicatorLayer.Children.Add(_dropIndicator);
+        }
+        return _dropIndicator;
+    }
+
+    void HideDropIndicator()
+    { if (_dropIndicator != null) _dropIndicator.Visibility = Visibility.Collapsed; }
 
     void Item_Enter(object s, MouseEventArgs e)
     {
@@ -740,7 +1183,40 @@ public partial class ZoneWindow : Window
     // ── Context menu ──
 
     void ItemOpen_Click(object s, RoutedEventArgs e) { if (VM(s) is ZoneItemViewModel v) Open(v); }
-    void ItemOpenLocation_Click(object s, RoutedEventArgs e) { if (VM(s) is not ZoneItemViewModel v) return; if (v.Type is ItemType.Shortcut or ItemType.Application) { var d = Path.GetDirectoryName(v.TargetPath); if (!string.IsNullOrEmpty(d)) System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{v.TargetPath}\""); } else System.Diagnostics.Process.Start("explorer.exe", v.TargetPath); }
+
+    // ── Recycle Bin item: right-click specialization (Empty Recycle Bin) ──
+
+    void ItemMenu_Opened(object s, RoutedEventArgs e)
+    {
+        if (s is not ContextMenu cm || cm.PlacementTarget is not FrameworkElement fe
+            || fe.DataContext is not ZoneItemViewModel vm) return;
+        bool isRecycle = vm.Type == ItemType.ShellLocation && ShellIconService.IsRecycleBin(vm.TargetPath);
+        foreach (var entry in cm.Items)
+        {
+            if (entry is MenuItem { Name: "CtxEmptyRecycle" } mi)
+                mi.Visibility = isRecycle ? Visibility.Visible : Visibility.Collapsed;
+        }
+    }
+
+    void ItemEmptyRecycle_Click(object s, RoutedEventArgs e)
+    {
+        if (VM(s) is not ZoneItemViewModel v) return;
+        try
+        {
+            NativeMethods.SHEmptyRecycleBinW(new WindowInteropHelper(this).Handle, null,
+                NativeMethods.SHERB_NOCONFIRMATION | NativeMethods.SHERB_NOPROGRESSUI | NativeMethods.SHERB_NOSOUND);
+        }
+        catch { }
+        // Refresh the bin icon immediately instead of waiting for the next poll tick.
+        ShellIconService.InvalidateRecycleBinState();
+        _recycleStateInit = false;
+        foreach (var item in _vm.Items)
+        {
+            if (item.Type == ItemType.ShellLocation && ShellIconService.IsRecycleBin(item.TargetPath))
+                item.RefreshIcon();
+        }
+    }
+    void ItemOpenLocation_Click(object s, RoutedEventArgs e) { if (VM(s) is not ZoneItemViewModel v) return; if (v.Type == ItemType.ShellLocation) { ShellLocationResolver.Open(v.TargetPath, v.Type); return; } if (v.Type is ItemType.Shortcut or ItemType.Application) { var d = Path.GetDirectoryName(v.TargetPath); if (!string.IsNullOrEmpty(d)) System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{v.TargetPath}\""); } else System.Diagnostics.Process.Start("explorer.exe", v.TargetPath); }
     void ItemRename_Click(object s, RoutedEventArgs e)
     {
         if (VM(s) is not ZoneItemViewModel v) return;
@@ -752,7 +1228,7 @@ public partial class ZoneWindow : Window
     static ZoneItemViewModel? VM(object s) => s is MenuItem mi && mi.Parent is ContextMenu cm && cm.PlacementTarget is FrameworkElement fe && fe.DataContext is ZoneItemViewModel vm ? vm : null;
     static void Open(ZoneItemViewModel v)
     {
-        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = v.TargetPath, UseShellExecute = true }); }
+        try { ShellLocationResolver.Open(v.TargetPath, v.Type); }
         catch (Exception ex)
         {
             var loc = LocalizationService.Instance;
@@ -785,7 +1261,8 @@ public partial class ZoneWindow : Window
         double BgImageOffsetX,
         double BgImageOffsetY,
         double BgImageZoom,
-        double BgImageOpacity);
+        double BgImageOpacity,
+        bool TitleBarFillIndependent);
 
     /// <summary>
     /// Resolve the visual style for the current mode. This is the ONLY place that knows
@@ -819,7 +1296,8 @@ public partial class ZoneWindow : Window
             BgImageOffsetX:   _zone.BgImageOffsetX,
             BgImageOffsetY:   _zone.BgImageOffsetY,
             BgImageZoom:      _zone.BgImageZoom,
-            BgImageOpacity:   _zone.BackgroundImageOpacity);
+            BgImageOpacity:   _zone.BackgroundImageOpacity,
+            TitleBarFillIndependent: _zone.TitleBarFillIndependent);
 
         // Step 2: merged-group override.
         bool isMerged = _zone.MergedGroupMembership.SubZoneIds.Count > 0 || _zone.MergedGroupMembership.GroupId.HasValue;
@@ -846,6 +1324,7 @@ public partial class ZoneWindow : Window
                 BgImageOffsetY =   _zone.MergedGroupStyle.BgImageOffsetY,
                 BgImageZoom =      _zone.MergedGroupStyle.BgImageZoom,
                 BgImageOpacity =   _zone.MergedGroupStyle.BackgroundImageOpacity,
+                TitleBarFillIndependent = _zone.MergedGroupStyle.TitleBarFillIndependent,
             };
         }
 
@@ -874,6 +1353,7 @@ public partial class ZoneWindow : Window
                     BgImageOffsetY =   sub.BgImageOffsetY,
                     BgImageZoom =      sub.BgImageZoom,
                     BgImageOpacity =   sub.BackgroundImageOpacity,
+                    TitleBarFillIndependent = sub.TitleBarFillIndependent,
                 };
             }
         }
@@ -897,10 +1377,26 @@ public partial class ZoneWindow : Window
         ZoneBorder.BorderThickness = new Thickness(s.BorderThickness);
         MainContent.CornerRadius = new CornerRadius(s.CornerRadius);
         ZoneBorder.CornerRadius = new CornerRadius(s.CornerRadius);
+        // ponytail 2026-08-26: the title bar and bottom bar carry their own
+        // hardcoded corner radii in XAML. They were never updated here, so
+        // switching to 尖角 left rounded top/bottom edges behind ("不能完全
+        // 转化尖角"). Drive them from the same resolved radius now.
+        TitleBarBg.CornerRadius = new CornerRadius(s.CornerRadius, s.CornerRadius, 0, 0);
+        if (BottomBarBg != null)
+            BottomBarBg.CornerRadius = new CornerRadius(0, 0, s.CornerRadius, s.CornerRadius);
+
+        // ponytail 2026-08-26: keep the OS (DWM) corner preference in lockstep.
+        // radius 0 → DONOTROUND so Win11 stops clipping the sharp WPF corners.
+        // Guarded: ApplyStyle also runs in the constructor before the HWND
+        // exists, where WindowInteropHelper.Handle would throw.
+        if (PresentationSource.FromVisual(this) != null)
+            NativeMethods.SetRoundedCorners(this, s.CornerRadius);
 
         // Body fill
         try { FillRect.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.FillColor)!); } catch { }
-        FillRect.RadiusX = FillRect.RadiusY = s.CornerRadius;
+        bool fillIndependent = s.TitleBarFillIndependent && !s.QuickBarMode;
+        FillRect.RadiusX = FillRect.RadiusY = fillIndependent ? 0 : s.CornerRadius;
+        FillRect.Margin = fillIndependent ? new Thickness(0, 24, 0, 0) : new Thickness(0);
 
         // Title bar fill
         try { TitleBarBg.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.TitleBarFillColor)!); } catch { }
@@ -978,6 +1474,9 @@ public partial class ZoneWindow : Window
 
     void ApplyBackgroundImage(ResolvedZoneStyle s)
     {
+        // 标题栏独立填充：背景图与 FillRect 一样不铺到标题栏下方（顶部裁剪）。
+        double clipTop = s.TitleBarFillIndependent && !s.QuickBarMode ? 24 : 0;
+        BgImageBorder.Margin = new Thickness(0, clipTop, 0, 0);
         if (!string.IsNullOrEmpty(s.BgImagePath) && File.Exists(s.BgImagePath))
         {
             try
@@ -992,8 +1491,8 @@ public partial class ZoneWindow : Window
                 BgImage.Source = bi;
                 BgImage.Stretch = Stretch.UniformToFill;
 
-                var bw = BgImageBorder.ActualWidth > 0 ? BgImageBorder.ActualWidth : _zone.Width;
-                var bh = BgImageBorder.ActualHeight > 0 ? BgImageBorder.ActualHeight : _zone.Height;
+                var bw = ActualWidth > 0 ? ActualWidth : _zone.Width;
+                var bh = ActualHeight > 0 ? ActualHeight : _zone.Height;
 
                 double imgW = bi.PixelWidth;
                 double imgH = bi.PixelHeight;
@@ -1013,7 +1512,7 @@ public partial class ZoneWindow : Window
 
                 BgImage.Margin = new Thickness(
                     zoneCenterX - imgCenterX + zox,
-                    zoneCenterY - imgCenterY + zoy, 0, 0);
+                    zoneCenterY - imgCenterY + zoy - clipTop, 0, 0);
                 BgImage.HorizontalAlignment = HorizontalAlignment.Left;
                 BgImage.VerticalAlignment = VerticalAlignment.Top;
                 BgImage.Opacity = Math.Max(0.01, s.BgImageOpacity / 100.0);
@@ -1225,6 +1724,18 @@ public partial class ZoneWindow : Window
 
     // ── Inline title editing ──
 
+    void ZoneTitle_PreviewMouseLeftButtonDown(object s, MouseButtonEventArgs e)
+    {
+        // Merged: the title text is the master label (above the sub-zone tabs), so a
+        // click switches back to the master view. Not merged: leave the click alone so
+        // the TextBox can start an inline rename.
+        if (_zone.MergedGroupMembership.SubZoneIds.Count > 0)
+        {
+            SelectSubZone(_zone.Id);
+            e.Handled = true;
+        }
+    }
+
     void ZoneTitle_LostFocus(object s, RoutedEventArgs e)
     {
         var text = ZoneTitleText.Text?.Trim() ?? "";
@@ -1292,15 +1803,24 @@ public partial class ZoneWindow : Window
         CtxDisbandThis.Visibility = isMaster ? Visibility.Collapsed : Visibility.Visible;
         if (CtxMergeSep != null) CtxMergeSep.Visibility = Visibility.Visible;
 
-        // Master zone tab
-        AddSubZoneTab(_zone.Id, _zone.Name, _zone.IconChar, adaptiveBrush, titleTextColor);
-
-        // Sub-zone tabs
-        foreach (var subId in _zone.MergedGroupMembership.SubZoneIds)
+        // Display order over ALL members (master + subs). Every tab is draggable
+        // for reordering; the master tab is just another label (its window role is
+        // unchanged wherever it sits). Legacy configs get normalized to master-first.
+        var order = _zone.MergedGroupMembership.TabOrder;
+        if (order.Count != _zone.MergedGroupMembership.SubZoneIds.Count + 1
+            || !order.Contains(_zone.Id)
+            || _zone.MergedGroupMembership.SubZoneIds.Any(id => !order.Contains(id)))
         {
-            var sub = _mgr.Zones.FirstOrDefault(z => z.Id == subId);
-            if (sub != null)
-                AddSubZoneTab(sub.Id, sub.Name, sub.IconChar, adaptiveBrush, titleTextColor);
+            order.Clear();
+            order.Add(_zone.Id);
+            order.AddRange(_zone.MergedGroupMembership.SubZoneIds);
+        }
+
+        foreach (var id in order)
+        {
+            var z = id == _zone.Id ? _zone : _mgr.Zones.FirstOrDefault(x => x.Id == id);
+            if (z != null)
+                AddSubZoneTab(z.Id, z.Name, z.IconChar, adaptiveBrush, titleTextColor);
         }
     }
 
@@ -1335,7 +1855,9 @@ public partial class ZoneWindow : Window
             Margin = new Thickness(1, 0, 1, 0),
             Cursor = Cursors.Hand,
             Tag = zoneId,
-            ToolTip = cn ? "点击切换到此分区" : "Click to switch to this zone"
+            RenderTransform = new TranslateTransform(),
+            // All tabs are identical — click to switch, drag to reorder, drag out to detach.
+            ToolTip = cn ? "点击切换到此分区；拖拽可调序，拖出标签条可分离" : "Click to switch; drag to reorder, drag out to detach"
         };
 
         var sp = new StackPanel { Orientation = Orientation.Horizontal };
@@ -1369,19 +1891,358 @@ public partial class ZoneWindow : Window
             tab.Background = new SolidColorBrush(Color.FromArgb(0x10, 0xFF, 0xFF, 0xFF));
         }
 
-        tab.MouseLeftButtonDown += SubZoneTab_Click;
+        tab.MouseLeftButtonDown += SubZoneTab_MouseDown;
         tab.Child = sp;
         SubZoneTabs.Children.Add(tab);
     }
 
-    void SubZoneTab_Click(object s, MouseButtonEventArgs e)
+    void SubZoneTab_MouseDown(object s, MouseButtonEventArgs e)
     {
+        var vm = DataContext as ZoneViewModel;
+        if (vm?.IsLocked == true) return;
         if (s is not Border tab || tab.Tag is not Guid zoneId) return;
+        if (_zone.MergedGroupMembership.SubZoneIds.Count == 0) return;
+
+        _dragTab = tab;
+        _dragTabZoneId = zoneId;
+        _dragTabOrigin = e.GetPosition(SubZoneTabsRow);
+        _dragTabFromIndex = SubZoneTabs.Children.IndexOf(tab);
+        _dragTabInsertIndex = _dragTabFromIndex;
+        _dragTabArmed = false;
+        _dragTabCompleted = false;
+        _isDragTabOut = false;
+
+        // Visible drag: the tab follows the cursor. Reset any leftover slide-transform
+        // first so the layout origin below is the pure layout position.
+        if (tab.RenderTransform is TranslateTransform tt)
+        {
+            tt.BeginAnimation(TranslateTransform.XProperty, null);
+            tt.X = 0;
+        }
+        int childIndex = SubZoneTabs.Children.IndexOf(tab);
+        _dragTabGrabOffset = _dragTabOrigin.X - SubZoneTabs.Margin.Left - TabLayoutOriginInStack(childIndex);
+        Panel.SetZIndex(tab, 10); // render the dragged tab above its neighbours
+
+        StartTabDragTimer();
+        e.Handled = true;
+    }
+
+    void SelectSubZone(Guid zoneId)
+    {
+        // Re-clicking the visible tab is a no-op (also avoids a redundant re-animate).
+        if (_vm.SelectedSubZoneId == zoneId) return;
+
+        int oldIndex = GetTabOrderIndex(_vm.SelectedSubZoneId);
+        int newIndex = GetTabOrderIndex(zoneId);
+        if (oldIndex < 0 || newIndex < 0 || oldIndex == newIndex)
+        {
+            ApplySubZoneSwitch(zoneId);
+            return;
+        }
+
+        // Directional two-phase switch (mirrors PropertyPanel.AnimateSwitch's fade +
+        // slide with Motion resources). Clicking a left tab slides the current content
+        // out to the right and the new content in from the left; a right tab → the
+        // opposite. dir = out direction (+1 right / -1 left); the in-phase enters from
+        // the opposite side.
+        int dir = newIndex < oldIndex ? 1 : -1;
+        AnimateSubZoneOut(dir, () =>
+        {
+            ApplySubZoneSwitch(zoneId);
+            AnimateSubZoneIn(dir);
+        });
+    }
+
+    void ApplySubZoneSwitch(Guid zoneId)
+    {
         _vm.SelectedSubZoneId = zoneId;
         // ponytail: ApplyStyle rebuilds sub-zone tabs internally with the resolved adaptive
         // brush — no separate RebuildSubZoneTabs / ApplySubZoneTabTextColorAdaptive needed.
         ApplyStyle(); // Apply style based on selected sub-zone (also rebuilds tabs)
         RearrangeAll(); // Rearrange items for the newly selected sub-zone
         UpdateCanvasSize();
+    }
+
+    /// <summary>Position of a zone in the merged tab strip (0..n, master included
+    /// wherever it sits in the display order). -1 when not part of this group.</summary>
+    int GetTabOrderIndex(Guid? zoneId)
+    {
+        if (zoneId == null) return -1;
+        int i = _zone.MergedGroupMembership.TabOrder.IndexOf(zoneId.Value);
+        if (i >= 0) return i;
+        // Legacy fallback before TabOrder is normalized on first render.
+        if (zoneId.Value == _zone.Id) return 0;
+        int j = _zone.MergedGroupMembership.SubZoneIds.IndexOf(zoneId.Value);
+        return j < 0 ? -1 : j + 1;
+    }
+
+    // ── Sub-zone content switch animation ──
+
+    const double SwitchSlideOffset = 16;
+
+    void AnimateSubZoneOut(int dir, Action onCompleted)
+    {
+        var duration = (Duration)FindResource("Motion.Fast");
+        var easing = (IEasingFunction)FindResource("Motion.StandardSpline");
+        // Pin the start pose so a rapid second click can't re-animate from a stale
+        // hold-end value (same stale-base pattern as HoverExpandBehavior).
+        ItemsViewport.BeginAnimation(OpacityProperty, null);
+        ItemsViewportTranslate.BeginAnimation(TranslateTransform.XProperty, null);
+        ItemsViewport.Opacity = 1;
+        ItemsViewportTranslate.X = 0;
+
+        var fade = new DoubleAnimation(1, 0, duration) { EasingFunction = easing };
+        var slide = new DoubleAnimation(0, dir * SwitchSlideOffset, duration) { EasingFunction = easing };
+        fade.Completed += (_, _) => onCompleted();
+        ItemsViewport.BeginAnimation(OpacityProperty, fade);
+        ItemsViewportTranslate.BeginAnimation(TranslateTransform.XProperty, slide);
+    }
+
+    void AnimateSubZoneIn(int dir)
+    {
+        var duration = (Duration)FindResource("Motion.Normal");
+        var easing = (IEasingFunction)FindResource("Motion.StandardSpline");
+        ItemsViewport.BeginAnimation(OpacityProperty, null);
+        ItemsViewportTranslate.BeginAnimation(TranslateTransform.XProperty, null);
+        ItemsViewport.Opacity = 0;
+        ItemsViewportTranslate.X = -dir * SwitchSlideOffset;
+
+        var fade = new DoubleAnimation(0, 1, duration) { EasingFunction = easing };
+        var slide = new DoubleAnimation(-dir * SwitchSlideOffset, 0, duration) { EasingFunction = easing };
+        ItemsViewport.BeginAnimation(OpacityProperty, fade);
+        ItemsViewportTranslate.BeginAnimation(TranslateTransform.XProperty, slide);
+    }
+
+    // ── Sub-zone tab drag loop (reorder + drag-out detach, browser-like) ──
+
+    void StartTabDragTimer()
+    {
+        if (_tabDragTimer != null) return;
+        _tabDragTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
+        _tabDragTimer.Tick += OnTabDragTick;
+        _tabDragTimer.Start();
+    }
+
+    void ResetTabDrag()
+    {
+        if (_tabDragTimer != null)
+        {
+            _tabDragTimer.Stop();
+            _tabDragTimer.Tick -= OnTabDragTick;
+            _tabDragTimer = null;
+        }
+        if (_dragTab != null)
+        {
+            _dragTab.Opacity = 1.0;
+            Panel.SetZIndex(_dragTab, 0);
+        }
+        _dragTab = null;
+        _dragTabZoneId = Guid.Empty;
+        _dragTabOrigin = default;
+        _dragTabFromIndex = -1;
+        _dragTabInsertIndex = -1;
+        _dragTabArmed = false;
+        _dragTabCompleted = false;
+        _isDragTabOut = false;
+    }
+
+    void OnTabDragTick(object? s, EventArgs e)
+    {
+        var dragTab = _dragTab;
+        if (dragTab == null || _dragTabCompleted) return;
+
+        GetCursorPos(out Win32Point pt);
+        var screen = new Point(pt.X, pt.Y);
+        // PointFromScreen converts physical pixels → DIP row coords, keeping the
+        // follow math consistent with GetPosition/layout widths (all DIPs). Mixing
+        // raw Win32 pixels with DIPs made the tab's head anchor at the cursor on
+        // scaled displays instead of the grab point.
+        var pos = SubZoneTabsRow.PointFromScreen(screen);
+        var rowBounds = new Rect(0, 0, SubZoneTabsRow.ActualWidth, SubZoneTabsRow.ActualHeight);
+        bool outsideRow = !rowBounds.Contains(pos);
+
+        var originScreen = SubZoneTabsRow.PointToScreen(_dragTabOrigin);
+        var dx = screen.X - originScreen.X;
+        var dy = screen.Y - originScreen.Y;
+        if (!_dragTabArmed && (dx * dx + dy * dy) > 25)
+            _dragTabArmed = true;
+
+        // Ghost the dragged tab while it's outside the strip (signals "will detach").
+        // All tabs behave identically — including the group's host zone.
+        if (outsideRow && !_isDragTabOut)
+        {
+            _isDragTabOut = true;
+            dragTab.Opacity = 0.35;
+        }
+        else if (!outsideRow && _isDragTabOut)
+        {
+            _isDragTabOut = false;
+            dragTab.Opacity = 1.0;
+        }
+
+        // Visible drag: the dragged tab tracks the cursor while inside the strip;
+        // it snaps back to its slot once the cursor leaves.
+        if (dragTab.RenderTransform is TranslateTransform followTt)
+        {
+            if (_dragTabArmed && !outsideRow)
+            {
+                int childIndex = SubZoneTabs.Children.IndexOf(dragTab);
+                double layoutX = TabLayoutOriginInStack(childIndex);
+                followTt.X = pos.X - SubZoneTabs.Margin.Left - _dragTabGrabOffset - layoutX;
+            }
+            else
+            {
+                followTt.X = 0;
+            }
+        }
+
+        // Live reorder while the cursor stays inside the strip.
+        if (_dragTabArmed && !outsideRow)
+        {
+            // Convert row coords → StackPanel coords so boundaries align exactly
+            // with the accumulated tab widths below.
+            int newIndex = ComputeTabDropIndex(pos.X - SubZoneTabs.Margin.Left);
+            if (newIndex >= 0 && newIndex != _dragTabInsertIndex
+                && newIndex != _dragTabFromIndex && newIndex != _dragTabFromIndex + 1)
+            {
+                int target = newIndex;
+                if (target > _dragTabFromIndex) target--;
+                CaptureTabSlidePositions(Math.Min(_dragTabFromIndex, target), Math.Max(_dragTabFromIndex, target));
+                MoveTab(_dragTabFromIndex, target);
+                _dragTabFromIndex = target;
+                _dragTabInsertIndex = newIndex;
+                Dispatcher.BeginInvoke(new Action(PlayTabSlideAnimations),
+                    System.Windows.Threading.DispatcherPriority.Loaded);
+            }
+        }
+
+        // LButton release is detected via Win32 so it works even outside this window.
+        if ((GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0) return;
+
+        _dragTabCompleted = true;
+        try
+        {
+            if (_dragTabArmed && outsideRow)
+            {
+                DetachDraggedTabAt(screen);
+                return;
+            }
+
+            if (_dragTabArmed)
+            {
+                // Reorder drop inside the strip — persist the new order.
+                _mgr.SaveSubZoneOrder(_zone.Id);
+            }
+            else
+            {
+                // Plain click → switch to that sub-zone.
+                SelectSubZone(_dragTabZoneId);
+            }
+        }
+        finally
+        {
+            ResetTabDrag();
+        }
+    }
+
+    int ComputeTabDropIndex(double x)
+    {
+        double acc = 0;
+        // All tabs (master included) share one uniform index space — no fixed first
+        // slot, so midpoint boundaries align with the tabs' real positions and both
+        // drag directions behave symmetrically.
+        for (int c = 0; c < SubZoneTabs.Children.Count; c++)
+        {
+            if (SubZoneTabs.Children[c] is not FrameworkElement el) continue;
+            var w = el.ActualWidth + el.Margin.Left + el.Margin.Right;
+            if (x < acc + w / 2) return c;
+            acc += w;
+        }
+        return SubZoneTabs.Children.Count;
+    }
+
+    /// <summary>Layout origin (x) of a tab child inside the SubZoneTabs StackPanel,
+    /// computed analytically from siblings' widths so it stays valid regardless of any
+    /// slide/follow RenderTransform on the tabs.</summary>
+    double TabLayoutOriginInStack(int childrenIndex)
+    {
+        double x = 0;
+        for (int i = 0; i < childrenIndex && i < SubZoneTabs.Children.Count; i++)
+        {
+            if (SubZoneTabs.Children[i] is FrameworkElement el)
+                x += el.ActualWidth + el.Margin.Left + el.Margin.Right;
+        }
+        return x;
+    }
+
+    void MoveTab(int from, int to)
+    {
+        if (from < 0 || from >= SubZoneTabs.Children.Count) return;
+        if (to < 0 || to >= SubZoneTabs.Children.Count) return;
+        if (from == to) return;
+
+        var el = SubZoneTabs.Children[from];
+        SubZoneTabs.Children.RemoveAt(from);
+        SubZoneTabs.Children.Insert(to, el);
+
+        var order = _zone.MergedGroupMembership.TabOrder;
+        if (from < order.Count && to < order.Count)
+        {
+            var id = order[from];
+            order.RemoveAt(from);
+            order.Insert(to, id);
+        }
+    }
+
+    void CaptureTabSlidePositions(int from, int to)
+    {
+        _pendingTabSlide.Clear();
+        for (int i = from; i <= to; i++)
+        {
+            if (i < 0 || i >= SubZoneTabs.Children.Count) continue;
+            if (SubZoneTabs.Children[i] is not FrameworkElement el) continue;
+            if (ReferenceEquals(el, _dragTab)) continue; // dragged tab follows the cursor instead
+            _pendingTabSlide[el] = el.TranslatePoint(new Point(0, 0), SubZoneTabs).X;
+        }
+    }
+
+    void PlayTabSlideAnimations()
+    {
+        foreach (var kv in _pendingTabSlide)
+        {
+            var el = kv.Key;
+            if (el.RenderTransform is not TranslateTransform transform) continue;
+            var newX = el.TranslatePoint(new Point(0, 0), SubZoneTabs).X;
+            var delta = kv.Value - newX;
+            if (Math.Abs(delta) < 0.5) continue;
+            var anim = new DoubleAnimation(delta, 0, TimeSpan.FromMilliseconds(160))
+            {
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            };
+            transform.BeginAnimation(TranslateTransform.XProperty, anim);
+        }
+        _pendingTabSlide.Clear();
+    }
+
+    void DetachDraggedTabAt(Point screenPos)
+    {
+        var zoneId = _dragTabZoneId;
+        var zone = _mgr.Zones.FirstOrDefault(z => z.Id == zoneId);
+        if (zone == null) return;
+
+        // If the detached zone was the currently selected view, fall back to the
+        // master view before the group refresh rebuilds the tab strip.
+        if (_vm.SelectedSubZoneId == zoneId) _vm.SelectedSubZoneId = _zone.Id;
+
+        // Detach (auto-dissolves when only one member remains). Detaching the group's
+        // host zone promotes the first remaining member and re-keys this window to it,
+        // so the group window stays on screen while the detached zone pops out below.
+        _mgr.DetachZoneAt(zoneId);
+
+        // Show the detached zone at the drop point, title bar centred under the cursor.
+        var dpi = VisualTreeHelper.GetDpi(this);
+        zone.X = screenPos.X / dpi.DpiScaleX - zone.Width / 2;
+        zone.Y = screenPos.Y / dpi.DpiScaleY - 12;
+        _mgr.ShowZone(zone);
     }
 }

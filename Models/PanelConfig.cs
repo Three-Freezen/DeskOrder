@@ -18,11 +18,15 @@ public class PanelConfig
     public string PanelFillColor { get; set; } = "#08000000";
     public bool PanelTextColorAdaptive { get; set; } = true;
     public bool PanelTitleBarTextColorAdaptive { get; set; } = true;
+    public bool PanelTitleBarFillIndependent { get; set; } = false;
     public string PanelBorderColor { get; set; } = "#40FFFFFF";
     // ponytail 2026-08-25: per-panel border thickness. Previously hardcoded 1.5 in
     // PanelWindow.ApplyStyle (the old global-appearance default). Own field now so
     // the 面板设置 editor can drive it like every other component.
     public double PanelBorderThickness { get; set; } = 1.5;
+    // ponytail 2026-08-26: per-panel corner radius (圆角/尖角 switch). Default 10
+    // matches the PanelWindow XAML hardcoded radius.
+    public int PanelCornerRadius { get; set; } = 10;
     public double PanelControlOpacity { get; set; } = 40;
     // ── Liquid glass (per-panel; migrated from AppConfig-level globals) ──
     public bool PanelEnableLiquidGlass { get; set; } = true;

@@ -320,13 +320,18 @@ public static class ThemeService
         var textColor = Contrast(accentColor, Colors.Black) >= Contrast(accentColor, Colors.White)
             ? Colors.Black
             : Colors.White;
+        // ponytail 2026-08-25: 镂空算法已抽到 ApplyHollowAccentBrushes。
+        // 这里只负责"换背景为系统主色"+"Wash/Text 系列 brush 重算"，
+        // 镂空按钮 brush 在背景换完后再调用一次 ApplyHollowAccentBrushes。
 
         var brushesDict = Application.Current?.Resources.MergedDictionaries
             .Cast<ResourceDictionary>()
             .FirstOrDefault(d => d.Source?.OriginalString.EndsWith("Theme.Brushes.xaml", StringComparison.OrdinalIgnoreCase) == true);
         if (brushesDict == null) return;
 
-        // Backgrounds: accent color everywhere.
+        // Backgrounds: accent color everywhere. Replace brush instance
+        // (in-place Color write fails — brushes in Theme.Brushes.xaml freeze once
+        // referenced and reject SetValue with InvalidOperationException).
         brushesDict["Brush.Bg.Base"]            = new SolidColorBrush(accentColor);
         brushesDict["Brush.Bg.Chrome"]          = new SolidColorBrush(accentColor);
         brushesDict["Brush.Bg.Surface"]         = new SolidColorBrush(accentColor);
@@ -348,19 +353,44 @@ public static class ThemeService
         brushesDict["Brush.Text.Tertiary"]      = new SolidColorBrush(Color.FromArgb(0x80, textColor.R, textColor.G, textColor.B));
         brushesDict["Brush.Text.Disabled"]      = new SolidColorBrush(Color.FromArgb(0x55, textColor.R, textColor.G, textColor.B));
 
-        // Accent variants: keep aligned with the inverted palette so primary
-        // buttons (Brush.Accent.Solid) contrast against the accent bg.
-        // Brush.Accent itself is NOT overridden — it stays at the configured brand
-        // color so the top-left brand icon (which uses Brush.Accent for its stroke)
-        // keeps its original look regardless of accent. Semantic brushes
-        // (Success / Warning / Danger / Close.Hover) also stay so status indicators,
-        // danger markers, and the close button keep meaning.
+        // Wash = textColor 20% alpha（用在 EditableListRow 等高亮背景）
         brushesDict["Brush.Accent.Wash"]        = new SolidColorBrush(Color.FromArgb(0x33, textColor.R, textColor.G, textColor.B));
-        brushesDict["Brush.Accent.Solid"]       = new SolidColorBrush(textColor);
-        brushesDict["Brush.Accent.Solid.Hover"] = new SolidColorBrush(textColor);
-        brushesDict["Brush.Accent.Solid.Press"] = new SolidColorBrush(Color.FromArgb(0xC0, textColor.R, textColor.G, textColor.B));
-        brushesDict["Brush.Accent.On"]          = new SolidColorBrush(accentColor);
         brushesDict["Brush.Accent.2"]           = new SolidColorBrush(textColor);
+
+        // ponytail 2026-08-25: System 模式下 Solid/On 用系统主色按算法算（不用 Color.Accent dict）。
+        //   Solid      = mix(accent, black, 20%)  — 加深 20%
+        //   On         = mix(accent, accent, 50%) = accent 同色（镂空与背景同色）→ 截图 1 效果
+        // Solid/On 的 dict 写入可能抛 InvalidOperationException（dict freeze），
+        // 所以 dict 写入要 try/catch 兜底；失败时更新既有 brush 的 Color。
+        Color Mix(Color a, Color b, double t) => Color.FromRgb(
+            (byte)(a.R * (1 - t) + b.R * t),
+            (byte)(a.G * (1 - t) + b.G * t),
+            (byte)(a.B * (1 - t) + b.B * t));
+        var sysSolid = Mix(accentColor, Colors.Black, 0.20);
+        var sysOn    = Mix(accentColor, accentColor, 0.50);  // = accentColor（与背景同色）
+        var sysSolidHover = Mix(accentColor, Colors.Black, 0.30);
+        var sysSolidPress = Mix(accentColor, Colors.Black, 0.10);
+        var sysSolidDisabled = Color.FromArgb(0x66, accentColor.R, accentColor.G, accentColor.B);
+        var sysOnDisabled    = Color.FromArgb(0x55, accentColor.R, accentColor.G, accentColor.B);
+        try
+        {
+            brushesDict["Brush.Accent.Solid"]          = new SolidColorBrush(sysSolid);
+            brushesDict["Brush.Accent.Solid.Hover"]    = new SolidColorBrush(sysSolidHover);
+            brushesDict["Brush.Accent.Solid.Press"]    = new SolidColorBrush(sysSolidPress);
+            brushesDict["Brush.Accent.Solid.Disabled"] = new SolidColorBrush(sysSolidDisabled);
+            brushesDict["Brush.Accent.On"]             = new SolidColorBrush(sysOn);
+            brushesDict["Brush.Accent.On.Disabled"]    = new SolidColorBrush(sysOnDisabled);
+        }
+        catch (InvalidOperationException)
+        {
+            // dict frozen — 更新既有 brush 的 Color
+            if (brushesDict["Brush.Accent.Solid"]          is SolidColorBrush sb1) sb1.Color = sysSolid;
+            if (brushesDict["Brush.Accent.Solid.Hover"]    is SolidColorBrush sb2) sb2.Color = sysSolidHover;
+            if (brushesDict["Brush.Accent.Solid.Press"]    is SolidColorBrush sb3) sb3.Color = sysSolidPress;
+            if (brushesDict["Brush.Accent.Solid.Disabled"] is SolidColorBrush sb4) sb4.Color = sysSolidDisabled;
+            if (brushesDict["Brush.Accent.On"]             is SolidColorBrush sb5) sb5.Color = sysOn;
+            if (brushesDict["Brush.Accent.On.Disabled"]    is SolidColorBrush sb6) sb6.Color = sysOnDisabled;
+        }
 
         // ponytail: DynamicResource references in XAML re-evaluate automatically
         // when the dictionary entry is replaced, but PropertyPanel builds elements
@@ -371,11 +401,15 @@ public static class ThemeService
     }
 
     /// <summary>
-    /// Write a fresh, unfrozen brush into each known brush key. We don't SetValue on
-    /// the existing brush (it may be frozen once any element references it), we
-    /// replace it in the dictionary. Newly-built UIs pick up the new instance via
-    /// FindResource; existing elements need RebindOpenWindows to re-bind.
+    /// Update each known brush's Color in place. We do NOT replace the brush instance
+    /// in the dictionary — replacing it would orphan every element that already
+    /// resolved the brush via StaticResource (e.g. LoadPresetDialog's chrome uses
+    /// {StaticResource Bg} which captures a brush reference at parse time and would
+    /// stay frozen to the old color forever). SolidColorBrush is a Freezable: writing
+    /// its Color DP fires Freezable.Changed, which WPF's render system listens to, so
+    /// all referrers repaint automatically.
     /// </summary>
+
     static void RepaintBrushes()
     {
         var app = Application.Current;

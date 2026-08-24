@@ -3,9 +3,11 @@ using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using DesktopZones.Models;
@@ -41,6 +43,20 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
     
     // Preview scaling (to fit zone in preview area)
     private double _previewScale = 1.0;
+    
+    // Preview-space dimensions of the crop zone (used by overlay + grid after the
+    // blue ZoneOutline border was removed).
+    private double _zonePreviewWidth;
+    private double _zonePreviewHeight;
+    // Real widget title-bar height (DIP) — drives the title-bar/body divider line
+    // and the drag snap in the preview. 0 = no title bar (clock/calendar).
+    private double _titleBarHeight;
+    const double TitleBarSnapThreshold = 8.0;
+
+    // Borderless window corner resize — same WM_NCLBUTTONDOWN loop ZoneWindow uses.
+    [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
+    const uint WM_NCLBUTTONDOWN = 0x00A1;
+    const int HTTOPLEFT = 13, HTTOPRIGHT = 14, HTBOTTOMLEFT = 16, HTBOTTOMRIGHT = 17;
     
     // Result
     public CropPreviewResult? Result { get; private set; }
@@ -78,7 +94,8 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
         double initialOffsetY = 0,
         double initialZoom = 1.0,
         double initialOpacity = 40,
-        string cropShape = "Rectangle")
+        string cropShape = "Rectangle",
+        double titleBarHeight = 0)
     {
         InitializeComponent();
 
@@ -90,6 +107,7 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
         _initialZoom = initialZoom;
         _initialOpacity = initialOpacity;
         _cropShape = cropShape;
+        _titleBarHeight = titleBarHeight;
 
         // Initialize current state
         _currentOffsetX = initialOffsetX;
@@ -106,11 +124,12 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         CalculatePreviewScale();
-        UpdateZoneOutline();
+        UpdateZoneGeometry();
         LoadImage();
         UpdateImageTransform();
         UpdateOverlay();
         DrawGridLines();
+        DrawTitleBarDivider();
         UpdateDisplays();
         
         // Set initial control values
@@ -158,41 +177,25 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
         
         double scaleX = availableWidth / _targetWidth;
         double scaleY = availableHeight / _targetHeight;
+        // ponytail: no 1.0 cap — the zone display always fits the current window
+        // size proportionally (grows and shrinks with the preview area).
         _previewScale = Math.Min(scaleX, scaleY);
-        
-        // Cap at 1.0 to avoid upscaling
-        _previewScale = Math.Min(_previewScale, 1.0);
     }
     
-    private void UpdateZoneOutline()
+    private void UpdateZoneGeometry()
     {
-        // Set zone outline size based on crop shape
+        // Compute the preview-space size of the crop zone. No visual outline is
+        // drawn anymore — the dark CropOverlay already delineates the zone edge.
         if (_cropShape == "Circle")
         {
-            // For circle, use the smaller dimension
             double size = Math.Min(_targetWidth, _targetHeight) * _previewScale;
-            ZoneOutlineEllipse.Width = size;
-            ZoneOutlineEllipse.Height = size;
-            ZoneOutlineEllipse.Visibility = Visibility.Visible;
-            ZoneOutline.Visibility = Visibility.Collapsed;
+            _zonePreviewWidth = size;
+            _zonePreviewHeight = size;
         }
         else
         {
-            // For rectangle/ellipse
-            ZoneOutline.Width = _targetWidth * _previewScale;
-            ZoneOutline.Height = _targetHeight * _previewScale;
-            ZoneOutline.Visibility = Visibility.Visible;
-            ZoneOutlineEllipse.Visibility = Visibility.Collapsed;
-
-            // For ellipse, set CornerRadius to make it rounded
-            if (_cropShape == "Ellipse")
-            {
-                ZoneOutline.CornerRadius = new CornerRadius(ZoneOutline.Width / 2, ZoneOutline.Height / 2, ZoneOutline.Height / 2, ZoneOutline.Width / 2);
-            }
-            else
-            {
-                ZoneOutline.CornerRadius = new CornerRadius(8); // Default rounded corners
-            }
+            _zonePreviewWidth = _targetWidth * _previewScale;
+            _zonePreviewHeight = _targetHeight * _previewScale;
         }
     }
     
@@ -277,6 +280,7 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
         // Convert preview delta to actual offset delta
         _currentOffsetX = _dragStartOffsetX + (deltaX / _previewScale);
         _currentOffsetY = _dragStartOffsetY + (deltaY / _previewScale);
+        ApplyTitleBarSnap();
         
         UpdateImageTransform();
         UpdateDisplays();
@@ -290,15 +294,30 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
         UpdateImageTransform();
     }
     
+    private void ResizeGrip_Down(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement g) return;
+        int d = g.Name switch
+        {
+            "GripTL" => HTTOPLEFT,
+            "GripTR" => HTTOPRIGHT,
+            "GripBL" => HTBOTTOMLEFT,
+            _ => HTBOTTOMRIGHT,
+        };
+        SendMessage(new WindowInteropHelper(this).Handle, WM_NCLBUTTONDOWN, (IntPtr)d, IntPtr.Zero);
+        e.Handled = true;
+    }
+    
     private void PreviewBorder_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         if (!IsLoaded) return;
         
         CalculatePreviewScale();
-        UpdateZoneOutline();
+        UpdateZoneGeometry();
         UpdateImageTransform();
         UpdateOverlay();
         DrawGridLines();
+        DrawTitleBarDivider();
     }
     
     private void BgZoom_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -398,8 +417,8 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
         else
         {
             // Rectangle overlay
-            double zoneLeft = (previewWidth - ZoneOutline.Width) / 2;
-            double zoneTop = (previewHeight - ZoneOutline.Height) / 2;
+            double zoneLeft = (previewWidth - _zonePreviewWidth) / 2;
+            double zoneTop = (previewHeight - _zonePreviewHeight) / 2;
 
             // Top overlay
             if (zoneTop > 0)
@@ -416,15 +435,15 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
             }
 
             // Bottom overlay
-            if (zoneTop + ZoneOutline.Height < previewHeight)
+            if (zoneTop + _zonePreviewHeight < previewHeight)
             {
                 var bottomRect = new System.Windows.Shapes.Rectangle
                 {
                     Width = previewWidth,
-                    Height = previewHeight - (zoneTop + ZoneOutline.Height),
+                    Height = previewHeight - (zoneTop + _zonePreviewHeight),
                     Fill = new SolidColorBrush(Color.FromArgb(0x80, 0x00, 0x00, 0x00))
                 };
-                Canvas.SetTop(bottomRect, zoneTop + ZoneOutline.Height);
+                Canvas.SetTop(bottomRect, zoneTop + _zonePreviewHeight);
                 Canvas.SetLeft(bottomRect, 0);
                 CropOverlay.Children.Add(bottomRect);
             }
@@ -435,7 +454,7 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
                 var leftRect = new System.Windows.Shapes.Rectangle
                 {
                     Width = zoneLeft,
-                    Height = ZoneOutline.Height,
+                    Height = _zonePreviewHeight,
                     Fill = new SolidColorBrush(Color.FromArgb(0x80, 0x00, 0x00, 0x00))
                 };
                 Canvas.SetTop(leftRect, zoneTop);
@@ -444,16 +463,16 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
             }
 
             // Right overlay
-            if (zoneLeft + ZoneOutline.Width < previewWidth)
+            if (zoneLeft + _zonePreviewWidth < previewWidth)
             {
                 var rightRect = new System.Windows.Shapes.Rectangle
                 {
-                    Width = previewWidth - (zoneLeft + ZoneOutline.Width),
-                    Height = ZoneOutline.Height,
+                    Width = previewWidth - (zoneLeft + _zonePreviewWidth),
+                    Height = _zonePreviewHeight,
                     Fill = new SolidColorBrush(Color.FromArgb(0x80, 0x00, 0x00, 0x00))
                 };
                 Canvas.SetTop(rightRect, zoneTop);
-                Canvas.SetLeft(rightRect, zoneLeft + ZoneOutline.Width);
+                Canvas.SetLeft(rightRect, zoneLeft + _zonePreviewWidth);
                 CropOverlay.Children.Add(rightRect);
             }
         }
@@ -463,9 +482,13 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
     {
         GridLinesCanvas.Children.Clear();
 
-        // Draw rule-of-thirds grid lines
+        // Draw rule-of-thirds grid lines using the management-UI secondary text
+        // color so they stay visible in light/dark/high-contrast and in
+        // System-accent mode (Border.* brushes get repainted at low alpha there).
         double lineWidth = 1;
-        var brush = new SolidColorBrush(Color.FromArgb(0x40, 0xFF, 0xFF, 0xFF));
+        Brush brush;
+        try { brush = (Brush)FindResource("Brush.Text.Secondary"); }
+        catch { brush = Brushes.White; }
 
         double zoneWidth, zoneHeight, zoneLeft, zoneTop;
 
@@ -477,8 +500,8 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
         }
         else
         {
-            zoneWidth = ZoneOutline.Width;
-            zoneHeight = ZoneOutline.Height;
+            zoneWidth = _zonePreviewWidth;
+            zoneHeight = _zonePreviewHeight;
         }
 
         zoneLeft = (PreviewBorder.ActualWidth - zoneWidth) / 2;
@@ -529,6 +552,49 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
             Canvas.SetTop(line, zoneTop);
             GridLinesCanvas.Children.Add(line);
         }
+    }
+    
+    private void DrawTitleBarDivider()
+    {
+        DividerCanvas.Children.Clear();
+        if (_titleBarHeight <= 0) return;
+        if (_cropShape == "Circle" || _cropShape == "Ellipse") return;
+
+        // 真实窗口的标题栏/主体分界线：y = 裁切区域顶部 + 标题栏高度 × 预览缩放。
+        // 预览界面不区分「标题栏独立填充」开关——这条线始终显示，只作裁剪参考。
+        double zoneLeft = (PreviewBorder.ActualWidth - _zonePreviewWidth) / 2;
+        double zoneTop = (PreviewBorder.ActualHeight - _zonePreviewHeight) / 2;
+        double y = zoneTop + _titleBarHeight * _previewScale;
+
+        Brush brush;
+        try { brush = (Brush)FindResource("Brush.Text.Secondary"); }
+        catch { brush = Brushes.White; }
+
+        DividerCanvas.Children.Add(new System.Windows.Shapes.Line
+        {
+            X1 = zoneLeft, Y1 = y,
+            X2 = zoneLeft + _zonePreviewWidth, Y2 = y,
+            Stroke = brush,
+            // 随预览缩放同步增粗（2–4px），放大后仍保持可见比例。
+            StrokeThickness = Math.Min(4, Math.Max(2, 2 * _previewScale)),
+            IsHitTestVisible = false
+        });
+    }
+
+    void ApplyTitleBarSnap()
+    {
+        if (_titleBarHeight <= 0) return;
+        if (_cropShape == "Circle" || _cropShape == "Ellipse") return;
+        if (CropImage == null || CropImage.Source == null) return;
+
+        // 图片上边缘靠近分界线时自动吸附；拖过阈值即可自由摆放（占满整个分区）。
+        double zoneTop = (PreviewBorder.ActualHeight - _zonePreviewHeight) / 2;
+        double dividerY = zoneTop + _titleBarHeight * _previewScale;
+        double imageTop = PreviewBorder.ActualHeight / 2 - CropImage.Height / 2
+                        + _currentOffsetY * _previewScale;
+        double delta = dividerY - imageTop;
+        if (Math.Abs(delta) < TitleBarSnapThreshold)
+            _currentOffsetY += delta / _previewScale;
     }
     
     private void UpdateDisplays()

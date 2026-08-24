@@ -86,6 +86,7 @@ public partial class SettingsPage : UserControl
             var cfg = _configService.Load();
             StartWithWindowsBox.IsChecked = cfg.StartWithWindows;
             StartMinimizedBox.IsChecked = cfg.StartMinimized;
+            AutoAlignBox.IsChecked = cfg.AutoAlign;
             SelectComboByTag(LanguageCombo, cfg.Language);
             SyncThemeRadios(cfg.ThemeMode switch
             {
@@ -143,6 +144,14 @@ public partial class SettingsPage : UserControl
         if (_suppress) return;
         var cfg = _configService.Load();
         cfg.StartMinimized = StartMinimizedBox.IsChecked == true;
+        _configService.Save(cfg);
+    }
+
+    void AutoAlign_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_suppress) return;
+        var cfg = _configService.Load();
+        cfg.AutoAlign = AutoAlignBox.IsChecked == true;
         _configService.Save(cfg);
     }
 

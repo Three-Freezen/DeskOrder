@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Windows;
+using System.Windows.Threading;
 using DesktopZones.Helpers;
 using DesktopZones.Models;
 using DesktopZones.Services;
+using DesktopZones.ViewModels;
 
 namespace DesktopZones.Views.Components;
 
@@ -124,15 +126,13 @@ public class PropertyWindowManager
             w.Width = config.PropertyWindowWidth > 0 ? config.PropertyWindowWidth : 360;
             w.Height = config.PropertyWindowHeight > 0 ? config.PropertyWindowHeight : 600;
         }
-        w.LocationChanged += (_, _) =>
+        w.LocationChanged += (_, _) => SchedulePersist(target, w, configService);
+        w.SizeChanged += (_, _) => SchedulePersist(target, w, configService);
+        w.Closed += (_, _) =>
         {
-                PersistRect(target, w, configService);
-            };
-        w.SizeChanged += (_, _) =>
-        {
-                PersistRect(target, w, configService);
-            };
-        w.Closed += (_, _) => _floating.Remove(target);
+            FlushPendingPersist();
+            _floating.Remove(target);
+        };
         // ponytail: flip the panel into "floating mode" — swap toggle icon to
         // dock-back, fire the spin animation. Subscribe DockRequested so the
         // same button that pops out can also dock back. DockTarget closes this
@@ -178,6 +178,38 @@ public class PropertyWindowManager
             configService.Save(config);
         }
         catch { }
+    }
+
+    // ── Debounced rect persistence ──
+    // ponytail 2026-08-26: LocationChanged / SizeChanged fire once per frame
+    // while the floating window is dragged or resized. Persisting on every one
+    // of them did a JSON Load+Save at 60Hz during drags — a major source of the
+    // "拖动一卡一卡" stutter. Now the write happens once, 400ms after movement
+    // settles (or immediately when the window closes).
+
+    readonly Dictionary<object, (PropertyWindow w, ConfigService svc)> _pendingPersist = new();
+    DispatcherTimer? _persistDebounce;
+
+    void SchedulePersist(object target, PropertyWindow w, ConfigService configService)
+    {
+        _pendingPersist[target] = (w, configService);
+        if (_persistDebounce == null)
+        {
+            _persistDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+            _persistDebounce.Tick += (_, _) => FlushPendingPersist();
+        }
+        _persistDebounce.Stop();
+        _persistDebounce.Start();
+    }
+
+    void FlushPendingPersist()
+    {
+        _persistDebounce?.Stop();
+        if (_pendingPersist.Count == 0) return;
+        var snapshot = new List<KeyValuePair<object, (PropertyWindow w, ConfigService svc)>>(_pendingPersist);
+        _pendingPersist.Clear();
+        foreach (var kv in snapshot)
+            PersistRect(kv.Key, kv.Value.w, kv.Value.svc);
     }
 
     public static void RestoreAndActivate(PropertyWindow w)
@@ -288,6 +320,10 @@ public class PropertyWindowManager
         if (target == null) return "";
         if (target is PanelConfig)
             return nameof(PanelConfig) + ":panel";
+        // ponytail 2026-08-26: merged-group target keys by the stable GroupId
+        // (survives master promotion on detach), not the master zone's Id.
+        if (target is MergedGroupTarget g)
+            return nameof(MergedGroupTarget) + ":" + g.GroupId;
         // Models expose `Id` — try reflection so we don't need a hard dep.
         var prop = target.GetType().GetProperty("Id");
         if (prop?.GetValue(target) is { } idVal && idVal != null)
@@ -304,6 +340,8 @@ public class PropertyWindowManager
         return target switch
         {
             Zone z => z.Name,
+            MergedGroupTarget g => string.IsNullOrEmpty(g.Master.MergedGroupMembership.DisplayName)
+                ? g.Master.Name : g.Master.MergedGroupMembership.DisplayName,
             DesktopClock c => c.Mode == ClockDisplayMode.Digital ? "Clock (数字)" : "Clock (钟表)",
             DesktopCalendar cal => $"Calendar {cal.DisplayYear}-{cal.DisplayMonth:D2}",
             StickyNote => "便签",
@@ -315,6 +353,7 @@ public class PropertyWindowManager
     public static string IconOf(object target) => target switch
     {
         Zone => "Icon.Zones",
+        MergedGroupTarget => "Icon.Merged",
         DesktopClock => "Icon.Clock",
         DesktopCalendar => "Icon.Calendar",
         StickyNote => "Icon.Sticky",

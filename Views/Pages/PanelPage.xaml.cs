@@ -9,6 +9,7 @@ using DesktopZones.Models;
 using DesktopZones.Services;
 using DesktopZones.ViewModels;
 using DesktopZones.Views.Components;
+using static DesktopZones.Views.Pages.PageHelpers;
 using RelayCommand = DesktopZones.ViewModels.RelayCommand;
 
 namespace DesktopZones.Views.Pages;
@@ -25,6 +26,7 @@ public partial class PanelPage : UserControl
     readonly ManagementWindow _main;
     readonly ConfigService _configService;
     readonly PanelService? _panelService;
+    PanelConfig? _selected; // ponytail: track singleton selection so RefreshList() re-applies the blue glow on rebuild.
 
     public PanelPage(ManagementWindow main, ConfigService configService, PanelService? panelService)
     {
@@ -52,6 +54,10 @@ public partial class PanelPage : UserControl
             : "未设置";
         CountLabel.Text = $"{hotkey} · {(cfg.Panel.PanelEnabled ? "已启用" : "未启用")}";
         ListHost.ItemsSource = new List<EditableListRow> { BuildRow(cfg) };
+        // ponytail 2026-08-25: mirror ZonesPage — reapply row selection after
+        // rebuild so the blue glow (IsSelected DataTrigger on EditableListRow)
+        // survives RefreshList triggered by language change / window events.
+        SetSelection(ListHost, _selected);
     }
 
     EditableListRow BuildRow(AppConfig cfg)
@@ -95,8 +101,16 @@ public partial class PanelPage : UserControl
         return row;
     }
 
-    void Select() =>
-        PropertyWindowManager.Instance.DockTarget(_main.LiveConfig.Panel, _main);
+    void Select()
+    {
+        // ponytail 2026-08-25: mirror ZonesPage — track _selected and call SetSelection
+        // so the blue glow (IsSelected DataTrigger on EditableListRow) fires on click.
+        // Without this, Panel rows opened the right pane but never lit up like zone rows.
+        var panel = _main.LiveConfig.Panel;
+        PropertyWindowManager.Instance.DockTarget(panel, _main);
+        _selected = panel;
+        SetSelection(ListHost, panel);
+    }
 
     static void ApplyStatusBadge(EditableListRow row, AppConfig cfg)
     {

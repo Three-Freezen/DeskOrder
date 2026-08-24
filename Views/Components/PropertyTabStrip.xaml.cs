@@ -105,6 +105,11 @@ public partial class PropertyTabStrip : UserControl
     bool _isDragOut;         // true once cursor has left the strip during drag-out
     DispatcherTimer? _dragTimer;
 
+    // ── Visible drag (tab follows the cursor) ──
+    Border? _dragContainer;          // dragged tab's template root Border
+    UIElement? _dragContainerPanel;  // its ContentPresenter (for z-order)
+    double _dragGrabOffsetX;
+
     int _dragInsertIndex = -1;
     bool _isTransferring;
     PropertyTabStrip? _transferTarget;
@@ -175,6 +180,20 @@ public partial class PropertyTabStrip : UserControl
             _dragOutArmed = false;
             _isDragOut = false;
             _dragInsertIndex = _dragFromIndex;
+
+            // Visible drag: the tab follows the cursor. Reset any leftover slide
+            // transform, record the grab offset and raise the tab above its siblings.
+            _dragContainer = sender as Border;
+            if (_dragContainer?.RenderTransform is TranslateTransform tt)
+            {
+                tt.BeginAnimation(TranslateTransform.XProperty, null);
+                tt.X = 0;
+            }
+            _dragGrabOffsetX = _dragOrigin.X - TabLayoutXInStrip(tab);
+            _dragContainerPanel = TabsHost.ItemContainerGenerator.ContainerFromItem(tab) as UIElement;
+            if (_dragContainerPanel != null)
+                Panel.SetZIndex(_dragContainerPanel, 10);
+
             StartDragTimer();
         }
     }
@@ -209,8 +228,11 @@ public partial class PropertyTabStrip : UserControl
 
         GetCursorPos(out POINT pt);
         var screen = new Point(pt.X, pt.Y);
-        var stripOrigin = PointToScreen(new Point(0, 0));
-        var pos = new Point(screen.X - stripOrigin.X, screen.Y - stripOrigin.Y);
+        // PointFromScreen converts physical pixels → DIP strip coords, keeping the
+        // follow math consistent with GetPosition/layout widths (all DIPs). Mixing
+        // raw Win32 pixels with DIPs made the tab's head anchor at the cursor on
+        // scaled displays instead of the grab point.
+        var pos = PointFromScreen(screen);
         var stripBounds = new Rect(0, 0, ActualWidth, ActualHeight);
         bool outsideStrip = !stripBounds.Contains(pos);
 
@@ -233,6 +255,16 @@ public partial class PropertyTabStrip : UserControl
         // Commit drag-out once armed and the cursor has actually left.
         if (_dragOutArmed && !_isDragOut && outsideStrip)
             _isDragOut = true;
+
+        // Visible drag: the dragged tab tracks the cursor while inside the strip;
+        // snap it back to its slot once the cursor leaves.
+        if (_dragContainer?.RenderTransform is TranslateTransform tt)
+        {
+            if (_dragArmed && !outsideStrip && _dragTab != null)
+                tt.X = pos.X - _dragGrabOffsetX - TabLayoutXInStrip(_dragTab);
+            else
+                tt.X = 0;
+        }
 
         // ponytail: cross-window transfer — if drag-out is armed AND cursor
         // is over another strip's hit zone, mark transferring and tell the
@@ -316,6 +348,8 @@ public partial class PropertyTabStrip : UserControl
                     if (target > _dragFromIndex) target--;
                     MoveTab(_dragFromIndex, target);
                 }
+                // Settle the dragged tab from wherever the cursor left it into its slot.
+                SettleDragContainer();
             }
         }
         finally
@@ -338,6 +372,34 @@ public partial class PropertyTabStrip : UserControl
         return Tabs.Count;
     }
 
+    /// <summary>Layout origin (x) of a tab in strip coordinates, computed
+    /// analytically from sibling widths so it stays valid regardless of any
+    /// slide/follow RenderTransform on the tabs.</summary>
+    double TabLayoutXInStrip(PropertyTab tab)
+    {
+        double hostX = TabsHost.TranslatePoint(new Point(0, 0), this).X;
+        double acc = 0;
+        for (int i = 0; i < Tabs.Count; i++)
+        {
+            if (ReferenceEquals(Tabs[i], tab)) break;
+            var c = (FrameworkElement)TabsHost.ItemContainerGenerator.ContainerFromIndex(i);
+            if (c != null) acc += c.ActualWidth;
+        }
+        return hostX + acc;
+    }
+
+    /// <summary>Animate the dragged tab from wherever the cursor left it back into
+    /// its final slot.</summary>
+    void SettleDragContainer()
+    {
+        if (_dragContainer?.RenderTransform is not TranslateTransform tt) return;
+        var anim = new DoubleAnimation(tt.X, 0, TimeSpan.FromMilliseconds(160))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        };
+        tt.BeginAnimation(TranslateTransform.XProperty, anim);
+    }
+
     // ── Slide animation (§4.1) ──
 
     void CaptureSlidePositions(int from, int to)
@@ -347,6 +409,7 @@ public partial class PropertyTabStrip : UserControl
         {
             if (i < 0 || i >= Tabs.Count) continue;
             var tab = Tabs[i];
+            if (ReferenceEquals(tab, _dragTab)) continue; // dragged tab follows the cursor instead
             var container = (FrameworkElement)TabsHost.ItemContainerGenerator.ContainerFromItem(tab);
             if (container == null) continue;
             var x = container.TranslatePoint(new Point(0, 0), TabsScroller).X;
@@ -401,6 +464,10 @@ public partial class PropertyTabStrip : UserControl
         }
         if (_isTransferring && _transferTarget != null)
             _transferTarget.HandleTransferDragLeave();
+        if (_dragContainerPanel != null)
+            Panel.SetZIndex(_dragContainerPanel, 0);
+        _dragContainerPanel = null;
+        _dragContainer = null;
         _dragTab = null;
         _dragFromIndex = -1;
         _dragArmed = false;
@@ -444,6 +511,9 @@ public partial class PropertyTabStrip : UserControl
                 nameof(DesktopClock) => main.WidgetService?.Clocks.FirstOrDefault(c => c.Id == id),
                 nameof(DesktopCalendar) => main.WidgetService?.Calendars.FirstOrDefault(c => c.Id == id),
                 nameof(StickyNote) => main.NotesService?.Notes.FirstOrDefault(n => n.Id == id),
+                nameof(MergedGroupTarget) => (main.Zones.FirstOrDefault(z =>
+                    z.MergedGroupMembership.GroupId == id && z.MergedGroupMembership.SubZoneIds.Count > 0)
+                    is { } m ? MergedGroupTarget.For(m) : null),
                 _ => null,
             };
         }

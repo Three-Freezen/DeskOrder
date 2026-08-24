@@ -91,11 +91,20 @@ public class ZoneViewModel : INotifyPropertyChanged
 
     public void RefreshItems()
     {
+        // ponytail 2026-08-26: merged masters must reload the SELECTED tab's
+        // items. Loading _zone.Items unconditionally yanked the view back to
+        // the master's icons on every ZonesChanged (icon add/delete, group
+        // settings save) — "删除/增添图标后自动跳到标题栏的第一个分区".
+        if (IsMergedMaster)
+        {
+            RefreshMergedItems();
+            return;
+        }
         Items.Clear();
-        double isize = _zone.GridSize * 0.6;
+        double isize = Math.Max(24, _zone.GridSize - 8);
         foreach (var item in _zone.Items)
         {
-            var vm = new ZoneItemViewModel(item, _iconService) { IconSize = isize, SourceZoneId = _zone.Id };
+            var vm = new ZoneItemViewModel(item, _iconService) { IconSize = isize, ItemSize = _zone.GridSize, SourceZoneId = _zone.Id };
             Items.Add(vm);
         }
     }
@@ -104,7 +113,7 @@ public class ZoneViewModel : INotifyPropertyChanged
     public void RefreshMergedItems()
     {
         Items.Clear();
-        double isize = _zone.GridSize * 0.6;
+        double isize = Math.Max(24, _zone.GridSize - 8);
 
         // Determine which zone's items to show
         Guid targetId = _selectedSubZoneId ?? _zone.Id;
@@ -112,7 +121,7 @@ public class ZoneViewModel : INotifyPropertyChanged
         if (targetId == _zone.Id)
         {
             foreach (var item in _zone.Items)
-                Items.Add(new ZoneItemViewModel(item, _iconService) { IconSize = isize, SourceZoneId = _zone.Id });
+                Items.Add(new ZoneItemViewModel(item, _iconService) { IconSize = isize, ItemSize = _zone.GridSize, SourceZoneId = _zone.Id });
         }
         else
         {
@@ -120,7 +129,7 @@ public class ZoneViewModel : INotifyPropertyChanged
             if (subZone != null)
             {
                 foreach (var item in subZone.Items)
-                    Items.Add(new ZoneItemViewModel(item, _iconService) { IconSize = isize, SourceZoneId = targetId });
+                    Items.Add(new ZoneItemViewModel(item, _iconService) { IconSize = isize, ItemSize = _zone.GridSize, SourceZoneId = targetId });
             }
         }
 
@@ -144,10 +153,21 @@ public class ZoneViewModel : INotifyPropertyChanged
         }
 
         _zone.Items.Add(item);
-        var vm = new ZoneItemViewModel(item, _iconService) { IconSize = _zone.GridSize * 0.6, SourceZoneId = _zone.Id };
+        var vm = new ZoneItemViewModel(item, _iconService) { IconSize = Math.Max(24, _zone.GridSize - 8), ItemSize = _zone.GridSize, SourceZoneId = _zone.Id };
         Items.Add(vm);
         _zoneManager.SaveConfig();
         _zoneManager.NotifyChanged();
+    }
+
+    /// <summary>The item list AddItem actually writes to (sub-zone when a tab is selected in merged mode).</summary>
+    public IReadOnlyList<ZoneItem> GetPlacementItems()
+    {
+        if (_selectedSubZoneId.HasValue && _selectedSubZoneId.Value != _zone.Id)
+        {
+            var targetZone = _zoneManager.Zones.FirstOrDefault(z => z.Id == _selectedSubZoneId.Value);
+            if (targetZone != null) return targetZone.Items;
+        }
+        return _zone.Items;
     }
 
     public void RemoveItem(ZoneItem item)
@@ -273,11 +293,25 @@ public class ZoneItemViewModel : INotifyPropertyChanged
         set { _iconSize = value; OnPropertyChanged(); }
     }
 
+    private double _itemSize = 56;
+    public double ItemSize
+    {
+        get => _itemSize;
+        set { _itemSize = value; OnPropertyChanged(); }
+    }
+
     private ImageSource? _icon;
     public ImageSource? Icon
     {
         get => _icon ??= _iconService.GetIcon(TargetPath, Type);
         set { _icon = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>Drop the cached icon so the next Icon read re-resolves it (recycle-bin state changes).</summary>
+    public void RefreshIcon()
+    {
+        _icon = null;
+        OnPropertyChanged(nameof(Icon));
     }
 
     /// <summary>Which zone this item belongs to (for merged views).</summary>

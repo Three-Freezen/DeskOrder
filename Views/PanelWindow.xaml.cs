@@ -33,6 +33,9 @@ public partial class PanelWindow : Window
     private readonly ShellIconService _iconService = new();
     private readonly LocalizationService _loc = LocalizationService.Instance;
     private readonly System.Windows.Threading.DispatcherTimer _clockTimer;
+    private readonly System.Windows.Threading.DispatcherTimer _recycleTimer = new() { Interval = TimeSpan.FromSeconds(2.5) };
+    private bool _recycleStateInit;
+    private bool _recycleFullLast;
     private bool _isGridView = true;
     private Zone? _selectedZone;
     private Action<string>? _langChanged;
@@ -61,7 +64,7 @@ public partial class PanelWindow : Window
         Loaded += OnLoad;
         LocationChanged += SavePosition;
         Activated += (_, _) => { Topmost = true; };
-        SizeChanged += (_, _) => { SavePosition(null, EventArgs.Empty); NativeMethods.UpdateRoundedCorners(this, 10); };
+        SizeChanged += (_, _) => { SavePosition(null, EventArgs.Empty); NativeMethods.UpdateRoundedCorners(this, _zoneManager.GetConfig().Panel.PanelCornerRadius); };
         _langChanged = _ => ApplyLoc();
         _loc.LanguageChanged += _langChanged;
 
@@ -69,6 +72,10 @@ public partial class PanelWindow : Window
         _clockTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _clockTimer.Tick += (_, _) => UpdateClock();
         _clockTimer.Start();
+
+        // Recycle-bin icon state watcher
+        _recycleTimer.Tick += RecycleTimer_Tick;
+        _recycleTimer.Start();
     }
 
     void ApplyLoc()
@@ -157,8 +164,8 @@ public partial class PanelWindow : Window
         ApplyLoc();
         RebuildDisplay();
         // Set rounded corners LAST after all sizing
-        NativeMethods.SetRoundedCorners(this, 10);
-        NativeMethods.UpdateRoundedCorners(this, 10);
+        NativeMethods.SetRoundedCorners(this, _zoneManager.GetConfig().Panel.PanelCornerRadius);
+        NativeMethods.UpdateRoundedCorners(this, _zoneManager.GetConfig().Panel.PanelCornerRadius);
     }
 
     void SavePosition(object? _, EventArgs __)
@@ -223,6 +230,10 @@ public partial class PanelWindow : Window
             FillRect.Opacity = 1.0; // Brush alpha from FillColor controls transparency
         }
         catch { }
+        bool fillIndependent = config.Panel.PanelTitleBarFillIndependent;
+        int r = config.Panel.PanelCornerRadius;
+        FillRect.RadiusX = FillRect.RadiusY = fillIndependent ? 0 : r;
+        FillRect.Margin = fillIndependent ? new Thickness(0, 44, 0, 0) : new Thickness(0);
 
         // Border
         try
@@ -231,6 +242,12 @@ public partial class PanelWindow : Window
         }
         catch { }
         PanelBorder.BorderThickness = new Thickness(borderThickness);
+
+        // ponytail 2026-08-26: 圆角/尖角 switch — border / top-bar / DWM lockstep.
+        PanelBorder.CornerRadius = new CornerRadius(r);
+        TopBar.CornerRadius = new CornerRadius(r, r, 0, 0);
+        if (System.Windows.PresentationSource.FromVisual(this) != null)
+            NativeMethods.SetRoundedCorners(this, r);
 
         // Title bar fill
         try
@@ -275,9 +292,20 @@ public partial class PanelWindow : Window
 
     public void ApplyBackgroundImage()
     {
+        var config = _zoneManager.GetConfig();
+        // 标题栏独立填充：背景图与 FillRect 一样不铺到顶栏下方（顶部裁剪）。
+        double clipTop = config.Panel.PanelTitleBarFillIndependent ? 44 : 0;
+        if (BgImageBorder != null)
+        {
+            BgImageBorder.Margin = new Thickness(0, clipTop, 0, 0);
+            // 顶部裁剪后上边角取直角，仅保留底部圆角以贴合窗口。
+            int r = config.Panel.PanelCornerRadius;
+            BgImageBorder.CornerRadius = clipTop > 0
+                ? new CornerRadius(0, 0, r, r)
+                : new CornerRadius(r);
+        }
         try
         {
-            var config = _zoneManager.GetConfig();
             if (!string.IsNullOrEmpty(config.Panel.PanelBackgroundImagePath) && System.IO.File.Exists(config.Panel.PanelBackgroundImagePath))
             {
                 var bi = new System.Windows.Media.Imaging.BitmapImage();
@@ -290,8 +318,8 @@ public partial class PanelWindow : Window
                 BgImage.Source = bi;
                 BgImage.Stretch = Stretch.UniformToFill;
 
-                double bw = BgImageBorder.ActualWidth > 0 ? BgImageBorder.ActualWidth : Width;
-                double bh = BgImageBorder.ActualHeight > 0 ? BgImageBorder.ActualHeight : Height;
+                double bw = Width;
+                double bh = Height;
 
                 // UniformToFill — fill target area maintaining aspect ratio
                 double imgW = bi.PixelWidth;
@@ -313,7 +341,7 @@ public partial class PanelWindow : Window
 
                 BgImage.Margin = new Thickness(
                     zoneCenterX - imgCenterX + ox,
-                    zoneCenterY - imgCenterY + oy, 0, 0);
+                    zoneCenterY - imgCenterY + oy - clipTop, 0, 0);
                 BgImage.HorizontalAlignment = HorizontalAlignment.Left;
                 BgImage.VerticalAlignment = VerticalAlignment.Top;
                 BgImage.Opacity = Math.Max(0.01, config.Panel.PanelBackgroundImageOpacity / 100.0);
@@ -529,7 +557,7 @@ public partial class PanelWindow : Window
         var openItem = new MenuItem { Header = _loc["Item.Open"] };
         openItem.Click += (_, _) =>
         {
-            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = item.TargetPath, UseShellExecute = true }); }
+            try { ShellLocationResolver.Open(item.TargetPath, item.Type); }
             catch (Exception ex)
             {
                 MessageBox.Show($"{_loc["Item.FailedToOpen"]}\n{ex.Message}", _loc["Item.FailedToOpen.Title"], MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -540,6 +568,11 @@ public partial class PanelWindow : Window
         var openLocation = new MenuItem { Header = _loc["Item.OpenLocation"] };
         openLocation.Click += (_, _) =>
         {
+            if (item.Type == ItemType.ShellLocation)
+            {
+                ShellLocationResolver.Open(item.TargetPath, item.Type);
+                return;
+            }
             if (item.Type is ItemType.Shortcut or ItemType.Application)
             {
                 var d = Path.GetDirectoryName(item.TargetPath);
@@ -549,6 +582,25 @@ public partial class PanelWindow : Window
             else System.Diagnostics.Process.Start("explorer.exe", item.TargetPath);
         };
         menu.Items.Add(openLocation);
+
+        // Recycle Bin item: offer "Empty Recycle Bin" right in the context menu.
+        if (item.Type == ItemType.ShellLocation && ShellIconService.IsRecycleBin(item.TargetPath))
+        {
+            var emptyRecycle = new MenuItem { Header = _loc["Item.EmptyRecycleBin"] };
+            emptyRecycle.Click += (_, _) =>
+            {
+                try
+                {
+                    NativeMethods.SHEmptyRecycleBinW(new WindowInteropHelper(this).Handle, null,
+                        NativeMethods.SHERB_NOCONFIRMATION | NativeMethods.SHERB_NOPROGRESSUI | NativeMethods.SHERB_NOSOUND);
+                }
+                catch { }
+                ShellIconService.InvalidateRecycleBinState();
+                _recycleStateInit = false;
+                RebuildDisplay();
+            };
+            menu.Items.Add(emptyRecycle);
+        }
 
         var renameItem = new MenuItem { Header = _loc["Item.Rename"] };
         renameItem.Click += (_, _) =>
@@ -584,7 +636,7 @@ public partial class PanelWindow : Window
         {
             if (s is Border b && b.Tag is (ZoneItem item, _))
             {
-                try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = item.TargetPath, UseShellExecute = true }); }
+                try { ShellLocationResolver.Open(item.TargetPath, item.Type); }
                 catch (Exception ex)
                 {
                     MessageBox.Show($"{_loc["Item.FailedToOpen"]}\n{ex.Message}", _loc["Item.FailedToOpen.Title"], MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -715,6 +767,11 @@ public partial class PanelWindow : Window
         var importFolderItem = new MenuItem { Header = _loc["Panel.ImportFolder"] };
         importFolderItem.Click += ImportFolder_Click;
         contextMenu.Items.Add(importFolderItem);
+
+        // Import System Items (virtual shell objects — Recycle Bin, This PC, ...)
+        var importShellItem = new MenuItem { Header = _loc["Panel.ImportShellItems"] };
+        importShellItem.Click += ImportShellItems_Click;
+        contextMenu.Items.Add(importShellItem);
 
         contextMenu.Items.Add(new Separator());
 
@@ -850,14 +907,27 @@ public partial class PanelWindow : Window
         }
     }
 
+    void ImportShellItems_Click(object s, RoutedEventArgs e)
+    {
+        var targetZone = GetTargetZone();
+        if (targetZone == null) return;
+
+        var dlg = new ShellLocationPickerWindow { Owner = this };
+        if (dlg.ShowDialog() != true || dlg.SelectedItems.Count == 0) return;
+
+        foreach (var (name, spec) in dlg.SelectedItems)
+        {
+            var (sx, sy) = FindFreeSpot(targetZone);
+            AddItemToZone(targetZone, name, spec, ItemType.ShellLocation, sx, sy);
+        }
+    }
+
     void NewFolder_Click(object s, RoutedEventArgs e)
     {
         var targetZone = GetTargetZone();
         if (targetZone == null) return;
         CreateNewFolder(targetZone);
-    }
-
-    void NewTextFile_Click(object s, RoutedEventArgs e)
+    }    void NewTextFile_Click(object s, RoutedEventArgs e)
     {
         var targetZone = GetTargetZone();
         if (targetZone == null) return;
@@ -1007,7 +1077,6 @@ public partial class PanelWindow : Window
 
     private void ImportFilesToZone(Zone zone, string[] paths)
     {
-        var (sx, sy) = FindFreeSpot(zone);
         foreach (var f in paths)
         {
             string name = Path.GetFileName(f);
@@ -1019,51 +1088,60 @@ public partial class PanelWindow : Window
                     ".exe" => ItemType.Application,
                     _ => ItemType.Shortcut
                 };
+            var (sx, sy) = FindFreeSpot(zone);
             AddItemToZone(zone, name, f, type, sx, sy);
-            sx += 80;
-            if (sx > zone.Width - 80) { sx = 10; sy += 90; }
         }
     }
 
     private (double, double) FindFreeSpot(Zone zone)
-    {
-        if (zone.Items.Count == 0) return (10, 10);
-        double maxY = 0;
-        foreach (var i in zone.Items) { if (i.Y > maxY) maxY = i.Y; }
-        double maxX = 0;
-        foreach (var i in zone.Items) { if (Math.Abs(i.Y - maxY) < 10 && i.X > maxX) maxX = i.X; }
-        double sx = maxX + 80, sy = maxY;
-        if (sx > zone.Width - 80) { sx = 10; sy = maxY + 90; }
-        return (sx, sy);
-    }
+        => ZoneLayout.FindFreeSpot(zone.Items, zone.Width, zone.Height, zone.GridSize, zone.GridSize);
 
-    // ── Drag-drop from Explorer ──
+    // ── Drag-drop from Explorer (WPF AllowDrop — files only) ──
 
     void Panel_DragEnter(object s, DragEventArgs e)
     {
-        if (e.Data.GetDataPresent(DataFormats.FileDrop))
-        {
-            e.Effects = DragDropEffects.Link;
-            e.Handled = true;
-        }
+        if (e.Data.GetDataPresent(DataFormats.FileDrop)) { e.Effects = DragDropEffects.Copy; e.Handled = true; }
     }
 
     void Panel_DragOver(object s, DragEventArgs e)
     {
-        if (e.Data.GetDataPresent(DataFormats.FileDrop))
-        {
-            e.Effects = DragDropEffects.Link;
-            e.Handled = true;
-        }
+        if (e.Data.GetDataPresent(DataFormats.FileDrop)) { e.Effects = DragDropEffects.Copy; e.Handled = true; }
     }
 
     void Panel_Drop(object s, DragEventArgs e)
     {
-        if (e.Data.GetData(DataFormats.FileDrop) is not string[] { Length: > 0 } fs) return;
+        if (e.Data.GetData(DataFormats.FileDrop) is not string[] { Length: > 0 } files) return;
         var targetZone = GetTargetZone();
         if (targetZone == null) return;
-        ImportFilesToZone(targetZone, fs);
+        ImportFilesToZone(targetZone, files);
         e.Handled = true;
+    }
+
+    // ── Recycle Bin icon state (empty ⇄ full) ──
+
+    void RecycleTimer_Tick(object? s, EventArgs e)
+    {
+        try
+        {
+            bool hasRecycle = false;
+            foreach (var z in _zoneManager.Zones)
+            {
+                foreach (var i in z.Items)
+                {
+                    if (i.Type == ItemType.ShellLocation && ShellIconService.IsRecycleBin(i.TargetPath))
+                    { hasRecycle = true; break; }
+                }
+                if (hasRecycle) break;
+            }
+            if (!hasRecycle) { _recycleStateInit = false; return; }
+
+            bool full = ShellIconService.RecycleBinHasItems();
+            if (_recycleStateInit && full == _recycleFullLast) return;
+            _recycleStateInit = true;
+            _recycleFullLast = full;
+            RebuildDisplay();
+        }
+        catch { }
     }
 
     // ── Hide ──
@@ -1091,6 +1169,7 @@ public partial class PanelWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _clockTimer?.Stop();
+        _recycleTimer.Stop();
         if (_langChanged != null) { _loc.LanguageChanged -= _langChanged; _langChanged = null; }
         _zoneManager.ZonesChanged -= RebuildDisplay;
         SavePosition(null, EventArgs.Empty);

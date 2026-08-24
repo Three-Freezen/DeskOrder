@@ -26,6 +26,8 @@ public class MergedGroupStyle
     public bool UseUnifiedFill { get; set; } = true;     // true=unified fill, false=keep original
     public bool QuickBarMode { get; set; } = false;      // title-bar-less compact mode
     public bool TitleBarTextColorAdaptive { get; set; } = true;
+    /// <summary>标题栏填充单独设置 — 统一填充模式下主体填充不铺到标题栏下方。</summary>
+    public bool TitleBarFillIndependent { get; set; } = false;
     public string BackgroundImagePath { get; set; } = "";
     public string BgImageStretch { get; set; } = "UniformToFill";
     public double BgImageOffsetX { get; set; } = 0;

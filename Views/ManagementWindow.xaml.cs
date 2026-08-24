@@ -478,6 +478,12 @@ public partial class ManagementWindow : Window
                     _configService.Save(LiveConfig);
                     _panelService?.RefreshAppearance();
                     break;
+                case MergedGroupTarget g:
+                    // ponytail 2026-08-26: group editor edits live on the master
+                    // zone (MergedGroupStyle / membership / window-level fields)
+                    // — UpdateZone refreshes the merged window + persists.
+                    _zoneManager.UpdateZone(g.Master);
+                    break;
             }
             // ponytail: edit = intent to keep the docked tab (previously ZonesPage
             // pinned on every edit). Pin the tab for the edited target so it
@@ -503,6 +509,15 @@ public partial class ManagementWindow : Window
         // failed, and the docked panel silently showed no field tree.
         if (typeName == nameof(PanelConfig))
             return LiveConfig.Panel;
+        if (typeName == nameof(MergedGroupTarget) && Guid.TryParse(idStr, out var groupId))
+        {
+            // ponytail 2026-08-26: group key carries the stable GroupId — resolve
+            // the current master (it may have been promoted after a detach).
+            var master = _zoneManager.Zones.FirstOrDefault(z =>
+                z.MergedGroupMembership.GroupId == groupId &&
+                z.MergedGroupMembership.SubZoneIds.Count > 0);
+            return master != null ? MergedGroupTarget.For(master) : null;
+        }
         if (!Guid.TryParse(idStr, out var id)) return null;
         return typeName switch
         {

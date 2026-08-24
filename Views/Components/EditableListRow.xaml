@@ -77,13 +77,14 @@
             <Setter Property="Background" Value="{DynamicResource Brush.Bg.Hover}"/>
             <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border.Default}"/>
           </Trigger>
+          <!-- ponytail 2026-08-25: 选中态 = Brush.Accent.Wash 背景（保持原 Wash）+ Brush.Accent.Solid 边框（深 accent）-->
           <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=UserControl}}"
                        Value="True">
             <Setter Property="Background" Value="{DynamicResource Brush.Accent.Wash}"/>
-            <Setter Property="BorderBrush" Value="{DynamicResource Brush.Accent}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Brush.Accent.Solid}"/>
             <Setter Property="Effect">
               <Setter.Value>
-                <DropShadowEffect Color="{DynamicResource Color.Accent}"
+                <DropShadowEffect Color="{DynamicResource Color.Accent.Solid}"
                                   BlurRadius="12" ShadowDepth="0" Opacity="0.55"/>
               </Setter.Value>
             </Setter>
@@ -92,8 +93,9 @@
       </Style>
     </Border.Style>
     <Grid>
+      <!-- ponytail 2026-08-25: 选中态左侧指示条 = Brush.Accent.Solid（深 accent 填充）-->
       <Border x:Name="SelectionBar" Width="2" HorizontalAlignment="Left"
-              Background="{DynamicResource Brush.Accent}"
+              Background="{DynamicResource Brush.Accent.Solid}"
               VerticalAlignment="Stretch" Visibility="Collapsed"
               RenderTransformOrigin="0.5,0.5">
         <Border.RenderTransform>

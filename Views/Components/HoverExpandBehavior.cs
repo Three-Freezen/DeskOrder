@@ -275,12 +275,31 @@ public class HoverExpandBehavior : IDisposable
     /// </summary>
     public void SetEnabled(bool on)
     {
-        CancelWave();
+        // ponytail: 2026-08-26 — do NOT cancel a queued batch wave. The widgets'
+        // model-sync handlers (CalendarWidget.OnCalendarsChanged / StickyNoteWindow.
+        // OnNotesChanged) call SetEnabled on EVERY UpdateCalendar/UpdateNote —
+        // including the one fired by HideCalendar/HideNote right AFTER
+        // CollapseAfterDelay armed the stagger timer. CancelWave() there killed the
+        // queued collapse, so "Minimize All" silently skipped calendar + sticky note
+        // (the clock was immune because OnClocksChanged has no SetEnabled call), and
+        // it killed the queued "Show All" expand — stranding the window as a
+        // full-size invisible Topmost ghost with only the RestoreButton visible
+        // (the reported "周围有透明边框" ring). The queued wave's tick reads all
+        // getters live, so re-applying settings during the delay must not disturb it.
+        bool wavePending = _waveTimer != null;
+        if (!wavePending) CancelWave();
         IsEnabled = on;
         _enterTimer.Stop();
         _exitTimer.Stop();
         ApplyOrigin();
         NormalizeFor(_isExpanded);
+
+        // ponytail: 2026-08-26 — while a wave is queued, leave the visual baseline as
+        // the wave's caller set it (collapsed + hidden button for Show, expanded for
+        // Hide). Snapping here would flash the RestoreButton during the stagger delay
+        // and, for a queued collapse, hide the content instantly — bypassing the very
+        // animation the batch wave exists to play.
+        if (wavePending) return;
 
         // ponytail: 2026-08-23 residual-frame fix — a settings change
         // (MotionSettingsDialog OK / EnableRestoreButton toggle / RefreshZone) can

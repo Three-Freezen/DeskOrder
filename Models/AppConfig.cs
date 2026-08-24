@@ -17,6 +17,9 @@ public class AppConfig
     public bool StartMinimized { get; set; } = true;
     public bool ShowAllOnStartup { get; set; } = true;
 
+    // ── 自动对齐：拖动组件时显示对齐线并自动吸附（面板除外） ──
+    public bool AutoAlign { get; set; } = true;
+
     // ── Theme selection (three-valued; replaces ambiguous single `Theme`) ──
     /// <summary>"System" / "Light" / "Dark". Defaults to "System" so existing configs fall back to OS preference.</summary>
     public string ThemeMode { get; set; } = "System";

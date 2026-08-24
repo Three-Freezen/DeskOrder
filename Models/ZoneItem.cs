@@ -8,7 +8,8 @@ public enum ItemType
     Shortcut,   // .lnk file
     Folder,     // folder path
     Application, // .exe file
-    Document    // .txt / .docx / .pptx etc.
+    Document,   // .txt / .docx / .pptx etc.
+    ShellLocation // virtual shell object, TargetPath is a "::{GUID}" spec (Recycle Bin, This PC, ...)
 }
 
 public class ZoneItem

@@ -22,6 +22,9 @@ public class StickyNote : AppearanceModel
     public bool PinnedTop { get; set; } = false;
     // ── Appearance (most fields inherited from AppearanceModel) ──
     public double BorderThickness { get; set; } = 1.0;
+    // ponytail 2026-08-26: per-instance corner radius (圆角/尖角 switch).
+    // Default 10 matches the XAML hardcoded radius these widgets shipped with.
+    public int CornerRadius { get; set; } = 10;
     // ── Title bar / button appearance ──
     public string TitleBarFillColor { get; set; } = "#10FFFFFF";
     public double TitleBarOpacity { get; set; } = 6;
@@ -32,6 +35,8 @@ public class StickyNote : AppearanceModel
     // ── Title bar text color adaptive ──
     /// <summary>Auto-pick sticky note title bar text color based on <see cref="TitleBarFillColor"/>.</summary>
     public bool TitleBarTextColorAdaptive { get; set; } = true;
+    /// <summary>标题栏填充单独设置 — 勾选后主体填充(FillColor)不再铺到标题栏下方。</summary>
+    public bool TitleBarFillIndependent { get; set; } = false;
     // ── Save ──
     public string LastSavePath { get; set; } = "";
     // ── Hotkey ──
@@ -51,9 +56,11 @@ public class StickyNote : AppearanceModel
             NoteColor = NoteColor, FontSize = FontSize,
             IsVisible = IsVisible, IsLocked = IsLocked, PinnedTop = PinnedTop,
             BorderThickness = BorderThickness,
+            CornerRadius = CornerRadius,
             TitleBarFillColor = TitleBarFillColor, TitleBarOpacity = TitleBarOpacity,
             ControlOpacity = ControlOpacity, TitleTextColor = TitleTextColor,
             TitleBarTextColorAdaptive = TitleBarTextColorAdaptive,
+            TitleBarFillIndependent = TitleBarFillIndependent,
             BackgroundImageOpacity = BackgroundImageOpacity,
             LastSavePath = LastSavePath,
             HotkeyEnabled = HotkeyEnabled, HotkeyModifiers = HotkeyModifiers,
@@ -93,6 +100,8 @@ public class DesktopClock : AppearanceModel
     public string AccentColor { get; set; } = "#FFFFFFFF";
     // ── Appearance (most fields inherited from AppearanceModel) ──
     public double BorderThickness { get; set; } = 1.0;
+    // ponytail 2026-08-26: per-instance corner radius (圆角/尖角 switch).
+    public int CornerRadius { get; set; } = 10;
     // ── Mode-independent fill ──
     public string AnalogFillColor { get; set; } = "#08000000";
     public string DigitalFillColor { get; set; } = "#08000000";
@@ -118,6 +127,7 @@ public class DesktopClock : AppearanceModel
             FontSize = FontSize, FontFamily = FontFamily,
             Opacity = Opacity, Mode = Mode, AccentColor = AccentColor,
             BorderThickness = BorderThickness,
+            CornerRadius = CornerRadius,
             AnalogFillColor = AnalogFillColor, DigitalFillColor = DigitalFillColor,
             BackgroundImageOpacity = BackgroundImageOpacity,
             DigitalBackgroundImagePath = DigitalBackgroundImagePath,
@@ -181,6 +191,8 @@ public class DesktopCalendar : AppearanceModel
     public double Opacity { get; set; } = 1.0;
     // ── Appearance (most fields inherited from AppearanceModel) ──
     public double BorderThickness { get; set; } = 1.0;
+    // ponytail 2026-08-26: per-instance corner radius (圆角/尖角 switch).
+    public int CornerRadius { get; set; } = 10;
     // ── Background image (Opacity stays per-model — 30 default) ──
     public double BackgroundImageOpacity { get; set; } = 30;
     // Notes keyed by "yyyy-MM-dd"
@@ -207,6 +219,7 @@ public class DesktopCalendar : AppearanceModel
             TextColor = TextColor, TodayColor = TodayColor,
             FontSize = FontSize, Opacity = Opacity,
             BorderThickness = BorderThickness,
+            CornerRadius = CornerRadius,
             BackgroundImageOpacity = BackgroundImageOpacity,
             Notes = Notes.ToDictionary(kvp => kvp.Key, kvp => new List<CalendarNote>(kvp.Value.Select(n => n.Clone())))
         };

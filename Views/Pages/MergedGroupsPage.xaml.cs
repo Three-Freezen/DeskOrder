@@ -124,7 +124,12 @@ public partial class MergedGroupsPage : UserControl
             _selected = master;
             SetSelection(ListHost, master);
         }
-        if (_main.DockedPanel != null) _main.DockedPanel.Target = master;
+        // ponytail 2026-08-26: row click opens the standalone merged-group
+        // editor (group style + membership), not the per-zone editor. Dedup
+        // rule "one editor per target" still applies to floating windows.
+        var target = MergedGroupTarget.For(master);
+        PropertyWindowManager.Instance.CloseWindow(target);
+        if (_main.DockedPanel != null) _main.DockedPanel.Target = target;
     }
 
     static void ApplyStatusBadge(EditableListRow row, Zone master)

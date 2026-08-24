@@ -45,6 +45,7 @@ public partial class StickyNoteWindow : Window
     // this instead of hardcoded #80FFFFFF so they don't clobber the adaptive color.
     private SolidColorBrush? _titleBarAdaptiveBrush;
     private HoverExpandBehavior? _hover;
+    private SnapDrag? _snapDrag;
 
     public StickyNoteWindow(StickyNote note, NotesService notesService)
     {
@@ -73,7 +74,7 @@ public partial class StickyNoteWindow : Window
         if (note.PinnedTop) Topmost = true;
 
         LocationChanged += (_, _) => { _note.X = Left; _note.Y = Top; };
-        SizeChanged += (_, _) => { if (MainContent.Visibility == Visibility.Visible) { _note.Width = Width; _note.Height = Height; NativeMethods.UpdateRoundedCorners(this, 10); } };
+        SizeChanged += (_, _) => { if (MainContent.Visibility == Visibility.Visible) { _note.Width = Width; _note.Height = Height; NativeMethods.UpdateRoundedCorners(this, _note.CornerRadius); } };
 
         Loaded += OnLoad;
         _notesService.NotesChanged += OnNotesChanged;
@@ -102,6 +103,9 @@ public partial class StickyNoteWindow : Window
         // call window.Show() without going through the equivalent of ShowZone, so
         // SnapToExpanded never runs.
         if (_note.IsVisible) _hover.SnapToExpanded();
+
+        // ponytail: 自适应对齐 — 替换 DragMove 的手动拖拽循环。
+        _snapDrag = new SnapDrag(this);
     }
 
     void OnHoverExpandSettingsChanged()
@@ -463,8 +467,8 @@ public partial class StickyNoteWindow : Window
         NativeMethods.SetToolWindow(this);
         ApplyAcrylic();
         ApplyBackgroundImage();
-        NativeMethods.SetRoundedCorners(this, 10);
-        NativeMethods.UpdateRoundedCorners(this, 10);
+        NativeMethods.SetRoundedCorners(this, _note.CornerRadius);
+        NativeMethods.UpdateRoundedCorners(this, _note.CornerRadius);
         if (!_note.IsVisible) ApplyHidden();
     }
 
@@ -496,7 +500,7 @@ public partial class StickyNoteWindow : Window
         ApplyAcrylic();
         MinWidth = 180; MinHeight = 120;
         _note.IsVisible = true; if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
-        NativeMethods.SetRoundedCorners(this, 10);
+        NativeMethods.SetRoundedCorners(this, _note.CornerRadius);
         _notesService.UpdateNote(_note);
         // Restore dimensions AFTER UpdateNote (which may trigger OnNotesChanged / reference swap)
         Width = savedW; Height = savedH;
@@ -609,8 +613,11 @@ public partial class StickyNoteWindow : Window
         if (Math.Abs(d.X) > 3 || Math.Abs(d.Y) > 3)
         {
             RestoreButton.ReleaseMouseCapture();
-            try { DragMove(); } catch { }
-            _note.X = Left; _note.Y = Top;
+            _snapDrag?.Start(e, () =>
+            {
+                if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
+                _note.X = Left; _note.Y = Top;
+            });
         }
     }
 
@@ -659,7 +666,7 @@ public partial class StickyNoteWindow : Window
             {
                 // Use fillColor directly — its ARGB alpha controls transparency
                 var fillColor = (Color)ColorConverter.ConvertFromString(fillColorStr)!;
-                NoteBorder.Background = new SolidColorBrush(fillColor);
+                BodyFillRect.Fill = new SolidColorBrush(fillColor);
             }
             catch { }
         }
@@ -671,9 +678,25 @@ public partial class StickyNoteWindow : Window
             try
             {
                 var fillColor = (Color)ColorConverter.ConvertFromString(fillColorStr)!;
-                NoteBorder.Background = new SolidColorBrush(fillColor);
+                BodyFillRect.Fill = new SolidColorBrush(fillColor);
             }
             catch { }
+        }
+        ApplyFillGeometry();
+    }
+
+    void ApplyFillGeometry()
+    {
+        if (BodyFillRect == null) return;
+        if (_note.TitleBarFillIndependent)
+        {
+            Grid.SetRow(BodyFillRect, 1);
+            Grid.SetRowSpan(BodyFillRect, 2);
+        }
+        else
+        {
+            Grid.SetRow(BodyFillRect, 0);
+            Grid.SetRowSpan(BodyFillRect, 3);
         }
     }
 
@@ -686,6 +709,16 @@ public partial class StickyNoteWindow : Window
             NoteBorder.BorderThickness = new Thickness(_note.BorderThickness);
         }
         catch { }
+
+        // ponytail 2026-08-26: 圆角/尖角 switch — corner elements + DWM lockstep.
+        int r = _note.CornerRadius;
+        MainContent.CornerRadius = new CornerRadius(r);
+        NoteBorder.CornerRadius = new CornerRadius(r);
+        TitleBarBorder.CornerRadius = new CornerRadius(r, r, 0, 0);
+        if (BodyFillRect != null)
+            BodyFillRect.RadiusX = BodyFillRect.RadiusY = _note.TitleBarFillIndependent ? 0 : r;
+        if (System.Windows.PresentationSource.FromVisual(this) != null)
+            NativeMethods.SetRoundedCorners(this, r);
     }
 
     void ApplyTitleBar()
@@ -795,6 +828,21 @@ public partial class StickyNoteWindow : Window
 
     void ApplyBackgroundImage()
     {
+        // 标题栏独立填充：背景图与 BodyFillRect 一样不铺到标题栏行（顶部裁剪）。
+        if (NoteBgBorder != null)
+        {
+            if (_note.TitleBarFillIndependent)
+            {
+                Grid.SetRow(NoteBgBorder, 1);
+                Grid.SetRowSpan(NoteBgBorder, 2);
+            }
+            else
+            {
+                Grid.SetRow(NoteBgBorder, 0);
+                Grid.SetRowSpan(NoteBgBorder, 3);
+            }
+        }
+        double clipTop = _note.TitleBarFillIndependent ? 28 : 0;
         try
         {
             if (!string.IsNullOrEmpty(_note.BackgroundImagePath) && System.IO.File.Exists(_note.BackgroundImagePath))
@@ -808,8 +856,8 @@ public partial class StickyNoteWindow : Window
                 bi.Freeze();
                 NoteBgImage.Source = bi;
                 NoteBgImage.Stretch = Stretch.UniformToFill;
-                double nw = NoteBgBorder.ActualWidth > 0 ? NoteBgBorder.ActualWidth : Width;
-                double nh = NoteBgBorder.ActualHeight > 0 ? NoteBgBorder.ActualHeight : Height;
+                double nw = Width;
+                double nh = Height;
 
                 // UniformToFill — fill target area maintaining aspect ratio
                 double imgW = bi.PixelWidth;
@@ -831,7 +879,7 @@ public partial class StickyNoteWindow : Window
 
                 NoteBgImage.Margin = new Thickness(
                     zoneCenterX - imgCenterX + ox,
-                    zoneCenterY - imgCenterY + oy, 0, 0);
+                    zoneCenterY - imgCenterY + oy - clipTop, 0, 0);
                 NoteBgImage.HorizontalAlignment = HorizontalAlignment.Left;
                 NoteBgImage.VerticalAlignment = VerticalAlignment.Top;
                 NoteBgImage.Opacity = Math.Max(0.01, _note.BackgroundImageOpacity / 100.0);
@@ -867,7 +915,11 @@ public partial class StickyNoteWindow : Window
     void TitleBar_Drag(object s, MouseButtonEventArgs e)
     {
         if (_vm?.IsLocked == true) return;
-        try { DragMove(); if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this); } catch { }
+        _snapDrag?.Start(e, () =>
+        {
+            if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
+            _note.X = Left; _note.Y = Top;
+        });
     }
 
     // ponytail: 2026-08-23 — the note's title bar has no bare grab area (the title
@@ -894,7 +946,11 @@ public partial class StickyNoteWindow : Window
                 return;
             src = System.Windows.Media.VisualTreeHelper.GetParent(src);
         }
-        try { DragMove(); if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this); } catch { }
+        _snapDrag?.Start(e, () =>
+        {
+            if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
+            _note.X = Left; _note.Y = Top;
+        });
         // Prevent the bubbling TitleBar_Drag from running a second move loop.
         e.Handled = true;
     }
@@ -1063,6 +1119,7 @@ public partial class StickyNoteWindow : Window
         _notesService.LockChanged -= OnServiceLockChanged;
         _notesService.NotesChanged -= OnNotesChanged;
         _note.HoverExpandSettingsChanged -= OnHoverExpandSettingsChanged;
+        _snapDrag?.Detach();
         _hover?.Dispose();
         base.OnClosed(e);
     }

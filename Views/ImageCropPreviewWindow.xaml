@@ -4,7 +4,8 @@
         Title="Image Crop Preview" Width="800" Height="600"
         MinWidth="600" MinHeight="450"
         WindowStartupLocation="CenterOwner" ResizeMode="CanResize"
-        WindowStyle="None" AllowsTransparency="True" Background="Transparent">
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        SnapsToDevicePixels="True">
 
     <Border Background="{DynamicResource Brush.Bg.Chrome}" CornerRadius="12"
             BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1">
@@ -12,16 +13,18 @@
             <DropShadowEffect BlurRadius="24" ShadowDepth="0" Color="#AA000000" Opacity="0.6"/>
         </Border.Effect>
 
+        <Grid>
         <Grid Margin="18">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>  <!-- Title bar -->
+                <RowDefinition Height="Auto"/>  <!-- Title-bar divider -->
                 <RowDefinition Height="*"/>     <!-- Preview area -->
                 <RowDefinition Height="Auto"/>  <!-- Controls -->
                 <RowDefinition Height="Auto"/>  <!-- Buttons -->
             </Grid.RowDefinitions>
 
             <!-- Title Bar with current values display -->
-            <Grid Grid.Row="0" Margin="0,0,0,12">
+            <Grid Grid.Row="0" Margin="0,0,0,8">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
@@ -37,10 +40,18 @@
                     <TextBlock x:Name="ZoomDisplay" Foreground="{DynamicResource Brush.Text.Secondary}"
                                FontSize="12" VerticalAlignment="Center"/>
                 </StackPanel>
+
             </Grid>
 
+            <!-- ponytail: title-bar divider — dedicated full-width row with the
+                 theme-adaptive secondary text color so it is clearly visible in
+                 light/dark/high-contrast AND in System-accent mode (where the
+                 Border.* brushes are repainted at low alpha by ThemeService). -->
+            <Border Grid.Row="1" Height="2" Margin="0,0,0,10"
+                    Background="{DynamicResource Brush.Text.Secondary}"/>
+
             <!-- Preview Area -->
-            <Border Grid.Row="1" Background="{DynamicResource Brush.Bg.Surface}" CornerRadius="8"
+            <Border Grid.Row="2" Background="{DynamicResource Brush.Bg.Surface}" CornerRadius="8"
                     BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1"
                     ClipToBounds="True" x:Name="PreviewBorder"
                     MouseWheel="PreviewBorder_MouseWheel"
@@ -50,20 +61,6 @@
                     SizeChanged="PreviewBorder_SizeChanged">
 
                 <Grid x:Name="PreviewGrid">
-                    <!-- Zone outline (dashed border showing target dimensions) -->
-                    <Border x:Name="ZoneOutline" BorderBrush="{DynamicResource Brush.Accent.Solid}"
-                            BorderThickness="2"
-                            HorizontalAlignment="Center" VerticalAlignment="Center"
-                            Background="Transparent" IsHitTestVisible="False"/>
-                    <Ellipse x:Name="ZoneOutlineEllipse" Stroke="{DynamicResource Brush.Accent.Solid}"
-                             StrokeThickness="2"
-                             HorizontalAlignment="Center" VerticalAlignment="Center"
-                             Fill="Transparent" IsHitTestVisible="False"
-                             Visibility="Collapsed"/>
-
-                    <!-- Grid lines for alignment (optional) -->
-                    <Canvas x:Name="GridLinesCanvas" IsHitTestVisible="False" Opacity="0.3"/>
-
                     <!-- Background image -->
                     <Canvas x:Name="ImageCanvas" ClipToBounds="True" IsHitTestVisible="False">
                         <Image x:Name="CropImage" Stretch="UniformToFill"
@@ -77,13 +74,20 @@
                         </Image>
                     </Canvas>
 
+                    <!-- Rule-of-thirds grid lines (theme-adaptive so they stay visible
+                         in light/dark/high-contrast; drawn above the image). -->
+                    <Canvas x:Name="GridLinesCanvas" IsHitTestVisible="False" Opacity="0.55"/>
+
+                    <!-- Real-widget title-bar/body boundary guide (snap target). -->
+                    <Canvas x:Name="DividerCanvas" IsHitTestVisible="False"/>
+
                     <!-- Crop area overlay (semi-transparent dark outside zone) -->
                     <Canvas x:Name="CropOverlay" IsHitTestVisible="False"/>
                 </Grid>
             </Border>
 
             <!-- Controls Panel -->
-            <Grid Grid.Row="2" Margin="0,12,0,0">
+            <Grid Grid.Row="3" Margin="0,12,0,0">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
@@ -120,7 +124,7 @@
             </Grid>
 
             <!-- Buttons -->
-            <StackPanel Grid.Row="3" Orientation="Horizontal"
+            <StackPanel Grid.Row="4" Orientation="Horizontal"
                         HorizontalAlignment="Right" Margin="0,12,0,0">
                 <Button x:Name="ResetButton" Content="Reset"
                         Background="{DynamicResource Brush.Bg.Surface}" Foreground="{DynamicResource Brush.Text.Secondary}"
@@ -148,8 +152,41 @@
                     <Button.Resources>
                         <Style TargetType="Border"><Setter Property="CornerRadius" Value="4"/></Style>
                     </Button.Resources>
+                    <Button.Style>
+                      <!-- ponytail 2026-08-25: 镂空 + 禁用态淡化 -->
+                      <Style TargetType="Button">
+                        <Style.Triggers>
+                          <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Background" Value="{DynamicResource Brush.Accent.Solid.Disabled}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.Accent.On.Disabled}"/>
+                            <Setter Property="Cursor" Value="Arrow"/>
+                          </Trigger>
+                        </Style.Triggers>
+                      </Style>
+                    </Button.Style>
                 </Button>
             </StackPanel>
+        </Grid>
+
+        <!-- ponytail: corner resize grips — the preview (zone outline / image / grid /
+             title-bar divider) auto-fits the window size via PreviewBorder.SizeChanged →
+             CalculatePreviewScale. -->
+        <Border x:Name="GripTL" Width="12" Height="12"
+                HorizontalAlignment="Left" VerticalAlignment="Top"
+                Cursor="SizeNWSE" Background="Transparent"
+                MouseLeftButtonDown="ResizeGrip_Down"/>
+        <Border x:Name="GripTR" Width="12" Height="12"
+                HorizontalAlignment="Right" VerticalAlignment="Top"
+                Cursor="SizeNESW" Background="Transparent"
+                MouseLeftButtonDown="ResizeGrip_Down"/>
+        <Border x:Name="GripBL" Width="12" Height="12"
+                HorizontalAlignment="Left" VerticalAlignment="Bottom"
+                Cursor="SizeNESW" Background="Transparent"
+                MouseLeftButtonDown="ResizeGrip_Down"/>
+        <Border x:Name="GripBR" Width="12" Height="12"
+                HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                Cursor="SizeNWSE" Background="Transparent"
+                MouseLeftButtonDown="ResizeGrip_Down"/>
         </Grid>
     </Border>
 </Window>

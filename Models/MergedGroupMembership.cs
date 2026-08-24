@@ -21,6 +21,15 @@ public class MergedGroupMembership
         get => _subZoneIds;
         set => _subZoneIds = value ?? new();
     }
+    private List<Guid> _tabOrder = new();
+    /// <summary>Display order of the group's member labels (master included) in the
+    /// merged window's tab strip. Empty for sub-zones and legacy configs — normalized
+    /// to [master] + SubZoneIds on render.</summary>
+    public List<Guid> TabOrder
+    {
+        get => _tabOrder;
+        set => _tabOrder = value ?? new();
+    }
     public string DisplayName { get; set; } = "";       // combined display name
     public string Icon { get; set; } = "";              // combined icon
 }

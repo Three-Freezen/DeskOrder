@@ -1,7 +1,10 @@
+using System;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
 
 namespace DesktopZones.Views.Components;
 
@@ -15,7 +18,9 @@ public class SegmentItem
 
 /// <summary>
 /// Wraps an ItemsControl of RadioButton segments inside a bordered container.
-/// Selected segment gets the accent fill via the SegmentItem style.
+/// The selected segment's accent fill is a Border that SLIDES under the target
+/// segment (200ms ease-out) instead of repainting in place — see
+/// SegmentItem.Slide for the segment template.
 /// </summary>
 public partial class Segmented : UserControl
 {
@@ -39,6 +44,9 @@ public partial class Segmented : UserControl
         set => SetValue(SelectedIndexProperty, value);
     }
 
+    /// <summary>Raised after SelectedIndex changes (user click or programmatic).</summary>
+    public event EventHandler? SelectedIndexChanged;
+
     public Segmented()
     {
         InitializeComponent();
@@ -46,6 +54,7 @@ public partial class Segmented : UserControl
         {
             Items = new ObservableCollection<SegmentItem>();
         }
+        Loaded += (_, _) => PositionHighlight(animate: false);
     }
 
     static void OnItemsChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
@@ -60,10 +69,15 @@ public partial class Segmented : UserControl
 
     static void OnSelectedIndexChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
-        ((Segmented)d).ApplySelected();
+        var s = (Segmented)d;
+        s.ApplySelected();
+        s.PositionHighlight(animate: true);
+        s.SelectedIndexChanged?.Invoke(s, EventArgs.Empty);
     }
 
     void OnCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e) => Rebuild();
+
+    void HostGrid_SizeChanged(object sender, SizeChangedEventArgs e) => PositionHighlight(animate: false);
 
     void Rebuild()
     {
@@ -73,15 +87,15 @@ public partial class Segmented : UserControl
         {
             var rb = new RadioButton
             {
-                Style = (Style)FindResource("SegmentItem"),
+                Style = (Style)FindResource("SegmentItem.Slide"),
                 Tag = i,
                 Content = Items[i].Text,
                 IsChecked = i == SelectedIndex,
             };
             rb.Checked += Segment_Checked;
-            rb.Unchecked += Segment_Unchecked;
             ItemsHost.Items.Add(rb);
         }
+        PositionHighlight(animate: false);
     }
 
     void ApplySelected()
@@ -95,16 +109,46 @@ public partial class Segmented : UserControl
         }
     }
 
+    /// <summary>Slide the accent highlight under the selected segment. Each
+    /// segment is exactly 1/N of the track width (UniformGrid).</summary>
+    void PositionHighlight(bool animate)
+    {
+        if (Highlight == null || HostGrid == null || ItemsHost == null) return;
+        int n = ItemsHost.Items.Count;
+        bool hasSelection = n > 0 && SelectedIndex >= 0 && SelectedIndex < n;
+        Highlight.Visibility = hasSelection ? Visibility.Visible : Visibility.Collapsed;
+        if (!hasSelection || HostGrid.ActualWidth <= 0)
+        {
+            if (HighlightTranslate != null)
+                HighlightTranslate.X = 0;
+            return;
+        }
+
+        double segW = HostGrid.ActualWidth / n;
+        Highlight.Width = Math.Max(0, segW - 4); // track the segments' 2px margins
+        double x = SelectedIndex * segW;
+
+        if (HighlightTranslate == null) return;
+        if (!animate)
+        {
+            HighlightTranslate.X = x;
+            return;
+        }
+
+        // ponytail: same motion family as the rest of the settings interface —
+        // 200ms cubic ease-out (Motion.StandardSpline equivalent).
+        var anim = new DoubleAnimation(HighlightTranslate.X, x, TimeSpan.FromMilliseconds(200))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        };
+        HighlightTranslate.BeginAnimation(TranslateTransform.XProperty, anim);
+    }
+
     void Segment_Checked(object sender, RoutedEventArgs e)
     {
         if (sender is RadioButton rb && rb.Tag is int idx && idx != SelectedIndex)
         {
             SelectedIndex = idx;
         }
-    }
-
-    void Segment_Unchecked(object sender, RoutedEventArgs e)
-    {
-        // RadioButton group keeps one checked; ignore Unchecked.
     }
 }

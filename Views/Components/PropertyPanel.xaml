@@ -12,6 +12,7 @@
       <RowDefinition Height="Auto"/>
       <RowDefinition Height="Auto"/>
       <RowDefinition Height="*"/>
+      <RowDefinition Height="Auto"/>
     </Grid.RowDefinitions>
 
     <Border Grid.Row="0" Background="{DynamicResource Brush.Bg.Chrome}"
@@ -96,5 +97,47 @@
       <TextBlock Margin="16" Text="{loc:Loc Key=PropertyPanel.NoTarget}"
                  Foreground="{DynamicResource Brush.Text.Tertiary}"/>
     </ScrollViewer>
+
+    <Border Grid.Row="3" Background="{DynamicResource Brush.Bg.Chrome}"
+            BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="0,1,0,0"
+            Padding="12,10">
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+        <!-- ponytail 2026-08-25: 前 3 个描边按钮 — Border + Foreground 跟主题。
+             Border.Default 在 system 模式下被 ThemeService 改写，描边跟随；Text.Secondary 同理。
+             IsEnabled=False 时 WPF 默认把 Foreground 改成 Brush.Text.Disabled（已在 ThemeService 重算）。-->
+        <Button x:Name="LoadPresetBtn" Content="{loc:Loc Key=PropertyPanel.Btn.LoadPreset}" Cursor="Hand"
+                Background="Transparent" BorderBrush="{DynamicResource Brush.Border.Default}" BorderThickness="1"
+                Foreground="{DynamicResource Brush.Text.Secondary}"
+                Padding="12,6" Click="LoadPresetBtn_Click" IsEnabled="False"
+                ToolTip="{loc:Loc Key=PropertyPanel.Btn.LoadPreset}">
+          <Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="4"/></Style></Button.Resources>
+        </Button>
+        <Button x:Name="SavePresetBtn" Content="{loc:Loc Key=PropertyPanel.Btn.SavePreset}" Cursor="Hand"
+                Background="Transparent" BorderBrush="{DynamicResource Brush.Border.Default}" BorderThickness="1"
+                Foreground="{DynamicResource Brush.Text.Secondary}"
+                Padding="12,6" Margin="6,0,0,0" Click="SavePresetBtn_Click" IsEnabled="False"
+                ToolTip="{loc:Loc Key=PropertyPanel.Btn.SavePreset}">
+          <Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="4"/></Style></Button.Resources>
+        </Button>
+        <Button x:Name="CancelBtn" Content="{loc:Loc Key=PropertyPanel.Btn.Cancel}" Cursor="Hand"
+                Background="Transparent" BorderBrush="{DynamicResource Brush.Border.Default}" BorderThickness="1"
+                Foreground="{DynamicResource Brush.Text.Secondary}"
+                Padding="12,6" Margin="6,0,0,0" Click="CancelBtn_Click" IsEnabled="False"
+                ToolTip="{loc:Loc Key=PropertyPanel.Btn.Cancel}">
+          <Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="4"/></Style></Button.Resources>
+        </Button>
+        <!-- ponytail 2026-08-25: Apply 是填充按钮 — 用 Brush.Accent.Solid + Brush.Accent.On 镂空主题色。
+             不绑 .Disabled brush（用户要求：填充按钮不需要颜色自适应模块）。
+             禁用态保持 Solid+On 不变（WPF 自动调低文字前景到 Brush.Text.Disabled 不影响填充）。-->
+        <Button x:Name="ApplyBtn" Content="{loc:Loc Key=PropertyPanel.Btn.Apply}" Cursor="Hand"
+                Background="{DynamicResource Brush.Accent.Solid}" Foreground="{DynamicResource Brush.Accent.On}"
+                BorderThickness="0" Padding="12,6" Margin="6,0,0,0" Click="ApplyBtn_Click" IsEnabled="False"
+                ToolTip="{loc:Loc Key=PropertyPanel.Btn.Apply}">
+          <Button.Resources>
+            <Style TargetType="Border"><Setter Property="CornerRadius" Value="4"/></Style>
+          </Button.Resources>
+        </Button>
+      </StackPanel>
+    </Border>
   </Grid>
 </UserControl>

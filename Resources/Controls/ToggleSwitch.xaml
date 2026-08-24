@@ -31,34 +31,12 @@
           </Grid>
 
           <ControlTemplate.Triggers>
+            <!-- ponytail 2026-08-25: 镂空 Switch — 开启时 Track = Accent.Solid（深 accent 填充），
+                 Dot = Accent.On（同色淡化 60%，镂空效果），不用 ColorAnimation 因为 brush 是 SolidColorBrush 的 Color DP。
+                 关闭时恢复 Brush.Bg.Active 灰色 Track + Brush.Text.Tertiary 灰色 Dot。 -->
             <Trigger Property="IsChecked" Value="True">
-              <Trigger.EnterActions>
-                <BeginStoryboard>
-                  <Storyboard>
-                    <DoubleAnimation Storyboard.TargetName="DotTransform"
-                                     Storyboard.TargetProperty="X"
-                                     To="18" Duration="0:0:0.16"/>
-                    <ColorAnimation Storyboard.TargetName="Track"
-                                    Storyboard.TargetProperty="Background.Color"
-                                    To="{DynamicResource Color.Accent}"
-                                    Duration="0:0:0.16"/>
-                  </Storyboard>
-                </BeginStoryboard>
-              </Trigger.EnterActions>
-              <Trigger.ExitActions>
-                <BeginStoryboard>
-                  <Storyboard>
-                    <DoubleAnimation Storyboard.TargetName="DotTransform"
-                                     Storyboard.TargetProperty="X"
-                                     To="2" Duration="0:0:0.16"/>
-                    <ColorAnimation Storyboard.TargetName="Track"
-                                    Storyboard.TargetProperty="Background.Color"
-                                    To="{DynamicResource Color.Bg.Active}"
-                                    Duration="0:0:0.16"/>
-                  </Storyboard>
-                </BeginStoryboard>
-              </Trigger.ExitActions>
-              <Setter TargetName="Dot" Property="Background" Value="#FFFFFF"/>
+              <Setter TargetName="Track" Property="Background" Value="{DynamicResource Brush.Accent.Solid}"/>
+              <Setter TargetName="Dot" Property="Background" Value="{DynamicResource Brush.Accent.On}"/>
             </Trigger>
             <Trigger Property="IsEnabled" Value="False">
               <Setter TargetName="Track" Property="Opacity" Value="0.5"/>

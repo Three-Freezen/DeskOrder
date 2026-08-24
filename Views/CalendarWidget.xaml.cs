@@ -28,6 +28,7 @@ public partial class CalendarWidget : Window
     private readonly CalendarViewModel _vm;
     private readonly LocalizationService _loc = LocalizationService.Instance;
     private HoverExpandBehavior? _hover;
+    private SnapDrag? _snapDrag;
     // ponytail: track generators we subscribed to in SubscribeDayCellStatusChanged so
     // OnClosed can detach without keeping a parallel list. IDisposable pattern: WPF event
     // -= requires the same delegate reference, but DayCellStatus_Changed is a shared
@@ -81,6 +82,9 @@ public partial class CalendarWidget : Window
         // ponytail: bug fix — see ZoneWindow ctor. Window.Show() (OpenCalendarWindow /
         // --spawn-widget) bypasses ShowCalendar, so SnapToExpanded never runs.
         if (_calendar.IsVisible) _hover.SnapToExpanded();
+
+        // ponytail: 自适应对齐 — 替换 DragMove 的手动拖拽循环。
+        _snapDrag = new SnapDrag(this);
     }
     private Action<string>? _langChanged;
 
@@ -139,8 +143,8 @@ public partial class CalendarWidget : Window
         // switch, preset load, etc.). Hook must be after Loaded so the visual tree is up.
         SubscribeDayCellStatusChanged();
         // Set rounded corners LAST after all sizing is complete
-        NativeMethods.SetRoundedCorners(this, 10);
-        NativeMethods.UpdateRoundedCorners(this, 10);
+        NativeMethods.SetRoundedCorners(this, _calendar.CornerRadius);
+        NativeMethods.UpdateRoundedCorners(this, _calendar.CornerRadius);
         ApplyLockState();
         if (!_calendar.IsVisible) ApplyHidden();
     }
@@ -149,7 +153,7 @@ public partial class CalendarWidget : Window
     {
         if (MainContent.Visibility != Visibility.Visible) return;
         _calendar.Width = Width; _calendar.Height = Height;
-        NativeMethods.UpdateRoundedCorners(this, 10);
+        NativeMethods.UpdateRoundedCorners(this, _calendar.CornerRadius);
     }
 
     // ── Acrylic / frosted glass ──
@@ -448,6 +452,14 @@ public partial class CalendarWidget : Window
         CalendarBorder.InvalidateMeasure();
         CalendarBorder.InvalidateVisual();
 
+        // ponytail 2026-08-26: 圆角/尖角 switch — corner elements + DWM lockstep.
+        int r = _calendar.CornerRadius;
+        MainContent.CornerRadius = new CornerRadius(r);
+        CalendarBorder.CornerRadius = new CornerRadius(r);
+        FillRect.RadiusX = FillRect.RadiusY = r;
+        if (System.Windows.PresentationSource.FromVisual(this) != null)
+            NativeMethods.SetRoundedCorners(this, r);
+
         ApplyQuickBar();
     }
 
@@ -551,7 +563,11 @@ public partial class CalendarWidget : Window
     void Window_Drag(object s, MouseButtonEventArgs e)
     {
         if (_vm?.IsLocked == true) return;
-        try { DragMove(); if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this); } catch { }
+        _snapDrag?.Start(e, () =>
+        {
+            if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
+            _calendar.X = Left; _calendar.Y = Top;
+        });
     }
 
     // ponytail: OS routes click normally now (no drill-through).
@@ -1093,8 +1109,11 @@ public partial class CalendarWidget : Window
         {
             _restoreDragging = true;
             RestoreButton.ReleaseMouseCapture();
-            try { DragMove(); } catch { }
-            _calendar.X = Left; _calendar.Y = Top;
+            _snapDrag?.Start(e, () =>
+            {
+                if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
+                _calendar.X = Left; _calendar.Y = Top;
+            });
         }
     }
 
@@ -1122,6 +1141,7 @@ public partial class CalendarWidget : Window
         _langChanged = null;
         _widgetService.LockChanged -= OnServiceLockChanged;
         _calendar.HoverExpandSettingsChanged -= OnHoverExpandSettingsChanged;
+        _snapDrag?.Detach();
         _widgetService.UpdateCalendar(_calendar);
         _hover?.Dispose();
         base.OnClosed(e);

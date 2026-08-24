@@ -25,7 +25,21 @@
           <Button Content="{loc:Loc Key=Manage.NewNote}" Click="NewNote_Click" Cursor="Hand" Margin="8,0,0,0"
                   Background="{DynamicResource Brush.Accent.Solid}"
                   Foreground="{DynamicResource Brush.Accent.On}" FontWeight="SemiBold"
-                  Padding="14,6" BorderThickness="0"/>
+                  Padding="14,6" BorderThickness="0">
+            <Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="4"/></Style></Button.Resources>
+            <Button.Style>
+              <!-- ponytail 2026-08-25: 镂空 + 禁用态淡化 -->
+              <Style TargetType="Button">
+                <Style.Triggers>
+                  <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Background" Value="{DynamicResource Brush.Accent.Solid.Disabled}"/>
+                    <Setter Property="Foreground" Value="{DynamicResource Brush.Accent.On.Disabled}"/>
+                    <Setter Property="Cursor" Value="Arrow"/>
+                  </Trigger>
+                </Style.Triggers>
+              </Style>
+            </Button.Style>
+          </Button>
         </StackPanel>
       </Grid>
     </Border>
