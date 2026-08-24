@@ -6,11 +6,31 @@
     <local:IconKeyToGeometryConverter x:Key="IconKeyToGeometry"/>
     <local:StringNotEmptyToVisibilityConverter x:Key="StrToVis"/>
     <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
+    <Storyboard x:Key="PressDown">
+      <DoubleAnimation Storyboard.TargetName="PressScale"
+                       Storyboard.TargetProperty="ScaleX"
+                       To="0.98" Duration="{StaticResource Motion.Fast}"
+                       EasingFunction="{StaticResource Motion.StandardSpline}"/>
+      <DoubleAnimation Storyboard.TargetName="PressScale"
+                       Storyboard.TargetProperty="ScaleY"
+                       To="0.98" Duration="{StaticResource Motion.Fast}"
+                       EasingFunction="{StaticResource Motion.StandardSpline}"/>
+    </Storyboard>
+    <Storyboard x:Key="PressUp">
+      <DoubleAnimation Storyboard.TargetName="PressScale"
+                       Storyboard.TargetProperty="ScaleX"
+                       To="1" Duration="{StaticResource Motion.Fast}"
+                       EasingFunction="{StaticResource Motion.StandardSpline}"/>
+      <DoubleAnimation Storyboard.TargetName="PressScale"
+                       Storyboard.TargetProperty="ScaleY"
+                       To="1" Duration="{StaticResource Motion.Fast}"
+                       EasingFunction="{StaticResource Motion.StandardSpline}"/>
+    </Storyboard>
   </UserControl.Resources>
   <Border x:Name="Root"
           Background="{DynamicResource Brush.Bg.Surface}"
           BorderBrush="{DynamicResource Brush.Border.Subtle}"
-          BorderThickness="1"
+          BorderThickness="3"
           CornerRadius="6"
           Padding="12,8"
           Margin="0,0,0,6"
@@ -18,7 +38,10 @@
           Opacity="0"
           RenderTransformOrigin="0.5,0.5">
     <Border.RenderTransform>
-      <TranslateTransform x:Name="RowTranslate" Y="8"/>
+      <TransformGroup>
+        <TranslateTransform x:Name="RowTranslate" Y="8"/>
+        <ScaleTransform x:Name="PressScale" ScaleX="1" ScaleY="1"/>
+      </TransformGroup>
     </Border.RenderTransform>
     <Border.Triggers>
       <EventTrigger RoutedEvent="Border.Loaded">
@@ -33,6 +56,18 @@
           </Storyboard>
         </BeginStoryboard>
       </EventTrigger>
+      <EventTrigger RoutedEvent="Border.PreviewMouseLeftButtonDown">
+        <BeginStoryboard Storyboard="{StaticResource PressDown}"
+                         HandoffBehavior="SnapshotAndReplace"/>
+      </EventTrigger>
+      <EventTrigger RoutedEvent="Border.PreviewMouseLeftButtonUp">
+        <BeginStoryboard Storyboard="{StaticResource PressUp}"
+                         HandoffBehavior="SnapshotAndReplace"/>
+      </EventTrigger>
+      <EventTrigger RoutedEvent="Border.MouseLeave">
+        <BeginStoryboard Storyboard="{StaticResource PressUp}"
+                         HandoffBehavior="SnapshotAndReplace"/>
+      </EventTrigger>
     </Border.Triggers>
     <Border.Style>
       <Style TargetType="Border">
@@ -46,6 +81,12 @@
                        Value="True">
             <Setter Property="Background" Value="{DynamicResource Brush.Accent.Wash}"/>
             <Setter Property="BorderBrush" Value="{DynamicResource Brush.Accent}"/>
+            <Setter Property="Effect">
+              <Setter.Value>
+                <DropShadowEffect Color="{DynamicResource Color.Accent}"
+                                  BlurRadius="12" ShadowDepth="0" Opacity="0.55"/>
+              </Setter.Value>
+            </Setter>
           </DataTrigger>
         </Style.Triggers>
       </Style>
