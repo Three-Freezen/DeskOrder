@@ -41,13 +41,11 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
     private double _dragStartOffsetX;
     private double _dragStartOffsetY;
 
-    // Crop-box corner resize state (proportional, center-anchored).
+    // Crop-box corner resize state (proportional, center-anchored). The box scale
+    // persists for the session; the final crop folds it back into zoom/offset.
     private bool _cropCornerDragging;
-    private Point _cropDragStartMouse;
     private Point _cropDragStartCornerVec;
-    private double _cropDragStartZoom;
-    private double _cropDragStartOffsetX;
-    private double _cropDragStartOffsetY;
+    private double _cropDragStartBoxScale;
     private double _boxVisualScale = 1.0;
     
     // Preview scaling (to fit zone in preview area)
@@ -335,16 +333,10 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
             _ => (1.0, 1.0),
         };
 
-        double centerX = PreviewBorder.ActualWidth / 2;
-        double centerY = PreviewBorder.ActualHeight / 2;
-        _cropDragStartMouse = e.GetPosition(PreviewBorder);
+        _cropDragStartBoxScale = _boxVisualScale;
         _cropDragStartCornerVec = new Point(
-            _zonePreviewWidth / 2 * sx,
-            _zonePreviewHeight / 2 * sy);
-        _cropDragStartZoom = _currentZoom;
-        _cropDragStartOffsetX = _currentOffsetX;
-        _cropDragStartOffsetY = _currentOffsetY;
-        _boxVisualScale = 1.0;
+            _zonePreviewWidth / 2 * sx * _boxVisualScale,
+            _zonePreviewHeight / 2 * sy * _boxVisualScale);
         _cropCornerDragging = true;
         CropHandleLayer.CaptureMouse();
         e.Handled = true;
@@ -365,13 +357,8 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
         double den = v.X * v.X + v.Y * v.Y;
         if (den <= 0) return;
 
-        _boxVisualScale = ClampBoxScale(num / den);
+        _boxVisualScale = ClampBoxScale(_cropDragStartBoxScale * (num / den));
         RedrawCropBoxVisuals();
-
-        // Live readout only — the image transform is committed on release.
-        double previewZoom = _cropDragStartZoom / _boxVisualScale;
-        ZoomDisplay.Text = $"Zoom: {previewZoom:F1}x";
-        ZoomValueText.Text = $"{previewZoom:F1}x";
     }
 
     private void CropHandleLayer_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
@@ -386,23 +373,9 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
         _cropCornerDragging = false;
         CropHandleLayer.ReleaseMouseCapture();
 
-        double s = _boxVisualScale;
-        _boxVisualScale = 1.0;
-
-        // Enlarging the box (s > 1) zooms out; shrinking it (s < 1) zooms in.
-        // Offset scales by the same factor so the crop-center pixel stays put.
-        double zoom1 = Math.Max(0.01, _cropDragStartZoom / s);
-        double factor = zoom1 / _cropDragStartZoom;
-        _currentZoom = zoom1;
-        _currentOffsetX = _cropDragStartOffsetX * factor;
-        _currentOffsetY = _cropDragStartOffsetY * factor;
-
-        if (zoom1 > BgZoom.Maximum) BgZoom.Maximum = zoom1;
-        BgZoom.Value = zoom1;
-
-        UpdateImageTransform();
+        // Keep the box at the size the user dragged it to; the image stays put.
+        // The effective crop (zoom/offset) is folded together on Confirm.
         RedrawCropBoxVisuals();
-        UpdateDisplays();
     }
 
     double ClampBoxScale(double s)
@@ -509,7 +482,9 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
         BgZoom.Value = _currentZoom;
         BgOpacity.Value = _currentOpacity;
         CropImage.Stretch = Stretch.UniformToFill;
+        _boxVisualScale = 1.0;
         UpdateImageTransform();
+        RedrawCropBoxVisuals();
     }
     
     private void CancelButton_Click(object sender, RoutedEventArgs e)
@@ -521,7 +496,12 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
     
     private void ConfirmButton_Click(object sender, RoutedEventArgs e)
     {
-        Result = new CropPreviewResult(_currentOffsetX, _currentOffsetY, _currentZoom, _currentOpacity);
+        // Fold the session-local box scale into the persisted zoom/offset: a box
+        // shrunk to s× shows a tighter region, i.e. an effective zoom of zoom/s.
+        double effZoom = Math.Max(0.01, _currentZoom / _boxVisualScale);
+        double scale = effZoom / _currentZoom; // 1/_boxVisualScale unless clamped at the floor
+        Result = new CropPreviewResult(
+            _currentOffsetX * scale, _currentOffsetY * scale, effZoom, _currentOpacity);
         DialogResult = true;
         Close();
     }
@@ -745,7 +725,7 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
         if (CropImage == null || CropImage.Source == null) return;
 
         // 图片上边缘靠近分界线时自动吸附；拖过阈值即可自由摆放（占满整个分区）。
-        double zoneTop = (PreviewBorder.ActualHeight - _zonePreviewHeight) / 2;
+        double zoneTop = (PreviewBorder.ActualHeight - _zonePreviewHeight * _boxVisualScale) / 2;
         double dividerY = zoneTop + _titleBarHeight * _previewScale;
         double imageTop = PreviewBorder.ActualHeight / 2 - CropImage.Height / 2
                         + _currentOffsetY * _previewScale;
