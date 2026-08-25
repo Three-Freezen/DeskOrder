@@ -72,6 +72,19 @@ public class ZoneManager
                     if (iconLoc != null && it.IconPath == null) { it.IconPath = iconLoc; anyResolved = true; }
                 }
 
+                // 系统项目修复:已知文件夹(文档/图片/音乐/视频等)的 "::{GUID}" 壳
+                // 无法被 shell 解析(打不开/空壳)— 迁移为真实文件夹路径。
+                if (it.Type == ItemType.ShellLocation)
+                {
+                    var kfPath = ShellLocationResolver.ResolveKnownFolderPath(it.TargetPath);
+                    if (kfPath != null)
+                    {
+                        it.TargetPath = kfPath;
+                        it.Type = ItemType.Folder;
+                        anyResolved = true;
+                    }
+                }
+
                 // Recovery: file items already migrated (shortcut path lost) whose icon
                 // is missing a custom desktop-shortcut icon — e.g. 必剪.lnk points at
                 // BCUT.exe but renders BCUT_Deskpic.ico. Match the desktop shortcut by

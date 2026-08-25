@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.IO;
 using System.Runtime.InteropServices;
 using DesktopZones.Helpers;
 using DesktopZones.Models;
@@ -54,7 +55,12 @@ public static class ShellLocationResolver
         IntPtr pidl = IntPtr.Zero;
         try
         {
-            if (ShellOle.SHParseDisplayName(candidate, IntPtr.Zero, out pidl, 0, out _) != 0 || pidl == IntPtr.Zero) return null;
+            if (ShellOle.SHParseDisplayName(candidate, IntPtr.Zero, out pidl, 0, out _) != 0 || pidl == IntPtr.Zero)
+            {
+                // 已知文件夹(FOLDERID_*)的 "::{GUID}" 无法被 SHParseDisplayName 解析 —
+                // 用已知文件夹路径确认并接受该 spec(导入时再转成真实文件夹)。
+                return ResolveKnownFolderPath(candidate) != null ? candidate : null;
+            }
             var iidItem = ShellOle.IID_IShellItem;
             if (ShellOle.SHCreateItemFromIDList(pidl, ref iidItem, out var item) != 0 || item == null) return null;
             if (item.GetDisplayName(ShellOle.SIGDN_DESKTOPABSOLUTEPARSING, out var p) != 0 || p == IntPtr.Zero) return null;
@@ -84,7 +90,49 @@ public static class ShellLocationResolver
     /// </summary>
     public static void Open(string target, ItemType type)
     {
+        if (type == ItemType.ShellLocation && IsShellLocation(target))
+        {
+            // 已知文件夹(文档/图片/音乐/视频等)的 "::{GUID}" 无法被 shell 解析,
+            // 直接打开真实文件夹路径;纯虚拟对象(回收站/此电脑等)走 shell: URI。
+            var path = ResolveKnownFolderPath(target);
+            if (path != null)
+            {
+                Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
+                return;
+            }
+        }
         var fileName = type == ItemType.ShellLocation && IsShellLocation(target) ? "shell:" + target : target;
         Process.Start(new ProcessStartInfo { FileName = fileName, UseShellExecute = true });
+    }
+
+    /// <summary>
+    /// Resolve a "::{GUID}" spec to a real folder path when the GUID is a known folder
+    /// (FOLDERID_* — Documents, Pictures, Music, Videos, Downloads, Desktop, ...) that
+    /// carries a file-system location; null for pure virtual objects (Recycle Bin,
+    /// This PC, Control Panel, Quick Access, ...). Empirically the shell cannot
+    /// SHParseDisplayName most FOLDERID specs ("::{FDD39AD0-...}" fails with
+    /// E_INVALIDARG), so such items would render/behave as empty shells unless they
+    /// are associated with the real folder path instead.
+    /// </summary>
+    public static string? ResolveKnownFolderPath(string spec)
+    {
+        if (!IsShellLocation(spec)) return null;
+        var guidText = spec.StartsWith("::{", StringComparison.Ordinal)
+            ? spec.Substring(3).TrimEnd('}') : null;
+        if (guidText == null || !Guid.TryParse(guidText, out var guid)) return null;
+        try
+        {
+            if (NativeMethods.SHGetKnownFolderPath(ref guid, 0, IntPtr.Zero, out var pPath) == 0 && pPath != IntPtr.Zero)
+            {
+                try
+                {
+                    var path = Marshal.PtrToStringUni(pPath) ?? string.Empty;
+                    return Directory.Exists(path) ? path : null;
+                }
+                finally { NativeMethods.CoTaskMemFree(pPath); }
+            }
+        }
+        catch { }
+        return null;
     }
 }

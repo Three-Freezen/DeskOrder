@@ -921,7 +921,11 @@ public partial class PanelWindow : Window
         foreach (var (name, spec) in dlg.SelectedItems)
         {
             var (sx, sy) = FindFreeSpot(targetZone);
-            AddItemToZone(targetZone, name, spec, ItemType.ShellLocation, sx, sy);
+            // 已知文件夹(文档/图片/音乐/视频等)直接关联真实路径 — "::{GUID}" 壳
+            // 无法被 shell 解析(打不开/空壳),转成真实 Folder 项。
+            var folderPath = ShellLocationResolver.ResolveKnownFolderPath(spec);
+            AddItemToZone(targetZone, name, folderPath ?? spec,
+                folderPath != null ? ItemType.Folder : ItemType.ShellLocation, sx, sy);
         }
     }
 

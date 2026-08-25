@@ -438,7 +438,13 @@ public partial class ZoneWindow : Window
         foreach (var (name, spec) in items)
         {
             var (sx, sy) = FindFreeSpot();
-            AddItem(new ZoneItem(name, spec, ItemType.ShellLocation, 0, 0), sx, sy);
+            // 已知文件夹(文档/图片/音乐/视频等)直接关联真实路径 — "::{GUID}" 壳
+            // 无法被 shell 解析(打不开/空壳),转成真实 Folder 项。
+            var folderPath = ShellLocationResolver.ResolveKnownFolderPath(spec);
+            if (folderPath != null)
+                AddItem(new ZoneItem(name, folderPath, ItemType.Folder, 0, 0), sx, sy);
+            else
+                AddItem(new ZoneItem(name, spec, ItemType.ShellLocation, 0, 0), sx, sy);
         }
         UpdateCanvasSize();
     }
