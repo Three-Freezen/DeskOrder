@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Linq;
 using DesktopZones.Helpers;
 using DesktopZones.Models;
@@ -38,12 +39,78 @@ public class ZoneManager
 
     public void Initialize()
     {
+        bool anyNormalized = false;
+        bool anyResolved = false;
+        var desktopIconLookup = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         foreach (var zone in _config.Zones)
         {
             Zones.Add(zone);
+            // Re-space auto-arrange zones onto the current grid pitch once
+            // (idempotent — keeps free-form zones untouched).
+            if (ZoneLayout.NormalizeZone(zone)) anyNormalized = true;
+            // Migrate legacy shortcuts: re-associate imported .lnk items with their real
+            // targets AND keep the shortcut's custom icon location, so icons render
+            // without the link-arrow overlay and identical to the desktop (the "二次关联" fix).
+            foreach (var it in zone.Items)
+            {
+                if (it.Type == ItemType.Shortcut && ShortcutResolver.IsShortcut(it.TargetPath))
+                {
+                    var (target, type, iconLoc) = ShortcutResolver.NormalizeItem(it.TargetPath, it.Type);
+                    if (!string.Equals(target, it.TargetPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        it.TargetPath = target;
+                        anyResolved = true;
+                    }
+                    if (type != it.Type) { it.Type = type; anyResolved = true; }
+                    if (iconLoc != null && it.IconPath == null) { it.IconPath = iconLoc; anyResolved = true; }
+                }
+
+                // Recovery: file items already migrated (shortcut path lost) whose icon
+                // is missing a custom desktop-shortcut icon — e.g. 必剪.lnk points at
+                // BCUT.exe but renders BCUT_Deskpic.ico. Match the desktop shortcut by
+                // target path and adopt its icon location.
+                if (it.IconPath == null
+                    && it.Type is ItemType.Application or ItemType.Shortcut
+                    && !string.IsNullOrEmpty(it.TargetPath)
+                    && File.Exists(it.TargetPath))
+                {
+                    var iconLoc = FindDesktopIcon(it.TargetPath, desktopIconLookup);
+                    if (iconLoc != null) { it.IconPath = iconLoc; anyResolved = true; }
+                }
+            }
             if (zone.IsVisible)
                 ShowZone(zone);
         }
+        if (anyNormalized || anyResolved) SaveConfig();
+    }
+
+    /// <summary>
+    /// Look for a desktop .lnk whose resolved target equals <paramref name="target"/> and
+    /// return its custom icon location. Cached per target for the whole startup scan.
+    /// </summary>
+    private static string? FindDesktopIcon(string target, Dictionary<string, string?> cache)
+    {
+        if (cache.TryGetValue(target, out var cached)) return cached;
+        string? result = null;
+        try
+        {
+            var desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+            if (Directory.Exists(desktop))
+            {
+                foreach (var lnk in Directory.GetFiles(desktop, "*.lnk"))
+                {
+                    var lnkTarget = ShortcutResolver.ResolveTarget(lnk);
+                    if (lnkTarget != null && string.Equals(lnkTarget, target, StringComparison.OrdinalIgnoreCase))
+                    {
+                        result = ShortcutResolver.ResolveIconLocation(lnk);
+                        break;
+                    }
+                }
+            }
+        }
+        catch { /* desktop scan is best-effort */ }
+        cache[target] = result;
+        return result;
     }
 
     public Zone CreateZone(string name = "New Zone", double x = 200, double y = 200,
@@ -315,6 +382,50 @@ public class ZoneManager
     {
         cfg.Zones = Zones.ToList();
     });
+
+    /// <summary>Move a zone to a new position in the list (long-press drag reorder).
+    /// ObservableCollection.Move fires CollectionChanged which the ItemsControl reflects
+    /// directly; we deliberately skip ZonesChanged to avoid RefreshList rebuilding all
+    /// rows mid-drag. <paramref name="newIndex"/> clamps to [0, Count-1] — drop-on-empty
+    /// space below the last row maps to "after last" = position Count-1, same effect.</summary>
+    public void MoveZone(Guid zoneId, int newIndex)
+    {
+        var zone = Zones.FirstOrDefault(z => z.Id == zoneId);
+        if (zone == null) return;
+        int oldIndex = Zones.IndexOf(zone);
+        if (oldIndex < 0 || oldIndex == newIndex) return;
+        if (newIndex < 0) newIndex = 0;
+        if (newIndex > Zones.Count - 1) newIndex = Zones.Count - 1;
+        Zones.Move(oldIndex, newIndex);
+        SaveConfig();
+    }
+
+    /// <summary>Move a merged-group master relative to the other masters (merged-groups
+    /// page drag reorder). The page lists only masters, but <see cref="Zones"/> stores
+    /// every zone — reorder the full collection so the masters' relative order matches
+    /// the drop and the filtered view persists across restarts. <paramref name="targetMasterIndex"/>
+    /// is the final 0-based index among masters; clamps to [0, masterCount-1].</summary>
+    public void MoveMergedGroupMaster(Guid masterId, int targetMasterIndex)
+    {
+        var master = Zones.FirstOrDefault(z => z.Id == masterId);
+        if (master == null || master.MergedGroupMembership.SubZoneIds.Count == 0) return;
+
+        var masters = Zones.Where(z => z.MergedGroupMembership.SubZoneIds.Count > 0).ToList();
+        int oldMasterIdx = masters.IndexOf(master);
+        if (oldMasterIdx < 0) return;
+        if (targetMasterIndex < 0) targetMasterIndex = 0;
+        if (targetMasterIndex > masters.Count - 1) targetMasterIndex = masters.Count - 1;
+        if (oldMasterIdx == targetMasterIndex) return;
+
+        int oldZoneIdx = Zones.IndexOf(master);
+        Zones.RemoveAt(oldZoneIdx);
+        var anchor = masters[targetMasterIndex];
+        int insertIdx = Zones.IndexOf(anchor);
+        // Downward move → land AFTER the anchor; upward → land BEFORE it.
+        if (targetMasterIndex > oldMasterIdx) insertIdx++;
+        Zones.Insert(insertIdx, master);
+        SaveConfig();
+    }
 
     public AppConfig GetConfig() => _config;
 

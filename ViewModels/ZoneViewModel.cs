@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
 using System.Windows.Media;
+using DesktopZones.Helpers;
 using DesktopZones.Models;
 using DesktopZones.Services;
 
@@ -101,10 +102,10 @@ public class ZoneViewModel : INotifyPropertyChanged
             return;
         }
         Items.Clear();
-        double isize = Math.Max(24, _zone.GridSize - 8);
+        double isize = Math.Max(24, _zone.GridSize - 4);
         foreach (var item in _zone.Items)
         {
-            var vm = new ZoneItemViewModel(item, _iconService) { IconSize = isize, ItemSize = _zone.GridSize, SourceZoneId = _zone.Id };
+            var vm = new ZoneItemViewModel(item, _iconService) { IconSize = isize, ItemSize = _zone.GridSize, ItemHeight = _zone.GridSize + ZoneLayout.LabelArea, SourceZoneId = _zone.Id };
             Items.Add(vm);
         }
     }
@@ -113,7 +114,7 @@ public class ZoneViewModel : INotifyPropertyChanged
     public void RefreshMergedItems()
     {
         Items.Clear();
-        double isize = Math.Max(24, _zone.GridSize - 8);
+        double isize = Math.Max(24, _zone.GridSize - 4);
 
         // Determine which zone's items to show
         Guid targetId = _selectedSubZoneId ?? _zone.Id;
@@ -121,7 +122,7 @@ public class ZoneViewModel : INotifyPropertyChanged
         if (targetId == _zone.Id)
         {
             foreach (var item in _zone.Items)
-                Items.Add(new ZoneItemViewModel(item, _iconService) { IconSize = isize, ItemSize = _zone.GridSize, SourceZoneId = _zone.Id });
+                Items.Add(new ZoneItemViewModel(item, _iconService) { IconSize = isize, ItemSize = _zone.GridSize, ItemHeight = _zone.GridSize + ZoneLayout.LabelArea, SourceZoneId = _zone.Id });
         }
         else
         {
@@ -129,7 +130,7 @@ public class ZoneViewModel : INotifyPropertyChanged
             if (subZone != null)
             {
                 foreach (var item in subZone.Items)
-                    Items.Add(new ZoneItemViewModel(item, _iconService) { IconSize = isize, ItemSize = _zone.GridSize, SourceZoneId = targetId });
+                    Items.Add(new ZoneItemViewModel(item, _iconService) { IconSize = isize, ItemSize = _zone.GridSize, ItemHeight = _zone.GridSize + ZoneLayout.LabelArea, SourceZoneId = targetId });
             }
         }
 
@@ -153,7 +154,7 @@ public class ZoneViewModel : INotifyPropertyChanged
         }
 
         _zone.Items.Add(item);
-        var vm = new ZoneItemViewModel(item, _iconService) { IconSize = Math.Max(24, _zone.GridSize - 8), ItemSize = _zone.GridSize, SourceZoneId = _zone.Id };
+        var vm = new ZoneItemViewModel(item, _iconService) { IconSize = Math.Max(24, _zone.GridSize - 4), ItemSize = _zone.GridSize, ItemHeight = _zone.GridSize + ZoneLayout.LabelArea, SourceZoneId = _zone.Id };
         Items.Add(vm);
         _zoneManager.SaveConfig();
         _zoneManager.NotifyChanged();
@@ -201,7 +202,7 @@ public class ZoneViewModel : INotifyPropertyChanged
         if (snapToGrid && _zone.SnapToGrid)
         {
             item.X = SnapToGrid(newX, _zone.GridSize);
-            item.Y = SnapToGrid(newY, _zone.GridSize);
+            item.Y = SnapToGridY(newY, _zone.GridSize);
         }
         else
         {
@@ -227,10 +228,10 @@ public class ZoneViewModel : INotifyPropertyChanged
         return null;
     }
 
-    public static double SnapToGrid(double value, int gridSize)
-    {
-        return Math.Round((value - 10) / gridSize) * gridSize + 10;
-    }
+    public static double SnapToGrid(double value, int gridSize) => ZoneLayout.Snap(value, gridSize);
+
+    /// <summary>Vertical grid snap — the vertical pitch includes the name area below the icon.</summary>
+    public static double SnapToGridY(double value, int gridSize) => ZoneLayout.SnapY(value, gridSize);
 
     private void DeleteItem(ZoneItemViewModel? itemVm)
     {
@@ -275,6 +276,9 @@ public class ZoneItemViewModel : INotifyPropertyChanged
     public string TargetPath => _item.TargetPath;
     public ItemType Type => _item.Type;
 
+    /// <summary>Custom shortcut icon location ("file,index") when the desktop shortcut had one.</summary>
+    public string? IconPath => _item.IconPath;
+
     public double X
     {
         get => _item.X;
@@ -286,7 +290,7 @@ public class ZoneItemViewModel : INotifyPropertyChanged
         set { _item.Y = value; OnPropertyChanged(); }
     }
 
-    private double _iconSize = 48;
+    private double _iconSize = 52;
     public double IconSize
     {
         get => _iconSize;
@@ -300,10 +304,18 @@ public class ZoneItemViewModel : INotifyPropertyChanged
         set { _itemSize = value; OnPropertyChanged(); }
     }
 
+    private double _itemHeight = 72;
+    /// <summary>Cell height = grid size + the name area below the icon (Windows-native icon style).</summary>
+    public double ItemHeight
+    {
+        get => _itemHeight;
+        set { _itemHeight = value; OnPropertyChanged(); }
+    }
+
     private ImageSource? _icon;
     public ImageSource? Icon
     {
-        get => _icon ??= _iconService.GetIcon(TargetPath, Type);
+        get => _icon ??= _iconService.GetIcon(TargetPath, Type, IconPath);
         set { _icon = value; OnPropertyChanged(); }
     }
 

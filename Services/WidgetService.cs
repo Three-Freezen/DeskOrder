@@ -72,6 +72,21 @@ public class WidgetService
         ClocksChanged?.Invoke();
     }
 
+    /// <summary>Move a clock to a new position (long-press drag reorder).
+    /// ObservableCollection.Move fires CollectionChanged → ItemsControl reorders.
+    /// Skips ClocksChanged so RefreshList doesn't rebuild rows mid-drag.</summary>
+    public void MoveClock(Guid clockId, int newIndex)
+    {
+        var c = Clocks.FirstOrDefault(x => x.Id == clockId);
+        if (c == null) return;
+        int oldIndex = Clocks.IndexOf(c);
+        if (oldIndex < 0 || oldIndex == newIndex) return;
+        if (newIndex < 0) newIndex = 0;
+        if (newIndex > Clocks.Count - 1) newIndex = Clocks.Count - 1;
+        Clocks.Move(oldIndex, newIndex);
+        Save();
+    }
+
     /// <summary>
     /// The clock the user is most likely interacting with — currently the most
     /// recently added visible clock. Used by <see cref="Views.LoadPresetDialog"/>
@@ -109,6 +124,21 @@ public class WidgetService
         if (c != null) Calendars.Remove(c);
         Save();
         CalendarsChanged?.Invoke();
+    }
+
+    /// <summary>Move a calendar to a new position (long-press drag reorder).
+    /// ObservableCollection.Move fires CollectionChanged → ItemsControl reorders.
+    /// Skips CalendarsChanged so RefreshList doesn't rebuild rows mid-drag.</summary>
+    public void MoveCalendar(Guid calendarId, int newIndex)
+    {
+        var c = Calendars.FirstOrDefault(x => x.Id == calendarId);
+        if (c == null) return;
+        int oldIndex = Calendars.IndexOf(c);
+        if (oldIndex < 0 || oldIndex == newIndex) return;
+        if (newIndex < 0) newIndex = 0;
+        if (newIndex > Calendars.Count - 1) newIndex = Calendars.Count - 1;
+        Calendars.Move(oldIndex, newIndex);
+        Save();
     }
 
     public void Save()

@@ -56,6 +56,11 @@ public class TrayIconService : IDisposable
     private Icon _icon;
     private bool _disposed;
 
+    /// <summary>True when the icon was actually registered with the shell (NIM_ADD
+    /// succeeded). When false there is no tray affordance, so callers should provide
+    /// an alternate way to reach the app (e.g. show the management window).</summary>
+    public bool IsAvailable { get; private set; }
+
     public event Action? LeftClick;
     public event Action? RightClick;
     public event Action? DoubleClick;
@@ -99,7 +104,8 @@ public class TrayIconService : IDisposable
             hIcon = _icon.Handle,
             szTip = tooltip
         };
-        if (!Shell_NotifyIcon(NIM_ADD, ref nid))
+        IsAvailable = Shell_NotifyIcon(NIM_ADD, ref nid);
+        if (!IsAvailable)
         {
             System.Diagnostics.Debug.WriteLine("[TrayIconService] NIM_ADD failed: False");
             NotifyError?.Invoke("Shell_NotifyIcon(NIM_ADD) failed — tray icon unavailable");

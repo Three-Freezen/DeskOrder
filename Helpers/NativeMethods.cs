@@ -200,6 +200,44 @@ public static class NativeMethods
         catch { }
     }
 
+    /// <summary>
+    /// ponytail 2026-08-25 ghost-ring fix: DWM draws a drop shadow around a layered
+    /// (transparent) window's opaque content — for a collapsed widget that's the
+    /// 36×36 RestoreButton, so the shadow hugs the button and shows as a dark ring on
+    /// the wallpaper (the reported "阴影"). Clipping the window to a rounded region
+    /// matching the button makes DWM treat it as a region window and it stops
+    /// shadowing it. <paramref name="rectDips"/> is in window/client DIP coordinates.
+    /// </summary>
+    public static void ClipWindowToRect(Window window, Rect rectDips)
+    {
+        if (window == null) return;
+        var hwnd = new WindowInteropHelper(window).Handle;
+        if (hwnd == IntPtr.Zero) return;
+        try
+        {
+            var m = PresentationSource.FromVisual(window)?.CompositionTarget?.TransformToDevice ?? System.Windows.Media.Matrix.Identity;
+            int x1 = (int)Math.Round(rectDips.Left * m.M11);
+            int y1 = (int)Math.Round(rectDips.Top * m.M22);
+            int x2 = (int)Math.Round(rectDips.Right * m.M11);
+            int y2 = (int)Math.Round(rectDips.Bottom * m.M22);
+            // CreateRoundRectRgn takes the ellipse WIDTH/HEIGHT for the corners —
+            // for a circular button that's the full button size (2× radius).
+            int r = Math.Max(2, (int)Math.Round(rectDips.Width * m.M11));
+            var rgn = CreateRoundRectRgn(x1, y1, x2, y2, r, r);
+            SetWindowRgn(hwnd, rgn, true);
+        }
+        catch { }
+    }
+
+    /// <summary>Remove a window clip region (restore the full-window shape).</summary>
+    public static void ClearWindowClip(Window window)
+    {
+        if (window == null) return;
+        var hwnd = new WindowInteropHelper(window).Handle;
+        if (hwnd == IntPtr.Zero) return;
+        try { SetWindowRgn(hwnd, IntPtr.Zero, true); } catch { }
+    }
+
     // ── Global Hotkey ──
     public const uint MOD_ALT = 0x0001;
     public const uint MOD_CONTROL = 0x0002;

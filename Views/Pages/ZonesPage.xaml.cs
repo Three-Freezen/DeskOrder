@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
@@ -29,12 +30,17 @@ public partial class ZonesPage : UserControl
     readonly ManagementWindow _main;
     readonly ZoneManager _zoneManager;
     Zone? _selected; // ponytail: row-level selection mirror (also pushed to DockedPanel.Target).
+    // ponytail: live row collection bound to ListHost — drag reorder moves rows
+    // through this OC (mirroring PropertyTabStrip's Tabs OC) so the ItemsControl
+    // shifts live while the model collection moves in parallel for persistence.
+    readonly ObservableCollection<EditableListRow> _rows = new();
 
     public ZonesPage(ManagementWindow main, ManagementViewModel vm, ZoneManager zoneManager)
     {
         InitializeComponent();
         _main = main;
         _zoneManager = zoneManager;
+        ListHost.ItemsSource = _rows;
         // ponytail 2026-08-25: Persist is wired centrally in ManagementWindow
         // (WirePropertyPanelPersist, which also pins the docked tab on edit).
         // Pages no longer overwrite it.
@@ -51,28 +57,14 @@ public partial class ZonesPage : UserControl
     public void RefreshList()
     {
         var loc = LocalizationService.Instance;
-        var sortLabels = new[] { loc["Manage.Sort.Name"], loc["Manage.Sort.ItemCount"] };
         var zones = _zoneManager.Zones;
         CountLabel.Text = $"{zones.Count} {loc["Manage.Count.Unit"]}";
-        IEnumerable<Zone> sorted = _sortMode switch
-        {
-            1 => zones.OrderByDescending(z => z.Items.Count).ThenBy(z => z.Name),
-            _ => zones.OrderBy(z => z.Name, StringComparer.Ordinal),
-        };
-        ListHost.ItemsSource = sorted.Select(BuildRow).ToList();
+        // 拖动排序即列表顺序：不再按名称/数量重排，Rows 直接镜像 Zones 的持久化顺序。
+        _rows.Clear();
+        foreach (var z in zones) _rows.Add(BuildRow(z));
         EmptyHint.Visibility = zones.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         SetSelection(ListHost, _selected); // re-apply after rebuild (rename / lock toggle).
-        SortBtn.Content = $"⇅ {sortLabels[_sortMode]}";
     }
-
-    void SortBtn_Click(object sender, RoutedEventArgs e)
-    {
-        var loc = LocalizationService.Instance;
-        var sortLabels = new[] { loc["Manage.Sort.Name"], loc["Manage.Sort.ItemCount"] };
-        ShowSortMenu(SortBtn, sortLabels, _sortMode, i => { _sortMode = i; RefreshList(); });
-    }
-
-    int _sortMode;
 
     EditableListRow BuildRow(Zone z)
     {
@@ -86,6 +78,15 @@ public partial class ZonesPage : UserControl
             IconText = z.IconChar ?? "",
             IsLocked = z.IsLocked,
             IsVisible = z.IsVisible,
+        };
+        // ponytail 2026-08-25: long-press drag reorder — model Move persists the
+        // collection order; MoveRow shifts the bound row OC so the ItemsControl
+        // reorders live mid-drag (same live-shift shape as PropertyTabStrip).
+        row.ReorderRequested += (src, targetIdx) =>
+        {
+            if (src.Tag is not Zone z2) return;
+            _zoneManager.MoveZone(z2.Id, targetIdx);
+            MoveRow(_rows, src, targetIdx);
         };
         ApplyStatusBadge(row, z);
 

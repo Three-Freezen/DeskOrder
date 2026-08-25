@@ -177,6 +177,7 @@
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
                                     <Canvas x:Name="ItemCanvas"
+                                            HorizontalAlignment="Left" VerticalAlignment="Top"
                                             Background="Transparent"/>
                                 </ItemsPanelTemplate>
                             </ItemsControl.ItemsPanel>
@@ -188,7 +189,7 @@
                             </ItemsControl.ItemContainerStyle>
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <Grid Width="{Binding ItemSize}" Height="{Binding ItemSize}"
+                                    <Grid Width="{Binding ItemSize}" Height="{Binding ItemHeight}"
                                           Background="Transparent"
                                           MouseLeftButtonDown="Item_MouseDown"
                                           MouseMove="Item_MouseMove"
@@ -209,17 +210,15 @@
                                             </ContextMenu>
                                         </Grid.ContextMenu>
 
-                                        <!-- Icon centered in its grid cell, filling it with a small inset;
-                                             the name overlays the bottom edge so the icon stays large. -->
+                                        <!-- Windows-native icon style: icon on top, name below, no overlay box. -->
                                         <Image Source="{Binding Icon}" Width="{Binding IconSize}" Height="{Binding IconSize}"
                                                Stretch="Uniform"
                                                RenderOptions.BitmapScalingMode="HighQuality"
-                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                               HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,2,0,0"/>
                                         <TextBlock Text="{Binding Name}" FontSize="10"
-                                                   Foreground="#FFFFFFFF" TextAlignment="Center"
+                                                   Foreground="#E0FFFFFF" TextAlignment="Center"
                                                    TextTrimming="CharacterEllipsis"
-                                                   MaxWidth="{Binding ItemSize}"
-                                                   Background="#99000000" Padding="4,1" Margin="2,0,2,2"
+                                                   MaxWidth="{Binding ItemSize}" Margin="1,0,1,1"
                                                    HorizontalAlignment="Center" VerticalAlignment="Bottom"/>
                                     </Grid>
                                 </DataTemplate>
@@ -262,8 +261,7 @@
                 Width="36" Height="36"
                 CornerRadius="18"
                 Background="#DD1A1A2E"
-                BorderBrush="#60FFFFFF"
-                BorderThickness="1"
+                BorderThickness="0"
                 Cursor="Hand"
                 MouseLeftButtonDown="Restore_MouseDown"
                 MouseMove="Restore_MouseMove"

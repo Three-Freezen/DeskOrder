@@ -1494,11 +1494,24 @@ public partial class ManagementWindow : Window
     {
         if (_openClockWindows.TryGetValue(clock.Id, out var w) && w is ClockWidget cw)
         {
-            if (cw.MainContent.Visibility == Visibility.Visible) cw.HideClock();
-            else cw.ShowClock();
+            // ponytail: 2026-08-26 — route EVERY show/hide through the widget's own
+            // ShowClock/HideClock and decide the direction from the RestoreButton (the
+            // minimized-state indicator), not MainContent.Visibility. MainContent misread
+            // windows mid-animation / full-hidden, letting the widget strand as a
+            // full-size transparent ghost with the RestoreButton floating in it (the
+            // reported "四周有透明边框").
+            bool show = !cw.IsVisible || cw.RestoreButton.Visibility == Visibility.Visible;
+#if DEBUG
+            DzTrace.Log($"[Toggle] ToggleClockWindow -> {(show ? "ShowClock" : "HideClock")} (winVisible={cw.IsVisible} content={cw.MainContent.Visibility} btn={cw.RestoreButton.Visibility})");
+#endif
+            if (show) cw.ShowClock();
+            else cw.HideClock();
         }
         else
         {
+#if DEBUG
+            DzTrace.Log($"[Toggle] ToggleClockWindow -> window not open, OpenClockWindow (modelVisible={clock.IsVisible})");
+#endif
             clock.IsVisible = true;
             OpenClockWindow(clock);
         }
@@ -1508,11 +1521,18 @@ public partial class ManagementWindow : Window
     {
         if (_openCalendarWindows.TryGetValue(cal.Id, out var w) && w is CalendarWidget caw)
         {
-            if (caw.MainContent.Visibility == Visibility.Visible) caw.HideCalendar();
-            else caw.ShowCalendar();
+            bool show = !caw.IsVisible || caw.RestoreButton.Visibility == Visibility.Visible;
+#if DEBUG
+            DzTrace.Log($"[Toggle] ToggleCalendarWindow -> {(show ? "ShowCalendar" : "HideCalendar")} (winVisible={caw.IsVisible} content={caw.MainContent.Visibility} btn={caw.RestoreButton.Visibility})");
+#endif
+            if (show) caw.ShowCalendar();
+            else caw.HideCalendar();
         }
         else
         {
+#if DEBUG
+            DzTrace.Log($"[Toggle] ToggleCalendarWindow -> window not open, OpenCalendarWindow (modelVisible={cal.IsVisible})");
+#endif
             cal.IsVisible = true;
             OpenCalendarWindow(cal);
         }

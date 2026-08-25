@@ -319,6 +319,9 @@ public static class AcrylicHelper
     /// <param name="colorMode">Color preset name (Default, Accent, GlassWhite, etc.).</param>
     public static BlurResult EnableBlur(Window window, int blurAmount, int tintOpacity, int tintLuminosity, string colorMode)
     {
+#if DEBUG
+        DesktopZones.Helpers.DzTrace.Log($"[acrylic] EnableBlur({window.GetType().Name}, blur={blurAmount}, opacity={tintOpacity}, lum={tintLuminosity}, mode={colorMode})");
+#endif
         var hwnd = new WindowInteropHelper(window).Handle;
         if (hwnd == IntPtr.Zero) return BlurResult.Fail("Window handle not created yet");
 
@@ -363,6 +366,9 @@ public static class AcrylicHelper
     /// <summary>Disable blur on a window.</summary>
     public static BlurResult DisableBlur(Window window)
     {
+#if DEBUG
+        DesktopZones.Helpers.DzTrace.Log($"[acrylic] DisableBlur({window.GetType().Name})");
+#endif
         var hwnd = new WindowInteropHelper(window).Handle;
         if (hwnd == IntPtr.Zero) return BlurResult.Fail("Window handle not created yet");
 

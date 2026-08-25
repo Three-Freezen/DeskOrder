@@ -18,11 +18,6 @@ namespace DesktopZones.Views;
 
 public partial class ClockWidget : Window
 {
-    const uint WM_NCLBUTTONDOWN = 0x00A1;
-    const int HTTOPLEFT = 13, HTTOPRIGHT = 14, HTBOTTOMLEFT = 16, HTBOTTOMRIGHT = 17;
-
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
-    static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
     private DesktopClock _clock;
     private readonly WidgetService _widgetService;
     private readonly ClockViewModel _vm;
@@ -30,6 +25,7 @@ public partial class ClockWidget : Window
     private readonly LocalizationService _loc = LocalizationService.Instance;
     private HoverExpandBehavior? _hover;
     private SnapDrag? _snapDrag;
+    private SnapResize? _snapResize;
 
     private bool _restoreDragging;
     private Point _restoreDown;
@@ -101,6 +97,7 @@ public partial class ClockWidget : Window
 
         // ponytail: 自适应对齐 — 替换 DragMove 的手动拖拽循环。
         _snapDrag = new SnapDrag(this);
+        _snapResize = new SnapResize(this);
     }
     private Action<string>? _langChanged;
 
@@ -702,14 +699,9 @@ public partial class ClockWidget : Window
     {
         if (s is not Border g || g.Tag is not string tag) return;
         if (_vm?.IsLocked == true) { e.Handled = true; return; }
-        int d = tag switch
-        {
-            "TL" => HTTOPLEFT,
-            "TR" => HTTOPRIGHT,
-            "BL" => HTBOTTOMLEFT,
-            _ => HTBOTTOMRIGHT
-        };
-        SendMessage(new WindowInteropHelper(this).Handle, WM_NCLBUTTONDOWN, (IntPtr)d, IntPtr.Zero);
+        bool left = tag == "TL" || tag == "BL";
+        bool top = tag == "TL" || tag == "TR";
+        _snapResize?.Start(e, left, top, !left, !top, 140, 80);
         e.Handled = true;
     }
 
@@ -829,6 +821,9 @@ public partial class ClockWidget : Window
 
     public void ShowClock(bool skipResync = false, double waveDelayMs = 0)
     {
+#if DEBUG
+        DzTrace.Log($"[ClockWidget] ShowClock(skip={skipResync}, wave={waveDelayMs}) ENTRY winVisible={IsVisible} content={MainContent.Visibility} btn={RestoreButton.Visibility} hoverExpanded={_hover?.IsExpanded} modelVisible={_clock.IsVisible} size={Width}x{Height}");
+#endif
         if (!IsVisible) Show();
         ApplyMode();
         // ponytail: skipResync=true when called from the property window (was the style dialog).
@@ -948,6 +943,9 @@ public partial class ClockWidget : Window
         _clock.IsVisible = false;
         // Update AFTER Hide() to ensure correct state when event fires
         _widgetService.UpdateClock(_clock);
+#if DEBUG
+        DzTrace.Log($"[ClockWidget] HideClock DONE winVisible={IsVisible} content={MainContent.Visibility} btn={RestoreButton.Visibility} hoverExpanded={_hover?.IsExpanded} size={Width}x{Height}");
+#endif
     }
 
     void ApplyHidden()
@@ -1028,6 +1026,7 @@ public partial class ClockWidget : Window
         _widgetService.LockChanged -= OnServiceLockChanged;
         _clock.HoverExpandSettingsChanged -= OnHoverExpandSettingsChanged;
         _snapDrag?.Detach();
+        _snapResize?.Detach();
         _hover?.Dispose();
         base.OnClosed(e);
     }

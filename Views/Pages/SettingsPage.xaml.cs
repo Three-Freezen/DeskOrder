@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -195,27 +196,52 @@ public partial class SettingsPage : UserControl
         var startupPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.Startup),
             "DeskOrder.lnk");
+
         if (create)
         {
             try
             {
-                var exePath = Environment.ProcessPath;
-                if (exePath == null) return;
-                Type? shellType = Type.GetTypeFromProgID("WScript.Shell");
-                if (shellType == null) return;
-                dynamic? shell = Activator.CreateInstance(shellType);
-                if (shell == null) return;
-                dynamic? shortcut = shell.CreateShortcut(startupPath);
+                // ponytail 2026-08-24: 6 个 catch { } → 全部走 toast，让用户能看见失败原因。
+                // 老逻辑每个失败都 silently return，勾上勾选框后用户毫无反馈，以为是空壳。
+                var exePath = Environment.ProcessPath
+                    ?? throw new InvalidOperationException("无法获取当前进程路径 (Environment.ProcessPath 为 null)");
+                var shellType = Type.GetTypeFromProgID("WScript.Shell")
+                    ?? throw new InvalidOperationException("WScript.Shell 不可用 — 可能是企业策略禁用了 WSH");
+                dynamic shell = Activator.CreateInstance(shellType)
+                    ?? throw new InvalidOperationException("无法创建 WScript.Shell 实例");
+                dynamic shortcut = shell.CreateShortcut(startupPath);
                 shortcut.TargetPath = exePath;
                 shortcut.WorkingDirectory = Path.GetDirectoryName(exePath);
                 shortcut.Description = "DeskOrder";
                 shortcut.Save();
+                // ponytail: 写完做一次回读 — AV / 权限问题会让 .Save() 不抛但也没文件。
+                if (!File.Exists(startupPath))
+                    throw new InvalidOperationException("快捷方式写入后未在磁盘上找到");
+
+                var loc = LocalizationService.Instance;
+                App.Notify?.Invoke(loc["Settings.StartupShortcut.CreatedTitle"], loc["Settings.StartupShortcut.CreatedBody"]);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[StartupShortcut] create failed: {ex}");
+                var loc = LocalizationService.Instance;
+                App.Notify?.Invoke(loc["Settings.StartupShortcut.FailedTitle"], loc.Get("Settings.StartupShortcut.FailedBody", ex.Message));
+            }
         }
         else if (File.Exists(startupPath))
         {
-            try { File.Delete(startupPath); } catch { }
+            try
+            {
+                File.Delete(startupPath);
+                var loc = LocalizationService.Instance;
+                App.Notify?.Invoke(loc["Settings.StartupShortcut.RemovedTitle"], loc["Settings.StartupShortcut.RemovedBody"]);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[StartupShortcut] delete failed: {ex}");
+                var loc = LocalizationService.Instance;
+                App.Notify?.Invoke(loc["Settings.StartupShortcut.FailedTitle"], loc.Get("Settings.StartupShortcut.FailedBody", ex.Message));
+            }
         }
     }
 }

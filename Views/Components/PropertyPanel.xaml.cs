@@ -606,9 +606,10 @@ public partial class PropertyPanel : UserControl
     // builders as the Zone editor. Group-level style reads/writes the master's
     // MergedGroupStyle + MergedGroupMembership; window-level behavior (motion,
     // liquid glass, size, grid) reads/writes the master zone itself.
-    // 统一填充/保留原有填充 is the sliding-highlight Segmented pill; the
-    // unified-only rows (圆角 + 标题栏 + 边框与填充 sections) fade out + disable
-    // when 保留原有填充 is selected.
+    // 统一填充/保留原有填充 is the sliding-highlight Segmented pill; 保留原有填充
+    // keeps the BODY fill original — the title bar (both layers), border and corners
+    // stay unified from MergedGroupStyle — while 填充 / 液态玻璃 / 背景图片 all fade
+    // out + disable when 保留原有填充 is selected.
 
     readonly List<FrameworkElement> _unifiedGated = new();
 
@@ -619,6 +620,7 @@ public partial class PropertyPanel : UserControl
         void SaveGroup() => Save(Target!);
 
         _unifiedGated.Clear();
+        CheckBox? titleBarIndependentCb = null;
         var root = new StackPanel { Margin = new Thickness(16, 12, 16, 12) };
 
         // 开关区
@@ -637,6 +639,15 @@ public partial class PropertyPanel : UserControl
         switches.Children.Add(MakeUnifiedFillRow(gs.UseUnifiedFill, v =>
         {
             gs.UseUnifiedFill = v;
+            // 保留原有填充 → 自动开启「标题栏填充单独设置」：两层标题栏的填充
+            // 颜色独立于各子分区自己的主体填充，避免统一标题栏盖在保留的原填充上。
+            if (!v)
+            {
+                gs.TitleBarFillIndependent = true;
+                z.TitleBarFillIndependent = true;
+                if (titleBarIndependentCb != null)
+                    titleBarIndependentCb.IsChecked = true; // 触发 onChange 幂等写入并 SaveGroup
+            }
             SaveGroup();
             SetUnifiedGating(v, animate: true);
         }));
@@ -647,7 +658,6 @@ public partial class PropertyPanel : UserControl
             SaveGroup();
         });
         switches.Children.Add(cornerRow);
-        _unifiedGated.Add(cornerRow);
         root.Children.Add(switches);
 
         // 基本
@@ -690,8 +700,13 @@ public partial class PropertyPanel : UserControl
         basic.Children.Add(gridGrid);
         root.Children.Add(basic);
 
-        // 标题栏 — unified-only, gated by 统一填充/保留原有填充.
+        // 标题栏 — 统一(两种模式都生效，因为保留原有填充只保留主体填充)。
+        // 独立标题栏填充同样作用于两层标题栏（最上方 24px + 子分区标签栏 24px）。
         var tb = MakeSection(_loc["ZoneProp.Section.TitleBar"]);
+        titleBarIndependentCb = MakeCheckRow(_loc["ZoneProp.TitleBarFillIndependent"],
+            gs.TitleBarFillIndependent,
+            v => { gs.TitleBarFillIndependent = v; z.TitleBarFillIndependent = v; SaveGroup(); });
+        tb.Children.Add(titleBarIndependentCb);
         tb.Children.Add(MakeColorRow(_loc["ZoneProp.TitleBarColor"], gs.TitleBarFillColor,
             v => { gs.TitleBarFillColor = v; SaveGroup(); }));
         tb.Children.Add(MakeSliderRow(_loc["ZoneProp.TitleBarOpacity"], 0, 100, 5,
@@ -700,10 +715,10 @@ public partial class PropertyPanel : UserControl
         tb.Children.Add(MakeSliderRow(_loc["ZoneProp.ButtonOpacity"], 5, 100, 5,
             gs.ControlOpacity,
             v => { gs.ControlOpacity = v; SaveGroup(); }));
-        _unifiedGated.Add(tb);
         root.Children.Add(tb);
 
-        // 边框与填充 — unified-only, gated.
+        // 边框与填充 — 边框统一(两种模式都生效)；只有「填充」行在保留原有填充时
+        // 失效(主体填充改回各子分区自己的填充)。
         var bf = MakeSection(_loc["ZoneProp.Section.BorderFill"]);
         bf.Children.Add(MakeTextRow(_loc["ZoneProp.BorderThickness"], gs.BorderThickness.ToString("0.0", CultureInfo.InvariantCulture),
             v => { if (double.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out var d)) { gs.BorderThickness = d; SaveGroup(); } }));
@@ -712,26 +727,30 @@ public partial class PropertyPanel : UserControl
         bf.Children.Add(MakeSliderRow(_loc["ZoneProp.BorderOpacity"], 0, 100, 5,
             ParsePercent(gs.BorderColor, 25),
             p => { gs.BorderColor = SetPercent(gs.BorderColor, p, "FFFFFF"); SaveGroup(); }));
-        bf.Children.Add(MakeColorRow(_loc["ZoneProp.FillColor"], gs.FillColor,
-            v => { gs.FillColor = v; SaveGroup(); }));
-        bf.Children.Add(MakeSliderRow(_loc["ZoneProp.FillOpacity"], 0, 100, 5,
+        var fillColorRow = MakeColorRow(_loc["ZoneProp.FillColor"], gs.FillColor,
+            v => { gs.FillColor = v; SaveGroup(); });
+        bf.Children.Add(fillColorRow);
+        var fillOpacityRow = MakeSliderRow(_loc["ZoneProp.FillOpacity"], 0, 100, 5,
             ParsePercent(gs.FillColor, 8),
-            p => { gs.FillColor = SetPercent(gs.FillColor, p, "000000"); SaveGroup(); }));
-        _unifiedGated.Add(bf);
+            p => { gs.FillColor = SetPercent(gs.FillColor, p, "000000"); SaveGroup(); });
+        bf.Children.Add(fillOpacityRow);
+        _unifiedGated.Add(fillColorRow);
+        _unifiedGated.Add(fillOpacityRow);
         root.Children.Add(bf);
 
         // 液态玻璃 — window-level, edits the master's own glass (per-window effect).
+        // 保留原有填充时禁用：玻璃属于统一填充表现的一部分。
         var lg = MakeSection(_loc["ZoneProp.Section.LiquidGlass"]);
         var lgRow = MakeCheckRowWithSideBtn(_loc["ZoneProp.LiquidGlass"], z.EnableLiquidGlass,
             v => { z.EnableLiquidGlass = v; SaveGroup(); },
             _loc["ZoneProp.LiquidGlassSettingsEllipsis"], _ => OpenLiquidGlassDialog(z));
         lg.Children.Add(lgRow);
+        _unifiedGated.Add(lgRow);
         root.Children.Add(lg);
 
-        // 背景图片 — group-level BgImage (unified mode only, like the rest of
-        // MergedGroupStyle; the row itself stays editable).
+        // 背景图片 — group-level BgImage (统一填充专属；保留原有填充时禁用整行)。
         var bg = MakeSection(_loc["ZoneProp.Section.BgImage"]);
-        bg.Children.Add(MakeBgImageRow("", new BgImageBinding
+        var bgRow = MakeBgImageRow("", new BgImageBinding
         {
             GetPath = () => gs.BackgroundImagePath,
             SetPath = v => gs.BackgroundImagePath = v ?? "",
@@ -745,9 +764,12 @@ public partial class PropertyPanel : UserControl
             SetOffsetY = v => gs.BgImageOffsetY = v,
             Width = z.Width, Height = z.Height,
             CropShape = "Rectangle",
-            TitleBarHeight = gs.QuickBarMode ? 0 : 24,
+            TitleBarHeight = gs.QuickBarMode ? 0 : 48,
+            TitleBarInnerDividerHeight = gs.QuickBarMode ? 0 : 24,
             OnSave = SaveGroup,
-        }));
+        });
+        bg.Children.Add(bgRow);
+        _unifiedGated.Add(bgRow);
         root.Children.Add(bg);
 
         FieldScroller.Content = root;
@@ -788,8 +810,8 @@ public partial class PropertyPanel : UserControl
         return seg;
     }
 
-    /// <summary>Fade + disable the unified-only rows. 统一填充 → opacity 1,
-    /// enabled; 保留原有填充 → opacity 0.4, disabled, 160ms ease-out.</summary>
+    /// <summary>Fade + disable the unified-fill-only rows (填充/液态玻璃/背景图片).
+    /// 统一填充 → opacity 1, enabled; 保留原有填充 → opacity 0.4, disabled, 160ms ease-out.</summary>
     void SetUnifiedGating(bool unified, bool animate)
     {
         foreach (var el in _unifiedGated)
@@ -1438,8 +1460,11 @@ public partial class PropertyPanel : UserControl
         /// "Circle" (analog clock face) or "Ellipse".</summary>
         public string CropShape = "Rectangle";
         /// <summary>真实窗口标题栏高度（DIP）。裁剪预览据此绘制标题栏/主体分界线并吸附；
-        /// 0 = 无标题栏（时钟/日历）。Zone=24、便签=28、面板=44。</summary>
+        /// 0 = 无标题栏（时钟/日历）。Zone=24、便签=28、面板=44、组合分区=48。</summary>
         public double TitleBarHeight = 0;
+        /// <summary>标题栏内部第二条分界线高度（DIP）——组合分区最上方标题栏与子分区
+        /// 标签栏之间的分界（24）。0 = 无内部标题栏分界。</summary>
+        public double TitleBarInnerDividerHeight = 0;
         public Action OnSave = () => { };
     }
 
@@ -1886,7 +1911,7 @@ public partial class PropertyPanel : UserControl
             b.Width, b.Height,
             b.GetOffsetX(), b.GetOffsetY(),
             b.GetZoom(), b.GetOpacity(),
-            b.CropShape, b.TitleBarHeight)
+            b.CropShape, b.TitleBarHeight, b.TitleBarInnerDividerHeight)
         {
             Owner = owner
         };

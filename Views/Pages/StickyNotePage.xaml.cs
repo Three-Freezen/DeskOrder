@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
@@ -25,12 +26,17 @@ public partial class StickyNotePage : UserControl
     readonly ManagementWindow _main;
     readonly NotesService? _notesService;
     StickyNote? _selected;
+    // ponytail: live row collection bound to ListHost — drag reorder moves rows
+    // through this OC (mirroring PropertyTabStrip's Tabs OC) so the ItemsControl
+    // shifts live while the model collection moves in parallel for persistence.
+    readonly ObservableCollection<EditableListRow> _rows = new();
 
     public StickyNotePage(ManagementWindow main, ManagementViewModel vm, NotesService? notesService)
     {
         InitializeComponent();
         _main = main;
         _notesService = notesService;
+        ListHost.ItemsSource = _rows;
         // ponytail 2026-08-25: Persist is wired centrally in ManagementWindow
         // (WirePropertyPanelPersist) — one dispatcher for all target types,
         // docked and floating. Pages no longer overwrite it.
@@ -54,22 +60,12 @@ public partial class StickyNotePage : UserControl
         if (_notesService == null) return;
         var notes = _notesService.Notes;
         CountLabel.Text = $"{notes.Count} 项";
-        IEnumerable<StickyNote> sorted = _sortMode switch
-        {
-            1 => notes.OrderBy(n => n.ModifiedAt).ThenBy(n => n.Title, StringComparer.Ordinal),
-            _ => notes.OrderBy(n => n.Title, StringComparer.Ordinal),
-        };
-        ListHost.ItemsSource = sorted.Select(BuildRow).ToList();
+        // 拖动排序即列表顺序：不再重排，Rows 直接镜像 Notes 的持久化顺序。
+        _rows.Clear();
+        foreach (var n in notes) _rows.Add(BuildRow(n));
         EmptyHint.Visibility = notes.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         SetSelection(ListHost, _selected);
-        SortBtn.Content = $"⇅ {SortLabels[_sortMode]}";
     }
-
-    void SortBtn_Click(object sender, RoutedEventArgs e) =>
-        ShowSortMenu(SortBtn, SortLabels, _sortMode, i => { _sortMode = i; RefreshList(); });
-
-    static readonly string[] SortLabels = { "名称", "修改时间" };
-    int _sortMode;
 
     EditableListRow BuildRow(StickyNote note)
     {
@@ -85,6 +81,12 @@ public partial class StickyNotePage : UserControl
             IsLocked = note.IsLocked,
             IsVisible = note.IsVisible,
         };
+        row.ReorderRequested += (src, targetIdx) =>
+        {
+            if (src.Tag is not StickyNote n || _notesService == null) return;
+            _notesService.MoveNote(n.Id, targetIdx);     // 模型 + 持久化
+            MoveRow(_rows, src, targetIdx);              // 列表实时换位（镜像标签栏）
+        };
         ApplyStatusBadge(row, note);
 
         row.LockCommand = new RelayCommand(_ =>
@@ -95,8 +97,9 @@ public partial class StickyNotePage : UserControl
         });
         row.VisibilityCommand = new RelayCommand(_ =>
         {
-            note.IsVisible = row.IsVisible;
-            _notesService?.UpdateNote(note);
+            // ponytail: 2026-08-26 — route straight through ToggleNoteWindow (see
+            // ClockPage). Pre-flipping the model fired NotesChanged → ghost-stamp snap,
+            // which reversed the toggle and left a transparent ghost.
             _main.ToggleNoteWindow(note);
         });
         row.DeleteCommand = new RelayCommand(_ => Delete(note));

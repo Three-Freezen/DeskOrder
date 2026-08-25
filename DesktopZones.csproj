@@ -12,6 +12,10 @@
     <Company>Three-Freeze</Company>
     <Authors>Three-Freeze</Authors>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- ponytail 2026-08-24: 把托管栏同款图标挂到 taskbar / Alt-Tab / EXE 文件属性。
+         DesktopZones.ico 是 16+32+48+256 多分辨率（Resources/Icons/RebuildMultiResIco 打包），
+         不带这个 tag 时 taskbar 走 Windows 默认空图标。 -->
+    <ApplicationIcon>Resources\Icons\DesktopZones.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -21,6 +25,17 @@
     <None Update="i18n\*.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+  </ItemGroup>
+
+  <!-- RebuildMultiResIco is a standalone console tool (its own .csproj). Its
+       top-level Program.Main must NOT be compiled into DeskOrder, otherwise it
+       becomes the WPF app's entry point and double-clicking DeskOrder.exe runs
+       the icon tool (and crashes looking for icon-*.png in the wrong directory). -->
+  <ItemGroup>
+    <Compile Remove="Resources\Icons\RebuildMultiResIco\**\*.cs" />
+    <None Remove="Resources\Icons\RebuildMultiResIco\**\*" />
+    <Content Remove="Resources\Icons\RebuildMultiResIco\**\*" />
+    <EmbeddedResource Remove="Resources\Icons\RebuildMultiResIco\**\*" />
   </ItemGroup>
 
 </Project>

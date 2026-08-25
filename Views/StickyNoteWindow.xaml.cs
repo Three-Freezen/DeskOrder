@@ -19,12 +19,6 @@ namespace DesktopZones.Views;
 
 public partial class StickyNoteWindow : Window
 {
-    const uint WM_NCLBUTTONDOWN = 0x00A1;
-    const int HTTOPLEFT = 13, HTTOPRIGHT = 14, HTBOTTOMLEFT = 16, HTBOTTOMRIGHT = 17;
-
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
-    static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
-
     // ponytail: frozen hover brushes — same color on every mouse-over.
     private static readonly SolidColorBrush RestoreHoverBrush = Freeze(new(Color.FromArgb(0xFF, 0x2A, 0x2A, 0x4E)));
     private static readonly SolidColorBrush RestoreIdleBrush  = Freeze(new(Color.FromArgb(0xDD, 0x1A, 0x1A, 0x2E)));
@@ -46,6 +40,7 @@ public partial class StickyNoteWindow : Window
     private SolidColorBrush? _titleBarAdaptiveBrush;
     private HoverExpandBehavior? _hover;
     private SnapDrag? _snapDrag;
+    private SnapResize? _snapResize;
 
     public StickyNoteWindow(StickyNote note, NotesService notesService)
     {
@@ -106,6 +101,7 @@ public partial class StickyNoteWindow : Window
 
         // ponytail: 自适应对齐 — 替换 DragMove 的手动拖拽循环。
         _snapDrag = new SnapDrag(this);
+        _snapResize = new SnapResize(this);
     }
 
     void OnHoverExpandSettingsChanged()
@@ -476,6 +472,9 @@ public partial class StickyNoteWindow : Window
 
     public void ShowNote(double waveDelayMs = 0)
     {
+#if DEBUG
+        DzTrace.Log($"[StickyNoteWindow] ShowNote(wave={waveDelayMs}) ENTRY winVisible={IsVisible} content={MainContent.Visibility} btn={RestoreButton.Visibility} hoverExpanded={_hover?.IsExpanded} modelVisible={_note.IsVisible} size={Width}x{Height}");
+#endif
         // Save dimensions before any reference swap can occur
         var savedW = _note.Width; var savedH = _note.Height;
         if (!IsVisible) Show();
@@ -525,6 +524,9 @@ public partial class StickyNoteWindow : Window
 
     public void HideNote(double waveDelayMs = 0)
     {
+#if DEBUG
+        DzTrace.Log($"[StickyNoteWindow] HideNote(wave={waveDelayMs}) ENTRY winVisible={IsVisible} content={MainContent.Visibility} btn={RestoreButton.Visibility} hoverExpanded={_hover?.IsExpanded} modelVisible={_note.IsVisible} restoreEnabled={_note.EnableRestoreButton} size={Width}x{Height}");
+#endif
         _note.X = Left; _note.Y = Top; _note.Width = Width; _note.Height = Height;
         NativeMethods.DisableRoundedCorners(this);
         if (!_note.EnableRestoreButton)
@@ -569,6 +571,9 @@ public partial class StickyNoteWindow : Window
         _note.IsVisible = false;
         _notesService.UpdateNote(_note);
         OnStateChanged?.Invoke();
+#if DEBUG
+        DzTrace.Log($"[StickyNoteWindow] HideNote DONE winVisible={IsVisible} content={MainContent.Visibility} btn={RestoreButton.Visibility} hoverExpanded={_hover?.IsExpanded} size={Width}x{Height}");
+#endif
     }
 
     void ApplyHidden()
@@ -957,16 +962,11 @@ public partial class StickyNoteWindow : Window
 
     void ResizeGrip_Down(object s, MouseButtonEventArgs e)
     {
-        if (_vm?.IsLocked == true) return;
+        if (_vm?.IsLocked == true) { e.Handled = true; return; }
         if (s is not Border g || g.Tag is not string tag) return;
-        int d = tag switch
-        {
-            "TL" => HTTOPLEFT,
-            "TR" => HTTOPRIGHT,
-            "BL" => HTBOTTOMLEFT,
-            _ => HTBOTTOMRIGHT
-        };
-        try { SendMessage(new WindowInteropHelper(this).Handle, WM_NCLBUTTONDOWN, (IntPtr)d, IntPtr.Zero); } catch { }
+        bool left = tag == "TL" || tag == "BL";
+        bool top = tag == "TL" || tag == "TR";
+        _snapResize?.Start(e, left, top, !left, !top, 180, 120);
         e.Handled = true;
     }
 
@@ -1120,6 +1120,7 @@ public partial class StickyNoteWindow : Window
         _notesService.NotesChanged -= OnNotesChanged;
         _note.HoverExpandSettingsChanged -= OnHoverExpandSettingsChanged;
         _snapDrag?.Detach();
+        _snapResize?.Detach();
         _hover?.Dispose();
         base.OnClosed(e);
     }

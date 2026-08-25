@@ -20,11 +20,6 @@ namespace DesktopZones.Views;
 
 public partial class ZoneWindow : Window
 {
-    // Resize
-    [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
-    const uint WM_NCLBUTTONDOWN = 0x00A1;
-    const int HTTOPLEFT = 13, HTTOPRIGHT = 14, HTBOTTOMLEFT = 16, HTBOTTOMRIGHT = 17;
-
     // Sub-zone tab drag (browser-like, mirrors PropertyTabStrip's Win32 polling loop)
     [DllImport("user32.dll")] static extern bool GetCursorPos(out Win32Point lpPoint);
     [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vKey);
@@ -52,6 +47,12 @@ public partial class ZoneWindow : Window
     private HwndSource? _src;
     private Canvas? _itemCanvas;
     private Action<string>? _langChanged;
+    // Background-image placement transform, refreshed by ApplyBackgroundImage and
+    // consumed by the adaptive-color samplers to map window-space sample points
+    // back into source-image pixels.
+    private double _bgImageScale;
+    private double _bgImageOffsetX;
+    private double _bgImageOffsetY;
 
     private bool _dragging;
     private Point _ds, _is;
@@ -61,7 +62,7 @@ public partial class ZoneWindow : Window
     private const double BarThickness = 3, BarLength = 56;
     // The item footprint is one grid cell (square); the icon is centered inside it.
     double ItemW => _zone.GridSize;
-    double ItemH => _zone.GridSize;
+    double ItemH => _zone.GridSize + ZoneLayout.LabelArea;
     private readonly System.Windows.Threading.DispatcherTimer _saveDebounce = new() { Interval = TimeSpan.FromMilliseconds(500) };
     private bool _savePending;
     private readonly System.Windows.Threading.DispatcherTimer _recycleTimer = new() { Interval = TimeSpan.FromSeconds(2.5) };
@@ -69,6 +70,7 @@ public partial class ZoneWindow : Window
     private bool _recycleFullLast;
     private HoverExpandBehavior? _hover;
     private SnapDrag? _snapDrag;
+    private SnapResize? _snapResize;
 
     // ── Title-bar drag-to-merge ──
     private ZoneWindow? _mergeTarget;
@@ -82,6 +84,7 @@ public partial class ZoneWindow : Window
     private int _dragTabInsertIndex = -1;
     private bool _dragTabArmed, _dragTabCompleted, _isDragTabOut;
     private double _dragTabGrabOffset;
+    private double _dragTabLastX = double.NaN; // previous cursor X — drives the leading-edge probe
     private System.Windows.Threading.DispatcherTimer? _tabDragTimer;
     private readonly Dictionary<FrameworkElement, double> _pendingTabSlide = new();
     // ponytail: extracted from inline lambdas so OnClosed can unsubscribe with the same
@@ -163,6 +166,7 @@ public partial class ZoneWindow : Window
 
         // ponytail: 自适应对齐 — 替换 DragMove 的手动拖拽循环。
         _snapDrag = new SnapDrag(this);
+        _snapResize = new SnapResize(this);
     }
 
     void OnHoverExpandSettingsChanged()
@@ -228,7 +232,14 @@ public partial class ZoneWindow : Window
     { try { uint n = NativeMethods.DragQueryFile(drop, 0xFFFFFFFF, null, 0); for (uint i = 0; i < n; i++) { var sb = new System.Text.StringBuilder(260); NativeMethods.DragQueryFile(drop, i, sb, 260); if (!string.IsNullOrEmpty(sb.ToString())) { var (sx, sy) = FindFreeSpot(); Add(sb.ToString(), sx, sy); } } UpdateCanvasSize(); } finally { NativeMethods.DragFinish(drop); } }
 
     void Add(string path, double x, double y)
-    { var t = Dir(path) ? ItemType.Folder : Path.GetExtension(path).ToLowerInvariant() switch { ".lnk" => ItemType.Shortcut, ".exe" => ItemType.Application, _ => ItemType.Shortcut }; AddItem(new ZoneItem(Path.GetFileNameWithoutExtension(path), path, t, 0, 0), x, y); }
+    {
+        var t = Dir(path) ? ItemType.Folder : Path.GetExtension(path).ToLowerInvariant() switch { ".lnk" => ItemType.Shortcut, ".exe" => ItemType.Application, _ => ItemType.Shortcut };
+        // Imported shortcuts re-associate to their real target AND keep the shortcut's
+        // custom icon location (no arrow overlay, desktop-identical icon, launches hit
+        // the target directly — see ShortcutResolver).
+        (string target, ItemType type, string? iconLoc) = ShortcutResolver.NormalizeItem(path, t);
+        AddItem(new ZoneItem(Path.GetFileNameWithoutExtension(path), target, type, 0, 0) { IconPath = iconLoc }, x, y);
+    }
 
     /// <summary>
     /// Clamp import coordinates to the zone without grid-snapping: import flows place
@@ -322,6 +333,9 @@ public partial class ZoneWindow : Window
 
     public void ShowZone(double waveDelayMs = 0)
     {
+#if DEBUG
+        DzTrace.Log($"[ZoneWindow] ShowZone(wave={waveDelayMs}) ENTRY winVisible={IsVisible} content={MainContent.Visibility} btn={RestoreButton.Visibility} hoverExpanded={_hover?.IsExpanded} modelVisible={_zone.IsVisible} size={Width}x{Height}");
+#endif
         // ponytail: 2026-08-23 — a window hidden via Hide()/ApplyHidden (full-hide
         // path) stays in the manager's dictionary when the hide came through
         // UpdateZone/RefreshZone; ShowZone never re-showed it, so the zone stayed
@@ -359,6 +373,9 @@ public partial class ZoneWindow : Window
 
     public void HideZone(double waveDelayMs = 0)
     {
+#if DEBUG
+        DzTrace.Log($"[ZoneWindow] HideZone(wave={waveDelayMs}) ENTRY winVisible={IsVisible} content={MainContent.Visibility} btn={RestoreButton.Visibility} hoverExpanded={_hover?.IsExpanded} modelVisible={_zone.IsVisible} restoreEnabled={_zone.EnableRestoreButton} size={Width}x{Height}");
+#endif
         // Save dimensions only if not currently minimized (RestoreButton not visible)
         // If minimized, the original dimensions are already saved in _zone
         if (RestoreButton.Visibility != Visibility.Visible)
@@ -408,11 +425,66 @@ public partial class ZoneWindow : Window
             if (waveDelayMs > 0)
                 _hover?.CollapseAfterDelay(waveDelayMs, null);
             else
+            {
                 _hover?.CollapseAnimated();
+#if DEBUG
+                // ponytail 2026-08-25 ghost-ring diagnosis — 1.5 s after the collapse
+                // finishes, save a pure-WPF render + a real screen grab of the
+                // collapsed window (see SaveCollapsedDiag).
+                var diag = new System.Windows.Threading.DispatcherTimer
+                {
+                    Interval = TimeSpan.FromMilliseconds(1500)
+                };
+                diag.Tick += (_, _) => { diag.Stop(); SaveCollapsedDiag(); };
+                diag.Start();
+#endif
+            }
         }
         _zone.IsVisible = false;
         _mgr.FireZoneVisibilityChanged(_zone.Id, false);
     }
+
+#if DEBUG
+    /// <summary>
+    /// ponytail 2026-08-25 ghost-ring diagnosis: writes two PNGs of the collapsed window —
+    ///   • D:\BS\dz_render.png — pure WPF render (RenderTargetBitmap, no DWM compositing);
+    ///   • D:\BS\dz_screen.png — real screen grab from THIS session around the window
+    ///     center (the RestoreButton position for ButtonCenter origin).
+    /// Comparing them pins the reported "透明边框" to either WPF-internal rendering or
+    /// the OS layer (DWM shadow / acrylic / corner-rounding compositing).
+    /// </summary>
+    void SaveCollapsedDiag()
+    {
+        try
+        {
+            int w = Math.Max(1, (int)Math.Ceiling(ActualWidth));
+            int h = Math.Max(1, (int)Math.Ceiling(ActualHeight));
+            var rtb = new RenderTargetBitmap(w, h, 96, 96, PixelFormats.Pbgra32);
+            rtb.Render(this);
+            var enc = new PngBitmapEncoder();
+            enc.Frames.Add(BitmapFrame.Create(rtb));
+            using (var fs = File.Create(@"D:\BS\dz_render.png")) enc.Save(fs);
+
+            var btn = RestoreButton;
+            var btnLocal = btn.TransformToAncestor(this).Transform(new Point(btn.ActualWidth / 2, btn.ActualHeight / 2));
+            var center = PointToScreen(btnLocal);
+            if (PresentationSource.FromVisual(this)?.CompositionTarget is System.Windows.Media.CompositionTarget ct)
+            {
+                var px = ct.TransformToDevice.Transform(center);
+                int cx = (int)Math.Round(px.X), cy = (int)Math.Round(px.Y);
+                using var bmp = new System.Drawing.Bitmap(560, 560);
+                using var g = System.Drawing.Graphics.FromImage(bmp);
+                g.CopyFromScreen(cx - 280, cy - 280, 0, 0, bmp.Size);
+                bmp.Save(@"D:\BS\dz_screen.png", System.Drawing.Imaging.ImageFormat.Png);
+            }
+            DzTrace.Log($"[ZoneWindow] SaveCollapsedDiag ok size={w}x{h} btn=({btnLocal.X:0},{btnLocal.Y:0})");
+        }
+        catch (Exception ex)
+        {
+            DzTrace.Log($"[ZoneWindow] SaveCollapsedDiag FAILED: {ex.Message}");
+        }
+    }
+#endif
 
     /// <summary>
     /// Batch-wave entrance for a freshly created window ("Show All" after the zone
@@ -468,6 +540,7 @@ public partial class ZoneWindow : Window
             _tabDragTimer = null;
         }
         _snapDrag?.Detach();
+        _snapResize?.Detach();
         _hover?.Dispose();
         var h = new WindowInteropHelper(this).Handle;
         _mgr.ZonesChanged -= OnZonesChanged;
@@ -563,7 +636,12 @@ public partial class ZoneWindow : Window
         if (TitleBarBg.Visibility != Visibility.Visible || TitleBarBg.ActualWidth <= 0 || TitleBarBg.ActualHeight <= 0)
             return Rect.Empty;
         var topLeft = TitleBarBg.TransformToAncestor(this).Transform(new Point(0, 0));
-        return new Rect(topLeft, new Size(TitleBarBg.ActualWidth, TitleBarBg.ActualHeight));
+        double h = TitleBarBg.ActualHeight;
+        // ponytail 2026-08-26: the merged master's title bar is two layers — the top
+        // bar plus the sub-zone tab row — so drag-to-merge drop targeting covers both.
+        if (SubZoneTabsRow.Visibility == Visibility.Visible && SubZoneTabsRow.ActualHeight > 0)
+            h += SubZoneTabsRow.ActualHeight;
+        return new Rect(topLeft, new Size(TitleBarBg.ActualWidth, h));
     }
 
     public void SetMergeHover(bool on)
@@ -588,8 +666,9 @@ public partial class ZoneWindow : Window
         var vm = DataContext as ZoneViewModel;
         if (vm?.IsLocked == true) { e.Handled = true; return; }
         if (s is not Border gr) return;
-        int d = gr == GripTL ? HTTOPLEFT : gr == GripTR ? HTTOPRIGHT : gr == GripBL ? HTBOTTOMLEFT : HTBOTTOMRIGHT;
-        SendMessage(new WindowInteropHelper(this).Handle, WM_NCLBUTTONDOWN, (IntPtr)d, IntPtr.Zero);
+        bool left = gr == GripTL || gr == GripBL;
+        bool top = gr == GripTL || gr == GripTR;
+        _snapResize?.Start(e, left, top, !left, !top, 120, 80);
         if (vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
         e.Handled = true;
     }
@@ -642,7 +721,7 @@ public partial class ZoneWindow : Window
         UpdateCanvasSize();
     }
 
-    (double, double) FindFreeSpot() => ZoneLayout.FindFreeSpot(_vm.GetPlacementItems(), _zone.Width, _zone.Height, _zone.GridSize, _zone.GridSize);
+    (double, double) FindFreeSpot() => ZoneLayout.FindFreeSpot(_vm.GetPlacementItems(), _zone.Width, _zone.Height, _zone.GridSize, _zone.GridSize + ZoneLayout.LabelArea);
 
     void RearrangeAll()
     {
@@ -666,13 +745,15 @@ public partial class ZoneWindow : Window
             gridSize = _zone.GridSize;
         }
 
+        double pitch = ZoneLayout.Pitch(gridSize);
+        double vpitch = ZoneLayout.VPitch(gridSize);
         double x = 10, y = 10;
         foreach (var item in items.OrderBy(i => i.Y).ThenBy(i => i.X))
         {
             item.X = ZoneViewModel.SnapToGrid(x, gridSize);
-            item.Y = ZoneViewModel.SnapToGrid(y, gridSize);
-            x += gridSize;
-            if (x > _zone.Width - gridSize) { x = 10; y += gridSize; }
+            item.Y = ZoneViewModel.SnapToGridY(y, gridSize);
+            x += pitch;
+            if (x > _zone.Width - gridSize) { x = 10; y += vpitch; }
         }
         _vm.RefreshMergedItems();
     }
@@ -950,13 +1031,15 @@ public partial class ZoneWindow : Window
 
     static int ComputeInsertIndex(List<ZoneItem> others, double dropX, double dropY, int gs)
     {
-        int row = (int)Math.Round((dropY - 10) / gs);
-        int col = (int)Math.Round((dropX - 10) / gs);
+        double pitch = ZoneLayout.Pitch(gs);
+        double vpitch = ZoneLayout.VPitch(gs);
+        int row = (int)Math.Round((dropY - ZoneLayout.Pad) / vpitch);
+        int col = (int)Math.Round((dropX - ZoneLayout.Pad) / pitch);
         int k = 0;
         foreach (var o in others)
         {
-            int r = (int)Math.Round((o.Y - 10) / gs);
-            int c = (int)Math.Round((o.X - 10) / gs);
+            int r = (int)Math.Round((o.Y - ZoneLayout.Pad) / vpitch);
+            int c = (int)Math.Round((o.X - ZoneLayout.Pad) / pitch);
             if (r < row || (r == row && c < col)) k++;
         }
         return k;
@@ -982,7 +1065,6 @@ public partial class ZoneWindow : Window
         int gs = owner.GridSize;
         double zw = _zone.Width;
         if (double.IsNaN(zw) || zw < gs + 10) zw = gs + 10;
-        int cols = Math.Max(1, (int)Math.Floor((zw - 10) / gs));
         int k = Math.Clamp(ComputeInsertIndex(others, dropX, dropY, gs), 0, others.Count);
 
         var ordered = new List<ZoneItem>(others.Count + 1);
@@ -998,13 +1080,15 @@ public partial class ZoneWindow : Window
             if (vm != null) oldPos[it.Id] = (vm.X, vm.Y);
         }
 
+        double pitch = ZoneLayout.Pitch(gs);
+        double vpitch = ZoneLayout.VPitch(gs);
         double x = 10, y = 10;
         foreach (var it in ordered)
         {
             it.X = ZoneViewModel.SnapToGrid(x, gs);
-            it.Y = ZoneViewModel.SnapToGrid(y, gs);
-            x += gs;
-            if (x > zw - gs) { x = 10; y += gs; }
+            it.Y = ZoneViewModel.SnapToGridY(y, gs);
+            x += pitch;
+            if (x > zw - gs) { x = 10; y += vpitch; }
         }
 
         owner.Items.Clear();
@@ -1051,83 +1135,61 @@ public partial class ZoneWindow : Window
         if (others.Count == 0) { HideDropIndicator(); return; }
 
         int gs = owner.GridSize;
+        double pitch = ZoneLayout.Pitch(gs);
         double zw = _zone.Width;
         if (double.IsNaN(zw) || zw < gs + 10) zw = gs + 10;
-        int cols = Math.Max(1, (int)Math.Floor((zw - 10) / gs));
+        int cols = Math.Max(1, (int)Math.Floor((zw - ZoneLayout.Pad - gs) / pitch) + 1);
         int k = Math.Clamp(ComputeInsertIndex(others, dragged.X, dragged.Y, gs), 0, others.Count);
 
-        // The bar is centred in the actual visual gap between the two icons that
-        // flank the insertion point (icon edge ↔ icon edge), so it keeps the same
-        // moderate distance from the icon on every side — left/right and top/bottom
-        // stay symmetric, and it follows the dragged icon instead of hugging the
-        // neighbour cell edge. Falls back to the cell boundary when the icons
-        // overlap/touch (no room left for the bar).
-        double iconSize = Math.Max(24, gs - 8);
-        double inset = (gs - iconSize) / 2;
-        (double L, double T, double R, double B) Bounds(ZoneItem it)
-            => (it.X + inset, it.Y + inset, it.X + gs - inset, it.Y + gs - inset);
-
-        double dInset = Math.Max(0, (dragged.ItemSize - dragged.IconSize) / 2);
-        double dL = dragged.X + dInset, dT = dragged.Y + dInset;
-        double dR = dragged.X + dragged.ItemSize - dInset;
-        double dB = dragged.Y + dragged.ItemSize - dInset;
-
-        double GapCenter(double a, double b, double fallback)
-            => b - a >= BarThickness ? (a + b) / 2 : fallback;
-
-        // The bar marks the insertion gap in reading order: vertical when the gap
-        // sits between two columns, horizontal when it sits between two rows.
+        // The caret sits at a fixed position in the gap between two grid cells
+        // (centred in the inter-cell gap), so it keeps the same moderate distance
+        // from the icon on every side — left/right and top/bottom are symmetric,
+        // and it never follows the dragged icon away.
         double barX, barY;
         bool vertical;
 
         if (k == 0)
         {
-            // Insert before the first item → caret in the gap between the dragged
-            // icon and that item (on its left side).
-            var first = others[0];
-            var fb = Bounds(first);
+            // Insert before the first item → gap to the left of that cell.
             vertical = true;
-            barX = GapCenter(dR, fb.L, first.X);
-            barY = first.Y;
+            barX = others[0].X - ZoneLayout.CellGap / 2;
+            barY = others[0].Y;
         }
         else if (k == others.Count)
         {
             // Insert after the last item.
             var prev = others[others.Count - 1];
-            int prevCol = (int)Math.Round((prev.X - 10) / gs);
-            var pb = Bounds(prev);
+            int prevCol = (int)Math.Round((prev.X - ZoneLayout.Pad) / pitch);
             if (prevCol < cols - 1)
             {
                 vertical = true;      // same row, to its right
-                barX = GapCenter(pb.R, dL, prev.X + gs);
+                barX = prev.X + gs + ZoneLayout.CellGap / 2;
                 barY = prev.Y;
             }
             else
             {
                 vertical = false;     // wraps to a new row below
                 barX = 10;
-                barY = GapCenter(pb.B, dT, prev.Y + gs);
+                barY = prev.Y + gs + ZoneLayout.LabelArea + ZoneLayout.CellGap / 2;
             }
         }
         else
         {
             var prev = others[k - 1];
             var next = others[k];
-            int prevRow = (int)Math.Round((prev.Y - 10) / gs);
-            int nextRow = (int)Math.Round((next.Y - 10) / gs);
-            var pb = Bounds(prev);
-            var nb = Bounds(next);
+            int prevRow = (int)Math.Round((prev.Y - ZoneLayout.Pad) / pitch);
+            int nextRow = (int)Math.Round((next.Y - ZoneLayout.Pad) / pitch);
             if (prevRow == nextRow)
             {
                 vertical = true;      // gap between two columns
-                barX = GapCenter(pb.R, nb.L, next.X);
+                barX = next.X - ZoneLayout.CellGap / 2;
                 barY = next.Y;
             }
             else
             {
                 vertical = false;     // gap between two rows
                 barX = 10;
-                barY = GapCenter(pb.B, nb.T, next.Y);
+                barY = next.Y - ZoneLayout.CellGap / 2;
             }
         }
 
@@ -1136,7 +1198,8 @@ public partial class ZoneWindow : Window
         {
             bar.Width = BarThickness; bar.Height = BarLength;
             Canvas.SetLeft(bar, barX - BarThickness / 2);
-            Canvas.SetTop(bar, barY + (ItemH - BarLength) / 2);
+            // Center the caret on the icon block (the cell also carries the name area below).
+            Canvas.SetTop(bar, barY + (gs - BarLength) / 2);
         }
         else
         {
@@ -1268,12 +1331,12 @@ public partial class ZoneWindow : Window
     /// Resolve the visual style for the current mode. This is the ONLY place that knows
     /// about merged-group logic — every other method takes the result and renders blindly.
     /// Mode precedence (highest first):
-    ///   1. Regular zone                              → _zone.*  (or global when useGlobal)
-    ///   2. Merged master + Unified                   → _zone.MergedGroup*
-    ///   3. Merged master + Keep Original + sub-zone  → selectedSubZone.*
-    ///   4. Merged master + Keep Original + no sub    → _zone.*  (master's own)
-    ///   5. Merged sub-zone standalone + Unified      → _zone.MergedGroup*
-    ///   6. Merged sub-zone standalone + Keep Original → _zone.*
+    ///   1. Regular zone             → _zone.*  (or global when useGlobal)
+    ///   2. Merged + Unified         → _zone.MergedGroup*
+    ///   3. Merged + Keep Original   → frame (border / corners / BOTH title-bar layers /
+    ///        icons / control opacity / bg image) from _zone.MergedGroup*; ONLY the body
+    ///        FillColor keeps the displayed zone's own fill (selected sub-zone's, or the
+    ///        master's own when no sub-zone is selected).
     /// TitleBarAdaptive MUST follow the same source as the colors it adapts to; otherwise
     /// adaptive would compute a contrasting color for a different background.
     /// </summary>
@@ -1328,38 +1391,39 @@ public partial class ZoneWindow : Window
             };
         }
 
-        // Merged + Keep Original + master + sub-zone selected → selectedSubZone.*
-        bool isMaster = _zone.MergedGroupMembership.SubZoneIds.Count > 0;
-        if (isMaster && _vm?.SelectedSubZoneId is Guid selId && selId != _zone.Id)
+        // Merged + Keep Original → the frame (border, corners, BOTH title-bar layers,
+        // icons, control opacity) stays unified from MergedGroupStyle; the body fill
+        // keeps the currently-displayed zone's own fill (selected sub-zone's when one
+        // is active, otherwise the master's own). The unified background image is
+        // disabled in this mode (背景图片随保留原有填充一起禁掉).
+        string keepFill = _zone.FillColor;
+        if (_zone.MergedGroupMembership.SubZoneIds.Count > 0
+            && _vm?.SelectedSubZoneId is Guid selId && selId != _zone.Id)
         {
             var sub = _mgr.Zones.FirstOrDefault(z => z.Id == selId);
-            if (sub != null)
-            {
-                return regular with
-                {
-                    FillColor =        sub.FillColor,
-                    BorderColor =      sub.BorderColor,
-                    BorderThickness =  sub.BorderThickness,
-                    TitleBarFillColor = sub.TitleBarFillColor,
-                    TitleTextColor =   sub.TitleTextColor,
-                    IconColor =        sub.IconColor,
-                    ControlOpacity =   sub.ControlOpacity,
-                    CornerRadius =     sub.CornerRadius,
-                    QuickBarMode =     sub.QuickBarMode,
-                    TitleBarAdaptive = sub.TitleBarTextColorAdaptive,
-                    BgImagePath =      sub.BackgroundImagePath,
-                    BgImageStretch =   sub.BgImageStretch,
-                    BgImageOffsetX =   sub.BgImageOffsetX,
-                    BgImageOffsetY =   sub.BgImageOffsetY,
-                    BgImageZoom =      sub.BgImageZoom,
-                    BgImageOpacity =   sub.BackgroundImageOpacity,
-                    TitleBarFillIndependent = sub.TitleBarFillIndependent,
-                };
-            }
+            if (sub != null) keepFill = sub.FillColor;
         }
 
-        // Merged + Keep Original + (master's own items OR sub-zone standalone) → _zone.*
-        return regular;
+        return regular with
+        {
+            FillColor =        keepFill,
+            BorderColor =      _zone.MergedGroupStyle.BorderColor,
+            BorderThickness =  _zone.MergedGroupStyle.BorderThickness,
+            TitleBarFillColor = _zone.MergedGroupStyle.TitleBarFillColor,
+            TitleTextColor =   _zone.MergedGroupStyle.TitleTextColor,
+            IconColor =        _zone.MergedGroupStyle.IconColor,
+            ControlOpacity =   _zone.MergedGroupStyle.ControlOpacity,
+            CornerRadius =     _zone.MergedGroupStyle.CornerRadius,
+            QuickBarMode =     _zone.MergedGroupStyle.QuickBarMode,
+            TitleBarAdaptive = _zone.MergedGroupStyle.TitleBarTextColorAdaptive,
+            BgImagePath =      "",
+            BgImageStretch =   _zone.MergedGroupStyle.BgImageStretch,
+            BgImageOffsetX =   _zone.MergedGroupStyle.BgImageOffsetX,
+            BgImageOffsetY =   _zone.MergedGroupStyle.BgImageOffsetY,
+            BgImageZoom =      _zone.MergedGroupStyle.BgImageZoom,
+            BgImageOpacity =   _zone.MergedGroupStyle.BackgroundImageOpacity,
+            TitleBarFillIndependent = _zone.MergedGroupStyle.TitleBarFillIndependent,
+        };
     }
 
     /// <summary>
@@ -1396,19 +1460,25 @@ public partial class ZoneWindow : Window
         try { FillRect.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.FillColor)!); } catch { }
         bool fillIndependent = s.TitleBarFillIndependent && !s.QuickBarMode;
         FillRect.RadiusX = FillRect.RadiusY = fillIndependent ? 0 : s.CornerRadius;
-        FillRect.Margin = fillIndependent ? new Thickness(0, 24, 0, 0) : new Thickness(0);
+        // ponytail 2026-08-26: the merged master's title bar is TWO layers — the
+        // 24px top bar + the 24px sub-zone tab row — so the body fill starts below
+        // both (48px), not just below the top bar.
+        FillRect.Margin = fillIndependent ? new Thickness(0, TitleBarLayerHeight(), 0, 0) : new Thickness(0);
 
-        // Title bar fill
+        // Title bar fill — both title-bar layers share the resolved fill.
         try { TitleBarBg.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.TitleBarFillColor)!); } catch { }
+        try { SubZoneTabsRow.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.TitleBarFillColor)!); } catch { }
 
-        // Title text — adaptive on → composite + HSL flip; off → resolved TitleTextColor
+        // Background image — computed before the adaptive brushes below so the
+        // sampling transform is fresh for both the title-bar and body regions.
+        ApplyBackgroundImage(s);
+
+        // Title text — adaptive on → sample the title-bar strip; off → resolved TitleTextColor.
+        SolidColorBrush? titleAdaptiveBrush = null;
         if (s.TitleBarAdaptive)
         {
-            // ponytail: TitleBarFillColor is a translucent overlay over FillColor. Composite
-            // before HSL flip so the algorithm sees the visible title-bar color, not the
-            // bare translucent layer.
-            var tBrush = AdaptiveTextColor.ResolveBrushOver(s.TitleBarFillColor, s.FillColor);
-            ZoneTitleText.Foreground = tBrush;
+            titleAdaptiveBrush = ResolveTitleBarAdaptiveBrush(s);
+            ZoneTitleText.Foreground = titleAdaptiveBrush;
         }
         else
         {
@@ -1420,7 +1490,7 @@ public partial class ZoneWindow : Window
         // ResolveStyle) and the button labels return to their XAML default #80FFFFFF.
         if (s.TitleBarAdaptive)
         {
-            var iBrush = AdaptiveTextColor.ResolveBrushOver(s.TitleBarFillColor, s.FillColor);
+            var iBrush = titleAdaptiveBrush!;
             TitleIconChar.Foreground = iBrush;
             RestoreIconChar.Foreground = iBrush;
             // ponytail: Border has no Foreground property — only the inner TextBlocks can carry
@@ -1459,23 +1529,93 @@ public partial class ZoneWindow : Window
         TitleBarBg.Visibility = vis;
         ControlPoint.Visibility = vis;
 
-        // Background image
-        ApplyBackgroundImage(s);
-
-        // Sub-zone tabs + items — both driven by the resolved style so adaptive decision
-        // is in lockstep with the resolved colors above (no separate "MergedGroup*" flag
-        // check that could fall out of sync).
-        SolidColorBrush? tabAdaptiveBrush = s.TitleBarAdaptive
-            ? AdaptiveTextColor.ResolveBrushOver(s.TitleBarFillColor, s.FillColor)
-            : null;
-        RebuildSubZoneTabs(tabAdaptiveBrush, s.TitleTextColor);
+        // Sub-zone tabs + items — the tab row sits inside the same title-bar band, so its text
+        // reuses the top title bar's adaptive brush (merged groups don't get a separate tab-bar
+        // sample; the difference is negligible).
+        RebuildSubZoneTabs(titleAdaptiveBrush, s.TitleTextColor);
         ApplyItemTextColorAdaptive(s.FillColor);
+    }
+
+    /// <summary>Combined title-bar height: 48px when the merged master's sub-zone
+    /// tab row is visible (24px top bar + 24px tab row), otherwise 24px.</summary>
+    double TitleBarLayerHeight() =>
+        _zone.MergedGroupMembership.SubZoneIds.Count > 0 ? 48 : 24;
+
+    /// <summary>Effective window size used by the background-image transform — mirrors
+    /// <see cref="ApplyBackgroundImage"/>, which falls back to the model size before the
+    /// first layout pass has run (e.g. inside the constructor's ApplyStyle).</summary>
+    double EffectiveWidth => ActualWidth > 0 ? ActualWidth : _zone.Width;
+    double EffectiveHeight => ActualHeight > 0 ? ActualHeight : _zone.Height;
+
+    /// <summary>Parse a hex color string, falling back to white on malformed input.</summary>
+    static Color ParseColor(string hex)
+    {
+        try { return (Color)ColorConverter.ConvertFromString(hex)!; }
+        catch { return Colors.White; }
+    }
+
+    /// <summary>The adaptive title-bar strip is always the 24px <see cref="TitleBarBg"/>;
+    /// merged groups sample only this top layer, never the sub-zone tab row.</summary>
+    const double TitleBarSampleHeight = 24;
+
+    /// <summary>Top edge of the body region in window space (below title bar + tab row).</summary>
+    double BodyRegionTop(ResolvedZoneStyle s) =>
+        s.QuickBarMode
+            ? (_zone.MergedGroupMembership.SubZoneIds.Count > 0 ? TitleBarSampleHeight : 0)
+            : TitleBarLayerHeight();
+
+    /// <summary>Title-bar samples: left endpoint, middle, right endpoint.</summary>
+    static (double, double)[] TitleBarSamplePoints(double width) => new[]
+    {
+        (4.0, TitleBarSampleHeight / 2.0),
+        (width / 2.0, TitleBarSampleHeight / 2.0),
+        (Math.Max(4.0, width - 4.0), TitleBarSampleHeight / 2.0),
+    };
+
+    /// <summary>Body samples: the body region's four corners + its center (5 points).</summary>
+    static (double, double)[] BodySamplePoints(double top, double bottom, double width)
+    {
+        double left = 4.0, right = Math.Max(4.0, width - 4.0);
+        return new[]
+        {
+            (left, top),
+            (right, top),
+            (width / 2.0, (top + bottom) / 2.0),
+            (left, bottom),
+            (right, bottom),
+        };
+    }
+
+    /// <summary>Resolve the title-bar adaptive brush. When a background image is present
+    /// (and not clipped away by an independent title bar), sample the title-bar strip;
+    /// otherwise fall back to the translucent-title-over-fill composite.</summary>
+    SolidColorBrush ResolveTitleBarAdaptiveBrush(ResolvedZoneStyle s)
+    {
+        var titleFill = ParseColor(s.TitleBarFillColor);
+
+        // Independent title bar: its fill is the only layer we own (the desktop behind it
+        // is unknowable), so contrast against the fill color itself.
+        if (s.TitleBarFillIndependent && !s.QuickBarMode)
+            return AdaptiveTextColor.ResolveBrush(titleFill);
+
+        if (BgImage?.Source is BitmapSource bmp && _bgImageScale > 0 && EffectiveWidth > 0)
+        {
+            var backdrop = ParseColor(s.FillColor);
+            var avg = AdaptiveTextColor.AverageImageOver(
+                bmp, _bgImageScale, _bgImageOffsetX, _bgImageOffsetY,
+                TitleBarSamplePoints(EffectiveWidth), backdrop);
+            if (avg is Color c)
+                return AdaptiveTextColor.ResolveBrush(AdaptiveTextColor.CompositeOver(titleFill, c));
+        }
+
+        // No image under the title bar: translucent title fill over the body fill.
+        return AdaptiveTextColor.ResolveBrushOver(s.TitleBarFillColor, s.FillColor);
     }
 
     void ApplyBackgroundImage(ResolvedZoneStyle s)
     {
         // 标题栏独立填充：背景图与 FillRect 一样不铺到标题栏下方（顶部裁剪）。
-        double clipTop = s.TitleBarFillIndependent && !s.QuickBarMode ? 24 : 0;
+        double clipTop = s.TitleBarFillIndependent && !s.QuickBarMode ? TitleBarLayerHeight() : 0;
         BgImageBorder.Margin = new Thickness(0, clipTop, 0, 0);
         if (!string.IsNullOrEmpty(s.BgImagePath) && File.Exists(s.BgImagePath))
         {
@@ -1516,10 +1656,16 @@ public partial class ZoneWindow : Window
                 BgImage.HorizontalAlignment = HorizontalAlignment.Left;
                 BgImage.VerticalAlignment = VerticalAlignment.Top;
                 BgImage.Opacity = Math.Max(0.01, s.BgImageOpacity / 100.0);
+
+                // Store the placement transform for the adaptive-color samplers:
+                // window → source pixel = ((wx - offsetX) / scale, (wy - offsetY) / scale).
+                _bgImageScale = utfScale;
+                _bgImageOffsetX = zoneCenterX - imgCenterX + zox;
+                _bgImageOffsetY = zoneCenterY - imgCenterY + zoy;
             }
-            catch { BgImage.Opacity = 0; }
+            catch { _bgImageScale = 0; BgImage.Opacity = 0; }
         }
-        else { BgImage.Source = null; BgImage.Opacity = 0; }
+        else { _bgImageScale = 0; BgImage.Source = null; BgImage.Opacity = 0; }
     }
 
     /// <summary>Walk the item template subtree under <see cref="MainContent"/> and apply the
@@ -1540,15 +1686,18 @@ public partial class ZoneWindow : Window
 #endif
         if (!_zone.TextColorAdaptive) return;
         string fillColor = effectiveFill ?? ResolveEffectiveBodyFill();
-        SolidColorBrush brush;
-        if (BgImage?.Source is BitmapSource bmp && !string.IsNullOrEmpty(_zone.BackgroundImagePath))
+        var backdrop = ParseColor(fillColor);
+        Color? sampled = null;
+        if (BgImage?.Source is BitmapSource bmp && _bgImageScale > 0 && EffectiveWidth > 0 && EffectiveHeight > 0)
         {
-            brush = AdaptiveTextColor.ResolveBrush(AdaptiveTextColor.ResolveTextColorForImage(bmp));
+            var s = ResolveStyle();
+            double top = BodyRegionTop(s) + 4.0;
+            double bottom = Math.Max(top, EffectiveHeight - 8.0 - 4.0);
+            sampled = AdaptiveTextColor.AverageImageOver(
+                bmp, _bgImageScale, _bgImageOffsetX, _bgImageOffsetY,
+                BodySamplePoints(top, bottom, EffectiveWidth), backdrop);
         }
-        else
-        {
-            brush = AdaptiveTextColor.ResolveBrush(fillColor);
-        }
+        var brush = AdaptiveTextColor.ResolveBrush(sampled ?? backdrop);
         // ponytail: walk ItemsHost subtree directly via visual tree, mirroring PanelWindow's
         // pattern over ContentStack.Children. The previous ContainerFromIndex approach raced
         // with ItemContainerGenerator status — containers would be null right after RefreshItems
@@ -1608,10 +1757,12 @@ public partial class ZoneWindow : Window
 
         // Use the actually displayed items list (sub-zone's items when a sub-zone tab is selected)
         List<Models.ZoneItem> displayItems;
+        int gs = _zone.GridSize;
         if (_zone.MergedGroupMembership.SubZoneIds.Count > 0 && _vm.SelectedSubZoneId.HasValue && _vm.SelectedSubZoneId.Value != _zone.Id)
         {
             var subZone = _mgr.Zones.FirstOrDefault(z => z.Id == _vm.SelectedSubZoneId.Value);
             displayItems = subZone?.Items ?? _zone.Items;
+            if (subZone != null) gs = subZone.GridSize;
         }
         else
         {
@@ -1620,7 +1771,7 @@ public partial class ZoneWindow : Window
 
         if (displayItems.Count == 0) { _itemCanvas.Width = Math.Max(0, _zone.Width - 2); _itemCanvas.Height = Math.Max(0, _zone.Height - 50); return; }
         double maxX = 0, maxY = 0;
-        foreach (var i in displayItems) { if (i.X + 80 > maxX) maxX = i.X + 80; if (i.Y + 96 > maxY) maxY = i.Y + 96; }
+        foreach (var i in displayItems) { if (i.X + gs + 20 > maxX) maxX = i.X + gs + 20; if (i.Y + gs + ZoneLayout.LabelArea + 20 > maxY) maxY = i.Y + gs + ZoneLayout.LabelArea + 20; }
         _itemCanvas.Width = Math.Max(_zone.Width - 20, maxX + 20);
         _itemCanvas.Height = Math.Max(_zone.Height - 50, maxY + 20);
     }
@@ -1659,10 +1810,12 @@ public partial class ZoneWindow : Window
                     try
                     {
                         TitleBarBg.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(titleBarFillColor)!);
+                        SubZoneTabsRow.Background = TitleBarBg.Background;
                     }
                     catch
                     {
                         TitleBarBg.Background = new SolidColorBrush(Color.FromArgb(0x10, 0xFF, 0xFF, 0xFF));
+                        SubZoneTabsRow.Background = TitleBarBg.Background;
                     }
                 }
             }
@@ -1679,6 +1832,7 @@ public partial class ZoneWindow : Window
                 FillRect.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(fillColor)!);
                 FillRect.Opacity = 1.0;
                 TitleBarBg.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(titleBarFillColor)!);
+                SubZoneTabsRow.Background = TitleBarBg.Background;
             }
             catch { }
         }
@@ -1911,6 +2065,7 @@ public partial class ZoneWindow : Window
         _dragTabArmed = false;
         _dragTabCompleted = false;
         _isDragTabOut = false;
+        _dragTabLastX = _dragTabOrigin.X;
 
         // Visible drag: the tab follows the cursor. Reset any leftover slide-transform
         // first so the layout origin below is the pure layout position.
@@ -2044,6 +2199,7 @@ public partial class ZoneWindow : Window
         _dragTabArmed = false;
         _dragTabCompleted = false;
         _isDragTabOut = false;
+        _dragTabLastX = double.NaN;
     }
 
     void OnTabDragTick(object? s, EventArgs e)
@@ -2099,9 +2255,19 @@ public partial class ZoneWindow : Window
         // Live reorder while the cursor stays inside the strip.
         if (_dragTabArmed && !outsideRow)
         {
+            // Leading-edge probe, direction-aware: the swap fires once the tab's
+            // leading edge (right edge when dragging right, left edge when dragging
+            // left) crosses a neighbour's midpoint — 拖过一半即换位. Probing the
+            // fixed left edge made rightward drags fire a whole tab-width late
+            // (the pointer had to reach the neighbour's far end — 拖到底).
+            bool movingRight = pos.X >= _dragTabLastX;
+            _dragTabLastX = pos.X;
             // Convert row coords → StackPanel coords so boundaries align exactly
             // with the accumulated tab widths below.
-            int newIndex = ComputeTabDropIndex(pos.X - SubZoneTabs.Margin.Left);
+            double probeX = pos.X - SubZoneTabs.Margin.Left - _dragTabGrabOffset; // left edge
+            if (movingRight)
+                probeX += dragTab.ActualWidth + dragTab.Margin.Left + dragTab.Margin.Right; // right edge
+            int newIndex = ComputeTabDropIndex(probeX);
             if (newIndex >= 0 && newIndex != _dragTabInsertIndex
                 && newIndex != _dragTabFromIndex && newIndex != _dragTabFromIndex + 1)
             {

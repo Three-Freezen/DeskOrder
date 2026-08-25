@@ -15,6 +15,9 @@ namespace DesktopZones;
 
 public partial class App : System.Windows.Application
 {
+    // ponytail 2026-08-24: 全局托盘气泡通知入口。委托由 InitializeTrayIcon 注入（在那之前调用会静默 no-op）。
+    public static Action<string, string>? Notify { get; internal set; }
+
     private TrayIconService? _trayIcon;
     private ZoneManager? _zoneManager;
     private ConfigService? _configService;
@@ -25,6 +28,10 @@ public partial class App : System.Windows.Application
     private ManagementWindow? _managementWindow;
     private readonly LocalizationService _loc = LocalizationService.Instance;
     private static Mutex? _mutex;
+    private static EventWaitHandle? _activateEvent;
+    private static Thread? _activateThread;
+    private const string SingleInstanceMutexName = "DeskOrder_SingleInstance";
+    private const string ActivateEventName = "DeskOrder_Activate";
 
     // Public accessors for live preview lookup (forward to services — windows
     // are now owned by NotesService / WidgetService / PanelService, not here)
@@ -47,6 +54,10 @@ public partial class App : System.Windows.Application
 
     private void Application_Startup(object sender, StartupEventArgs e)
     {
+#if DEBUG
+        // ponytail 2026-08-26: fresh diagnostics log per run (ghost-ring regression trace).
+        Helpers.DzTrace.Reset();
+#endif
         // ponytail: capture all Debug.WriteLine output to a file so we can post-mortem
         // hover-expand behavior without attaching a debugger.
         try
@@ -58,13 +69,36 @@ public partial class App : System.Windows.Application
         }
         catch { }
 
-        // Single-instance check
-        _mutex = new Mutex(true, "DeskOrder_SingleInstance", out bool createdNew);
-        if (!createdNew)
+        // Single-instance check (session-local). The mutex is only an existence
+        // marker; a second launch signals the activation event so the running
+        // instance surfaces its management window instead of silently dying into
+        // an unreaped zombie under a handle-holding launcher.
+        bool createdNew;
+        try
+        {
+            _mutex = new Mutex(false, SingleInstanceMutexName, out createdNew);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Another (typically elevated) instance owns the lock and our lower-
+            // integrity process can't open it. Treat as already running and exit.
+            Shutdown();
+            return;
+        }
+        catch (WaitHandleCannotBeOpenedException)
         {
             Shutdown();
             return;
         }
+
+        if (!createdNew)
+        {
+            SignalActivation();
+            Shutdown();
+            return;
+        }
+
+        StartActivationListener();
 
         // Global crash guard — show error instead of crashing silently
         DispatcherUnhandledException += (s, args) =>
@@ -245,6 +279,57 @@ public partial class App : System.Windows.Application
 
         if (!config.StartMinimized)
             ShowManagementWindow();
+        else if (_trayIcon is { IsAvailable: false })
+        {
+            // ponytail: tray icon failed to register — never leave the user with an
+            // invisible, unreachable process. Surface the management window instead.
+            ShowManagementWindow();
+        }
+    }
+
+    /// <summary>Signal the running instance to show its management window. Called by
+    /// a second launch right before it shuts down.</summary>
+    static void SignalActivation()
+    {
+        try
+        {
+            using var ev = new EventWaitHandle(false, EventResetMode.AutoReset, ActivateEventName);
+            ev.Set();
+        }
+        catch { }
+    }
+
+    void StartActivationListener()
+    {
+        try
+        {
+            _activateEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ActivateEventName);
+            _activateThread = new Thread(ActivationListener) { IsBackground = true, Name = "DeskOrder.Activation" };
+            _activateThread.Start();
+        }
+        catch
+        {
+            _activateEvent?.Dispose();
+            _activateEvent = null;
+        }
+    }
+
+    /// <summary>Background loop: a second DeskOrder launch sets the activation event,
+    /// so surface the management window on the UI thread.</summary>
+    void ActivationListener()
+    {
+        try
+        {
+            while (_activateEvent != null)
+            {
+                if (_activateEvent.WaitOne())
+                    Dispatcher.BeginInvoke(new Action(ShowManagementWindow));
+            }
+        }
+        catch
+        {
+            // Event disposed during shutdown — exit the listener silently.
+        }
     }
 
     // ── Hotkey WndProc ──
@@ -351,22 +436,26 @@ public partial class App : System.Windows.Application
     {
         if (_notesService.Windows.TryGetValue(note.Id, out var window))
         {
-            if (window.IsVisible)
+            if (window is StickyNoteWindow snw)
             {
-                if (window is StickyNoteWindow snw)
-                {
-                    if (snw.MainContent.Visibility == Visibility.Visible) snw.HideNote();
-                    else snw.ShowNote();
-                }
-                else
-                {
-                    window.Hide();
-                }
+                // ponytail: 2026-08-26 — single source of truth: the RestoreButton (the
+                // minimized indicator) + window visibility, routed through ShowNote/HideNote.
+                // The previous MainContent.Visibility check misread mid-animation windows and
+                // left a transparent ghost behind.
+                bool show = !snw.IsVisible || snw.RestoreButton.Visibility == Visibility.Visible;
+#if DEBUG
+                Helpers.DzTrace.Log($"[Toggle] ToggleNoteWindow -> {(show ? "ShowNote" : "HideNote")} (winVisible={snw.IsVisible} content={snw.MainContent.Visibility} btn={snw.RestoreButton.Visibility})");
+#endif
+                if (show) snw.ShowNote();
+                else snw.HideNote();
+            }
+            else if (window.IsVisible)
+            {
+                window.Hide();
             }
             else
             {
-                if (window is StickyNoteWindow snw) snw.ShowNote();
-                else window.Show();
+                window.Show();
             }
         }
         else
@@ -482,6 +571,9 @@ public partial class App : System.Windows.Application
 
         _trayIcon.LeftClick += TrayLeftClick;
         _trayIcon.NotifyError += msg => _trayIcon?.ShowBalloonTip(_loc["Toast.TrayError.Title"], msg);
+        // ponytail 2026-08-24: 给非 App 内部代码（SettingsPage 等）一个走托盘气泡的入口，
+        // 避免 SettingsPage 还要反射 / 强转才能拿到 _trayIcon。失败时静默 return。
+        App.Notify = (title, body) => _trayIcon?.ShowBalloonTip(title, body);
         _trayIcon.DoubleClick += TrayDoubleClick;
         _trayIcon.ShowAllZones += TrayShowAll;
         _trayIcon.HideAllZones += TrayHideAll;
@@ -705,6 +797,7 @@ public partial class App : System.Windows.Application
         _reminderService?.Dispose();
         _zoneManager?.Shutdown();
         _trayIcon?.Dispose();
+        DisposeSingleInstance();
         Current.Shutdown();
     }
 
@@ -719,6 +812,20 @@ public partial class App : System.Windows.Application
         _reminderService?.Dispose();
         _zoneManager?.Shutdown();
         _trayIcon?.Dispose();
+        DisposeSingleInstance();
+    }
+
+    void DisposeSingleInstance()
+    {
+        var ev = _activateEvent;
+        _activateEvent = null;
+        if (ev != null)
+        {
+            try { ev.Set(); } catch { }
+            try { ev.Dispose(); } catch { }
+        }
+        try { _mutex?.Dispose(); } catch { }
+        _mutex = null;
     }
 
     static AppThemeMode ParseThemeMode(string? s) => s switch

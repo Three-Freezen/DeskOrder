@@ -20,6 +20,13 @@ public class ZoneItem
     public double X { get; set; }
     public double Y { get; set; }
 
+    /// <summary>
+    /// Custom icon location ("file,index") of the source shortcut, when the shortcut's
+    /// icon differs from its target's (e.g. a desktop shortcut with a rounded high-res
+    /// .ico). Null = render the target's own icon.
+    /// </summary>
+    public string? IconPath { get; set; }
+
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public ItemType Type { get; set; }
 
@@ -45,6 +52,7 @@ public class ZoneItem
             TargetPath = TargetPath,
             X = X,
             Y = Y,
+            IconPath = IconPath,
             Type = Type
         };
     }

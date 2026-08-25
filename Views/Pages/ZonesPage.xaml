@@ -18,11 +18,7 @@
                      Foreground="{DynamicResource Brush.Text.Tertiary}" VerticalAlignment="Center"/>
         </StackPanel>
         <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right">
-          <Button x:Name="SortBtn" Content="{loc:Loc Key=Common.SortByName}" Click="SortBtn_Click" Cursor="Hand"
-                  Background="Transparent" BorderThickness="0"
-                  Foreground="{DynamicResource Brush.Text.Secondary}" FontSize="11"
-                  Padding="8,6" ToolTip="{loc:Loc Key=Common.SortTooltip}"/>
-          <Button Content="{loc:Loc Key=Manage.New}" Click="NewZone_Click" Cursor="Hand" Margin="8,0,0,0"
+          <Button Content="{loc:Loc Key=Manage.New}" Click="NewZone_Click" Cursor="Hand"
                   Background="{DynamicResource Brush.Accent.Solid}"
                   Foreground="{DynamicResource Brush.Accent.On}" FontWeight="SemiBold"
                   Padding="14,6" BorderThickness="0">

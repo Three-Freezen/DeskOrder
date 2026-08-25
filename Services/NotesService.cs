@@ -70,6 +70,21 @@ public class NotesService
         NotesChanged?.Invoke();
     }
 
+    /// <summary>Move a note to a new position (long-press drag reorder).
+    /// ObservableCollection.Move fires CollectionChanged → ItemsControl reorders.
+    /// Skips NotesChanged so RefreshList doesn't rebuild rows mid-drag.</summary>
+    public void MoveNote(Guid noteId, int newIndex)
+    {
+        var note = Notes.FirstOrDefault(n => n.Id == noteId);
+        if (note == null) return;
+        int oldIndex = Notes.IndexOf(note);
+        if (oldIndex < 0 || oldIndex == newIndex) return;
+        if (newIndex < 0) newIndex = 0;
+        if (newIndex > Notes.Count - 1) newIndex = Notes.Count - 1;
+        Notes.Move(oldIndex, newIndex);
+        Save();
+    }
+
     public void Save()
     {
         if (_appConfig == null) return;

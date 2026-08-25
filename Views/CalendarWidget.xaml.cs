@@ -16,19 +16,16 @@ namespace DesktopZones.Views;
 
 public partial class CalendarWidget : Window
 {
-    const uint WM_NCLBUTTONDOWN = 0x00A1;
-    const int HTTOPLEFT = 13, HTTOPRIGHT = 14, HTBOTTOMLEFT = 16, HTBOTTOMRIGHT = 17;
     private bool _restoreDragging;
     private Point _restoreDown;
 
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
-    static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
     private DesktopCalendar _calendar;
     private readonly WidgetService _widgetService;
     private readonly CalendarViewModel _vm;
     private readonly LocalizationService _loc = LocalizationService.Instance;
     private HoverExpandBehavior? _hover;
     private SnapDrag? _snapDrag;
+    private SnapResize? _snapResize;
     // ponytail: track generators we subscribed to in SubscribeDayCellStatusChanged so
     // OnClosed can detach without keeping a parallel list. IDisposable pattern: WPF event
     // -= requires the same delegate reference, but DayCellStatus_Changed is a shared
@@ -85,6 +82,7 @@ public partial class CalendarWidget : Window
 
         // ponytail: 自适应对齐 — 替换 DragMove 的手动拖拽循环。
         _snapDrag = new SnapDrag(this);
+        _snapResize = new SnapResize(this);
     }
     private Action<string>? _langChanged;
 
@@ -577,14 +575,9 @@ public partial class CalendarWidget : Window
     {
         if (s is not Border g || g.Tag is not string tag) return;
         if (_vm?.IsLocked == true) { e.Handled = true; return; }
-        int d = tag switch
-        {
-            "TL" => HTTOPLEFT,
-            "TR" => HTTOPRIGHT,
-            "BL" => HTBOTTOMLEFT,
-            _ => HTBOTTOMRIGHT
-        };
-        SendMessage(new WindowInteropHelper(this).Handle, WM_NCLBUTTONDOWN, (IntPtr)d, IntPtr.Zero);
+        bool left = tag == "TL" || tag == "BL";
+        bool top = tag == "TL" || tag == "TR";
+        _snapResize?.Start(e, left, top, !left, !top, 260, 460);
         e.Handled = true;
     }
 
@@ -959,6 +952,9 @@ public partial class CalendarWidget : Window
 
     public void ShowCalendar(bool skipResync = false, double waveDelayMs = 0)
     {
+#if DEBUG
+        DzTrace.Log($"[CalendarWidget] ShowCalendar(skip={skipResync}, wave={waveDelayMs}) ENTRY winVisible={IsVisible} content={MainContent.Visibility} btn={RestoreButton.Visibility} hoverExpanded={_hover?.IsExpanded} modelVisible={_calendar.IsVisible} size={Width}x{Height}");
+#endif
         if (!IsVisible) Show();
         // ponytail: skipResync=true when called from the property window (was the style dialog).
         // Skip BOTH ApplyAcrylic() and UpdateCalendar(_calendar):
@@ -1022,6 +1018,9 @@ public partial class CalendarWidget : Window
 
     public void HideCalendar(double waveDelayMs = 0)
     {
+#if DEBUG
+        DzTrace.Log($"[CalendarWidget] HideCalendar(wave={waveDelayMs}) ENTRY winVisible={IsVisible} content={MainContent.Visibility} btn={RestoreButton.Visibility} hoverExpanded={_hover?.IsExpanded} modelVisible={_calendar.IsVisible} restoreEnabled={_calendar.EnableRestoreButton} size={Width}x{Height}");
+#endif
         _calendar.X = Left; _calendar.Y = Top; _calendar.Width = Width; _calendar.Height = Height;
         NativeMethods.DisableRoundedCorners(this);
         if (!_calendar.EnableRestoreButton)
@@ -1065,6 +1064,9 @@ public partial class CalendarWidget : Window
         }
         _calendar.IsVisible = false;
         _widgetService.UpdateCalendar(_calendar);
+#if DEBUG
+        DzTrace.Log($"[CalendarWidget] HideCalendar DONE winVisible={IsVisible} content={MainContent.Visibility} btn={RestoreButton.Visibility} hoverExpanded={_hover?.IsExpanded} size={Width}x{Height}");
+#endif
     }
 
     void ApplyHidden()
@@ -1142,6 +1144,7 @@ public partial class CalendarWidget : Window
         _widgetService.LockChanged -= OnServiceLockChanged;
         _calendar.HoverExpandSettingsChanged -= OnHoverExpandSettingsChanged;
         _snapDrag?.Detach();
+        _snapResize?.Detach();
         _widgetService.UpdateCalendar(_calendar);
         _hover?.Dispose();
         base.OnClosed(e);

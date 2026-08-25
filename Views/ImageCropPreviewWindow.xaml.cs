@@ -51,6 +51,9 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
     // Real widget title-bar height (DIP) — drives the title-bar/body divider line
     // and the drag snap in the preview. 0 = no title bar (clock/calendar).
     private double _titleBarHeight;
+    // Second divider inside the title bar (DIP) — the boundary between the merged
+    // group's top bar and its sub-zone tab row. 0 = single-row title bar.
+    private double _titleBarInnerDividerHeight;
     const double TitleBarSnapThreshold = 8.0;
 
     // Borderless window corner resize — same WM_NCLBUTTONDOWN loop ZoneWindow uses.
@@ -95,7 +98,8 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
         double initialZoom = 1.0,
         double initialOpacity = 40,
         string cropShape = "Rectangle",
-        double titleBarHeight = 0)
+        double titleBarHeight = 0,
+        double titleBarInnerDividerHeight = 0)
     {
         InitializeComponent();
 
@@ -108,6 +112,7 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
         _initialOpacity = initialOpacity;
         _cropShape = cropShape;
         _titleBarHeight = titleBarHeight;
+        _titleBarInnerDividerHeight = titleBarInnerDividerHeight;
 
         // Initialize current state
         _currentOffsetX = initialOffsetX;
@@ -562,21 +567,30 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
 
         // 真实窗口的标题栏/主体分界线：y = 裁切区域顶部 + 标题栏高度 × 预览缩放。
         // 预览界面不区分「标题栏独立填充」开关——这条线始终显示，只作裁剪参考。
+        // 组合分区标题栏有两层（最上方 24px + 子分区标签栏 24px），因此内部再补一条分界线。
         double zoneLeft = (PreviewBorder.ActualWidth - _zonePreviewWidth) / 2;
         double zoneTop = (PreviewBorder.ActualHeight - _zonePreviewHeight) / 2;
-        double y = zoneTop + _titleBarHeight * _previewScale;
 
         Brush brush;
         try { brush = (Brush)FindResource("Brush.Text.Secondary"); }
         catch { brush = Brushes.White; }
 
+        AddDividerLine(zoneLeft, zoneTop + _titleBarHeight * _previewScale, brush);
+        if (_titleBarInnerDividerHeight > 0 && _titleBarInnerDividerHeight < _titleBarHeight)
+            AddDividerLine(zoneLeft, zoneTop + _titleBarInnerDividerHeight * _previewScale, brush, thin: true);
+    }
+
+    void AddDividerLine(double zoneLeft, double y, Brush brush, bool thin = false)
+    {
         DividerCanvas.Children.Add(new System.Windows.Shapes.Line
         {
             X1 = zoneLeft, Y1 = y,
             X2 = zoneLeft + _zonePreviewWidth, Y2 = y,
             Stroke = brush,
-            // 随预览缩放同步增粗（2–4px），放大后仍保持可见比例。
-            StrokeThickness = Math.Min(4, Math.Max(2, 2 * _previewScale)),
+            // 随预览缩放同步增粗（2–4px），放大后仍保持可见比例；内部分界略细。
+            StrokeThickness = thin
+                ? Math.Min(2, Math.Max(1, 1 * _previewScale))
+                : Math.Min(4, Math.Max(2, 2 * _previewScale)),
             IsHitTestVisible = false
         });
     }

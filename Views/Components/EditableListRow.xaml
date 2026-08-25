@@ -35,27 +35,24 @@
           Padding="12,8"
           Margin="0,0,0,6"
           Cursor="Hand"
-          Opacity="0"
           RenderTransformOrigin="0.5,0.5">
+    <!-- ponytail 2026-08-25: 删了 Border.Loaded 的 fade+slide 入场动画。
+         之前每次 RefreshList() 重建 ListHost.ItemsSource（每改一项属性 → ZoneManager
+         .ZonesChanged → RefreshList），每个新 EditableListRow 都触发 Border.Loaded 一次，
+         Motion.Normal 段全部行同步淡入 + 下滑，看起来"动画一直跳"。
+         选中和按压动画（PreviewMouseLeftButtonDown/Up/MouseLeave）保留 — 它们跟着用户
+         操作，不受 Rebuild 影响。-->
     <Border.RenderTransform>
+      <!-- ponytail 2026-08-25: DragTranslate lets the row's host (or the row itself during
+           a self-drag) shift the row up/down without affecting layout. Used by the long-press
+           drag-to-reorder loop to (a) let the dragged row follow the cursor and (b) animate
+           sibling rows sliding into the freed slot. The XAML-level name exposes it to code. -->
       <TransformGroup>
-        <TranslateTransform x:Name="RowTranslate" Y="8"/>
+        <TranslateTransform x:Name="DragTranslate" Y="0"/>
         <ScaleTransform x:Name="PressScale" ScaleX="1" ScaleY="1"/>
       </TransformGroup>
     </Border.RenderTransform>
     <Border.Triggers>
-      <EventTrigger RoutedEvent="Border.Loaded">
-        <BeginStoryboard>
-          <Storyboard>
-            <DoubleAnimation Storyboard.TargetName="Root" Storyboard.TargetProperty="Opacity"
-                             From="0" To="1" Duration="{StaticResource Motion.Normal}"
-                             EasingFunction="{StaticResource Motion.StandardSpline}"/>
-            <DoubleAnimation Storyboard.TargetName="RowTranslate" Storyboard.TargetProperty="Y"
-                             From="8" To="0" Duration="{StaticResource Motion.Normal}"
-                             EasingFunction="{StaticResource Motion.StandardSpline}"/>
-          </Storyboard>
-        </BeginStoryboard>
-      </EventTrigger>
       <EventTrigger RoutedEvent="Border.PreviewMouseLeftButtonDown">
         <BeginStoryboard Storyboard="{StaticResource PressDown}"
                          HandoffBehavior="SnapshotAndReplace"/>

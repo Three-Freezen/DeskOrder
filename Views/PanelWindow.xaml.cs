@@ -743,7 +743,10 @@ public partial class PanelWindow : Window
 
     void AddItemToZone(Zone zone, string name, string path, ItemType type, double x = 10, double y = 10)
     {
-        var item = new ZoneItem(name, path, type, x, y);
+        // Imported shortcuts re-associate to their real target and keep their custom
+        // icon location (see ShortcutResolver).
+        (string target, ItemType t, string? iconLoc) = ShortcutResolver.NormalizeItem(path, type);
+        var item = new ZoneItem(name, target, t, x, y) { IconPath = iconLoc };
         zone.Items.Add(item);
         _zoneManager.SaveConfig();
         _zoneManager.NotifyChanged();
@@ -1094,7 +1097,7 @@ public partial class PanelWindow : Window
     }
 
     private (double, double) FindFreeSpot(Zone zone)
-        => ZoneLayout.FindFreeSpot(zone.Items, zone.Width, zone.Height, zone.GridSize, zone.GridSize);
+        => ZoneLayout.FindFreeSpot(zone.Items, zone.Width, zone.Height, zone.GridSize, zone.GridSize + ZoneLayout.LabelArea);
 
     // ── Drag-drop from Explorer (WPF AllowDrop — files only) ──
 

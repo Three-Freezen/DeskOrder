@@ -48,21 +48,20 @@ public static class PageHelpers
     }
 
     /// <summary>
-    /// Show a sort-options menu via the same <see cref="RowContextMenu"/> chrome.
-    /// Prepends a check mark to the currently active option. On selection, calls
-    /// <paramref name="onPick"/> with the chosen index (caller then updates state and RefreshList).
-    /// ponytail: reuses the existing popup pipeline — no second chrome to maintain.
+    /// Move a row inside the page's live row collection (drag reorder). Mirrors
+    /// ObservableCollection.Move semantics: <paramref name="targetIndex"/> is the
+    /// final 0-based index after removal. Clamps to [0, Count-1]; no-op on same
+    /// index. Pages call this right after the matching model-level Move so the
+    /// ItemsControl shifts live while the drag is still in progress.
     /// </summary>
-    public static void ShowSortMenu(FrameworkElement placement, string[] labels, int currentIndex, Action<int> onPick)
+    public static void MoveRow(System.Collections.ObjectModel.ObservableCollection<EditableListRow> rows,
+        EditableListRow src, int targetIndex)
     {
-        var items = new List<RowContextMenu.Item>(labels.Length);
-        for (int i = 0; i < labels.Length; i++)
-        {
-            int captured = i;
-            var prefix = captured == currentIndex ? "✓ " : "   ";
-            items.Add(new RowContextMenu.Item(prefix + labels[captured], () => onPick(captured)));
-        }
-        RowContextMenu.Show(placement, items);
+        int cur = rows.IndexOf(src);
+        if (cur < 0 || cur == targetIndex) return;
+        if (targetIndex < 0) targetIndex = 0;
+        if (targetIndex > rows.Count - 1) targetIndex = rows.Count - 1;
+        rows.Move(cur, targetIndex);
     }
 }
 

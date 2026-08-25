@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
@@ -26,12 +27,17 @@ public partial class MergedGroupsPage : UserControl
     readonly ManagementWindow _main;
     readonly ZoneManager _zoneManager;
     Zone? _selected;
+    // ponytail: live row collection bound to ListHost — drag reorder moves rows
+    // through this OC (mirroring PropertyTabStrip's Tabs OC) so the ItemsControl
+    // shifts live while ZoneManager.MoveMergedGroupMaster persists the model order.
+    readonly ObservableCollection<EditableListRow> _rows = new();
 
     public MergedGroupsPage(ManagementWindow main, ManagementViewModel vm, ZoneManager zoneManager)
     {
         InitializeComponent();
         _main = main;
         _zoneManager = zoneManager;
+        ListHost.ItemsSource = _rows;
         // ponytail 2026-08-25: Persist is wired centrally in ManagementWindow
         // (WirePropertyPanelPersist) — one dispatcher for all target types.
         // Pages no longer overwrite it.
@@ -49,22 +55,12 @@ public partial class MergedGroupsPage : UserControl
     {
         var masters = _zoneManager.Zones.Where(z => z.MergedGroupMembership.SubZoneIds.Count > 0).ToList();
         CountLabel.Text = $"{masters.Count} 个分区 · {_zoneManager.Zones.Count} 项";
-        IEnumerable<Zone> sorted = _sortMode switch
-        {
-            1 => masters.OrderByDescending(m => m.MergedGroupMembership.SubZoneIds.Count).ThenBy(m => m.MergedGroupMembership.DisplayName),
-            _ => masters.OrderBy(m => m.MergedGroupMembership.DisplayName, StringComparer.Ordinal),
-        };
-        ListHost.ItemsSource = sorted.Select(BuildRow).ToList();
+        // 拖动排序即列表顺序：主分区按 Zones 集合中的持久化相对顺序展示。
+        _rows.Clear();
+        foreach (var m in masters) _rows.Add(BuildRow(m));
         EmptyHint.Visibility = masters.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         SetSelection(ListHost, _selected);
-        SortBtn.Content = $"⇅ {SortLabels[_sortMode]}";
     }
-
-    void SortBtn_Click(object sender, RoutedEventArgs e) =>
-        ShowSortMenu(SortBtn, SortLabels, _sortMode, i => { _sortMode = i; RefreshList(); });
-
-    static readonly string[] SortLabels = { "名称", "子分区数" };
-    int _sortMode;
 
     EditableListRow BuildRow(Zone master)
     {
@@ -80,6 +76,17 @@ public partial class MergedGroupsPage : UserControl
             IsVisible = master.IsVisible,
         };
         ApplyStatusBadge(row, master);
+
+        // ponytail: long-press drag reorder — masters are a FILTERED view of
+        // Zones, so the model move goes through MoveMergedGroupMaster (reorders
+        // the full collection so the masters' relative order persists), while
+        // MoveRow shifts the bound row OC for the live visual reorder.
+        row.ReorderRequested += (src, targetIdx) =>
+        {
+            if (src.Tag is not Zone m) return;
+            _zoneManager.MoveMergedGroupMaster(m.Id, targetIdx);
+            MoveRow(_rows, src, targetIdx);
+        };
 
         row.LockCommand = new RelayCommand(_ => { master.IsLocked = !master.IsLocked; _zoneManager.UpdateZone(master); });
         row.VisibilityCommand = new RelayCommand(v =>
@@ -125,11 +132,12 @@ public partial class MergedGroupsPage : UserControl
             SetSelection(ListHost, master);
         }
         // ponytail 2026-08-26: row click opens the standalone merged-group
-        // editor (group style + membership), not the per-zone editor. Dedup
-        // rule "one editor per target" still applies to floating windows.
+        // editor (group style + membership), not the per-zone editor. Route
+        // through DockTarget so a collapsed right workspace auto-opens the
+        // style panel (EnsurePropertyPanelVisible) and the tab strip stays in
+        // sync — direct DockedPanel.Target assignment skipped both.
         var target = MergedGroupTarget.For(master);
-        PropertyWindowManager.Instance.CloseWindow(target);
-        if (_main.DockedPanel != null) _main.DockedPanel.Target = target;
+        PropertyWindowManager.Instance.DockTarget(target, _main);
     }
 
     static void ApplyStatusBadge(EditableListRow row, Zone master)

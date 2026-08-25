@@ -136,6 +136,46 @@ public static class AdaptiveTextColor
         return ResolveTextColor(avg);
     }
 
+    /// <summary>
+    /// Sample the given window-space points against a transformed background image,
+    /// composite each source pixel over <paramref name="backdrop"/>, and return the average
+    /// RGB. Returns null when no sample point lands on the image. The transform matches the
+    /// one used to place the image on screen: <paramref name="scale"/> plus the image
+    /// element's window-space top-left offset (<paramref name="offsetX"/>, <paramref name="offsetY"/>).
+    /// </summary>
+    public static Color? AverageImageOver(
+        BitmapSource image,
+        double scale,
+        double offsetX,
+        double offsetY,
+        IEnumerable<(double wx, double wy)> points,
+        Color backdrop)
+    {
+        if (image == null || image.PixelWidth <= 0 || image.PixelHeight <= 0 || scale <= 0)
+            return null;
+
+        double r = 0, g = 0, b = 0;
+        int count = 0;
+        foreach (var (wx, wy) in points)
+        {
+            double ix = (wx - offsetX) / scale;
+            double iy = (wy - offsetY) / scale;
+            if (ix < 0 || iy < 0 || ix >= image.PixelWidth || iy >= image.PixelHeight)
+                continue;
+            var px = GetPixel(image, (int)ix, (int)iy);
+            var composite = CompositeOver(px, backdrop);
+            r += composite.R;
+            g += composite.G;
+            b += composite.B;
+            count++;
+        }
+        if (count == 0) return null;
+        return Color.FromRgb(
+            (byte)Math.Clamp(r / count, 0, 255),
+            (byte)Math.Clamp(g / count, 0, 255),
+            (byte)Math.Clamp(b / count, 0, 255));
+    }
+
     /// <summary>No-op kept for API compatibility — see <see cref="ResolveTextColorForImage"/>.</summary>
     public static void ClearImageCache() { }
 

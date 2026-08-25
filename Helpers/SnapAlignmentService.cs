@@ -50,6 +50,12 @@ public static class SnapAlignmentService
         _enabled = false;
     }
 
+    /// <summary>缩放与拖拽共用同一套对齐状态（自动对齐开关 + 展开态判定）。</summary>
+    public static void BeginResize(Window resized) => BeginDrag(resized);
+
+    /// <summary>结束缩放，隐藏对齐线。</summary>
+    public static void EndResize(Window resized) => EndDrag(resized);
+
     /// <summary>
     /// 计算拖拽目标位置并对齐。返回经过吸附修正后的窗口 Left/Top；
     /// 若有对齐则同时绘制对齐线，否则隐藏对齐线。
@@ -151,6 +157,116 @@ public static class SnapAlignmentService
 
         DrawLines(lineX, y1, y2, lineY, x1, x2);
         return new Point(finalLeft, finalTop);
+    }
+
+    /// <summary>
+    /// 计算缩放目标并对齐。返回经过吸附修正后的窗口边界；若有对齐则同时绘制
+    /// 对齐线，否则隐藏对齐线。<paramref name="moveLeft"/>/<paramref name="moveTop"/>/
+    /// <paramref name="moveRight"/>/<paramref name="moveBottom"/> 标记哪些边缘跟随鼠标。
+    /// </summary>
+    public static Rect AdjustResize(Window resized, Rect rect,
+        bool moveLeft, bool moveTop, bool moveRight, bool moveBottom,
+        double minWidth, double minHeight)
+    {
+        if (!_enabled) return rect;
+
+        var targets = GetTargets(resized);
+        if (targets.Count == 0)
+        {
+            HideOverlay();
+            return rect;
+        }
+
+        double left = rect.Left, top = rect.Top, right = rect.Right, bottom = rect.Bottom;
+
+        // 吸附移动的垂直边缘（左或右）到目标窗口的左/中/右线。
+        double bestV = double.MaxValue, vx = 0, vDx = 0;
+        Rect vTarget = default; bool hasV = false;
+        if (moveLeft || moveRight)
+        {
+            double edge = moveLeft ? left : right;
+            foreach (var t in targets)
+            {
+                foreach (var tx in new[] { t.Left, t.Left + t.Width / 2, t.Right })
+                {
+                    double delta = tx - edge;
+                    double ad = Math.Abs(delta);
+                    if (ad < Threshold && ad < bestV)
+                    {
+                        bestV = ad; vDx = delta; vx = tx; vTarget = t; hasV = true;
+                    }
+                }
+            }
+        }
+
+        // 吸附移动的水平边缘（上或下）到目标窗口的上/中/下线。
+        double bestH = double.MaxValue, hy = 0, hDy = 0;
+        Rect hTarget = default; bool hasH = false;
+        if (moveTop || moveBottom)
+        {
+            double edge = moveTop ? top : bottom;
+            foreach (var t in targets)
+            {
+                foreach (var ty in new[] { t.Top, t.Top + t.Height / 2, t.Bottom })
+                {
+                    double delta = ty - edge;
+                    double ad = Math.Abs(delta);
+                    if (ad < Threshold && ad < bestH)
+                    {
+                        bestH = ad; hDy = delta; hy = ty; hTarget = t; hasH = true;
+                    }
+                }
+            }
+        }
+
+        double newLeft = left, newTop = top, newRight = right, newBottom = bottom;
+        if (hasV)
+        {
+            if (moveLeft) newLeft = left + vDx;
+            else newRight = right + vDx;
+        }
+        if (hasH)
+        {
+            if (moveTop) newTop = top + hDy;
+            else newBottom = bottom + hDy;
+        }
+
+        // 最小尺寸优先于吸附，锚点边缘保持不动。
+        if (newRight - newLeft < minWidth)
+        {
+            if (moveLeft) newLeft = newRight - minWidth;
+            else newRight = newLeft + minWidth;
+        }
+        if (newBottom - newTop < minHeight)
+        {
+            if (moveTop) newTop = newBottom - minHeight;
+            else newBottom = newTop + minHeight;
+        }
+
+        var final = new Rect(newLeft, newTop, newRight - newLeft, newBottom - newTop);
+
+        if (!hasV && !hasH)
+        {
+            HideOverlay();
+            return final;
+        }
+
+        double? lineX = hasV ? vx : null;
+        double? lineY = hasH ? hy : null;
+        double y1 = 0, y2 = 0, x1 = 0, x2 = 0;
+        if (hasV)
+        {
+            y1 = Math.Min(final.Top, vTarget.Top);
+            y2 = Math.Max(final.Bottom, vTarget.Bottom);
+        }
+        if (hasH)
+        {
+            x1 = Math.Min(final.Left, hTarget.Left);
+            x2 = Math.Max(final.Right, hTarget.Right);
+        }
+
+        DrawLines(lineX, y1, y2, lineY, x1, x2);
+        return final;
     }
 
     // ── Target enumeration ──

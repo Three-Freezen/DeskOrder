@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
@@ -26,12 +27,17 @@ public partial class CalendarPage : UserControl
     readonly ManagementWindow _main;
     readonly WidgetService? _widgetService;
     DesktopCalendar? _selected;
+    // ponytail: live row collection bound to ListHost — drag reorder moves rows
+    // through this OC (mirroring PropertyTabStrip's Tabs OC) so the ItemsControl
+    // shifts live while the model collection moves in parallel for persistence.
+    readonly ObservableCollection<EditableListRow> _rows = new();
 
     public CalendarPage(ManagementWindow main, ManagementViewModel vm, WidgetService? widgetService)
     {
         InitializeComponent();
         _main = main;
         _widgetService = widgetService;
+        ListHost.ItemsSource = _rows;
         // ponytail 2026-08-25: Persist is wired centrally in ManagementWindow
         // (WirePropertyPanelPersist) — one dispatcher for all target types,
         // docked and floating. Pages no longer overwrite it.
@@ -55,22 +61,12 @@ public partial class CalendarPage : UserControl
         if (_widgetService == null) return;
         var cals = _widgetService.Calendars;
         CountLabel.Text = $"{cals.Count} 项";
-        IEnumerable<DesktopCalendar> sorted = _sortMode switch
-        {
-            1 => cals.OrderByDescending(c => c.Notes.Count).ThenBy(c => c.Id),
-            _ => cals.OrderBy(c => c.Id),
-        };
-        ListHost.ItemsSource = sorted.Select(BuildRow).ToList();
+        // 拖动排序即列表顺序：不再重排，Rows 直接镜像 Calendars 的持久化顺序。
+        _rows.Clear();
+        foreach (var c in cals) _rows.Add(BuildRow(c));
         EmptyHint.Visibility = cals.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         SetSelection(ListHost, _selected);
-        SortBtn.Content = $"⇅ {SortLabels[_sortMode]}";
     }
-
-    void SortBtn_Click(object sender, RoutedEventArgs e) =>
-        ShowSortMenu(SortBtn, SortLabels, _sortMode, i => { _sortMode = i; RefreshList(); });
-
-    static readonly string[] SortLabels = { "名称", "备注数" };
-    int _sortMode;
 
     EditableListRow BuildRow(DesktopCalendar cal)
     {
@@ -83,6 +79,12 @@ public partial class CalendarPage : UserControl
             IsLocked = cal.IsLocked,
             IsVisible = cal.IsVisible,
         };
+        row.ReorderRequested += (src, targetIdx) =>
+        {
+            if (src.Tag is not DesktopCalendar c || _widgetService == null) return;
+            _widgetService.MoveCalendar(c.Id, targetIdx); // 模型 + 持久化
+            MoveRow(_rows, src, targetIdx);               // 列表实时换位（镜像标签栏）
+        };
         ApplyStatusBadge(row, cal);
 
         row.LockCommand = new RelayCommand(_ =>
@@ -93,8 +95,9 @@ public partial class CalendarPage : UserControl
         });
         row.VisibilityCommand = new RelayCommand(_ =>
         {
-            cal.IsVisible = row.IsVisible;
-            _widgetService?.UpdateCalendar(cal);
+            // ponytail: 2026-08-26 — route straight through ToggleCalendarWindow (see
+            // ClockPage). Pre-flipping the model fired CalendarsChanged → ghost-stamp
+            // snap + SetEnabled, which reversed the toggle and left a transparent ghost.
             _main.ToggleCalendarWindow(cal);
         });
         row.DeleteCommand = new RelayCommand(_ => Delete(cal));

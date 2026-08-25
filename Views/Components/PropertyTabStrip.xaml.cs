@@ -113,6 +113,7 @@ public partial class PropertyTabStrip : UserControl
     int _dragInsertIndex = -1;
     bool _isTransferring;
     PropertyTabStrip? _transferTarget;
+    double _dragLastCursorX = double.NaN; // previous cursor X — drives the leading-edge probe
 
     // ── Transfer drop indicator (called by source strip's drag loop) ──
     DropIndicatorAdorner? _dropIndicatorAdorner;
@@ -180,6 +181,7 @@ public partial class PropertyTabStrip : UserControl
             _dragOutArmed = false;
             _isDragOut = false;
             _dragInsertIndex = _dragFromIndex;
+            _dragLastCursorX = _dragOrigin.X;
 
             // Visible drag: the tab follows the cursor. Reset any leftover slide
             // transform, record the grab offset and raise the tab above its siblings.
@@ -298,7 +300,14 @@ public partial class PropertyTabStrip : UserControl
         // ponytail: live reorder while cursor stays inside the strip.
         if (_dragArmed && !outsideStrip && _dragTab != null)
         {
-            int newIndex = ComputeDropIndex(pos.X);
+            // Leading-edge probe, direction-aware: the swap fires once the tab's
+            // leading edge (right edge when dragging right, left edge when dragging
+            // left) crosses a neighbour's midpoint — 拖过一半即换位. Probing the
+            // fixed left edge made rightward drags fire a whole tab-width late
+            // (the pointer had to reach the neighbour's far end — 拖到底).
+            bool movingRight = pos.X >= _dragLastCursorX;
+            _dragLastCursorX = pos.X;
+            int newIndex = ComputeDropIndex(ComputeProbeX(pos.X, movingRight));
             if (newIndex >= 0 && newIndex != _dragInsertIndex
                 && newIndex != _dragFromIndex && newIndex != _dragFromIndex + 1)
             {
@@ -341,7 +350,7 @@ public partial class PropertyTabStrip : UserControl
             // Reorder drop inside the strip.
             if (_dragArmed && _dragTab != null && _dragFromIndex >= 0 && !outsideStrip)
             {
-                int dropIndex = ComputeDropIndex(pos.X);
+                int dropIndex = ComputeDropIndex(ComputeProbeX(pos.X, pos.X >= _dragLastCursorX));
                 if (dropIndex >= 0 && dropIndex != _dragFromIndex && dropIndex != _dragFromIndex + 1)
                 {
                     int target = dropIndex;
@@ -356,6 +365,22 @@ public partial class PropertyTabStrip : UserControl
         {
             ResetDrag();
         }
+    }
+
+    /// <summary>Leading-edge probe in TabsHost coords, direction-aware: the dragged
+    /// tab's right edge when <paramref name="movingRight"/>, its left edge otherwise.
+    /// In-strip swaps fire when this edge crosses a neighbour's midpoint, so both
+    /// drag directions behave symmetrically (拖过一半即换位).</summary>
+    double ComputeProbeX(double cursorX, bool movingRight)
+    {
+        double hostX = TabsHost.TranslatePoint(new Point(0, 0), this).X;
+        double probeX = cursorX - hostX - _dragGrabOffsetX; // left edge
+        if (movingRight)
+        {
+            var container = TabsHost.ItemContainerGenerator.ContainerFromItem(_dragTab) as FrameworkElement;
+            if (container != null) probeX += container.ActualWidth; // right edge
+        }
+        return probeX;
     }
 
     internal int ComputeDropIndex(double x)
@@ -451,7 +476,9 @@ public partial class PropertyTabStrip : UserControl
     {
         if (target.TabsHost == null) return -1;
         var localInHost = target.TabsHost.PointFromScreen(screenPos);
-        return target.ComputeDropIndex(localInHost.X);
+        // Left-edge probe — the transfer indicator marks where the dragged tab's
+        // left edge would insert in the target strip.
+        return target.ComputeDropIndex(localInHost.X - _dragGrabOffsetX);
     }
 
     void ResetDrag()
@@ -478,6 +505,7 @@ public partial class PropertyTabStrip : UserControl
         _isTransferring = false;
         _transferTarget = null;
         _dragInsertIndex = -1;
+        _dragLastCursorX = double.NaN;
     }
 
     void HandleDragOutDrop(PropertyTab tab, Point screenPos)
