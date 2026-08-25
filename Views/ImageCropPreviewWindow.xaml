@@ -83,6 +83,41 @@
 
                     <!-- Crop area overlay (semi-transparent dark outside zone) -->
                     <Canvas x:Name="CropOverlay" IsHitTestVisible="False"/>
+
+                    <!-- Crop box outline (visual only) -->
+                    <Canvas x:Name="CropBoxVisual" IsHitTestVisible="False">
+                        <Rectangle x:Name="CropBoxBorder"
+                                   Stroke="{DynamicResource Brush.Accent.Solid}" StrokeThickness="1.5"
+                                   Fill="Transparent"/>
+                        <Ellipse x:Name="CropBoxEllipseBorder" Visibility="Collapsed"
+                                 Stroke="{DynamicResource Brush.Accent.Solid}" StrokeThickness="1.5"
+                                 Fill="Transparent"/>
+                    </Canvas>
+
+                    <!-- Corner resize handles: proportionally scale the crop box around its
+                         center (aspect ratio locked). The result is folded back into the
+                         image zoom/offset on release. -->
+                    <Canvas x:Name="CropHandleLayer"
+                            MouseMove="CropHandleLayer_MouseMove"
+                            MouseLeftButtonUp="CropHandleLayer_MouseLeftButtonUp"
+                            LostMouseCapture="CropHandleLayer_LostMouseCapture">
+                        <Border x:Name="HandleTL" Width="12" Height="12" CornerRadius="2"
+                                Cursor="SizeNWSE" Background="White"
+                                BorderBrush="{DynamicResource Brush.Accent.Solid}" BorderThickness="1.5"
+                                MouseLeftButtonDown="CropHandle_MouseLeftButtonDown"/>
+                        <Border x:Name="HandleTR" Width="12" Height="12" CornerRadius="2"
+                                Cursor="SizeNESW" Background="White"
+                                BorderBrush="{DynamicResource Brush.Accent.Solid}" BorderThickness="1.5"
+                                MouseLeftButtonDown="CropHandle_MouseLeftButtonDown"/>
+                        <Border x:Name="HandleBL" Width="12" Height="12" CornerRadius="2"
+                                Cursor="SizeNESW" Background="White"
+                                BorderBrush="{DynamicResource Brush.Accent.Solid}" BorderThickness="1.5"
+                                MouseLeftButtonDown="CropHandle_MouseLeftButtonDown"/>
+                        <Border x:Name="HandleBR" Width="12" Height="12" CornerRadius="2"
+                                Cursor="SizeNWSE" Background="White"
+                                BorderBrush="{DynamicResource Brush.Accent.Solid}" BorderThickness="1.5"
+                                MouseLeftButtonDown="CropHandle_MouseLeftButtonDown"/>
+                    </Canvas>
                 </Grid>
             </Border>
 

@@ -40,6 +40,15 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
     private Point _dragStartPoint;
     private double _dragStartOffsetX;
     private double _dragStartOffsetY;
+
+    // Crop-box corner resize state (proportional, center-anchored).
+    private bool _cropCornerDragging;
+    private Point _cropDragStartMouse;
+    private Point _cropDragStartCornerVec;
+    private double _cropDragStartZoom;
+    private double _cropDragStartOffsetX;
+    private double _cropDragStartOffsetY;
+    private double _boxVisualScale = 1.0;
     
     // Preview scaling (to fit zone in preview area)
     private double _previewScale = 1.0;
@@ -135,6 +144,7 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
         UpdateOverlay();
         DrawGridLines();
         DrawTitleBarDivider();
+        UpdateCropBoxControls();
         UpdateDisplays();
         
         // Set initial control values
@@ -312,7 +322,156 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
         SendMessage(new WindowInteropHelper(this).Handle, WM_NCLBUTTONDOWN, (IntPtr)d, IntPtr.Zero);
         e.Handled = true;
     }
-    
+
+    private void CropHandle_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement g || CropImage?.Source == null) return;
+
+        (double sx, double sy) = g.Name switch
+        {
+            "HandleTL" => (-1.0, -1.0),
+            "HandleTR" => (1.0, -1.0),
+            "HandleBL" => (-1.0, 1.0),
+            _ => (1.0, 1.0),
+        };
+
+        double centerX = PreviewBorder.ActualWidth / 2;
+        double centerY = PreviewBorder.ActualHeight / 2;
+        _cropDragStartMouse = e.GetPosition(PreviewBorder);
+        _cropDragStartCornerVec = new Point(
+            _zonePreviewWidth / 2 * sx,
+            _zonePreviewHeight / 2 * sy);
+        _cropDragStartZoom = _currentZoom;
+        _cropDragStartOffsetX = _currentOffsetX;
+        _cropDragStartOffsetY = _currentOffsetY;
+        _boxVisualScale = 1.0;
+        _cropCornerDragging = true;
+        CropHandleLayer.CaptureMouse();
+        e.Handled = true;
+    }
+
+    private void CropHandleLayer_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_cropCornerDragging) return;
+
+        Point p = e.GetPosition(PreviewBorder);
+        double centerX = PreviewBorder.ActualWidth / 2;
+        double centerY = PreviewBorder.ActualHeight / 2;
+        Point v = _cropDragStartCornerVec;
+
+        // Project the cursor onto the corner's radial direction: the box scales
+        // uniformly around its center, so the corner stays on the center→corner ray.
+        double num = (p.X - centerX) * v.X + (p.Y - centerY) * v.Y;
+        double den = v.X * v.X + v.Y * v.Y;
+        if (den <= 0) return;
+
+        _boxVisualScale = ClampBoxScale(num / den);
+        RedrawCropBoxVisuals();
+
+        // Live readout only — the image transform is committed on release.
+        double previewZoom = _cropDragStartZoom / _boxVisualScale;
+        ZoomDisplay.Text = $"Zoom: {previewZoom:F1}x";
+        ZoomValueText.Text = $"{previewZoom:F1}x";
+    }
+
+    private void CropHandleLayer_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        => FinishCropCornerDrag();
+
+    private void CropHandleLayer_LostMouseCapture(object sender, MouseEventArgs e)
+        => FinishCropCornerDrag();
+
+    void FinishCropCornerDrag()
+    {
+        if (!_cropCornerDragging) return;
+        _cropCornerDragging = false;
+        CropHandleLayer.ReleaseMouseCapture();
+
+        double s = _boxVisualScale;
+        _boxVisualScale = 1.0;
+
+        // Enlarging the box (s > 1) zooms out; shrinking it (s < 1) zooms in.
+        // Offset scales by the same factor so the crop-center pixel stays put.
+        double zoom1 = Math.Max(0.01, _cropDragStartZoom / s);
+        double factor = zoom1 / _cropDragStartZoom;
+        _currentZoom = zoom1;
+        _currentOffsetX = _cropDragStartOffsetX * factor;
+        _currentOffsetY = _cropDragStartOffsetY * factor;
+
+        if (zoom1 > BgZoom.Maximum) BgZoom.Maximum = zoom1;
+        BgZoom.Value = zoom1;
+
+        UpdateImageTransform();
+        RedrawCropBoxVisuals();
+        UpdateDisplays();
+    }
+
+    double ClampBoxScale(double s)
+    {
+        // Min: keep a ~6px dot so the handles stay grabbable and can be pulled back.
+        double minDim = Math.Min(_zonePreviewWidth, _zonePreviewHeight);
+        double sMin = minDim > 0 ? 6.0 / minDim : 0.02;
+        double sMax = MaxBoxScale();
+        if (sMax < sMin) sMax = sMin;
+        return Math.Max(sMin, Math.Min(sMax, s));
+    }
+
+    double MaxBoxScale()
+    {
+        // Max: the crop box may fill the preview area, keeping the handles visible.
+        const double margin = 8.0;
+        double availW = PreviewBorder.ActualWidth - margin * 2;
+        double availH = PreviewBorder.ActualHeight - margin * 2;
+        if (_zonePreviewWidth <= 0 || _zonePreviewHeight <= 0 || availW <= 0 || availH <= 0)
+            return 1.0;
+        return Math.Max(1.0, Math.Min(availW / _zonePreviewWidth, availH / _zonePreviewHeight));
+    }
+
+    void RedrawCropBoxVisuals()
+    {
+        UpdateOverlay();
+        DrawGridLines();
+        DrawTitleBarDivider();
+        UpdateCropBoxControls();
+    }
+
+    void UpdateCropBoxControls()
+    {
+        bool hasImage = CropImage?.Source != null;
+        CropBoxVisual.Visibility = hasImage ? Visibility.Visible : Visibility.Collapsed;
+        CropHandleLayer.Visibility = hasImage ? Visibility.Visible : Visibility.Collapsed;
+        if (!hasImage) return;
+
+        double w = _zonePreviewWidth * _boxVisualScale;
+        double h = _zonePreviewHeight * _boxVisualScale;
+        double left = (PreviewBorder.ActualWidth - w) / 2;
+        double top = (PreviewBorder.ActualHeight - h) / 2;
+
+        CropBoxBorder.Visibility = _cropShape == "Rectangle" ? Visibility.Visible : Visibility.Collapsed;
+        CropBoxEllipseBorder.Visibility = _cropShape == "Circle" || _cropShape == "Ellipse"
+            ? Visibility.Visible : Visibility.Collapsed;
+
+        CropBoxBorder.Width = w;
+        CropBoxBorder.Height = h;
+        Canvas.SetLeft(CropBoxBorder, left);
+        Canvas.SetTop(CropBoxBorder, top);
+
+        CropBoxEllipseBorder.Width = w;
+        CropBoxEllipseBorder.Height = h;
+        Canvas.SetLeft(CropBoxEllipseBorder, left);
+        Canvas.SetTop(CropBoxEllipseBorder, top);
+
+        PositionHandle(HandleTL, left, top);
+        PositionHandle(HandleTR, left + w, top);
+        PositionHandle(HandleBL, left, top + h);
+        PositionHandle(HandleBR, left + w, top + h);
+    }
+
+    void PositionHandle(FrameworkElement handle, double centerX, double centerY)
+    {
+        Canvas.SetLeft(handle, centerX - handle.Width / 2);
+        Canvas.SetTop(handle, centerY - handle.Height / 2);
+    }
+
     private void PreviewBorder_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         if (!IsLoaded) return;
@@ -323,6 +482,7 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
         UpdateOverlay();
         DrawGridLines();
         DrawTitleBarDivider();
+        UpdateCropBoxControls();
     }
     
     private void BgZoom_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -383,18 +543,8 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
         if (_cropShape == "Circle" || _cropShape == "Ellipse")
         {
             // For circle/ellipse, create a full-screen overlay with a hole
-            double zoneWidth, zoneHeight;
-            if (_cropShape == "Circle")
-            {
-                double size = Math.Min(_targetWidth, _targetHeight) * _previewScale;
-                zoneWidth = size;
-                zoneHeight = size;
-            }
-            else
-            {
-                zoneWidth = _targetWidth * _previewScale;
-                zoneHeight = _targetHeight * _previewScale;
-            }
+            double zoneWidth = _zonePreviewWidth * _boxVisualScale;
+            double zoneHeight = _zonePreviewHeight * _boxVisualScale;
 
             double zoneLeft = (previewWidth - zoneWidth) / 2;
             double zoneTop = (previewHeight - zoneHeight) / 2;
@@ -422,8 +572,10 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
         else
         {
             // Rectangle overlay
-            double zoneLeft = (previewWidth - _zonePreviewWidth) / 2;
-            double zoneTop = (previewHeight - _zonePreviewHeight) / 2;
+            double zoneW = _zonePreviewWidth * _boxVisualScale;
+            double zoneH = _zonePreviewHeight * _boxVisualScale;
+            double zoneLeft = (previewWidth - zoneW) / 2;
+            double zoneTop = (previewHeight - zoneH) / 2;
 
             // Top overlay
             if (zoneTop > 0)
@@ -440,15 +592,15 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
             }
 
             // Bottom overlay
-            if (zoneTop + _zonePreviewHeight < previewHeight)
+            if (zoneTop + zoneH < previewHeight)
             {
                 var bottomRect = new System.Windows.Shapes.Rectangle
                 {
                     Width = previewWidth,
-                    Height = previewHeight - (zoneTop + _zonePreviewHeight),
+                    Height = previewHeight - (zoneTop + zoneH),
                     Fill = new SolidColorBrush(Color.FromArgb(0x80, 0x00, 0x00, 0x00))
                 };
-                Canvas.SetTop(bottomRect, zoneTop + _zonePreviewHeight);
+                Canvas.SetTop(bottomRect, zoneTop + zoneH);
                 Canvas.SetLeft(bottomRect, 0);
                 CropOverlay.Children.Add(bottomRect);
             }
@@ -459,7 +611,7 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
                 var leftRect = new System.Windows.Shapes.Rectangle
                 {
                     Width = zoneLeft,
-                    Height = _zonePreviewHeight,
+                    Height = zoneH,
                     Fill = new SolidColorBrush(Color.FromArgb(0x80, 0x00, 0x00, 0x00))
                 };
                 Canvas.SetTop(leftRect, zoneTop);
@@ -468,16 +620,16 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
             }
 
             // Right overlay
-            if (zoneLeft + _zonePreviewWidth < previewWidth)
+            if (zoneLeft + zoneW < previewWidth)
             {
                 var rightRect = new System.Windows.Shapes.Rectangle
                 {
-                    Width = previewWidth - (zoneLeft + _zonePreviewWidth),
-                    Height = _zonePreviewHeight,
+                    Width = previewWidth - (zoneLeft + zoneW),
+                    Height = zoneH,
                     Fill = new SolidColorBrush(Color.FromArgb(0x80, 0x00, 0x00, 0x00))
                 };
                 Canvas.SetTop(rightRect, zoneTop);
-                Canvas.SetLeft(rightRect, zoneLeft + _zonePreviewWidth);
+                Canvas.SetLeft(rightRect, zoneLeft + zoneW);
                 CropOverlay.Children.Add(rightRect);
             }
         }
@@ -495,22 +647,10 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
         try { brush = (Brush)FindResource("Brush.Text.Secondary"); }
         catch { brush = Brushes.White; }
 
-        double zoneWidth, zoneHeight, zoneLeft, zoneTop;
-
-        if (_cropShape == "Circle")
-        {
-            double size = Math.Min(_targetWidth, _targetHeight) * _previewScale;
-            zoneWidth = size;
-            zoneHeight = size;
-        }
-        else
-        {
-            zoneWidth = _zonePreviewWidth;
-            zoneHeight = _zonePreviewHeight;
-        }
-
-        zoneLeft = (PreviewBorder.ActualWidth - zoneWidth) / 2;
-        zoneTop = (PreviewBorder.ActualHeight - zoneHeight) / 2;
+        double zoneWidth = _zonePreviewWidth * _boxVisualScale;
+        double zoneHeight = _zonePreviewHeight * _boxVisualScale;
+        double zoneLeft = (PreviewBorder.ActualWidth - zoneWidth) / 2;
+        double zoneTop = (PreviewBorder.ActualHeight - zoneHeight) / 2;
 
         // For circle/ellipse, clip the grid lines
         if (_cropShape == "Circle" || _cropShape == "Ellipse")
@@ -568,8 +708,8 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
         // 真实窗口的标题栏/主体分界线：y = 裁切区域顶部 + 标题栏高度 × 预览缩放。
         // 预览界面不区分「标题栏独立填充」开关——这条线始终显示，只作裁剪参考。
         // 组合分区标题栏有两层（最上方 24px + 子分区标签栏 24px），因此内部再补一条分界线。
-        double zoneLeft = (PreviewBorder.ActualWidth - _zonePreviewWidth) / 2;
-        double zoneTop = (PreviewBorder.ActualHeight - _zonePreviewHeight) / 2;
+        double zoneLeft = (PreviewBorder.ActualWidth - _zonePreviewWidth * _boxVisualScale) / 2;
+        double zoneTop = (PreviewBorder.ActualHeight - _zonePreviewHeight * _boxVisualScale) / 2;
 
         Brush brush;
         try { brush = (Brush)FindResource("Brush.Text.Secondary"); }
@@ -588,7 +728,7 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
         DividerCanvas.Children.Add(new System.Windows.Shapes.Line
         {
             X1 = zoneLeft, Y1 = y,
-            X2 = zoneLeft + _zonePreviewWidth, Y2 = y,
+            X2 = zoneLeft + _zonePreviewWidth * _boxVisualScale, Y2 = y,
             Stroke = brush,
             // 随预览缩放同步增粗（2–4px），放大后仍保持可见比例；内部分界略细。
             StrokeThickness = thin
