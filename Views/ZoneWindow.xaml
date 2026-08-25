@@ -14,6 +14,7 @@
         UseLayoutRounding="True"
         PreviewMouseLeftButtonDown="Window_PreviewMouseLeftButtonDown"
         PreviewMouseRightButtonDown="Window_PreviewMouseRightButtonDown"
+        MouseDoubleClick="Window_MouseDoubleClick"
         PreviewKeyDown="Window_PreviewKeyDown"
         MouseMove="Window_MouseMove"
         MouseLeftButtonUp="Window_MouseLeftButtonUp"
@@ -53,7 +54,7 @@
                            Stretch="Uniform"
                            RenderOptions.BitmapScalingMode="HighQuality"
                            HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,2,0,0"/>
-                    <TextBlock Text="{Binding Name}" FontSize="10"
+                    <TextBlock x:Name="ItemNameText" Text="{Binding Name}" FontSize="10"
                                Foreground="#E0FFFFFF" TextAlignment="Center"
                                TextTrimming="CharacterEllipsis"
                                MaxWidth="{Binding ItemSize}" Margin="1,0,1,1"

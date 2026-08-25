@@ -535,14 +535,14 @@ public partial class ClockWidget : Window
         ApplyQuickBar();
     }
 
-    // ponytail 2026-08-25: 极简模式 + 按钮透明度 (时钟设置 spec). Applies in BOTH
+    // ponytail 2026-08-25: 磁贴模式 + 按钮透明度 (时钟设置 spec). Applies in BOTH
     // digital and analog modes — the lock/hide buttons live on the outer grid
-    // shared by both mode panels. Zone-style: QuickBarMode collapses the
+    // shared by both mode panels. Zone-style: TileMode collapses the
     // control buttons, ControlOpacity drives their opacity (5-100).
     void ApplyQuickBar()
     {
         if (LockBtn == null || HideBtn == null) return;
-        var vis = _clock.QuickBarMode ? Visibility.Collapsed : Visibility.Visible;
+        var vis = _clock.TileMode ? Visibility.Collapsed : Visibility.Visible;
         LockBtn.Visibility = vis;
         HideBtn.Visibility = vis;
         var op = Math.Max(0.05, _clock.ControlOpacity / 100.0);

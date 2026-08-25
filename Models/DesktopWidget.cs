@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.Serialization;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace DesktopZones.Models;
@@ -88,8 +90,21 @@ public class DesktopClock : AppearanceModel
     public bool ShowSeconds { get; set; } = true;
     public bool ShowDate { get; set; } = true;
     public bool Use24Hour { get; set; } = true;
-    /// <summary>极简模式 — hides the minimize + lock buttons in BOTH digital and analog modes.</summary>
-    public bool QuickBarMode { get; set; } = false;
+    /// <summary>磁贴模式 — hides the minimize + lock buttons in BOTH digital and analog modes.</summary>
+    public bool TileMode { get; set; } = false;
+
+    /// <summary>配置兼容 — 旧 config/预设用 "QuickBarMode" 字段名，回填到 TileMode。</summary>
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; set; }
+
+    [OnDeserialized]
+    internal void OnDeserializedAfterRename(StreamingContext _)
+    {
+        if (ExtensionData == null) return;
+        if (ExtensionData.TryGetValue("QuickBarMode", out var old)
+            && old.ValueKind is JsonValueKind.True or JsonValueKind.False)
+            TileMode = old.GetBoolean();
+    }
     /// <summary>Opacity of the title-bar control buttons (lock / hide), 5-100. Zone-style.</summary>
     public double ControlOpacity { get; set; } = 40;
     public string TextColor { get; set; } = "#EEFFFFFF";
@@ -123,7 +138,7 @@ public class DesktopClock : AppearanceModel
             IsLocked = IsLocked,
             ShowSeconds = ShowSeconds, ShowDate = ShowDate,
             Use24Hour = Use24Hour, TextColor = TextColor,
-            QuickBarMode = QuickBarMode, ControlOpacity = ControlOpacity,
+            TileMode = TileMode, ControlOpacity = ControlOpacity,
             FontSize = FontSize, FontFamily = FontFamily,
             Opacity = Opacity, Mode = Mode, AccentColor = AccentColor,
             BorderThickness = BorderThickness,
@@ -181,8 +196,21 @@ public class DesktopCalendar : AppearanceModel
     public bool IsLocked { get; set; } = false;
     public bool ShowWeekNumbers { get; set; } = false;
     public bool StartOnMonday { get; set; } = true;
-    /// <summary>极简模式 — hides the minimize + lock buttons.</summary>
-    public bool QuickBarMode { get; set; } = false;
+    /// <summary>磁贴模式 — hides the minimize + lock buttons.</summary>
+    public bool TileMode { get; set; } = false;
+
+    /// <summary>配置兼容 — 旧 config/预设用 "QuickBarMode" 字段名，回填到 TileMode。</summary>
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; set; }
+
+    [OnDeserialized]
+    internal void OnDeserializedAfterRename(StreamingContext _)
+    {
+        if (ExtensionData == null) return;
+        if (ExtensionData.TryGetValue("QuickBarMode", out var old)
+            && old.ValueKind is JsonValueKind.True or JsonValueKind.False)
+            TileMode = old.GetBoolean();
+    }
     /// <summary>Opacity of the title-bar control buttons (lock / hide), 5-100. Zone-style.</summary>
     public double ControlOpacity { get; set; } = 40;
     public string TextColor { get; set; } = "#EEFFFFFF";
@@ -215,7 +243,7 @@ public class DesktopCalendar : AppearanceModel
             Id = Id, X = X, Y = Y, Width = Width, Height = Height, IsVisible = IsVisible,
             IsLocked = IsLocked,
             ShowWeekNumbers = ShowWeekNumbers, StartOnMonday = StartOnMonday,
-            QuickBarMode = QuickBarMode, ControlOpacity = ControlOpacity,
+            TileMode = TileMode, ControlOpacity = ControlOpacity,
             TextColor = TextColor, TodayColor = TodayColor,
             FontSize = FontSize, Opacity = Opacity,
             BorderThickness = BorderThickness,

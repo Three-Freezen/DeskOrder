@@ -130,7 +130,7 @@
                                 <Border.Style>
                                     <Style TargetType="Border">
                                         <Style.Triggers>
-                                            <DataTrigger Binding="{Binding Payload.QuickBarMode}" Value="True">
+                                            <DataTrigger Binding="{Binding Payload.TileMode}" Value="True">
                                                 <Setter Property="Visibility" Value="Collapsed"/>
                                             </DataTrigger>
                                         </Style.Triggers>

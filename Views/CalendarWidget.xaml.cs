@@ -462,13 +462,13 @@ public partial class CalendarWidget : Window
         ApplyQuickBar();
     }
 
-    // ponytail 2026-08-25: 极简模式 + 按钮透明度 (日历设置 spec). Zone-style:
-    // QuickBarMode collapses the minimize/lock buttons, ControlOpacity drives
+    // ponytail 2026-08-25: 磁贴模式 + 按钮透明度 (日历设置 spec). Zone-style:
+    // TileMode collapses the minimize/lock buttons, ControlOpacity drives
     // their opacity.
     void ApplyQuickBar()
     {
         if (LockBtn == null || HideBtn == null) return;
-        var vis = _calendar.QuickBarMode ? Visibility.Collapsed : Visibility.Visible;
+        var vis = _calendar.TileMode ? Visibility.Collapsed : Visibility.Visible;
         LockBtn.Visibility = vis;
         HideBtn.Visibility = vis;
         var op = Math.Max(0.05, _calendar.ControlOpacity / 100.0);

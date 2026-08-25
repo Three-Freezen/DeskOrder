@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.Serialization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -26,7 +27,12 @@ public class Zone : AppearanceModel
     public bool AutoArrange { get; set; } = true;
     public string IconColor { get; set; } = "";              // emoji tint color
     public string TitleTextColor { get; set; } = "#A0FFFFFF";
-    public bool QuickBarMode { get; set; } = false;             // Title-bar-less compact mode
+    /// <summary>磁贴模式 — 隐藏标题栏与底部 8px 分割条，主体作为一块完整窗口。</summary>
+    public bool TileMode { get; set; } = false;
+    /// <summary>隐藏应用名 — 磁贴模式下默认隐藏；非磁贴模式下也可手动勾选。</summary>
+    public bool HideAppName { get; set; } = false;
+    /// <summary>自定义图标 — 单图标模式，需 TileMode=true 且 Items.Count&lt;=1 才能启用。</summary>
+    public bool CustomIcon { get; set; } = false;
     private List<ZoneItem> _items = new();
     public List<ZoneItem> Items
     {
@@ -46,6 +52,17 @@ public class Zone : AppearanceModel
     /// </summary>
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; set; }
+
+    /// <summary>配置兼容 — 旧 config 用 "QuickBarMode" 字段名保存磁贴/极简模式，
+    /// 重命名后通过扩展数据回填到 TileMode。</summary>
+    [OnDeserialized]
+    internal void OnDeserializedAfterRename(StreamingContext _)
+    {
+        if (ExtensionData == null) return;
+        if (ExtensionData.TryGetValue("QuickBarMode", out var old)
+            && old.ValueKind is JsonValueKind.True or JsonValueKind.False)
+            TileMode = old.GetBoolean();
+    }
 
     // ── Title bar text color adaptive ──
     /// <summary>Auto-pick zone title bar text color based on <see cref="TitleBarFillColor"/>.</summary>
@@ -86,7 +103,9 @@ public class Zone : AppearanceModel
             AutoArrange = AutoArrange,
             IconColor = IconColor,
             TitleTextColor = TitleTextColor,
-            QuickBarMode = QuickBarMode,
+            TileMode = TileMode,
+            HideAppName = HideAppName,
+            CustomIcon = CustomIcon,
             TitleBarFillIndependent = TitleBarFillIndependent,
             FolderMappingEnabled = FolderMappingEnabled,
             FolderMappingPath = FolderMappingPath,
@@ -110,7 +129,7 @@ public class Zone : AppearanceModel
                 ControlOpacity = MergedGroupStyle.ControlOpacity,
                 TitleBarOpacity = MergedGroupStyle.TitleBarOpacity,
                 UseUnifiedFill = MergedGroupStyle.UseUnifiedFill,
-                QuickBarMode = MergedGroupStyle.QuickBarMode,
+                TileMode = MergedGroupStyle.TileMode,
                 TitleBarTextColorAdaptive = MergedGroupStyle.TitleBarTextColorAdaptive,
                 TitleBarFillIndependent = MergedGroupStyle.TitleBarFillIndependent,
                 BackgroundImagePath = MergedGroupStyle.BackgroundImagePath,

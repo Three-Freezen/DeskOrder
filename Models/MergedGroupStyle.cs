@@ -1,4 +1,8 @@
 using System;
+using System.Collections.Generic;
+using System.Runtime.Serialization;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace DesktopZones.Models;
 
@@ -24,7 +28,8 @@ public class MergedGroupStyle
     public double ControlOpacity { get; set; } = 40;
     public double TitleBarOpacity { get; set; } = 6;
     public bool UseUnifiedFill { get; set; } = true;     // true=unified fill, false=keep original
-    public bool QuickBarMode { get; set; } = false;      // title-bar-less compact mode
+    /// <summary>磁贴模式 — 隐藏两层标题栏与底部 8px 分割条（组合分区整体形态）。</summary>
+    public bool TileMode { get; set; } = false;
     public bool TitleBarTextColorAdaptive { get; set; } = true;
     /// <summary>标题栏填充单独设置 — 统一填充模式下主体填充不铺到标题栏下方。</summary>
     public bool TitleBarFillIndependent { get; set; } = false;
@@ -38,4 +43,18 @@ public class MergedGroupStyle
     // ── Folder mapping (组合分区内容区展示映射文件夹/磁盘的内容) ──
     public bool FolderMappingEnabled { get; set; } = false;
     public string FolderMappingPath { get; set; } = "";
+
+    /// <summary>配置兼容 — 旧 config 的组合分区样式用 "QuickBarMode" 字段名，
+    /// 重命名后通过扩展数据回填到 TileMode。</summary>
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; set; }
+
+    [OnDeserialized]
+    internal void OnDeserializedAfterRename(StreamingContext _)
+    {
+        if (ExtensionData == null) return;
+        if (ExtensionData.TryGetValue("QuickBarMode", out var old)
+            && old.ValueKind is JsonValueKind.True or JsonValueKind.False)
+            TileMode = old.GetBoolean();
+    }
 }

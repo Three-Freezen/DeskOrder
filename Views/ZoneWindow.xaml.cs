@@ -182,7 +182,11 @@ public partial class ZoneWindow : Window
         {
             if (ItemsHost.ItemContainerGenerator.Status
                 == System.Windows.Controls.Primitives.GeneratorStatus.ContainersGenerated)
+            {
                 ApplyItemTextColorAdaptive();
+                ApplyHideAppName(_zone.HideAppName);
+                ApplyCustomIcon(_zone.TileMode && _zone.CustomIcon && _zone.Items.Count == 1);
+            }
         };
         ItemsHost.ItemContainerGenerator.StatusChanged += _itemsHostStatusChangedHandler;
         if (!_zone.IsVisible) ApplyHidden();
@@ -1446,16 +1450,7 @@ public partial class ZoneWindow : Window
 
     void TitleBar_Drag(object s, MouseButtonEventArgs e)
     {
-        var vm = DataContext as ZoneViewModel;
-        if (vm?.IsLocked == true) return;
-        if (_snapDrag == null || _snapDrag.IsActive) return;
-
-        var restOpacity = ControlPoint.Opacity;
-        ControlPoint.Opacity = 0.6;
-        _mergeTarget = null;
-        _titleDragMoved = false;
-        _snapDrag.DragMoved += OnTitleBarDragMoved;
-        _snapDrag.Start(e, () => OnTitleBarDragCompleted(restOpacity, vm));
+        StartBodyDrag(e);
     }
 
     void OnTitleBarDragMoved(Point screenPos)
@@ -1530,10 +1525,10 @@ public partial class ZoneWindow : Window
             new DoubleAnimation(on ? 1.24 : 1.0, TimeSpan.FromMilliseconds(140)) { EasingFunction = ease });
     }
 
-    // ── Window-level mouse: resize grips only ──
+    // ── Window-level mouse: body drag (Tile mode) + Ctrl marquee ──
 
-    // ponytail: OS routes click normally now (no drill-through).
-    // Kept as a no-op so the XAML handler reference in ZoneWindow.xaml keeps working.
+    // ponytail 2026-08-26 (磁贴模式): 主体空白按下 = 拖动整窗（复用 _snapDrag 合并检测），
+    // Ctrl+按下 = 保留原有框选。双击由 Window_MouseDoubleClick 处理（自定义图标打开）。
     void Window_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (e.OriginalSource is TextBox) return; // title inline editing
@@ -1542,16 +1537,42 @@ public partial class ZoneWindow : Window
         if (IsWithinZoneChrome(e.OriginalSource)) return;
         if (MainContent.Visibility != Visibility.Visible) return;
         if (FolderMappingView.Visibility == Visibility.Visible) return;
-        // Empty zone area: press + drag immediately draws the marquee.
-        _selectMode = SelectMode.Draw;
-        _selectTarget = SelectTarget.ZoneItems;
-        _selectStart = e.GetPosition(this);
-        _selectCurrent = _selectStart;
-        _selectMoved = false;
-        _selectFromEmpty = true;
-        _selectStartZone = null;
-        _selectStartList = null;
-        try { Mouse.Capture(this); } catch { }
+
+        // 自定义图标模式下第二次按下（ClickCount==2）不启动拖动，交给双击打开。
+        if (_customIconOpenFirst && e.ClickCount == 2) return;
+
+        // Ctrl+drag 走框选（保留旧行为）。
+        if ((Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
+        {
+            _selectMode = SelectMode.Draw;
+            _selectTarget = SelectTarget.ZoneItems;
+            _selectStart = e.GetPosition(this);
+            _selectCurrent = _selectStart;
+            _selectMoved = false;
+            _selectFromEmpty = true;
+            _selectStartZone = null;
+            _selectStartList = null;
+            try { Mouse.Capture(this); } catch { }
+            return;
+        }
+
+        // 主体空白 = 拖动整窗（复用 _snapDrag + 合并检测）。
+        StartBodyDrag(e);
+    }
+
+    /// <summary>从主体空白触发的窗口拖动，复用 TitleBar_Drag 同款 _snapDrag + 合并检测。</summary>
+    void StartBodyDrag(MouseButtonEventArgs e)
+    {
+        var vm = DataContext as ZoneViewModel;
+        if (vm?.IsLocked == true) return;
+        if (_snapDrag == null || _snapDrag.IsActive) return;
+
+        var restOpacity = ControlPoint.Opacity;
+        ControlPoint.Opacity = 0.6;
+        _mergeTarget = null;
+        _titleDragMoved = false;
+        _snapDrag.DragMoved += OnTitleBarDragMoved;
+        _snapDrag.Start(e, () => OnTitleBarDragCompleted(restOpacity, vm));
     }
 
     // ── Resize ──
@@ -3332,7 +3353,7 @@ public partial class ZoneWindow : Window
         string IconColor,
         double ControlOpacity,
         int CornerRadius,
-        bool QuickBarMode,
+        bool TileMode,
         bool TitleBarAdaptive,
         string BgImagePath,
         string BgImageStretch,
@@ -3367,7 +3388,7 @@ public partial class ZoneWindow : Window
             IconColor:        _zone.IconColor,
             ControlOpacity:   _zone.ControlOpacity,
             CornerRadius:     _zone.CornerRadius,
-            QuickBarMode:     _zone.QuickBarMode,
+            TileMode:     _zone.TileMode,
             TitleBarAdaptive: _zone.TitleBarTextColorAdaptive,
             BgImagePath:      _zone.BackgroundImagePath,
             BgImageStretch:   _zone.BgImageStretch,
@@ -3394,7 +3415,7 @@ public partial class ZoneWindow : Window
                 IconColor =        _zone.MergedGroupStyle.IconColor,
                 ControlOpacity =   _zone.MergedGroupStyle.ControlOpacity,
                 CornerRadius =     _zone.MergedGroupStyle.CornerRadius,
-                QuickBarMode =     _zone.MergedGroupStyle.QuickBarMode,
+                TileMode =     _zone.MergedGroupStyle.TileMode,
                 TitleBarAdaptive = _zone.MergedGroupStyle.TitleBarTextColorAdaptive,
                 BgImagePath =      _zone.MergedGroupStyle.BackgroundImagePath,
                 BgImageStretch =   _zone.MergedGroupStyle.BgImageStretch,
@@ -3429,7 +3450,7 @@ public partial class ZoneWindow : Window
             IconColor =        _zone.MergedGroupStyle.IconColor,
             ControlOpacity =   _zone.MergedGroupStyle.ControlOpacity,
             CornerRadius =     _zone.MergedGroupStyle.CornerRadius,
-            QuickBarMode =     _zone.MergedGroupStyle.QuickBarMode,
+            TileMode =         _zone.MergedGroupStyle.TileMode,
             TitleBarAdaptive = _zone.MergedGroupStyle.TitleBarTextColorAdaptive,
             BgImagePath =      "",
             BgImageStretch =   _zone.MergedGroupStyle.BgImageStretch,
@@ -3473,7 +3494,7 @@ public partial class ZoneWindow : Window
 
         // Body fill
         try { FillRect.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.FillColor)!); } catch { }
-        bool fillIndependent = s.TitleBarFillIndependent && !s.QuickBarMode;
+        bool fillIndependent = s.TitleBarFillIndependent && !s.TileMode;
         FillRect.RadiusX = FillRect.RadiusY = fillIndependent ? 0 : s.CornerRadius;
         // ponytail 2026-08-26: the merged master's title bar is TWO layers — the
         // 24px top bar + the 24px sub-zone tab row — so the body fill starts below
@@ -3540,17 +3561,65 @@ public partial class ZoneWindow : Window
             HideBtnText.Foreground = CtrlLabelDefaultBrush;
         }
 
-        // Control-point opacity + QuickBar visibility
+        // Control-point opacity + TileMode visibility
         ControlPoint.Opacity = Math.Max(0.05, s.ControlOpacity / 100.0);
-        var vis = s.QuickBarMode ? Visibility.Collapsed : Visibility.Visible;
+        var vis = s.TileMode ? Visibility.Collapsed : Visibility.Visible;
         TitleBarBg.Visibility = vis;
         ControlPoint.Visibility = vis;
+
+        // 磁贴模式 = 隐藏底部 8px 分割条。
+        if (BottomBarBg != null)
+            BottomBarBg.Visibility = s.TileMode ? Visibility.Collapsed : Visibility.Visible;
+
+        // 隐藏应用名 — 遍历 item 容器切换名称 TextBlock 可见性。
+        ApplyHideAppName(_zone.HideAppName);
+
+        // 自定义图标（单图标模式）：TileMode + CustomIcon + Items.Count==1 时
+        // 隐藏 ItemsHost，双击整个分区打开唯一图标。
+        ApplyCustomIcon(s.TileMode && _zone.CustomIcon && _zone.Items.Count == 1);
 
         // Sub-zone tabs + items — the tab row sits inside the same title-bar band, so its text
         // reuses the top title bar's adaptive brush (merged groups don't get a separate tab-bar
         // sample; the difference is negligible).
         RebuildSubZoneTabs(titleAdaptiveBrush, s.TitleTextColor);
         ApplyItemTextColorAdaptive(s.FillColor);
+    }
+
+    /// <summary>遍历 ItemsHost 内的 ContentPresenter，根据 hide 切换名称 TextBlock
+    /// （x:Name="ItemNameText"）可见性。容器未生成时无操作 — StatusChanged
+    /// 处理器会在容器生成后补一次。</summary>
+    void ApplyHideAppName(bool hide)
+    {
+        if (ItemsHost == null) return;
+        for (int i = 0; i < ItemsHost.Items.Count; i++)
+        {
+            if (ItemsHost.ItemContainerGenerator.ContainerFromIndex(i) is not DependencyObject container) continue;
+            var tb = FindVisualChild<TextBlock>(container, tb => tb.Name == "ItemNameText");
+            if (tb != null) tb.Visibility = hide ? Visibility.Collapsed : Visibility.Visible;
+        }
+    }
+
+    bool _customIconOpenFirst;
+
+    /// <summary>自定义图标模式：ItemsHost 隐藏，整窗双击（Window_MouseDoubleClick）
+    /// 打开 Items[0]。</summary>
+    void ApplyCustomIcon(bool on)
+    {
+        if (ItemsHost == null) return;
+        ItemsHost.Visibility = on ? Visibility.Collapsed : Visibility.Visible;
+        _customIconOpenFirst = on;
+    }
+
+    /// <summary>整窗双击：CustomIcon 开启时打开当前列表的第一项；否则忽略。</summary>
+    void Window_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (!_customIconOpenFirst) return;
+        // 标题栏 / 控件 / 文件夹映射区域的双击不触发打开。
+        if (IsWithinZoneChrome(e.OriginalSource)) return;
+        var item = _vm.Items.FirstOrDefault();
+        if (item == null) return;
+        Open(item);
+        e.Handled = true;
     }
 
     /// <summary>Combined title-bar height: 24px top bar + 24px merged sub-zone tab
@@ -3578,7 +3647,7 @@ public partial class ZoneWindow : Window
 
     /// <summary>Top edge of the body region in window space (below title bar + tab row).</summary>
     double BodyRegionTop(ResolvedZoneStyle s) =>
-        s.QuickBarMode
+        s.TileMode
             ? (_zone.MergedGroupMembership.SubZoneIds.Count > 0 ? TitleBarSampleHeight : 0)
             : TitleBarLayerHeight();
 
@@ -3613,7 +3682,7 @@ public partial class ZoneWindow : Window
 
         // Independent title bar: its fill is the only layer we own (the desktop behind it
         // is unknowable), so contrast against the fill color itself.
-        if (s.TitleBarFillIndependent && !s.QuickBarMode)
+        if (s.TitleBarFillIndependent && !s.TileMode)
             return AdaptiveTextColor.ResolveBrush(titleFill);
 
         if (BgImage?.Source is BitmapSource bmp && _bgImageScale > 0 && EffectiveWidth > 0)
@@ -3633,7 +3702,7 @@ public partial class ZoneWindow : Window
     void ApplyBackgroundImage(ResolvedZoneStyle s)
     {
         // 标题栏独立填充：背景图与 FillRect 一样不铺到标题栏下方（顶部裁剪）。
-        double clipTop = s.TitleBarFillIndependent && !s.QuickBarMode ? TitleBarLayerHeight() : 0;
+        double clipTop = s.TitleBarFillIndependent && !s.TileMode ? TitleBarLayerHeight() : 0;
         BgImageBorder.Margin = new Thickness(0, clipTop, 0, 0);
         if (!string.IsNullOrEmpty(s.BgImagePath) && File.Exists(s.BgImagePath))
         {
@@ -3864,6 +3933,19 @@ public partial class ZoneWindow : Window
             if (child is T t) return t;
             var result = FindVisualChild<T>(child);
             if (result != null) return result;
+        }
+        return null;
+    }
+
+    /// <summary>在 visual tree 中按谓词查找指定类型后代（磁贴模式 item 名称定位）。</summary>
+    static T? FindVisualChild<T>(DependencyObject parent, Func<T, bool> pred) where T : DependencyObject
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            if (child is T t && pred(t)) return t;
+            var deeper = FindVisualChild(child, pred);
+            if (deeper != null) return deeper;
         }
         return null;
     }

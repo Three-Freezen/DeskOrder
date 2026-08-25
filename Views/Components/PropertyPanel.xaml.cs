@@ -515,14 +515,38 @@ public partial class PropertyPanel : UserControl
     // ZoneManager. Persist is set by the host page; if not wired, updates
     // are in-memory only.
 
+    /// <summary>重新渲染字段树以反映 TileMode / HideAppName / CustomIcon 的依赖更新。</summary>
+    void Rebuild(Zone z) => BuildZoneFields(z);
+
     void BuildZoneFields(Zone z)
     {
         var root = new StackPanel { Margin = new Thickness(16, 12, 16, 12) };
 
         // 开关区
         var switches = MakeSection(_loc["ZoneProp.Section.Switches"]);
-        switches.Children.Add(MakeCheckRow(_loc["ZoneProp.MinimalMode"], z.QuickBarMode,
-            v => { z.QuickBarMode = v; Save(z); }));
+        // 磁贴模式开关：开启时若 HideAppName 仍为默认值 false，自动勾选。
+        var tileModeCb = MakeCheckRow(_loc["ZoneProp.TileMode"], z.TileMode,
+            v =>
+            {
+                z.TileMode = v;
+                if (v && !z.HideAppName) z.HideAppName = true;
+                Rebuild(z);
+                Save(z);
+            });
+        switches.Children.Add(tileModeCb);
+        // 隐藏应用名 — 始终可用；磁贴模式下默认勾选（首次切换时自动开启）。
+        var hideNameCb = MakeCheckRow(_loc["ZoneProp.HideAppName"], z.HideAppName,
+            v => { z.HideAppName = v; Save(z); });
+        switches.Children.Add(hideNameCb);
+        // 自定义图标 — TileMode=false 或 Items.Count>1 时锁定（灰显 0.4 + 禁用）。
+        var customIconCb = MakeCheckRow(_loc["ZoneProp.CustomIcon"], z.CustomIcon,
+            v => { z.CustomIcon = v; Save(z); });
+        customIconCb.IsEnabled = z.TileMode && z.Items.Count <= 1;
+        customIconCb.Opacity = customIconCb.IsEnabled ? 1.0 : 0.4;
+        customIconCb.ToolTip = customIconCb.IsEnabled
+            ? _loc["ZoneProp.CustomIconHint"]
+            : _loc["ZoneProp.CustomIconDisabledHint"];
+        switches.Children.Add(customIconCb);
         var hoverRow = MakeCheckRowWithSideBtn(_loc["ZoneProp.RestoreButton"], z.EnableRestoreButton,
             v => { z.EnableRestoreButton = v; Save(z); },
             _loc["Motion.SettingsEllipsis"], _ => OpenMotionDialog(z, () => BuildZoneFields(z)));
@@ -657,8 +681,8 @@ public partial class PropertyPanel : UserControl
             Width = z.Width, Height = z.Height,
             CropShape = "Rectangle",
             // 文件夹映射头部行(26px)也算进标题栏：分界线 + 内部 24px 分界。
-            TitleBarHeight = z.QuickBarMode ? 0 : 24 + (z.FolderMappingEnabled ? 26 : 0),
-            TitleBarInnerDividerHeights = !z.QuickBarMode && z.FolderMappingEnabled ? new[] { 24.0 } : Array.Empty<double>(),
+            TitleBarHeight = z.TileMode ? 0 : 24 + (z.FolderMappingEnabled ? 26 : 0),
+            TitleBarInnerDividerHeights = !z.TileMode && z.FolderMappingEnabled ? new[] { 24.0 } : Array.Empty<double>(),
             OnSave = () => Save(z),
         }));
         root.Children.Add(bg);
@@ -703,8 +727,8 @@ public partial class PropertyPanel : UserControl
 
         // 开关区
         var switches = MakeSection(_loc["ZoneProp.Section.Switches"]);
-        switches.Children.Add(MakeCheckRow(_loc["ZoneProp.MinimalMode"], gs.QuickBarMode,
-            v => { gs.QuickBarMode = v; z.QuickBarMode = v; SaveGroup(); }));
+        switches.Children.Add(MakeCheckRow(_loc["ZoneProp.TileMode"], gs.TileMode,
+            v => { gs.TileMode = v; z.TileMode = v; SaveGroup(); }));
         switches.Children.Add(MakeCheckRow(_loc["ZoneProp.RestoreButton"], z.EnableRestoreButton,
             v => { z.EnableRestoreButton = v; SaveGroup(); }));
         switches.Children.Add(MakeCheckRowWithSideBtn(_loc["Motion.HoverAutoExpand"], z.HoverAutoExpand,
@@ -843,8 +867,8 @@ public partial class PropertyPanel : UserControl
             Width = z.Width, Height = z.Height,
             CropShape = "Rectangle",
             // 组合分区两层标题栏(24+24) + 文件夹映射头部行(26px)：内部分界线 24/48。
-            TitleBarHeight = gs.QuickBarMode ? 0 : 48 + (gs.FolderMappingEnabled ? 26 : 0),
-            TitleBarInnerDividerHeights = gs.QuickBarMode
+            TitleBarHeight = gs.TileMode ? 0 : 48 + (gs.FolderMappingEnabled ? 26 : 0),
+            TitleBarInnerDividerHeights = gs.TileMode
                 ? Array.Empty<double>()
                 : gs.FolderMappingEnabled ? new[] { 24.0, 48.0 } : new[] { 24.0 },
             OnSave = SaveGroup,
@@ -1202,8 +1226,8 @@ public partial class PropertyPanel : UserControl
 
         // 开关区
         var switches = MakeSection(_loc["ZoneProp.Section.Switches"]);
-        switches.Children.Add(MakeCheckRow("极简模式", c.QuickBarMode,
-            v => { c.QuickBarMode = v; Save(c); }));
+        switches.Children.Add(MakeCheckRow(_loc["ZoneProp.TileMode"], c.TileMode,
+            v => { c.TileMode = v; Save(c); }));
         switches.Children.Add(MakeCheckRowWithSideBtn(_loc["ZoneProp.RestoreButton"], c.EnableRestoreButton,
             v => { c.EnableRestoreButton = v; Save(c); },
             _loc["Motion.SettingsEllipsis"], _ => OpenMotionDialog(c, () => BuildClockFields(c))));
@@ -1313,8 +1337,8 @@ public partial class PropertyPanel : UserControl
 
         // 开关区
         var switches = MakeSection(_loc["ZoneProp.Section.Switches"]);
-        switches.Children.Add(MakeCheckRow("极简模式", cal.QuickBarMode,
-            v => { cal.QuickBarMode = v; Save(cal); }));
+        switches.Children.Add(MakeCheckRow(_loc["ZoneProp.TileMode"], cal.TileMode,
+            v => { cal.TileMode = v; Save(cal); }));
         switches.Children.Add(MakeCheckRowWithSideBtn(_loc["ZoneProp.RestoreButton"], cal.EnableRestoreButton,
             v => { cal.EnableRestoreButton = v; Save(cal); },
             _loc["Motion.SettingsEllipsis"], _ => OpenMotionDialog(cal, () => BuildCalendarFields(cal))));
@@ -1949,7 +1973,9 @@ public partial class PropertyPanel : UserControl
         dst.BorderThickness = src.BorderThickness;
         dst.TitleBarFillColor = src.TitleBarFillColor;
         dst.CornerRadius = src.CornerRadius;
-        dst.QuickBarMode = src.QuickBarMode;
+        dst.TileMode = src.TileMode;
+        dst.HideAppName = src.HideAppName;
+        dst.CustomIcon = src.CustomIcon;
         dst.HoverAutoExpand = src.HoverAutoExpand;
         dst.EnableRestoreButton = src.EnableRestoreButton;
         dst.TitleBarTextColorAdaptive = src.TitleBarTextColorAdaptive;
@@ -1991,7 +2017,7 @@ public partial class PropertyPanel : UserControl
     void CopyMergedGroupFields(Zone src, Zone dst)
     {
         CloneHelper.CopyBaseProperties<AppearanceModel>(src, dst);
-        dst.QuickBarMode = src.QuickBarMode;
+        dst.TileMode = src.TileMode;
         dst.TitleBarTextColorAdaptive = src.TitleBarTextColorAdaptive;
         dst.TitleBarFillIndependent = src.TitleBarFillIndependent;
         dst.TitleBarFillColor = src.TitleBarFillColor;
