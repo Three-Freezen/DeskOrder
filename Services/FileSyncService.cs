@@ -9,33 +9,47 @@ using DesktopZones.Models;
 namespace DesktopZones.Services;
 
 /// <summary>
-/// 逆向同步服务（单例）。定期扫描所有分区的图标项，若原文件/文件夹已不存在
-/// 则自动移除对应图标项（与 AutoOrganize 互补：AutoOrganize 发现新文件 → 添加图标，
-/// FileSyncService 发现文件消失 → 删除图标）。
+/// 逆向同步服务（单例）。事件驱动——为每个分区图标的父目录注册
+/// FileSystemWatcher，监听文件/文件夹的删除与重命名；命中后精确移除
+/// 对应图标项（与 AutoOrganize 互补：AutoOrganize 发现新文件→添加图标，
+/// FileSyncService 发现文件消失→删除图标）。
 ///
-/// 设计：5 秒轮询（比 FileSystemWatcher 更稳健——无 buffer 溢出 / 网络驱动器 /
-/// 多 watcher 生命周期管理问题，3-5 秒延迟对用户无感知）。仅处理真实文件路径
-/// （ItemType.Folder / Shortcut / Application / Document），跳过 ShellLocation / SubFolder。
+/// 设计要点：
+///   - 事件驱动，空闲时零 CPU（对比轮询方案）。
+///   - 每个父目录仅一个 watcher（多图标共享同一目录时不重复创建）。
+///   - 防抖 500ms 合并批量删除（如清空文件夹时一次性移除所有对应图标）。
+///   - 订阅 ZonesChanged 自动重建 watcher 集合（分区增删、图标增删时同步）。
+///   - 仅处理真实文件路径项（Folder/Shortcut/Application/Document），
+///     跳过 ShellLocation / SubFolder / ::{GUID} 虚拟对象。
 /// </summary>
 public sealed class FileSyncService : IDisposable
 {
     public static FileSyncService Instance { get; } = new();
 
-    readonly DispatcherTimer _timer;
+    ZoneManager? _zoneManager;
+    readonly Dictionary<string, DirWatcher> _watchers = new(StringComparer.OrdinalIgnoreCase);
+    readonly DispatcherTimer _debounce;
+    readonly HashSet<string> _dirtyDirs = new(StringComparer.OrdinalIgnoreCase);
+    readonly object _lock = new();
     bool _enabled;
     bool _disposed;
 
     FileSyncService()
     {
-        _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
-        _timer.Tick += (_, _) => ScanAll();
+        _debounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        _debounce.Tick += (_, _) => ProcessDirty();
     }
 
-    /// <summary>由 App.OnStartup 注入配置初始值并启动/停止定时器。</summary>
-    public void Initialize(bool enabled)
+    /// <summary>由 App.OnStartup 注入；订阅 ZonesChanged 自动同步 watcher 集合。</summary>
+    public void Initialize(ZoneManager zoneManager, bool enabled)
     {
+        _zoneManager = zoneManager;
         _enabled = enabled;
-        if (_enabled) _timer.Start();
+        if (_enabled)
+        {
+            _zoneManager.ZonesChanged += OnZonesChanged;
+            RebuildWatchers();
+        }
     }
 
     /// <summary>运行时开关（由 SettingsPage 调用）。</summary>
@@ -46,75 +60,226 @@ public sealed class FileSyncService : IDisposable
         {
             if (_enabled == value) return;
             _enabled = value;
-            if (_enabled) _timer.Start();
-            else _timer.Stop();
+            if (_enabled)
+            {
+                _zoneManager ??= (Application.Current as App)?.ZoneManager;
+                if (_zoneManager != null)
+                {
+                    _zoneManager.ZonesChanged += OnZonesChanged;
+                    RebuildWatchers();
+                }
+            }
+            else
+            {
+                if (_zoneManager != null)
+                    _zoneManager.ZonesChanged -= OnZonesChanged;
+                ClearWatchers();
+            }
         }
     }
 
-    /// <summary>立即执行一次扫描（外部可手动触发）。</summary>
-    public void ScanNow() => ScanAll();
-
-    void ScanAll()
+    void OnZonesChanged()
     {
         if (!_enabled || _disposed) return;
-        var app = Application.Current;
-        var zoneManager = app is App a ? a.ZoneManager : null;
-        if (zoneManager == null) return;
+        RebuildWatchers();
+    }
 
-        int totalRemoved = 0;
-        // 收集需要删除的项（在遍历期间不修改集合）。
-        var toRemove = new List<(Zone zone, List<ZoneItem> items)>();
+    /// <summary>重建 watcher 集合：收集当前所有分区图标的父目录，创建缺失的 watcher，
+    /// 释放不再需要的 watcher（幂等，高频调用无副作用）。</summary>
+    void RebuildWatchers()
+    {
+        if (_zoneManager == null) return;
 
-        foreach (var zone in zoneManager.Zones)
+        // 收集当前所有需要监听的父目录。
+        var needed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var zone in _zoneManager.Zones)
         {
-            var stale = new List<ZoneItem>();
             foreach (var item in zone.Items)
             {
-                // 仅检查真实文件路径项。
-                if (item.Type is ItemType.ShellLocation or ItemType.SubFolder) continue;
-                if (string.IsNullOrWhiteSpace(item.TargetPath)) continue;
+                if (!ShouldWatch(item)) continue;
+                var dir = GetParentDir(item.TargetPath);
+                if (dir != null) needed.Add(dir);
+            }
+        }
 
-                // 纯虚拟 shell 对象（::{GUID}）没有文件系统路径。
-                if (item.TargetPath.StartsWith("::")) continue;
+        // 移除不再需要的 watcher。
+        foreach (var dir in _watchers.Keys.Where(d => !needed.Contains(d)).ToList())
+        {
+            _watchers[dir].Dispose();
+            _watchers.Remove(dir);
+        }
+
+        // 创建缺失的 watcher。
+        foreach (var dir in needed)
+        {
+            if (_watchers.ContainsKey(dir)) continue;
+            if (!Directory.Exists(dir)) continue;
+            try
+            {
+                _watchers[dir] = new DirWatcher(dir, OnFileEvent, OnWatcherError);
+            }
+            catch
+            {
+                // 无法创建 watcher（权限不足等）→ 跳过该目录。
+            }
+        }
+    }
+
+    /// <summary>释放所有 watcher。</summary>
+    void ClearWatchers()
+    {
+        foreach (var w in _watchers.Values) w.Dispose();
+        _watchers.Clear();
+        _dirtyDirs.Clear();
+        _debounce.Stop();
+    }
+
+    /// <summary>FileSystemWatcher 回调（线程池线程）：标记目录为脏，启动防抖定时器。</summary>
+    void OnFileEvent(string directory)
+    {
+        lock (_lock)
+        {
+            _dirtyDirs.Add(directory);
+        }
+        // DispatcherTimer 自动 marshal 到 UI 线程。
+        Application.Current?.Dispatcher.BeginInvoke(() =>
+        {
+            _debounce.Stop();
+            _debounce.Start();
+        });
+    }
+
+    /// <summary>Watcher 错误回调：移除该 watcher，下次 RebuildWatchers 会重建。</summary>
+    void OnWatcherError(string directory)
+    {
+        lock (_lock)
+        {
+            if (_watchers.Remove(directory, out var w)) w.Dispose();
+        }
+    }
+
+    /// <summary>防抖到期：检查所有脏目录下的图标项，移除已失效的。</summary>
+    void ProcessDirty()
+    {
+        _debounce.Stop();
+        if (!_enabled || _disposed || _zoneManager == null) return;
+
+        List<string> dirs;
+        lock (_lock)
+        {
+            if (_dirtyDirs.Count == 0) return;
+            dirs = _dirtyDirs.ToList();
+            _dirtyDirs.Clear();
+        }
+
+        var toRemove = new List<(Zone zone, ZoneItem item)>();
+
+        foreach (var zone in _zoneManager.Zones)
+        {
+            foreach (var item in zone.Items)
+            {
+                if (!ShouldWatch(item)) continue;
+                var dir = GetParentDir(item.TargetPath);
+                if (dir == null || !dirs.Contains(dir)) continue;
 
                 try
                 {
                     if (!PathExists(item.TargetPath))
-                        stale.Add(item);
+                        toRemove.Add((zone, item));
                 }
                 catch
                 {
-                    // 路径格式异常（如非法字符）→ 视为不存在。
-                    stale.Add(item);
+                    toRemove.Add((zone, item));
                 }
             }
-            if (stale.Count > 0)
-                toRemove.Add((zone, stale));
         }
 
-        foreach (var (zone, items) in toRemove)
-        {
-            foreach (var item in items)
-                zone.Items.Remove(item);
-            totalRemoved += items.Count;
-        }
+        foreach (var (zone, item) in toRemove)
+            zone.Items.Remove(item);
 
-        if (totalRemoved > 0)
+        if (toRemove.Count > 0)
         {
-            zoneManager.SaveConfig();
-            zoneManager.NotifyChanged();
+            _zoneManager.SaveConfig();
+            _zoneManager.NotifyChanged();
+            // 删除操作会触发 ZonesChanged → RebuildWatchers，自动清理已失效的 watcher。
         }
     }
 
-    /// <summary>检查文件或文件夹是否存在（避免抛出异常中断扫描）。</summary>
-    static bool PathExists(string path)
+    static bool ShouldWatch(ZoneItem item)
     {
-        return File.Exists(path) || Directory.Exists(path);
+        if (item.Type is ItemType.ShellLocation or ItemType.SubFolder) return false;
+        if (string.IsNullOrWhiteSpace(item.TargetPath)) return false;
+        if (item.TargetPath.StartsWith("::")) return false;
+        return true;
     }
+
+    /// <summary>获取路径的父目录（兼容 UNC / 根目录等边界情况）。</summary>
+    static string? GetParentDir(string path)
+    {
+        try
+        {
+            // Path.GetDirectoryName 对根目录（如 "C:\"）返回 null。
+            var dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(dir)) return dir;
+            // 根目录本身作为父目录（如网络驱动器根）。
+            if (Path.IsPathRooted(path)) return Path.GetPathRoot(path);
+        }
+        catch { }
+        return null;
+    }
+
+    static bool PathExists(string path) => File.Exists(path) || Directory.Exists(path);
 
     public void Dispose()
     {
         _disposed = true;
-        _timer.Stop();
+        if (_zoneManager != null)
+            _zoneManager.ZonesChanged -= OnZonesChanged;
+        ClearWatchers();
+    }
+
+    // ── Per-directory watcher ──
+
+    sealed class DirWatcher : IDisposable
+    {
+        readonly FileSystemWatcher _fsw;
+        readonly Action<string> _onEvent;
+        readonly Action<string> _onError;
+        readonly string _directory;
+
+        public DirWatcher(string directory, Action<string> onEvent, Action<string> onError)
+        {
+            _directory = directory;
+            _onEvent = onEvent;
+            _onError = onError;
+
+            _fsw = new FileSystemWatcher(directory)
+            {
+                NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName,
+                EnableRaisingEvents = true,
+                InternalBufferSize = 8192,
+            };
+            _fsw.Deleted += OnChanged;
+            _fsw.Renamed += OnRenamed;
+            _fsw.Error += OnError;
+        }
+
+        void OnChanged(object sender, FileSystemEventArgs e) => _onEvent(_directory);
+        void OnRenamed(object sender, RenamedEventArgs e) => _onEvent(_directory);
+
+        void OnError(object sender, ErrorEventArgs e)
+        {
+            _fsw.EnableRaisingEvents = false;
+            _onError(_directory);
+        }
+
+        public void Dispose()
+        {
+            _fsw.Deleted -= OnChanged;
+            _fsw.Renamed -= OnRenamed;
+            _fsw.Error -= OnError;
+            _fsw.EnableRaisingEvents = false;
+            _fsw.Dispose();
+        }
     }
 }
