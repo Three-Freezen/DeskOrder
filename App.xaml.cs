@@ -168,6 +168,9 @@ public partial class App : System.Windows.Application
         // 逆向同步：原文件消失/变更时自动删除分区图标（事件驱动 FileSystemWatcher）。
         FileSyncService.Instance.Initialize(_zoneManager, _configService.Load().ReverseSyncEnabled);
 
+        // 分区图片预览：同步运行态开关（ZoneItemViewModel 渲染时读取）。
+        ShellIconService.ImagePreviewEnabled = _configService.Load().ImagePreviewEnabled;
+
         var config = _configService.Load();
         // Apply persisted language preference
         if (!string.IsNullOrEmpty(config.Language))

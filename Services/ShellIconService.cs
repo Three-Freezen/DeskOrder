@@ -94,6 +94,9 @@ public class ShellIconService
 
     // ── Image thumbnail (分区图片预览) ──
 
+    /// <summary>分区图片预览开关（运行时由 App 启动 / 设置页同步）。</summary>
+    public static bool ImagePreviewEnabled { get; set; }
+
     static readonly HashSet<string> _imageExts = new(StringComparer.OrdinalIgnoreCase)
     {
         ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".tiff", ".tif", ".ico", ".svg"
@@ -122,9 +125,12 @@ public class ShellIconService
         ImageSource? src = null;
         try
         {
+            // 用 FileStream 加载本地路径（new Uri("C:\...") 会把盘符解析成 scheme 而失败），
+            // FileShare.Read 允许图片正被其它程序（资源管理器等）读取时也能打开。
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
             var bmp = new BitmapImage();
             bmp.BeginInit();
-            bmp.UriSource = new Uri(path, UriKind.Absolute);
+            bmp.StreamSource = fs;
             bmp.DecodePixelWidth = decodeWidth;
             bmp.CacheOption = BitmapCacheOption.OnLoad;
             bmp.CreateOptions = BitmapCreateOptions.IgnoreColorProfile;

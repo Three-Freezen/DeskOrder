@@ -334,9 +334,7 @@ public class ZoneItemViewModel : INotifyPropertyChanged
             if (_icon == null && _iconRetryTimer == null)
             {
                 // 分区图片预览：图片文件显示内容缩略图而非默认文件图标。
-                if (ShellIconService.IsImageFile(TargetPath)
-                    && (Application.Current as App)?.ZoneManager is { } zm
-                    && zm.GetConfig().ImagePreviewEnabled)
+                if (ShellIconService.IsImageFile(TargetPath) && ShellIconService.ImagePreviewEnabled)
                 {
                     _icon = _iconService.GetImageThumbnail(TargetPath);
                 }
