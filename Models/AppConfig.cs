@@ -23,6 +23,9 @@ public class AppConfig
     // ── 逆向同步：原文件消失/变更时自动删除分区图标 ──
     public bool ReverseSyncEnabled { get; set; } = false;
 
+    // ── 分区图片预览：导入的图片文件显示内容缩略图而非默认图标 ──
+    public bool ImagePreviewEnabled { get; set; } = false;
+
     // ── Theme selection (three-valued; replaces ambiguous single `Theme`) ──
     /// <summary>"System" / "Light" / "Dark". Defaults to "System" so existing configs fall back to OS preference.</summary>
     public string ThemeMode { get; set; } = "System";

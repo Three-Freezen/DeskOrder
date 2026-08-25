@@ -176,6 +176,8 @@
   "Settings.AutoAlign": "Auto Align",
   "Settings.ReverseSync": "Reverse Sync",
   "Settings.ReverseSync.Hint": "Auto-remove zone icons when source files are deleted or moved",
+  "Settings.ImagePreview": "Zone Image Preview",
+  "Settings.ImagePreview.Hint": "Show image content thumbnails instead of default file icons",
   "Settings.Update": "Update",
   "Settings.CheckUpdate": "Check for updates",
   "Settings.UpToDate": "You're up to date (v0.9.0)",
@@ -329,6 +331,8 @@
 
   "ZoneProp.Section.AutoOrganize": "Auto-organize",
   "ZoneProp.AutoOrganize.WatchingEnabled": "Enable watching",
+  "ZoneProp.AutoOrganize.ExtensionEnabled": "Auto-organize by extension",
+  "ZoneProp.AutoOrganize.NameEnabled": "Auto-organize by filename",
   "ZoneProp.AutoOrganize.ExtensionLabel": "Selected extensions",
   "ZoneProp.AutoOrganize.NameLabel": "Filename tokens",
   "ZoneProp.AutoOrganize.WatchPath": "Watch path",

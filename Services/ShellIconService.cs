@@ -92,6 +92,56 @@ public class ShellIconService
         return src;
     }
 
+    // ── Image thumbnail (分区图片预览) ──
+
+    static readonly HashSet<string> _imageExts = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".tiff", ".tif", ".ico", ".svg"
+    };
+
+    /// <summary>文件是否为支持预览的图片格式（按扩展名判断）。</summary>
+    public static bool IsImageFile(string path)
+    {
+        try { return _imageExts.Contains(Path.GetExtension(path)); }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// 加载图片文件的内容缩略图（与资源管理器视图模式一致）。
+    /// 使用 BitmapImage + DecodePixelWidth 按需解码，避免加载全分辨率。
+    /// 缓存键加 "thumb:" 前缀与普通图标缓存隔离。
+    /// </summary>
+    public ImageSource? GetImageThumbnail(string path, int decodeWidth = 256)
+    {
+        if (!IsImageFile(path) || !File.Exists(path)) return null;
+
+        string cacheKey = "thumb:" + path;
+        if (_iconCache.TryGetValue(cacheKey, out var cached))
+            return cached;
+
+        ImageSource? src = null;
+        try
+        {
+            var bmp = new BitmapImage();
+            bmp.BeginInit();
+            bmp.UriSource = new Uri(path, UriKind.Absolute);
+            bmp.DecodePixelWidth = decodeWidth;
+            bmp.CacheOption = BitmapCacheOption.OnLoad;
+            bmp.CreateOptions = BitmapCreateOptions.IgnoreColorProfile;
+            bmp.EndInit();
+            bmp.Freeze(); // 跨线程安全
+            src = bmp;
+        }
+        catch
+        {
+            // 文件损坏 / 格式不支持 / 被占用 → 回退到默认图标。
+        }
+
+        if (src != null)
+            _iconCache.TryAdd(cacheKey, src);
+        return src;
+    }
+
     /// <summary>
     /// Extract an icon from an explicit "file,index" icon location (a shortcut's custom
     /// icon). Index 0 .ico files are extracted via IShellItemImageFactory — this keeps

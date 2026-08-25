@@ -176,6 +176,8 @@
   "Settings.AutoAlign": "自动对齐",
   "Settings.ReverseSync": "逆向同步",
   "Settings.ReverseSync.Hint": "原文件被删除或移动后，自动移除对应分区图标",
+  "Settings.ImagePreview": "分区图片预览",
+  "Settings.ImagePreview.Hint": "导入的图片文件显示内容缩略图，而非默认文件图标",
   "Settings.Update": "更新",
   "Settings.CheckUpdate": "检查更新",
   "Settings.UpToDate": "已是最新版本 v0.9.0",
@@ -329,6 +331,8 @@
 
   "ZoneProp.Section.AutoOrganize": "自动整理",
   "ZoneProp.AutoOrganize.WatchingEnabled": "启用监听",
+  "ZoneProp.AutoOrganize.ExtensionEnabled": "按扩展名自动整理",
+  "ZoneProp.AutoOrganize.NameEnabled": "按文件名包含自动整理",
   "ZoneProp.AutoOrganize.ExtensionLabel": "已选后缀",
   "ZoneProp.AutoOrganize.NameLabel": "文件名要素",
   "ZoneProp.AutoOrganize.WatchPath": "监听路径",

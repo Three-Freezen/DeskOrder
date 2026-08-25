@@ -3,6 +3,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -332,7 +333,14 @@ public class ZoneItemViewModel : INotifyPropertyChanged
         {
             if (_icon == null && _iconRetryTimer == null)
             {
-                _icon = _iconService.GetIcon(TargetPath, Type, IconPath);
+                // 分区图片预览：图片文件显示内容缩略图而非默认文件图标。
+                if (ShellIconService.IsImageFile(TargetPath)
+                    && (Application.Current as App)?.ZoneManager is { } zm
+                    && zm.GetConfig().ImagePreviewEnabled)
+                {
+                    _icon = _iconService.GetImageThumbnail(TargetPath);
+                }
+                _icon ??= _iconService.GetIcon(TargetPath, Type, IconPath);
                 // 文件刚创建仍在写入/被占用时 shell 解析失败：定时重试直到成功
                 //（监听导入时文件尚未写完 → 图标空白的修复）。重试进行中不再重复解析，
                 // 由定时器统一重试。

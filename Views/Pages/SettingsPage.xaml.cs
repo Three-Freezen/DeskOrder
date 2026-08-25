@@ -89,6 +89,7 @@ public partial class SettingsPage : UserControl
             StartMinimizedBox.IsChecked = cfg.StartMinimized;
             AutoAlignBox.IsChecked = cfg.AutoAlign;
             ReverseSyncBox.IsChecked = cfg.ReverseSyncEnabled;
+            ImagePreviewBox.IsChecked = cfg.ImagePreviewEnabled;
             SelectComboByTag(LanguageCombo, cfg.Language);
             SyncThemeRadios(cfg.ThemeMode switch
             {
@@ -164,6 +165,17 @@ public partial class SettingsPage : UserControl
         cfg.ReverseSyncEnabled = ReverseSyncBox.IsChecked == true;
         _configService.Save(cfg);
         FileSyncService.Instance.Enabled = cfg.ReverseSyncEnabled;
+    }
+
+    void ImagePreview_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_suppress) return;
+        var cfg = _configService.Load();
+        cfg.ImagePreviewEnabled = ImagePreviewBox.IsChecked == true;
+        _configService.Save(cfg);
+        // 清除图标缓存并刷新所有分区窗口，使缩略图/图标切换即时生效。
+        ShellIconService.Instance.ClearCache();
+        (Application.Current as App)?.ZoneManager?.NotifyChanged();
     }
 
     void Language_Changed(object sender, SelectionChangedEventArgs e)

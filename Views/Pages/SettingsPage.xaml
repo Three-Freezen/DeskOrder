@@ -28,6 +28,11 @@
                     Checked="ReverseSync_Changed" Unchecked="ReverseSync_Changed"/>
           <TextBlock Text="{loc:Loc Key=Settings.ReverseSync.Hint}" FontSize="11" Margin="24,0,0,8"
                      Foreground="{DynamicResource Brush.Text.Tertiary}" TextWrapping="Wrap"/>
+          <CheckBox x:Name="ImagePreviewBox" Content="{loc:Loc Key=Settings.ImagePreview}" Margin="0,6,0,2"
+                    Foreground="{DynamicResource Brush.Text.Primary}"
+                    Checked="ImagePreview_Changed" Unchecked="ImagePreview_Changed"/>
+          <TextBlock Text="{loc:Loc Key=Settings.ImagePreview.Hint}" FontSize="11" Margin="24,0,0,8"
+                     Foreground="{DynamicResource Brush.Text.Tertiary}" TextWrapping="Wrap"/>
           <Grid Margin="0,8,0,8">
             <Grid.ColumnDefinitions>
               <ColumnDefinition Width="*"/>
