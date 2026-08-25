@@ -165,6 +165,9 @@ public partial class App : System.Windows.Application
         AutoOrganizeService.Instance.SyncAll(_zoneManager.Zones);
         _zoneManager.ZonesChanged += () => AutoOrganizeService.Instance.SyncAll(_zoneManager.Zones);
 
+        // 逆向同步：原文件消失/变更时自动删除分区图标。
+        FileSyncService.Instance.Initialize(_configService.Load().ReverseSyncEnabled);
+
         var config = _configService.Load();
         // Apply persisted language preference
         if (!string.IsNullOrEmpty(config.Language))
@@ -793,6 +796,7 @@ public partial class App : System.Windows.Application
         }
         _reminderService?.Dispose();
         AutoOrganizeService.Instance.Dispose();
+        FileSyncService.Instance.Dispose();
         _zoneManager?.Shutdown();
         _trayIcon?.Dispose();
         DisposeSingleInstance();
@@ -809,6 +813,7 @@ public partial class App : System.Windows.Application
         }
         _reminderService?.Dispose();
         AutoOrganizeService.Instance.Dispose();
+        FileSyncService.Instance.Dispose();
         _zoneManager?.Shutdown();
         _trayIcon?.Dispose();
         DisposeSingleInstance();

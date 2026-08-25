@@ -174,6 +174,8 @@
   "Settings.StartupShortcut.FailedTitle": "开机自启动设置失败",
   "Settings.StartupShortcut.FailedBody": "{0}",
   "Settings.AutoAlign": "自动对齐",
+  "Settings.ReverseSync": "逆向同步",
+  "Settings.ReverseSync.Hint": "原文件被删除或移动后，自动移除对应分区图标",
   "Settings.Update": "更新",
   "Settings.CheckUpdate": "检查更新",
   "Settings.UpToDate": "已是最新版本 v0.9.0",
@@ -326,8 +328,7 @@
   "Subfolder.Dissolve": "解散次级文件夹",
 
   "ZoneProp.Section.AutoOrganize": "自动整理",
-  "ZoneProp.AutoOrganize.ExtensionEnabled": "按扩展名自动整理",
-  "ZoneProp.AutoOrganize.NameEnabled": "按文件名包含自动整理",
+  "ZoneProp.AutoOrganize.WatchingEnabled": "启用监听",
   "ZoneProp.AutoOrganize.ExtensionLabel": "已选后缀",
   "ZoneProp.AutoOrganize.NameLabel": "文件名要素",
   "ZoneProp.AutoOrganize.WatchPath": "监听路径",

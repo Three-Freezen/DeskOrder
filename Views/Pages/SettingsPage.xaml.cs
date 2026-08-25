@@ -88,6 +88,7 @@ public partial class SettingsPage : UserControl
             StartWithWindowsBox.IsChecked = cfg.StartWithWindows;
             StartMinimizedBox.IsChecked = cfg.StartMinimized;
             AutoAlignBox.IsChecked = cfg.AutoAlign;
+            ReverseSyncBox.IsChecked = cfg.ReverseSyncEnabled;
             SelectComboByTag(LanguageCombo, cfg.Language);
             SyncThemeRadios(cfg.ThemeMode switch
             {
@@ -154,6 +155,15 @@ public partial class SettingsPage : UserControl
         var cfg = _configService.Load();
         cfg.AutoAlign = AutoAlignBox.IsChecked == true;
         _configService.Save(cfg);
+    }
+
+    void ReverseSync_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_suppress) return;
+        var cfg = _configService.Load();
+        cfg.ReverseSyncEnabled = ReverseSyncBox.IsChecked == true;
+        _configService.Save(cfg);
+        FileSyncService.Instance.Enabled = cfg.ReverseSyncEnabled;
     }
 
     void Language_Changed(object sender, SelectionChangedEventArgs e)
