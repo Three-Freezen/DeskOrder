@@ -167,13 +167,10 @@ public partial class ZoneWindow : Window
         _vmItemsChangedHandler = (_, _) =>
         {
             UpdateCanvasSize();
-            // 磁贴模式：新增/移除图标后，容器在下一个布局才生成 — 两个时点各
-            // 重应用一次「隐藏应用名」和「自定义图标」状态（新容器默认显示名称，
-            // 布局前后各覆盖一次，保证新图标一定吃到当前设置）。
-            Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Render,
-                ReapplyTileItemVisuals);
-            Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.ContextIdle,
-                ReapplyTileItemVisuals);
+            // 自定义图标按图标数立即同步（只切换 ItemsHost 可见性，不依赖容器）。
+            // 应用名隐藏由模板 DataTrigger 声明式处理（容器实例化瞬间即生效），
+            // 不在此延迟遍历 — 否则缩窗重排容器时会出现「名字先显示再隐藏」的闪烁。
+            ApplyCustomIcon(_zone.TileMode && _zone.CustomIcon && _zone.Items.Count == 1);
         };
         _vm.Items.CollectionChanged += _vmItemsChangedHandler;
         Loaded += OnLoad;

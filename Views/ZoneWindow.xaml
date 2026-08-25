@@ -68,6 +68,13 @@
                     <DataTrigger Binding="{Binding IsSelected}" Value="True">
                         <Setter TargetName="SelBox" Property="Visibility" Value="Visible"/>
                     </DataTrigger>
+                    <!-- 隐藏应用名：声明式绑定到窗口 Zone.HideAppName。容器实例化瞬间
+                         即应用，避免缩窗重排/增删图标时「名字先显示再隐藏」的闪烁。 -->
+                    <DataTrigger Binding="{Binding DataContext.Zone.HideAppName,
+                                                  RelativeSource={RelativeSource AncestorType=Window}}"
+                                 Value="True">
+                        <Setter TargetName="ItemNameText" Property="Visibility" Value="Collapsed"/>
+                    </DataTrigger>
                 </DataTemplate.Triggers>
             </DataTemplate>
             <DataTemplate x:Key="SubfolderItemTemplate">
