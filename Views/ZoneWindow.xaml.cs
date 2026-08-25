@@ -146,6 +146,13 @@ public partial class ZoneWindow : Window
         // view class so the unbound VM can be swapped for a SubfolderItemViewModel
         // when the ItemsControl renders a SubFolder row.
         DesktopZones.Views.Components.SubfolderItemView.IconService = icons;
+        // ponytail 2026-08-26: 内层图标与主分区同款操作 — 打开/重命名/删除由
+        // SubfolderFlyout 事件委托回 ZoneWindow(主分区命令都住在这里);
+        // ItemsChanged = flyout 内部换位/删除后保存。
+        SubfolderFlyoutView.ItemOpenRequested += OnFlyoutItemOpen;
+        SubfolderFlyoutView.ItemRenameRequested += OnFlyoutItemRename;
+        SubfolderFlyoutView.ItemDeleteRequested += OnFlyoutItemDelete;
+        SubfolderFlyoutView.ItemsChanged += OnFlyoutItemsChanged;
         _vm = new ZoneViewModel(zone, mgr, icons);
         _vm.IsLocked = zone.IsLocked;
         DataContext = _vm;
@@ -157,7 +164,17 @@ public partial class ZoneWindow : Window
         SetRestoreIcon();
         ApplyLoc();
         FolderList.ItemsSource = _folderEntries;
-        _vmItemsChangedHandler = (_, _) => UpdateCanvasSize();
+        _vmItemsChangedHandler = (_, _) =>
+        {
+            UpdateCanvasSize();
+            // 磁贴模式：新增/移除图标后，容器在下一个布局才生成 — 两个时点各
+            // 重应用一次「隐藏应用名」和「自定义图标」状态（新容器默认显示名称，
+            // 布局前后各覆盖一次，保证新图标一定吃到当前设置）。
+            Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Render,
+                ReapplyTileItemVisuals);
+            Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.ContextIdle,
+                ReapplyTileItemVisuals);
+        };
         _vm.Items.CollectionChanged += _vmItemsChangedHandler;
         Loaded += OnLoad;
         LocationChanged += (_, _) => { _zone.X = Left; _zone.Y = Top; ScheduleSave(); };
@@ -184,8 +201,7 @@ public partial class ZoneWindow : Window
                 == System.Windows.Controls.Primitives.GeneratorStatus.ContainersGenerated)
             {
                 ApplyItemTextColorAdaptive();
-                ApplyHideAppName(_zone.HideAppName);
-                ApplyCustomIcon(_zone.TileMode && _zone.CustomIcon && _zone.Items.Count == 1);
+                ReapplyTileItemVisuals();
             }
         };
         ItemsHost.ItemContainerGenerator.StatusChanged += _itemsHostStatusChangedHandler;
@@ -688,11 +704,33 @@ public partial class ZoneWindow : Window
         UpdateCanvasSize();
     }
 
+    /// <summary>ponytail 2026-08-26: 解析 SubFolder 打开的填充 — 跟随主分区时取
+    /// ResolveStyle() 的主分区主体填充(填充色/背景图/液态玻璃,不含边框);不跟随时取
+    /// SubFolder 自身的 override 字段。边框固定不同步(设计如此)。</summary>
+    SubfolderFill ResolveSubfolderFill(ZoneItem sub)
+    {
+        if (!sub.FillFollowsZone)
+            return SubfolderFill.FromOverride(sub);
+        var s = ResolveStyle();
+        return new SubfolderFill(
+            s.FillColor, 100,
+            s.BgImagePath, s.BgImageOpacity,
+            _zone.EnableAcrylic ? _zone.GlassColorMode : null);
+    }
+
     void OpenSubfolderFlyout(ZoneItem sub)
     {
+        // ponytail 2026-08-26: 左键/双击/菜单"打开"已开启的同一个 SubFolder → 直接播
+        // 关闭动画(不要重播打开动画 — 重开会 Reset 缩放/不透明度,视觉上卡一帧)。
+        if (SubfolderFlyoutPopup.IsOpen && !_flyoutClosing
+            && SubfolderFlyoutView.ViewModel?.HostSubItem.Id == sub.Id)
+        {
+            CloseSubfolderFlyout();
+            return;
+        }
         var token = ++_flyoutOpenToken;
         _flyoutClosing = false;
-        var vm = new SubfolderFlyoutViewModel(sub, _iconService);
+        var vm = new SubfolderFlyoutViewModel(sub, _iconService, ResolveSubfolderFill(sub));
         SubfolderFlyoutView.ViewModel = vm;
 
         // SubItems 变化(drag-in/out)后重排内层 UniformGrid。
@@ -750,20 +788,34 @@ public partial class ZoneWindow : Window
     /// 上方,并夹在屏幕工作区内;c = 图标中心 - pos(flyout 局部坐标,允许负值)。
     /// 全程只用图标容器的 PointToScreen(容器在可见分区窗口里,必然连着 PresentationSource),
     /// 不再读 flyout 自身的 PointToScreen — 那会因 popup 重排时序拿到错误位置,
-    /// 或在 visual 未连接时抛异常回落到 (0,0),造成"起点有时在左、有时在右"。</summary>
+    /// 或在 visual 未连接时抛异常回落到 (0,0),造成"起点有时在左、有时在右"。
+    /// ponytail 2026-08-26: 全程统一到 DIP。PointToScreen / SystemParameters.WorkArea
+    /// 返回物理像素,而 Popup 的 AbsolutePoint offset 与 RenderTransform 平移都是 DIP —
+    /// 125%/150% 缩放下直接把物理像素塞给 offset 会被再放大一遍,flyout 离图标越来越远
+    /// ("离图标太远")。锚点 c 同样按 DIP 计算,展开原点仍是图标中心,不改变原有算法。</summary>
     (Point pos, Point c) ComputeFlyoutPosAndAnchor(FrameworkElement? container, Size flyoutSize)
     {
         const double gap = 8;
-        var wa = SystemParameters.WorkArea;
+        // 物理像素 → DIP 的换算比例:取图标所在窗口(分区)的当前显示器 DPI。
+        double sx = 1, sy = 1;
+        try
+        {
+            var d = VisualTreeHelper.GetDpi((System.Windows.Media.Visual?)container ?? this);
+            sx = d.DpiScaleX; sy = d.DpiScaleY;
+        }
+        catch { }
+        var waPx = SystemParameters.WorkArea; // 物理像素
+        var wa = new Rect(waPx.Left / sx, waPx.Top / sy, waPx.Width / sx, waPx.Height / sy); // → DIP
         Point iconTL = new(0, 0);
         double iconW = 0, iconH = 0;
         if (container != null)
         {
             try
             {
-                iconTL = container.PointToScreen(new Point(0, 0));
-                iconW = container.ActualWidth;
-                iconH = container.ActualHeight;
+                var tl = container.PointToScreen(new Point(0, 0)); // 物理像素
+                iconTL = new Point(tl.X / sx, tl.Y / sy);          // → DIP
+                iconW = container.ActualWidth;                      // 已是 DIP
+                iconH = container.ActualHeight;                     // 已是 DIP
             }
             catch
             {
@@ -850,6 +902,14 @@ public partial class ZoneWindow : Window
     void OnFlyoutClickOutside(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
         if (!SubfolderFlyoutPopup.IsOpen) return;
+        // ponytail 2026-08-26: 右键菜单(ContextMenu 弹出层)内的点击不算"点击外部" —
+        // 否则内层图标的 打开/重命名/删除 菜单刚一点击就把 flyout 关掉了。
+        for (System.Windows.DependencyObject? cur = e.OriginalSource as System.Windows.DependencyObject;
+             cur != null;
+             cur = System.Windows.LogicalTreeHelper.GetParent(cur))
+        {
+            if (cur is System.Windows.Controls.ContextMenu) return;
+        }
         CloseSubfolderFlyout();
     }
 
@@ -934,10 +994,15 @@ public partial class ZoneWindow : Window
 
     void SubfolderFlyout_EditStyleRequested(SubfolderFlyout flyout)
     {
-        if (flyout.ViewModel == null) return;
+        if (flyout.ViewModel == null)
+        {
+            System.Diagnostics.Trace.WriteLine("[SubFlyout] EditStyleRequested: ViewModel 为空,中止");
+            return;
+        }
         // ponytail 2026-08-26: ensure the management window exists before routing the
         // property editor — PropertyWindowService is a no-op while ManagementWindow is
         // null (startup with StartMinimized + zones shown directly). See App.EnsureManagementWindow.
+        System.Diagnostics.Trace.WriteLine("[SubFlyout] EditStyleRequested: ⚙ 点击 → 打开样式设置,Host=" + flyout.ViewModel.HostSubItem.Id);
         (System.Windows.Application.Current as App)?.EnsureManagementWindow();
         PropertyWindowService.OpenOrFocus(flyout.ViewModel.HostSubItem, this);
     }
@@ -950,6 +1015,44 @@ public partial class ZoneWindow : Window
         _flyoutCloseTimer = null;
         try { DragDrop.DoDragDrop(SubfolderFlyoutView, itemVm, DragDropEffects.Move); }
         finally { ClearSubfolderDragScale(); }
+    }
+
+    // ── 内层图标与主分区同款操作(委托自 SubfolderFlyout) ──
+
+    void OnFlyoutItemOpen(ZoneItemViewModel vm)
+    {
+        try { ShellLocationResolver.Open(vm.TargetPath, vm.Type); }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"{_loc["Item.FailedToOpen"]}\n{ex.Message}",
+                _loc["Item.FailedToOpen.Title"], MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    void OnFlyoutItemRename(ZoneItemViewModel vm)
+    {
+        // 与主分区单个图标重命名同款弹窗(RenameDialog)。
+        var rn = new Views.RenameDialog(vm.Name) { Owner = this };
+        if (rn.ShowDialog() == true && !string.IsNullOrWhiteSpace(rn.NewName))
+        {
+            vm.Name = rn.NewName; // ZoneItemViewModel.Name 直写底层 ZoneItem
+            _mgr.SaveConfig();
+        }
+    }
+
+    void OnFlyoutItemDelete(ZoneItemViewModel vm)
+    {
+        // 与主分区一致:单个删除直接删(无确认)。ItemVms.Remove → CollectionChanged
+        // 写回 HostSubItem.SubItems → 图标格 2×2 缩略图 / flyout 网格自动刷新。
+        SubfolderFlyoutView.ViewModel?.ItemVms.Remove(vm);
+        OnFlyoutItemsChanged();
+    }
+
+    /// <summary>flyout 内部换位/删除已写回模型 → 落盘 + 通知。</summary>
+    void OnFlyoutItemsChanged()
+    {
+        _mgr.SaveConfig();
+        _mgr.NotifyChanged();
     }
 
     void SubfolderFlyoutPopup_Closed(object? s, EventArgs e)
@@ -2311,13 +2414,21 @@ public partial class ZoneWindow : Window
 
         double pitch = ZoneLayout.Pitch(gridSize);
         double vpitch = ZoneLayout.VPitch(gridSize);
-        double x = 10, y = 10;
+        double pad = ZoneLayout.Pad;
+        // 按窗口宽度计算列数并把整块水平居中 — 左右留白相等（不再出现
+        // 左侧 10px、右侧一大片的偏斜布局；换行临界处的留白跳变也被摊平）。
+        double avail = Math.Max(0, _zone.Width - 2 * pad);
+        int cols = Math.Max(1, (int)Math.Floor((avail - gridSize) / pitch) + 1);
+        double blockWidth = (cols - 1) * pitch + gridSize;
+        double offsetX = Math.Max(pad, (_zone.Width - blockWidth) / 2);
+        int idx = 0;
         foreach (var item in items.OrderBy(i => i.Y).ThenBy(i => i.X))
         {
-            item.X = ZoneViewModel.SnapToGrid(x, gridSize);
-            item.Y = ZoneViewModel.SnapToGridY(y, gridSize);
-            x += pitch;
-            if (x > _zone.Width - gridSize) { x = 10; y += vpitch; }
+            int col = idx % cols;
+            int row = idx / cols;
+            item.X = offsetX + col * pitch;
+            item.Y = ZoneViewModel.SnapToGridY(pad + row * vpitch, gridSize);
+            idx++;
         }
         _vm.RefreshMergedItems();
     }
@@ -3484,6 +3595,8 @@ public partial class ZoneWindow : Window
         TitleBarBg.CornerRadius = new CornerRadius(s.CornerRadius, s.CornerRadius, 0, 0);
         if (BottomBarBg != null)
             BottomBarBg.CornerRadius = new CornerRadius(0, 0, s.CornerRadius, s.CornerRadius);
+        if (ClickPulseBg != null)
+            ClickPulseBg.CornerRadius = new CornerRadius(s.CornerRadius);
 
         // ponytail 2026-08-26: keep the OS (DWM) corner preference in lockstep.
         // radius 0 → DONOTROUND so Win11 stops clipping the sharp WPF corners.
@@ -3610,7 +3723,15 @@ public partial class ZoneWindow : Window
         _customIconOpenFirst = on;
     }
 
-    /// <summary>整窗双击：CustomIcon 开启时打开当前列表的第一项；否则忽略。</summary>
+    /// <summary>图标列表变化后重应用磁贴相关的 item 视觉（隐藏应用名 + 自定义图标）。</summary>
+    void ReapplyTileItemVisuals()
+    {
+        ApplyHideAppName(_zone.HideAppName);
+        ApplyCustomIcon(_zone.TileMode && _zone.CustomIcon && _zone.Items.Count == 1);
+    }
+
+    /// <summary>整窗双击：CustomIcon 开启时打开当前列表的第一项；否则忽略。
+    /// 打开的同时播放一次点击脉冲动画 — 仅在该模式下存在双击行为。</summary>
     void Window_MouseDoubleClick(object sender, MouseButtonEventArgs e)
     {
         if (!_customIconOpenFirst) return;
@@ -3618,8 +3739,26 @@ public partial class ZoneWindow : Window
         if (IsWithinZoneChrome(e.OriginalSource)) return;
         var item = _vm.Items.FirstOrDefault();
         if (item == null) return;
+        PlayClickPulse();
         Open(item);
         e.Handled = true;
+    }
+
+    /// <summary>自定义图标双击反馈：整窗白色脉冲（0 → 0.30 → 0，约 230ms）。</summary>
+    void PlayClickPulse()
+    {
+        if (ClickPulseBg == null) return;
+        var anim = new DoubleAnimationUsingKeyFrames();
+        anim.KeyFrames.Add(new EasingDoubleKeyFrame(0.0, KeyTime.FromTimeSpan(TimeSpan.Zero)));
+        anim.KeyFrames.Add(new EasingDoubleKeyFrame(0.30, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(70)))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        });
+        anim.KeyFrames.Add(new EasingDoubleKeyFrame(0.0, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(230)))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        });
+        ClickPulseBg.BeginAnimation(OpacityProperty, anim);
     }
 
     /// <summary>Combined title-bar height: 24px top bar + 24px merged sub-zone tab

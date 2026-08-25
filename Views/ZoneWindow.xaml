@@ -417,6 +417,10 @@
                         <Border x:Name="BottomBarBg" Grid.Row="3" Height="8"
                                 Background="#08FFFFFF"
                                 CornerRadius="0,0,8,8"/>
+
+                        <!-- 自定义图标双击脉冲反馈（仅磁贴单图标模式由代码触发 Opacity 动画） -->
+                        <Border x:Name="ClickPulseBg" Grid.RowSpan="4" Background="#FFFFFF"
+                                Opacity="0" IsHitTestVisible="False"/>
                     </Grid>
                 </Border>
 

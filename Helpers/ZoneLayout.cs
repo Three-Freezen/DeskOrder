@@ -82,18 +82,24 @@ public static class ZoneLayout
         double pitch = Pitch(zone.GridSize);
         double vpitch = VPitch(zone.GridSize);
         double zw = double.IsNaN(zone.Width) ? pitch + Pad : Math.Max(pitch + Pad, zone.Width);
-        double x = Pad, y = Pad;
+        // 按窗口宽度计算列数并把整块水平居中 — 左右留白相等（与 ZoneWindow.RearrangeAll 一致）。
+        double avail = Math.Max(0, zw - 2 * Pad);
+        int cols = Math.Max(1, (int)Math.Floor((avail - zone.GridSize) / pitch) + 1);
+        double blockWidth = (cols - 1) * pitch + zone.GridSize;
+        double offsetX = Math.Max(Pad, (zw - blockWidth) / 2);
         bool changed = false;
 
+        int idx = 0;
         foreach (var it in zone.Items.OrderBy(i => i.Y).ThenBy(i => i.X))
         {
-            double nx = Snap(x, zone.GridSize);
-            double ny = SnapY(y, zone.GridSize);
+            int col = idx % cols;
+            int row = idx / cols;
+            double nx = offsetX + col * pitch;
+            double ny = SnapY(Pad + row * vpitch, zone.GridSize);
             if (Math.Abs(it.X - nx) > 0.01 || Math.Abs(it.Y - ny) > 0.01) changed = true;
             it.X = nx;
             it.Y = ny;
-            x += pitch;
-            if (x > zw - zone.GridSize) { x = Pad; y += vpitch; }
+            idx++;
         }
         return changed;
     }

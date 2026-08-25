@@ -149,10 +149,28 @@ public partial class PropertyPanel : UserControl
     void CaptureFolderMappingState() => _lastFolderMappingState = FolderMappingStateOf(Target);
 
     /// <summary>ZonesChanged handler: rebuild only when the current target's
-    /// mapping state actually moved (avoids resetting fields mid-edit).</summary>
+    /// mapping state actually moved (avoids resetting fields mid-edit).
+    /// 同时实时同步「自定义图标」行 — 分区图标数变化（增删图标）时立即更新
+    /// 门控状态，不用重开面板。</summary>
     void SyncFolderMappingStateFromManager()
     {
         if (Target == null) return;
+
+        // 磁贴模式实时门控：图标数变化 → 刷新自定义图标行的可用状态。
+        if (Target is Zone z)
+        {
+            int count = z.Items.Count;
+            if (_lastZoneItemCount.HasValue && _lastZoneItemCount.Value != count)
+            {
+                _lastZoneItemCount = count;
+                ApplyCustomIconGating(z);
+            }
+            else if (!_lastZoneItemCount.HasValue)
+            {
+                _lastZoneItemCount = count;
+            }
+        }
+
         var current = FolderMappingStateOf(Target);
         if (current == null) return;
         if (_lastFolderMappingState == current) return;
@@ -518,6 +536,22 @@ public partial class PropertyPanel : UserControl
     /// <summary>重新渲染字段树以反映 TileMode / HideAppName / CustomIcon 的依赖更新。</summary>
     void Rebuild(Zone z) => BuildZoneFields(z);
 
+    // ── 自定义图标实时门控 ──
+    CheckBox? _customIconCb;
+    int? _lastZoneItemCount;
+
+    /// <summary>按 TileMode + 图标数更新「自定义图标」勾选行的可用状态（灰显 0.4 + Tooltip）。</summary>
+    void ApplyCustomIconGating(Zone z)
+    {
+        if (_customIconCb == null) return;
+        bool allowed = z.TileMode && z.Items.Count <= 1;
+        _customIconCb.IsEnabled = allowed;
+        _customIconCb.Opacity = allowed ? 1.0 : 0.4;
+        _customIconCb.ToolTip = allowed
+            ? _loc["ZoneProp.CustomIconHint"]
+            : _loc["ZoneProp.CustomIconDisabledHint"];
+    }
+
     void BuildZoneFields(Zone z)
     {
         var root = new StackPanel { Margin = new Thickness(16, 12, 16, 12) };
@@ -541,12 +575,11 @@ public partial class PropertyPanel : UserControl
         // 自定义图标 — TileMode=false 或 Items.Count>1 时锁定（灰显 0.4 + 禁用）。
         var customIconCb = MakeCheckRow(_loc["ZoneProp.CustomIcon"], z.CustomIcon,
             v => { z.CustomIcon = v; Save(z); });
-        customIconCb.IsEnabled = z.TileMode && z.Items.Count <= 1;
-        customIconCb.Opacity = customIconCb.IsEnabled ? 1.0 : 0.4;
-        customIconCb.ToolTip = customIconCb.IsEnabled
-            ? _loc["ZoneProp.CustomIconHint"]
-            : _loc["ZoneProp.CustomIconDisabledHint"];
         switches.Children.Add(customIconCb);
+        // 保存引用 + 记录图标数，供 ZonesChanged 实时同步门控（增删图标时联动）。
+        _customIconCb = customIconCb;
+        _lastZoneItemCount = z.Items.Count;
+        ApplyCustomIconGating(z);
         var hoverRow = MakeCheckRowWithSideBtn(_loc["ZoneProp.RestoreButton"], z.EnableRestoreButton,
             v => { z.EnableRestoreButton = v; Save(z); },
             _loc["Motion.SettingsEllipsis"], _ => OpenMotionDialog(z, () => BuildZoneFields(z)));
@@ -898,8 +931,9 @@ public partial class PropertyPanel : UserControl
     //          (动画类型/速度在二级窗口里,同分区)
     //   C 布局:GridSize / SnapToGrid / AutoArrange
     //   D 外观:FillFollowsZone (级联门控) + FillColorOverride + FillOpacityOverride
-    //          + EnableLiquidGlass + BackgroundImagePath + BackgroundImageOpacity
-    //   E 预设:预设卡列表(点击应用);保存入口走底部按钮栏的"保存预设"
+    //          + EnableLiquidGlass + BackgroundImagePath
+    //   预设:入口统一走底部按钮栏的"加载预设/保存预设"(预设卡在 LoadPresetDialog
+    //         二级界面里,参考分区卡片含名称/日期信息栏)。
     // 持久化走 Save(sub) → Persist?.Invoke(sub) (同 Zone 路径);host dispatcher 已有
     // ZoneItem 分支(_zoneManager.UpdateZone(parent))。
 
@@ -992,37 +1026,13 @@ public partial class PropertyPanel : UserControl
             TitleBarHeight = 0,
             OnSave = () => Save(sub),
         }));
-        appearance.Children.Add(MakeSliderRow("背景图片透明度", 0, 100, 5,
-            sub.BackgroundImageOpacity < 0 ? 30 : sub.BackgroundImageOpacity,
-            p => { sub.BackgroundImageOpacity = p; Save(sub); }));
+        // ponytail 2026-08-26: "背景图片透明度"独立行删除 — 多出来的设置(背景图
+        // 不透明度回到模型默认值,不再单列一行)。
         root.Children.Add(appearance);
 
-        // E: 预设 — 保存入口统一走底部按钮栏的"保存预设"(与加载预设相邻,所有
-        // target 共用),这里不再重复放"保存当前为预设"按钮;只保留预设卡列表(点击应用)。
-        var presets = MakeSection("预设");
-        // 预设列表:横向 WrapPanel,每个 SubfolderPresetPreview 显示名字 + 圆角 + 边框 (Q9 无缩略图)。
-        // ponytail: 用 WrapPanel + 手动 Children.Add 镜像同文件 1163 的 AddChip 风格 —
-        // 整个 PropertyPanel 的 UI 都在代码里构造,XAML DataTemplate 不适用此上下文。
-        var presetWrap = new WrapPanel { Margin = new Thickness(0, 4, 0, 0) };
-        foreach (var record in PresetService.For(PresetKind.Subfolder).ListSubfolderPresets())
-        {
-            var preview = new SubfolderPresetPreview();
-            preview.SetPreset(record);
-            preview.Margin = new Thickness(4);
-            preview.MouseLeftButtonDown += (_, _) =>
-            {
-                if (Target is ZoneItem cur && cur.Type == ItemType.SubFolder
-                    && record is SubfolderPreset sp)
-                {
-                    CopySubfolderFields(sp.Subfolder, cur);
-                    Save(cur);
-                    OnTargetChanged();
-                }
-            };
-            presetWrap.Children.Add(preview);
-        }
-        presets.Children.Add(presetWrap);
-        root.Children.Add(presets);
+        // ponytail 2026-08-26: 预设入口统一走底部按钮栏的"加载预设/保存预设"
+        // (所有 target 共用,已存在)。面板里不再放预设卡列表 — 预设卡挪到加载预设
+        // 的二级界面(LoadPresetDialog 新增 SubfolderCardTemplate)。
 
         FieldScroller.Content = root;
         SetFillGating(sub.FillFollowsZone, animate: false);
