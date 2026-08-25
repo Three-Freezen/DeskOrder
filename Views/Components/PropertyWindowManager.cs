@@ -110,7 +110,23 @@ public class PropertyWindowManager
 
     void OpenFloating(object target, ConfigService configService, ManagementWindow main, (double x, double y) pos, Size? initialSize = null)
     {
-        var w = new PropertyWindow(target, configService) { Owner = main, Left = pos.x, Top = pos.y };
+        var w = new PropertyWindow(target, configService) { Left = pos.x, Top = pos.y };
+        // ponytail 2026-08-26: Owner 只能挂到"已显示过"的窗口上 — WPF 对从未 Show 的
+        // 窗口 set_Owner 抛 InvalidOperationException("无法将 Owner 属性设置为之前未显示的
+        // Window"),EnsureManagementWindow 创建的管理窗口可能从未显示。IsVisible 为 true 时
+        // 才挂 Owner,并再包一层 try/catch 兜底:任何异常都不阻断设置面板打开(浮动窗口
+        // 本身 Topmost,无 Owner 也能正常显示)。
+        if (main.IsVisible)
+        {
+            try { w.Owner = main; }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[PropWin] Set Owner failed (non-fatal): {ex.Message}");
+            }
+        }
+        // 把位置夹回工作区,避免历史持久化的屏幕外坐标(拔显示器等)让窗口"打不开"。
+        var clamped = ClampToWorkArea(pos.x, pos.y);
+        w.Left = clamped.x; w.Top = clamped.y;
         // ponytail: drag-out calls pass an explicit initialSize so the new
         // floating starts at a known width/height instead of inheriting the
         // persisted config size. Other callers leave it null and fall through
@@ -153,6 +169,18 @@ public class PropertyWindowManager
         };
         _floating[target] = w;
         w.Show();
+    }
+
+    /// <summary>夹取窗口左上角到工作区,保证至少有一部分可见(兜底历史遗留的屏幕外坐标)。</summary>
+    static (double x, double y) ClampToWorkArea(double x, double y)
+    {
+        var wa = SystemParameters.WorkArea;
+        const double minVisible = 120;
+        if (x + minVisible < wa.Left) x = wa.Left + 8;
+        if (x > wa.Right - minVisible) x = Math.Max(wa.Left + 8, wa.Right - 400);
+        if (y + minVisible < wa.Top) y = wa.Top + 8;
+        if (y > wa.Bottom - 48) y = Math.Max(wa.Top + 8, wa.Bottom - 480);
+        return (x, y);
     }
 
     void PersistRect(object target, PropertyWindow w, ConfigService configService)
@@ -216,6 +244,14 @@ public class PropertyWindowManager
     {
         if (w.WindowState == WindowState.Minimized)
             w.WindowState = WindowState.Normal;
+        // 窗口完全在屏幕外(拔显示器等遗留位置)→ 拉回工作区,否则激活了也看不见。
+        var wa = SystemParameters.WorkArea;
+        if (w.Left + w.Width < wa.Left - 8 || w.Left > wa.Right + 8
+            || w.Top + w.Height < wa.Top - 8 || w.Top > wa.Bottom + 8)
+        {
+            w.Left = wa.Left + 80;
+            w.Top = wa.Top + 60;
+        }
         w.Activate();
     }
 
@@ -346,6 +382,9 @@ public class PropertyWindowManager
             DesktopCalendar cal => $"Calendar {cal.DisplayYear}-{cal.DisplayMonth:D2}",
             StickyNote => "便签",
             PanelConfig => "控制面板",
+            // ponytail 2026-08-26: SubFolder 编辑面板的标题直接取 ZoneItem.Name
+            // (用户消息:右键重命名即可),不要回落到 "ZoneItem"。
+            ZoneItem si => si.Name,
             _ => target.GetType().Name,
         };
     }
@@ -361,6 +400,8 @@ public class PropertyWindowManager
         // of the generic Settings gear so the docked/undocked panel tab is
         // visually distinct from the four property editors.
         PanelConfig => "Icon.Panel",
+        // ponytail 2026-08-26: SubFolder 沿用 Icon.Folder 视觉一致性。
+        ZoneItem si when si.Type == ItemType.SubFolder => "Icon.Folder",
         _ => "Icon.Settings",
     };
 

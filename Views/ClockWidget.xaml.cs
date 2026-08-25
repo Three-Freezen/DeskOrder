@@ -140,6 +140,7 @@ public partial class ClockWidget : Window
     {
         if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
         NativeMethods.SetToolWindow(this);
+        NativeMethods.DisableDwmFrameShadow(this);
         if (_clock.Mode == ClockDisplayMode.Digital)
             NativeMethods.RemoveThickFrame(this);
         ApplyAcrylic();

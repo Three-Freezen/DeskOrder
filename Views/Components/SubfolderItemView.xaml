@@ -1,0 +1,56 @@
+<UserControl x:Class="DesktopZones.Views.Components.SubfolderItemView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:DesktopZones.ViewModels"
+             x:Name="Root"
+             Width="{Binding CellLayout, Converter={x:Static vm:GridLayoutToSizeConverter.Instance}, ConverterParameter=W}"
+             Height="{Binding CellLayout, Converter={x:Static vm:GridLayoutToSizeConverter.Instance}, ConverterParameter=TotalH}">
+    <Grid>
+        <Grid.RowDefinitions>
+            <!-- 方框本体:和正常图标的 Image 一样高(锁死 1×1 = 56) -->
+            <RowDefinition Height="{Binding CellLayout, Converter={x:Static vm:GridLayoutToSizeConverter.Instance}, ConverterParameter=H}"/>
+            <!-- 名字 label,挂在方框下方(和 ZoneItemTemplate 的 Icon+Name 布局一致) -->
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- 方框:永远 2×2 四个缩略图槽(参考 Win11 开始菜单应用文件夹)。
+             空槽有半透明占位底,有内容时显示对应缩略图。缩略图 Source 由 code-behind
+             直接赋值(SubfolderItemView.xaml.cs → UpdateThumbs),不依赖 XAML 索引绑定。 -->
+        <Border Grid.Row="0"
+                CornerRadius="{Binding Source.CornerRounded, Converter={x:Static vm:BoolToCornerRadiusConverter.Instance}}"
+                Background="#08000000"
+                BorderBrush="#40FFFFFF"
+                BorderThickness="1">
+            <UniformGrid Rows="2" Columns="2" Margin="4">
+                <Border Background="#14FFFFFF" CornerRadius="3" Margin="1.5">
+                    <Image x:Name="ThumbImg0" Stretch="Uniform" Margin="2"
+                           RenderOptions.BitmapScalingMode="HighQuality"/>
+                </Border>
+                <Border Background="#14FFFFFF" CornerRadius="3" Margin="1.5">
+                    <Image x:Name="ThumbImg1" Stretch="Uniform" Margin="2"
+                           RenderOptions.BitmapScalingMode="HighQuality"/>
+                </Border>
+                <Border Background="#14FFFFFF" CornerRadius="3" Margin="1.5">
+                    <Image x:Name="ThumbImg2" Stretch="Uniform" Margin="2"
+                           RenderOptions.BitmapScalingMode="HighQuality"/>
+                </Border>
+                <Border Background="#14FFFFFF" CornerRadius="3" Margin="1.5">
+                    <Image x:Name="ThumbImg3" Stretch="Uniform" Margin="2"
+                           RenderOptions.BitmapScalingMode="HighQuality"/>
+                </Border>
+            </UniformGrid>
+        </Border>
+
+        <!-- 名字 label 放到方框外面,和正常图标布局一致 -->
+        <TextBlock Grid.Row="1"
+                   Text="{Binding Source.Name}"
+                   Foreground="#E0FFFFFF"
+                   TextAlignment="Center"
+                   TextTrimming="CharacterEllipsis"
+                   MaxWidth="{Binding ActualWidth, ElementName=Root}"
+                   Margin="1,2,1,1"
+                   FontSize="10"
+                   HorizontalAlignment="Center"
+                   VerticalAlignment="Top"/>
+    </Grid>
+</UserControl>

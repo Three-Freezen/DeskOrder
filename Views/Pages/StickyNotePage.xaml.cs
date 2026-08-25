@@ -87,8 +87,7 @@ public partial class StickyNotePage : UserControl
             _notesService.MoveNote(n.Id, targetIdx);     // 模型 + 持久化
             MoveRow(_rows, src, targetIdx);              // 列表实时换位（镜像标签栏）
         };
-        ApplyStatusBadge(row, note);
-
+        // ponytail: status badge removed (lock/hidden/hotkey chips no longer shown).
         row.LockCommand = new RelayCommand(_ =>
         {
             note.IsLocked = !note.IsLocked;
@@ -145,27 +144,6 @@ public partial class StickyNotePage : UserControl
             _selected = note;
             SetSelection(ListHost, note);
         }
-    }
-
-    static void ApplyStatusBadge(EditableListRow row, StickyNote note)
-    {
-        if (note.IsLocked)
-        {
-            row.HasStatusBadge = true; row.StatusBadge = "已锁定";
-            row.StatusBadgeBrush = new SolidColorBrush(Color.FromArgb(0x40, 0xFF, 0xC1, 0x07));
-        }
-        else if (!note.IsVisible)
-        {
-            row.HasStatusBadge = true; row.StatusBadge = "已隐藏";
-            row.StatusBadgeBrush = new SolidColorBrush(Color.FromArgb(0x40, 0xA0, 0xA0, 0xC0));
-        }
-        else if (note.HotkeyEnabled)
-        {
-            row.HasStatusBadge = true; row.StatusBadge =
-                ManagementWindow.GetHotkeyLabel(note.HotkeyModifiers, note.HotkeyKey);
-            row.StatusBadgeBrush = new SolidColorBrush(Color.FromArgb(0x30, 0x7C, 0x3A, 0xED));
-        }
-        else row.HasStatusBadge = false;
     }
 
     void ShowNoteContextMenu(StickyNote note, EditableListRow row)

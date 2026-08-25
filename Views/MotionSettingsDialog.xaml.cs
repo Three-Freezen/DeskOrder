@@ -24,12 +24,22 @@ public partial class MotionSettingsDialog : Window
     public HoverExpandOrigin ResultHoverExpandOrigin { get; private set; }
     public double ResultHoverExpandSpeed { get; private set; }
 
-    public MotionSettingsDialog(HoverExpandAnimationKind animation, HoverExpandOrigin origin, double speed)
+    /// <summary>Secondary motion dialog shared by all targets. When
+    /// <paramref name="showOrigin"/> is false (SubFolder), the origin picker row is
+    /// hidden and the result origin is pinned to the passed-in value — the SubFolder
+    /// flyout always grows from its own icon (spec §5: origin not exposed).</summary>
+    public MotionSettingsDialog(HoverExpandAnimationKind animation, HoverExpandOrigin origin, double speed, bool showOrigin = true)
     {
         _initialAnimation = animation;
         _initialOrigin = origin;
         InitializeComponent();
         ApplyLoc();
+
+        if (!showOrigin)
+        {
+            OriginRow.Visibility = Visibility.Collapsed;
+            Height = 250;
+        }
 
         SelectOrigin(origin);
         SelectAnimation(animation);
@@ -109,7 +119,9 @@ public partial class MotionSettingsDialog : Window
 
     void Ok_Click(object sender, RoutedEventArgs e)
     {
-        if (AnimationCombo.SelectedIndex == -1 || OriginCombo.SelectedIndex == -1)
+        // ponytail: SubFolder targets hide the origin row — skip its validation then.
+        bool originHidden = OriginRow.Visibility != Visibility.Visible;
+        if (AnimationCombo.SelectedIndex == -1 || (!originHidden && OriginCombo.SelectedIndex == -1))
         {
             MessageBox.Show(this, _loc["Motion.UnknownAnimation"], _loc["Motion.Title"],
                 MessageBoxButton.OK, MessageBoxImage.Warning);

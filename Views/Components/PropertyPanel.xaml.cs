@@ -1,6 +1,7 @@
 using System;
 using System.ComponentModel;
 using System.Globalization;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -111,11 +112,53 @@ public partial class PropertyPanel : UserControl
     {
         InitializeComponent();
         Loaded += (_, _) => CachedOwner = Window.GetWindow(this);
-        Unloaded += (_, _) => _loc.LanguageChanged -= OnLanguageChanged;
+        Unloaded += (_, _) =>
+        {
+            _loc.LanguageChanged -= OnLanguageChanged;
+            if (_zoneChangedHandler != null && Application.Current is App app2 && app2.ZoneManager is ZoneManager zm2)
+                zm2.ZonesChanged -= _zoneChangedHandler;
+        };
         _loc.LanguageChanged += OnLanguageChanged;
+        // ponytail: folder-mapping sync — the zone window can toggle the mapping
+        // (✕ button / + menu / navigation), and the panel's checkbox + path row
+        // rebuild when the manager reports a change to the current target's state.
+        if (Application.Current is App app && app.ZoneManager is ZoneManager zm)
+        {
+            _zoneChangedHandler = SyncFolderMappingStateFromManager;
+            zm.ZonesChanged += _zoneChangedHandler;
+        }
     }
 
     void OnLanguageChanged(string _) => OnTargetChanged();
+
+    // ── Folder-mapping state sync (zone window ↔ style panel) ──
+
+    Action? _zoneChangedHandler;
+    (bool Enabled, string Path)? _lastFolderMappingState;
+
+    (bool Enabled, string Path)? FolderMappingStateOf(object? target) => target switch
+    {
+        Zone z => (z.FolderMappingEnabled, z.FolderMappingPath ?? ""),
+        MergedGroupTarget g => (g.Master.MergedGroupStyle.FolderMappingEnabled,
+                                g.Master.MergedGroupStyle.FolderMappingPath ?? ""),
+        _ => null,
+    };
+
+    /// <summary>Called BEFORE persisting the panel's own mapping edits so the
+    /// synchronous ZonesChanged round-trip sees the state as unchanged.</summary>
+    void CaptureFolderMappingState() => _lastFolderMappingState = FolderMappingStateOf(Target);
+
+    /// <summary>ZonesChanged handler: rebuild only when the current target's
+    /// mapping state actually moved (avoids resetting fields mid-edit).</summary>
+    void SyncFolderMappingStateFromManager()
+    {
+        if (Target == null) return;
+        var current = FolderMappingStateOf(Target);
+        if (current == null) return;
+        if (_lastFolderMappingState == current) return;
+        _lastFolderMappingState = current;
+        OnTargetChanged();
+    }
 
     /// <summary>Sync the 4 footer buttons' IsEnabled to whether we have a snapshot.
     /// Null snapshot means Target is null (or unsupported type) — buttons stay disabled.
@@ -154,6 +197,8 @@ public partial class PropertyPanel : UserControl
             case StickyNote n when _snapshot is StickyNote sn: CopyNoteFields(sn, n); break;
             case PanelConfig p when _snapshot is PanelPresetConfig sp: CopyPanelConfigFields(sp, p); break;
             case MergedGroupTarget g when _snapshot is Zone sz: CopyMergedGroupFields(sz, g.Master); break;
+            // ponytail 2026-08-26: SubFolder 取消 — 还原到 snapshot 时的字段值。
+            case ZoneItem sub when _snapshot is ZoneItem ssub && sub.Type == ItemType.SubFolder: CopySubfolderFields(ssub, sub); break;
         }
         Save(Target);  // persist the restored state
         OnTargetChanged();  // rebuild UI from restored model + refresh snapshot
@@ -194,6 +239,9 @@ public partial class PropertyPanel : UserControl
         DesktopCalendar cal => (PresetKind.Calendar, (object?)cal.Clone()),
         StickyNote n => (PresetKind.StickyNote, (object?)n.Clone()),
         PanelConfig p => (PresetKind.Panel, (object?)PanelPresetConfig.FromConfig(new AppConfig { Panel = p })),
+        // ponytail 2026-08-26: SubFolder preset — PresetKind.Subfolder 走 PresetService
+        // 已有的 SubfolderPreset 序列化分支 (Models/SubfolderPreset.cs)。
+        ZoneItem sub when sub.Type == ItemType.SubFolder => (PresetKind.Subfolder, (object?)sub.Clone()),
         _ => (null, null),
     };
 
@@ -249,6 +297,11 @@ public partial class PropertyPanel : UserControl
                 // PanelWindow doesn't have RefreshAppearance; live update path is
                 // via the host page reload — leave it; Save() will trigger persist
                 // and the panel window subscribes to config changes elsewhere.
+                break;
+            // ponytail 2026-08-26: SubFolder preset — 镜像 preset.Subfolder 的字段到当前 ZoneItem,
+            // SubItems 内容不动 (SubfolderPreset.Clone 不含 SubItems,符合 spec §4.5)。
+            case ZoneItem sub when sub.Type == ItemType.SubFolder && record is SubfolderPreset sp:
+                CopySubfolderFields(sp.Subfolder, sub);
                 break;
         }
         OnTargetChanged();  // resync UI to the new model state
@@ -344,6 +397,8 @@ public partial class PropertyPanel : UserControl
             DesktopCalendar cal => cal.Clone(),
             StickyNote n => n.Clone(),
             PanelConfig p => PanelPresetConfig.FromConfig(new AppConfig { Panel = p }).Clone(),
+            // ponytail 2026-08-26: SubFolder 用 ZoneItem.Clone() (已有,深拷贝 SubItems + 所有专属字段)。
+            ZoneItem sub when sub.Type == ItemType.SubFolder => sub.Clone(),
             _ => null,
         };
         UpdateButtonBarEnabled();
@@ -393,6 +448,13 @@ public partial class PropertyPanel : UserControl
                 SetInstanceIcon("Icon.Merged");
                 BuildMergedGroupFields(g.Master);
                 break;
+            // ponytail 2026-08-26: Task 7 — SubFolder zone item style editor.
+            // 5 groups + 15 controls mirror docs/superpowers/specs/2026-08-25-subfolder-design.md §5.
+            case ZoneItem sub when sub.Type == ItemType.SubFolder:
+                InstanceName = sub.Name;
+                SetInstanceIcon("Icon.Folder");
+                BuildSubfolderFields(sub);
+                break;
             default:
                 InstanceName = "";
                 SetInstanceIcon(null);
@@ -404,6 +466,8 @@ public partial class PropertyPanel : UserControl
                 };
                 break;
         }
+        // Folder-mapping sync baseline: captured after the field tree is built.
+        _lastFolderMappingState = FolderMappingStateOf(Target);
         AnimateSwitch();
     }
 
@@ -592,10 +656,20 @@ public partial class PropertyPanel : UserControl
             SetOffsetY = v => z.BgImageOffsetY = v,
             Width = z.Width, Height = z.Height,
             CropShape = "Rectangle",
-            TitleBarHeight = z.QuickBarMode ? 0 : 24,
+            // 文件夹映射头部行(26px)也算进标题栏：分界线 + 内部 24px 分界。
+            TitleBarHeight = z.QuickBarMode ? 0 : 24 + (z.FolderMappingEnabled ? 26 : 0),
+            TitleBarInnerDividerHeights = !z.QuickBarMode && z.FolderMappingEnabled ? new[] { 24.0 } : Array.Empty<double>(),
             OnSave = () => Save(z),
         }));
         root.Children.Add(bg);
+
+        // 文件夹映射 — 样式设置界面的最后一项。
+        var fm = MakeSection(_loc["ZoneProp.Section.FolderMapping"]);
+        AddFolderMappingSection(fm,
+            () => z.FolderMappingEnabled, v => z.FolderMappingEnabled = v,
+            () => z.FolderMappingPath, v => z.FolderMappingPath = v ?? "",
+            () => { CaptureFolderMappingState(); Save(z); });
+        root.Children.Add(fm);
 
         FieldScroller.Content = root;
     }
@@ -612,6 +686,10 @@ public partial class PropertyPanel : UserControl
     // out + disable when 保留原有填充 is selected.
 
     readonly List<FrameworkElement> _unifiedGated = new();
+    // ponytail 2026-08-26: SubFolder 专用填充门控 — FillFollowsZone=true 时
+    // FillColorOverride / FillOpacityOverride 行灰显。镜像 _unifiedGated 形状,
+    // 共享同一组动效/灰显参数。
+    readonly List<FrameworkElement> _fillGated = new();
 
     void BuildMergedGroupFields(Zone z)
     {
@@ -764,16 +842,166 @@ public partial class PropertyPanel : UserControl
             SetOffsetY = v => gs.BgImageOffsetY = v,
             Width = z.Width, Height = z.Height,
             CropShape = "Rectangle",
-            TitleBarHeight = gs.QuickBarMode ? 0 : 48,
-            TitleBarInnerDividerHeight = gs.QuickBarMode ? 0 : 24,
+            // 组合分区两层标题栏(24+24) + 文件夹映射头部行(26px)：内部分界线 24/48。
+            TitleBarHeight = gs.QuickBarMode ? 0 : 48 + (gs.FolderMappingEnabled ? 26 : 0),
+            TitleBarInnerDividerHeights = gs.QuickBarMode
+                ? Array.Empty<double>()
+                : gs.FolderMappingEnabled ? new[] { 24.0, 48.0 } : new[] { 24.0 },
             OnSave = SaveGroup,
         });
         bg.Children.Add(bgRow);
         _unifiedGated.Add(bgRow);
         root.Children.Add(bg);
 
+        // 文件夹映射 — 组合分区内容区的映射（两种填充模式都生效，不受统一填充门控）。
+        var fm = MakeSection(_loc["ZoneProp.Section.FolderMapping"]);
+        AddFolderMappingSection(fm,
+            () => gs.FolderMappingEnabled, v => { gs.FolderMappingEnabled = v; z.FolderMappingEnabled = v; },
+            () => gs.FolderMappingPath, v => { gs.FolderMappingPath = v ?? ""; z.FolderMappingPath = v ?? ""; },
+            () => { CaptureFolderMappingState(); SaveGroup(); });
+        root.Children.Add(fm);
+
         FieldScroller.Content = root;
         SetUnifiedGating(gs.UseUnifiedFill, animate: false);
+    }
+
+    // ── Field tree for SubFolder zone items ──
+    //
+    // ponytail 2026-08-26: Task 7 — SubFolder 专属字段编辑器。镜像 BuildZoneFields
+    // 形状但只暴露 SubFolder 专属 14 字段 + Name,分 5 组:
+    //   A 基础:Name / IconSizeAutoGrow / CornerRounded
+    //   B 动效:HoverAutoExpand 开关 + 右侧"…"按钮打开二级窗口 MotionSettingsDialog
+    //          (动画类型/速度在二级窗口里,同分区)
+    //   C 布局:GridSize / SnapToGrid / AutoArrange
+    //   D 外观:FillFollowsZone (级联门控) + FillColorOverride + FillOpacityOverride
+    //          + EnableLiquidGlass + BackgroundImagePath + BackgroundImageOpacity
+    //   E 预设:预设卡列表(点击应用);保存入口走底部按钮栏的"保存预设"
+    // 持久化走 Save(sub) → Persist?.Invoke(sub) (同 Zone 路径);host dispatcher 已有
+    // ZoneItem 分支(_zoneManager.UpdateZone(parent))。
+
+    void BuildSubfolderFields(ZoneItem sub)
+    {
+        _fillGated.Clear();
+        var root = new StackPanel { Margin = new Thickness(16, 12, 16, 12) };
+
+        // A: 基础
+        var basic = MakeSection("基础");
+        basic.Children.Add(MakeTextRow("名称", sub.Name,
+            v => { sub.Name = v ?? ""; Save(sub); }));
+        // ponytail: 图标锁死 1×1(用户取消尺寸自适应),不再暴露 IconSizeAutoGrow 开关。
+        basic.Children.Add(MakeCornerStyleRow(sub.CornerRounded, rounded =>
+        {
+            sub.CornerRounded = rounded;
+            Save(sub);
+        }));
+        root.Children.Add(basic);
+
+        // B: 动效 — 参考分区的做法:动效类型/速度收敛到二级窗口 MotionSettingsDialog,
+        // 行内只留"鼠标悬停自动展开"开关 + 右侧"…"按钮打开二级窗口。
+        var motion = MakeSection("动效");
+        motion.Children.Add(MakeCheckRowWithSideBtn("鼠标悬停自动展开", sub.HoverAutoExpand,
+            v => { sub.HoverAutoExpand = v; Save(sub); },
+            _loc["Motion.SettingsEllipsis"], _ => OpenSubfolderMotionDialog(sub)));
+        root.Children.Add(motion);
+
+        // C: 布局 — 镜像 BuildZoneFields 的 GridSize + SnapToGrid/AutoArrange 二列布局。
+        var layout = MakeSection("布局");
+        var layoutGrid = new Grid { Margin = new Thickness(0, 6, 0, 0) };
+        layoutGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        layoutGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(10) });
+        layoutGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var gridBlock = MakeNumberSubBlock("网格大小", sub.GridSize,
+            v => { sub.GridSize = (int)v; Save(sub); }, asInt: true);
+        Grid.SetColumn(gridBlock, 0);
+        layoutGrid.Children.Add(gridBlock);
+        var snapStack = new StackPanel { VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 18, 0, 4) };
+        snapStack.Children.Add(MakeCheckRow("吸附到网格", sub.SnapToGrid,
+            v => { sub.SnapToGrid = v; Save(sub); }));
+        snapStack.Children.Add(MakeCheckRow("尺寸变化时自动重排", sub.AutoArrange,
+            v => { sub.AutoArrange = v; Save(sub); }));
+        Grid.SetColumn(snapStack, 2);
+        layoutGrid.Children.Add(snapStack);
+        layout.Children.Add(layoutGrid);
+        root.Children.Add(layout);
+
+        // D: 外观 — FillFollowsZone 控制 FillColor/FillOpacityOverride 行门控。
+        var appearance = MakeSection("外观");
+        appearance.Children.Add(MakeCheckRow("填充跟随主分区", sub.FillFollowsZone,
+            v =>
+            {
+                sub.FillFollowsZone = v;
+                // ponytail: 首次开启 override 时 FillOpacityOverride 还是 -1 (跟随),
+                // 给个 100% 默认值,避免滑块停在 0 让 SubFolder 透明不可见。
+                if (!v && sub.FillOpacityOverride < 0) sub.FillOpacityOverride = 100;
+                Save(sub);
+                SetFillGating(v, animate: true);
+            }));
+        var fillColorRow = MakeColorRow("填充颜色",
+            string.IsNullOrEmpty(sub.FillColorOverride) ? "#08000000" : sub.FillColorOverride,
+            v => { sub.FillColorOverride = v; Save(sub); });
+        appearance.Children.Add(fillColorRow);
+        _fillGated.Add(fillColorRow);
+        var fillOpacityRow = MakeSliderRow("填充透明度", 0, 100, 5,
+            sub.FillOpacityOverride < 0 ? 100 : sub.FillOpacityOverride,
+            p => { sub.FillOpacityOverride = p; Save(sub); });
+        appearance.Children.Add(fillOpacityRow);
+        _fillGated.Add(fillOpacityRow);
+        appearance.Children.Add(MakeCheckRow("液态玻璃", sub.EnableLiquidGlass,
+            v => { sub.EnableLiquidGlass = v; Save(sub); }));
+        // ponytail: SubFolder 背景图片预览尺寸固定 128×128 (flyout 内部格大小),
+        // 不像 Zone 跟随 Width/Height。TitleBarHeight=0 因为 SubFolder 没有标题栏。
+        appearance.Children.Add(MakeBgImageRow("", new BgImageBinding
+        {
+            GetPath = () => sub.BackgroundImagePath,
+            SetPath = v => sub.BackgroundImagePath = v ?? "",
+            GetOpacity = () => sub.BackgroundImageOpacity < 0 ? 30 : sub.BackgroundImageOpacity,
+            SetOpacity = v => sub.BackgroundImageOpacity = v,
+            GetZoom = () => 1.0,
+            SetZoom = _ => { },
+            GetOffsetX = () => 0,
+            SetOffsetX = _ => { },
+            GetOffsetY = () => 0,
+            SetOffsetY = _ => { },
+            Width = 128,
+            Height = 128,
+            CropShape = "Rectangle",
+            TitleBarHeight = 0,
+            OnSave = () => Save(sub),
+        }));
+        appearance.Children.Add(MakeSliderRow("背景图片透明度", 0, 100, 5,
+            sub.BackgroundImageOpacity < 0 ? 30 : sub.BackgroundImageOpacity,
+            p => { sub.BackgroundImageOpacity = p; Save(sub); }));
+        root.Children.Add(appearance);
+
+        // E: 预设 — 保存入口统一走底部按钮栏的"保存预设"(与加载预设相邻,所有
+        // target 共用),这里不再重复放"保存当前为预设"按钮;只保留预设卡列表(点击应用)。
+        var presets = MakeSection("预设");
+        // 预设列表:横向 WrapPanel,每个 SubfolderPresetPreview 显示名字 + 圆角 + 边框 (Q9 无缩略图)。
+        // ponytail: 用 WrapPanel + 手动 Children.Add 镜像同文件 1163 的 AddChip 风格 —
+        // 整个 PropertyPanel 的 UI 都在代码里构造,XAML DataTemplate 不适用此上下文。
+        var presetWrap = new WrapPanel { Margin = new Thickness(0, 4, 0, 0) };
+        foreach (var record in PresetService.For(PresetKind.Subfolder).ListSubfolderPresets())
+        {
+            var preview = new SubfolderPresetPreview();
+            preview.SetPreset(record);
+            preview.Margin = new Thickness(4);
+            preview.MouseLeftButtonDown += (_, _) =>
+            {
+                if (Target is ZoneItem cur && cur.Type == ItemType.SubFolder
+                    && record is SubfolderPreset sp)
+                {
+                    CopySubfolderFields(sp.Subfolder, cur);
+                    Save(cur);
+                    OnTargetChanged();
+                }
+            };
+            presetWrap.Children.Add(preview);
+        }
+        presets.Children.Add(presetWrap);
+        root.Children.Add(presets);
+
+        FieldScroller.Content = root;
+        SetFillGating(sub.FillFollowsZone, animate: false);
     }
 
     /// <summary>统一填充/保留原有填充 — sliding-highlight Segmented pill.
@@ -832,6 +1060,134 @@ public partial class PropertyPanel : UserControl
                 }
             };
             el.BeginAnimation(OpacityProperty, anim);
+        }
+    }
+
+    /// <summary>SubFolder 填充门控 — Follows=true 时 FillColor / FillOpacityOverride
+    /// 两行灰显 + IsEnabled=false,镜像 SetUnifiedGating 的动画曲线。</summary>
+    void SetFillGating(bool follows, bool animate)
+    {
+        foreach (var el in _fillGated)
+        {
+            if (el == null) continue;
+            el.IsEnabled = !follows;
+            double to = follows ? 0.4 : 1.0;
+            if (!animate)
+            {
+                el.Opacity = to;
+                continue;
+            }
+            var anim = new System.Windows.Media.Animation.DoubleAnimation(el.Opacity, to, TimeSpan.FromMilliseconds(160))
+            {
+                EasingFunction = new System.Windows.Media.Animation.CubicEase
+                {
+                    EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut
+                }
+            };
+            el.BeginAnimation(OpacityProperty, anim);
+        }
+    }
+
+    // ── 文件夹映射 (folder mapping) section builder ──
+    //
+    // 勾选启用 + 路径行（可手输/选择文件夹）。磁盘与文件夹走同一个选择对话框
+    // （系统文件夹选择器可以直接选磁盘根目录），不再单独提供磁盘入口。
+
+    void AddFolderMappingSection(StackPanel section,
+        Func<bool> getEnabled, Action<bool> setEnabled,
+        Func<string> getPath, Action<string> setPath,
+        Action onChanged)
+    {
+        TextBox? pathBox = null;
+        section.Children.Add(MakeCheckRow(_loc["ZoneProp.FolderMapping"], getEnabled(), v =>
+        {
+            setEnabled(v);
+            onChanged();
+            // 启用后若还没有映射路径，直接弹出选择对话框。
+            if (v && string.IsNullOrWhiteSpace(getPath()))
+                PickFolderMappingPath(setPath, onChanged,
+                    () => { if (pathBox != null) pathBox.Text = getPath() ?? ""; });
+        }));
+        section.Children.Add(MakeFolderMappingPathRow(getPath, setPath, onChanged, out pathBox));
+        section.Children.Add(new TextBlock
+        {
+            Text = _loc["ZoneProp.FolderMappingHint"],
+            FontSize = 10,
+            Foreground = (Brush)FindResource("Brush.Text.Tertiary"),
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 8, 0, 0),
+        });
+    }
+
+    Grid MakeFolderMappingPathRow(Func<string> getPath, Action<string> setPath, Action onChanged,
+        out TextBox pathBox)
+    {
+        var grid = new Grid { Margin = new Thickness(0, 6, 0, 0) };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var tb = new TextBox
+        {
+            Text = getPath() ?? "",
+            Background = (Brush)FindResource("Brush.Bg.Input"),
+            Foreground = (Brush)FindResource("Brush.Text.Primary"),
+            BorderBrush = (Brush)FindResource("Brush.Border.Subtle"),
+            BorderThickness = new Thickness(1),
+            Padding = new Thickness(6, 4, 6, 4),
+            FontSize = 12,
+            VerticalContentAlignment = VerticalAlignment.Center,
+        };
+        pathBox = tb;
+        tb.LostFocus += (_, _) =>
+        {
+            string raw = (tb.Text ?? "").Trim();
+            if (raw.Length == 2 && char.IsLetter(raw[0]) && raw[1] == ':') raw += "\\";
+            if (Directory.Exists(raw))
+            {
+                if (raw != getPath()) { setPath(raw); onChanged(); }
+            }
+            else
+            {
+                tb.Text = getPath() ?? ""; // invalid — revert
+            }
+        };
+        tb.KeyDown += (_, e) => { if (e.Key == Key.Enter) Keyboard.ClearFocus(); };
+        Grid.SetColumn(tb, 0);
+        grid.Children.Add(tb);
+        var btn = new Button
+        {
+            Content = _loc["ZoneProp.FolderMappingChoose"],
+            Margin = new Thickness(6, 0, 0, 0),
+            Padding = new Thickness(10, 4, 10, 4),
+            Background = (Brush)FindResource("Brush.Bg.Input"),
+            Foreground = (Brush)FindResource("Brush.Text.Secondary"),
+            BorderBrush = (Brush)FindResource("Brush.Border.Subtle"),
+            BorderThickness = new Thickness(1),
+            Cursor = Cursors.Hand,
+            FontSize = 11,
+        };
+        btn.Click += (_, _) => PickFolderMappingPath(setPath, onChanged,
+            () => tb.Text = getPath() ?? "");
+        Grid.SetColumn(btn, 1);
+        grid.Children.Add(btn);
+        return grid;
+    }
+
+    void PickFolderMappingPath(Action<string> setPath, Action onChanged, Action? afterPick = null)
+    {
+        var owner = CachedOwner ?? Window.GetWindow(this);
+        var dlg = new Microsoft.Win32.OpenFolderDialog
+        {
+            Title = _loc["FolderMap.ChooseTitle"],
+            Multiselect = false,
+        };
+        bool? ok;
+        try { ok = owner != null ? dlg.ShowDialog(owner) : dlg.ShowDialog(); }
+        catch { ok = null; }
+        if (ok == true && !string.IsNullOrEmpty(dlg.FolderName))
+        {
+            setPath(dlg.FolderName);
+            onChanged();
+            afterPick?.Invoke();
         }
     }
 
@@ -1460,11 +1816,13 @@ public partial class PropertyPanel : UserControl
         /// "Circle" (analog clock face) or "Ellipse".</summary>
         public string CropShape = "Rectangle";
         /// <summary>真实窗口标题栏高度（DIP）。裁剪预览据此绘制标题栏/主体分界线并吸附；
-        /// 0 = 无标题栏（时钟/日历）。Zone=24、便签=28、面板=44、组合分区=48。</summary>
+        /// 0 = 无标题栏（时钟/日历）。Zone=24、便签=28、面板=44、组合分区=48；
+        /// 开启文件夹映射时加上映射头部行 26px。</summary>
         public double TitleBarHeight = 0;
-        /// <summary>标题栏内部第二条分界线高度（DIP）——组合分区最上方标题栏与子分区
-        /// 标签栏之间的分界（24）。0 = 无内部标题栏分界。</summary>
-        public double TitleBarInnerDividerHeight = 0;
+        /// <summary>标题栏内部的分界线高度（DIP）——组合分区最上方标题栏与子分区
+        /// 标签栏之间的分界（24）；开启文件夹映射时再加映射头部行分界
+        /// （普通分区 24，组合分区 48）。空 = 无内部标题栏分界。</summary>
+        public double[] TitleBarInnerDividerHeights = Array.Empty<double>();
         public Action OnSave = () => { };
     }
 
@@ -1597,7 +1955,33 @@ public partial class PropertyPanel : UserControl
         dst.TitleBarTextColorAdaptive = src.TitleBarTextColorAdaptive;
         dst.TitleBarFillIndependent = src.TitleBarFillIndependent;
         dst.MergedGroupStyle.TitleBarFillIndependent = src.MergedGroupStyle.TitleBarFillIndependent;
+        dst.FolderMappingEnabled = src.FolderMappingEnabled;
+        dst.FolderMappingPath = src.FolderMappingPath;
+        dst.MergedGroupStyle.FolderMappingEnabled = src.MergedGroupStyle.FolderMappingEnabled;
+        dst.MergedGroupStyle.FolderMappingPath = src.MergedGroupStyle.FolderMappingPath;
         dst.TextColorAdaptive = src.TextColorAdaptive;
+    }
+
+    // ponytail 2026-08-26: SubFolder 取消还原 — 镜像 spec §4.5 SubFolder 专属 14 字段 + Name。
+    // SubItems (内容) 不还原 — 镜像 SubfolderPreset 不含 SubItems 的做法,避免取消意外清空内容。
+    // 身份字段 (Id / X / Y / IconPath / Type / TargetPath) 不还原。
+    void CopySubfolderFields(ZoneItem src, ZoneItem dst)
+    {
+        dst.Name = src.Name;
+        dst.IconSizeAutoGrow = src.IconSizeAutoGrow;
+        dst.CornerRounded = src.CornerRounded;
+        dst.FillFollowsZone = src.FillFollowsZone;
+        dst.FillColorOverride = src.FillColorOverride;
+        dst.FillOpacityOverride = src.FillOpacityOverride;
+        dst.BackgroundImagePath = src.BackgroundImagePath;
+        dst.BackgroundImageOpacity = src.BackgroundImageOpacity;
+        dst.EnableLiquidGlass = src.EnableLiquidGlass;
+        dst.GridSize = src.GridSize;
+        dst.SnapToGrid = src.SnapToGrid;
+        dst.AutoArrange = src.AutoArrange;
+        dst.HoverAnimation = src.HoverAnimation;
+        dst.HoverExpandSpeed = src.HoverExpandSpeed;
+        dst.HoverAutoExpand = src.HoverAutoExpand;
     }
 
     /// <summary>Cancel-restore for the merged-group editor: everything the group
@@ -1621,6 +2005,8 @@ public partial class PropertyPanel : UserControl
         dst.SnapToGrid = src.SnapToGrid;
         dst.MergedGroupMembership.DisplayName = src.MergedGroupMembership.DisplayName;
         dst.MergedGroupMembership.Icon = src.MergedGroupMembership.Icon;
+        dst.FolderMappingEnabled = src.FolderMappingEnabled;
+        dst.FolderMappingPath = src.FolderMappingPath;
         CloneHelper.CopyBaseProperties<MergedGroupStyle>(src.MergedGroupStyle, dst.MergedGroupStyle);
     }
 
@@ -1836,6 +2222,25 @@ public partial class PropertyPanel : UserControl
         rebuildFields();
     }
 
+    /// <summary>SubFolder 动效二级窗口。复用分区的 MotionSettingsDialog,但 SubFolder
+    /// 没有展开原点概念(原点永远是 SubFolder 图标自身,spec §5 不暴露),所以隐藏原点
+    /// 选择行;只回写动画类型 + 速度。</summary>
+    void OpenSubfolderMotionDialog(ZoneItem sub)
+    {
+        var owner = CachedOwner ?? Window.GetWindow(this);
+        if (owner == null) { MessageBox.Show(_loc["PropertyPanel.NoOwnerWindow"]); return; }
+        var dlg = new MotionSettingsDialog(sub.HoverAnimation, HoverExpandOrigin.ButtonCenter, sub.HoverExpandSpeed, showOrigin: false)
+        {
+            Owner = owner
+        };
+        if (dlg.ShowDialog() != true) return;
+        sub.HoverAnimation = dlg.ResultHoverExpandAnimation;
+        sub.HoverExpandSpeed = dlg.ResultHoverExpandSpeed;
+        Save(sub);
+        // ponytail: flyout 每次打开都从 live ZoneItem 读 kind/speed,无需像
+        // AppearanceModel 那样广播 RaiseHoverExpandSettingsChanged。
+    }
+
     void OpenLiquidGlassDialog(AppearanceModel m)
     {
         var owner = CachedOwner ?? Window.GetWindow(this);
@@ -1911,7 +2316,7 @@ public partial class PropertyPanel : UserControl
             b.Width, b.Height,
             b.GetOffsetX(), b.GetOffsetY(),
             b.GetZoom(), b.GetOpacity(),
-            b.CropShape, b.TitleBarHeight, b.TitleBarInnerDividerHeight)
+            b.CropShape, b.TitleBarHeight, b.TitleBarInnerDividerHeights)
         {
             Owner = owner
         };

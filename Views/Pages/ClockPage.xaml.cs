@@ -88,8 +88,7 @@ public partial class ClockPage : UserControl
             _widgetService.MoveClock(c.Id, targetIdx);   // 模型 + 持久化
             MoveRow(_rows, src, targetIdx);              // 列表实时换位（镜像标签栏）
         };
-        ApplyStatusBadge(row, clock);
-
+        // ponytail: status badge removed (lock/hidden chips no longer shown).
         row.LockCommand = new RelayCommand(_ =>
         {
             clock.IsLocked = !clock.IsLocked;
@@ -143,21 +142,6 @@ public partial class ClockPage : UserControl
             _selected = clock;
             SetSelection(ListHost, clock);
         }
-    }
-
-    static void ApplyStatusBadge(EditableListRow row, DesktopClock clock)
-    {
-        if (clock.IsLocked)
-        {
-            row.HasStatusBadge = true; row.StatusBadge = "已锁定";
-            row.StatusBadgeBrush = new SolidColorBrush(Color.FromArgb(0x40, 0xFF, 0xC1, 0x07));
-        }
-        else if (!clock.IsVisible)
-        {
-            row.HasStatusBadge = true; row.StatusBadge = "已隐藏";
-            row.StatusBadgeBrush = new SolidColorBrush(Color.FromArgb(0x40, 0xA0, 0xA0, 0xC0));
-        }
-        else row.HasStatusBadge = false;
     }
 
     void ShowClockContextMenu(DesktopClock clock, EditableListRow row)

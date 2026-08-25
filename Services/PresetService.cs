@@ -104,6 +104,7 @@ public class PresetService
                         PresetKind.StickyNote => JsonSerializer.Deserialize<StickyNotePreset>(text, Opts),
                         PresetKind.MergedGroup => MigrateMergedGroupPreset(JsonSerializer.Deserialize<MergedGroupPreset>(text, Opts)),
                         PresetKind.Panel => JsonSerializer.Deserialize<PanelPreset>(text, Opts),
+                        PresetKind.Subfolder => JsonSerializer.Deserialize<SubfolderPreset>(text, Opts),
                         _ => JsonSerializer.Deserialize<ZonePreset>(text, Opts)
                     };
                 }
@@ -261,6 +262,11 @@ public class PresetService
             PresetKind.StickyNote => BuildStickyNotePreset(id, trimmedName, createdAt, (StickyNote)payload),
             PresetKind.MergedGroup => new MergedGroupPreset { Id = id, Name = trimmedName, CreatedAt = createdAt, Zone = ((Zone)payload).Clone() },
             PresetKind.Panel => new PanelPreset { Id = id, Name = trimmedName, CreatedAt = createdAt, Config = ((PanelPresetConfig)payload).Clone() },
+            // ponytail 2026-08-26: Q8 — SubFolder presets describe appearance only,
+            // not content. Strip SubItems before persisting (the dedicated
+            // SaveSubfolderPreset convenience method already did this; the dispatch
+            // here was cloning the payload with SubItems intact).
+            PresetKind.Subfolder => BuildSubfolderPreset(id, trimmedName, createdAt, (ZoneItem)payload),
             _ => throw new InvalidOperationException($"Unknown preset kind {_kind}")
         };
         preset.Kind = _kind;
@@ -279,6 +285,20 @@ public class PresetService
         var clone = note.Clone();
         clone.Content = "";
         return new StickyNotePreset { Id = id, Name = name, CreatedAt = createdAt, Note = clone };
+    }
+
+    /// <summary>
+    /// ponytail 2026-08-26: SubFolder preset should NOT bake the user's items
+    /// into the preset (Q8 — presets describe style, not content). Strip SubItems
+    /// before save. Mirrors SaveSubfolderPreset's body; that method now goes
+    /// through Save → BuildSubfolderPreset so the dispatch and the convenience
+    /// path agree.
+    /// </summary>
+    private static SubfolderPreset BuildSubfolderPreset(Guid id, string name, DateTime createdAt, ZoneItem subfolder)
+    {
+        var clone = subfolder.Clone();
+        clone.SubItems.Clear();
+        return new SubfolderPreset { Id = id, Name = name, CreatedAt = createdAt, Subfolder = clone };
     }
 
     /// <summary>Deletes a preset by Id. Returns true on success, false if the file was missing or could not be deleted.</summary>
@@ -307,6 +327,53 @@ public class PresetService
         StickyNotePreset s => s.Note,
         MergedGroupPreset m => m.Zone,
         PanelPreset p => p.Config,
+        SubfolderPreset s => s.Subfolder,
         _ => throw new InvalidOperationException($"Unknown preset type {record.GetType().Name}")
     };
+
+    // ── Subfolder convenience API ──
+    // Instance methods — caller must instantiate via PresetService.For(PresetKind.Subfolder).
+    // SaveSubfolderPreset strips SubItems (Q8: presets describe style, not content).
+
+    /// <summary>Save a SubFolder preset. SubItems are stripped before persist.</summary>
+    public SubfolderPreset SaveSubfolderPreset(string name, ZoneItem subfolder)
+    {
+        var snapshot = subfolder.Clone();
+        snapshot.SubItems.Clear(); // Q8: 不存内容
+        return (SubfolderPreset)Save(name, snapshot);
+    }
+
+    /// <summary>Apply a saved SubFolder preset onto a target SubFolder. Copies the 14 SubFolder
+    /// style fields + Name; SubItems and positional fields (X/Y/TargetPath/IconPath/Id/Type) are
+    /// intentionally NOT touched (Q8).</summary>
+    public bool ApplySubfolderPreset(Guid presetId, ZoneItem target)
+    {
+        var preset = LoadAll().OfType<SubfolderPreset>().FirstOrDefault(p => p.Id == presetId);
+        if (preset == null) return false;
+        var src = preset.Subfolder;
+        target.Name = src.Name;
+        target.IconSizeAutoGrow = src.IconSizeAutoGrow;
+        target.CornerRounded = src.CornerRounded;
+        target.FillFollowsZone = src.FillFollowsZone;
+        target.FillColorOverride = src.FillColorOverride;
+        target.FillOpacityOverride = src.FillOpacityOverride;
+        target.BackgroundImagePath = src.BackgroundImagePath;
+        target.BackgroundImageOpacity = src.BackgroundImageOpacity;
+        target.EnableLiquidGlass = src.EnableLiquidGlass;
+        target.GridSize = src.GridSize;
+        target.SnapToGrid = src.SnapToGrid;
+        target.AutoArrange = src.AutoArrange;
+        target.HoverAnimation = src.HoverAnimation;
+        target.HoverExpandSpeed = src.HoverExpandSpeed;
+        target.HoverAutoExpand = src.HoverAutoExpand;
+        // SubItems intentionally not touched (Q8)
+        return true;
+    }
+
+    /// <summary>List all saved SubFolder presets (SubfolderPreset only).</summary>
+    public IReadOnlyList<SubfolderPreset> ListSubfolderPresets()
+        => LoadAll().OfType<SubfolderPreset>().ToList();
+
+    /// <summary>Delete a SubFolder preset by Id. Returns false if the file was missing.</summary>
+    public bool DeleteSubfolderPreset(Guid presetId) => Delete(presetId);
 }

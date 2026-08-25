@@ -93,8 +93,10 @@ public partial class ZonesPage : UserControl
         row.LockCommand = new RelayCommand(_ => { z.IsLocked = !z.IsLocked; _zoneManager.UpdateZone(z); });
         row.VisibilityCommand = new RelayCommand(v =>
         {
-            z.IsVisible = row.IsVisible;
-            if (z.IsVisible) _zoneManager.ShowZone(z); else _zoneManager.HideZone(z.Id);
+            // ponytail 2026-08-26: no model pre-flip — route through the SAME window
+            // code as the zone's own hide button (ShowZone/HideZone set _zone.IsVisible
+            // and fire the visibility events; ZonesChanged refreshes this list).
+            if (z.IsVisible) _zoneManager.HideZone(z.Id); else _zoneManager.ShowZone(z);
         });
         row.DeleteCommand = new RelayCommand(_ => Delete(z));
         row.RenameCommand = new RelayCommand(p =>
@@ -143,22 +145,13 @@ public partial class ZonesPage : UserControl
     static void ApplyStatusBadge(EditableListRow row, Zone z)
     {
         var loc = LocalizationService.Instance;
-        // ponytail: one badge per row; locked beats hidden, hidden beats merged (most actionable first).
-        if (z.IsLocked)
-        {
-            row.HasStatusBadge = true; row.StatusBadge = loc["Manage.Status.Locked"];
-            row.StatusBadgeBrush = new SolidColorBrush(Color.FromArgb(0x40, 0xFF, 0xC1, 0x07));
-        }
-        else if (!z.IsVisible)
-        {
-            row.HasStatusBadge = true; row.StatusBadge = loc["Manage.Status.Hidden"];
-            row.StatusBadgeBrush = new SolidColorBrush(Color.FromArgb(0x40, 0xA0, 0xA0, 0xC0));
-        }
-        else if (z.MergedGroupMembership.SubZoneIds.Count > 0)
+        // ponytail: status chips no longer surface lock/hidden/merged — the badge
+        // slot is reserved for the folder-mapping state.
+        if (z.FolderMappingEnabled || z.MergedGroupStyle.FolderMappingEnabled)
         {
             row.HasStatusBadge = true;
-            row.StatusBadge = string.Format(loc["Manage.Status.Merged"], z.MergedGroupMembership.SubZoneIds.Count + 1);
-            row.StatusBadgeBrush = new SolidColorBrush(Color.FromArgb(0x40, 0x7C, 0x3A, 0xED));
+            row.StatusBadge = loc["Manage.Status.FolderMapping"];
+            row.StatusBadgeBrush = new SolidColorBrush(Color.FromArgb(0x40, 0x4A, 0xC0, 0x4A));
         }
         else
         {
@@ -173,8 +166,10 @@ public partial class ZonesPage : UserControl
         {
             new(z.IsVisible ? loc["Manage.Zone.Hide"] : loc["Manage.Zone.Show"], () =>
             {
-                if (z.IsVisible) { z.IsVisible = false; _zoneManager.HideZone(z.Id); }
-                else { z.IsVisible = true; _zoneManager.ShowZone(z); }
+                // ponytail 2026-08-26: SAME path as the zone's own hide button —
+                // no model pre-flip; ShowZone/HideZone own the state.
+                if (z.IsVisible) _zoneManager.HideZone(z.Id);
+                else _zoneManager.ShowZone(z);
                 RefreshList();
             }),
             new(z.IsLocked ? loc["Manage.Zone.Unlock"] : loc["Manage.Zone.Lock"], () =>

@@ -123,35 +123,6 @@ public class HoverExpandBehavior : IDisposable
     // ponytail 2026-08-26: diagnostics label for the ghost-ring regression trace.
     string Host => _window?.GetType().Name ?? "?";
 
-    /// <summary>Ghost-ring fix: clip the window to the collapsed button so DWM stops
-    /// drawing its drop shadow around the opaque circle (see NativeMethods.ClipWindowToRect).
-    /// Geometry comes from the behavior's own anchor (_translateBack, refreshed by
-    /// ApplyOrigin at every state change) + the button's declared size — no dependency
-    /// on the button being measure/laid out yet.</summary>
-    void ApplyClip()
-    {
-        if (_window == null || _collapsedButton == null) return;
-        try
-        {
-            double size = _collapsedButton.Width > 1 ? _collapsedButton.Width : 36;
-            double b = size / 2.0;
-            double cx = _translateBack.X, cy = _translateBack.Y;
-            double x1, y1;
-            // ButtonCenter anchor = button centre; ButtonCorner anchor = button top-left.
-            if (_originGetter() == HoverExpandOrigin.ButtonCorner) { x1 = cx; y1 = cy; }
-            else { x1 = cx - b; y1 = cy - b; }
-            NativeMethods.ClipWindowToRect(_window, new Rect(x1, y1, size, size));
-        }
-        catch { }
-    }
-
-    /// <summary>Ghost-ring fix: restore the full window shape (no DWM shadow suppression).</summary>
-    void ClearClip()
-    {
-        if (_window == null) return;
-        try { NativeMethods.ClearWindowClip(_window); } catch { }
-    }
-
     readonly MouseEventHandler _enterHandler;
     readonly MouseEventHandler _exitHandler;
 
@@ -410,11 +381,6 @@ public class HoverExpandBehavior : IDisposable
         _expandedContent.Visibility = Visibility.Visible;
         _collapsedButton!.Visibility = Visibility.Collapsed;
         if (_expandedModeElement != null) _expandedModeElement.Visibility = Visibility.Visible;
-        // ponytail 2026-08-25 ghost-ring fix: restore the full window shape so DWM's
-        // shadow suppression region never clips the content (SnapToExpanded does NOT
-        // fire the Expanded event — the clip must be cleared here, not only in the
-        // host's Expanded handler).
-        ClearClip();
 #if DEBUG
         DzTrace.Log($"[hover:{Host}] SnapToExpanded -> scale=1 op=1 content=Visible btn=Collapsed");
 #endif
@@ -454,9 +420,6 @@ public class HoverExpandBehavior : IDisposable
         // (the widgets' ghost-stamp lock) used to leave the glass enabled — the
         // "button in the middle + liquid glass around" ghost after a restore-click.
         if (wasExpanded) Collapsed?.Invoke();
-        // ponytail 2026-08-25 ghost-ring fix: clip the window to the button so DWM stops
-        // drawing its drop shadow around the opaque circle on the wallpaper.
-        ApplyClip();
 #if DEBUG
         DzTrace.Log($"[hover:{Host}] SnapToCollapsed wasExpanded={wasExpanded} -> scale=0 op=0 content=Collapsed btn=Visible");
 #endif
@@ -500,8 +463,6 @@ public class HoverExpandBehavior : IDisposable
         // Hosts gate DWM acrylic on IsExpanded — notify them so a full-hide can
         // never leave the full-window glass tint behind.
         if (wasExpanded) Collapsed?.Invoke();
-        // ghost-ring fix: full-hide removes the window, so drop any shadow clip.
-        ClearClip();
 #if DEBUG
         DzTrace.Log($"[hover:{Host}] SnapToFullHidden wasExpanded={wasExpanded} -> scale=0 op=0 content=Collapsed btn=Collapsed");
 #endif
@@ -642,8 +603,6 @@ public class HoverExpandBehavior : IDisposable
         _expandedContent.Visibility = Visibility.Visible;
         _collapsedButton!.Visibility = Visibility.Collapsed;
         if (_expandedModeElement != null) _expandedModeElement.Visibility = Visibility.Visible;
-        // ghost-ring fix: restore the full window shape before the expand renders.
-        ClearClip();
         // ponytail: notify hosts AFTER the state flip so their acrylic re-apply sees
         // IsExpanded == true (ghost-glass fix: liquid glass only while expanded).
         Expanded?.Invoke();
@@ -704,8 +663,6 @@ public class HoverExpandBehavior : IDisposable
                 if (_expandedModeElement != null) _expandedModeElement.Visibility = Visibility.Collapsed;
                 // ponytail: ghost-glass fix — hosts disable DWM acrylic once collapsed.
                 Collapsed?.Invoke();
-                // ghost-ring fix: clip to the button once the collapse is settled.
-                ApplyClip();
             }
         };
         safetyTimer.Start();
@@ -721,8 +678,6 @@ public class HoverExpandBehavior : IDisposable
             _collapsedButton!.Visibility = Visibility.Visible;
             if (_expandedModeElement != null) _expandedModeElement.Visibility = Visibility.Collapsed;
             Collapsed?.Invoke();
-            // ghost-ring fix: clip to the button once the collapse is settled.
-            ApplyClip();
             onComplete?.Invoke();
 #if DEBUG
             DzTrace.Log($"[hover:{Host}] CollapseAnimated COMPLETED scale=0 op=0 content=Collapsed btn=Visible");

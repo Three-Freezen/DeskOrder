@@ -1,9 +1,14 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
@@ -44,6 +49,7 @@ public partial class ZoneWindow : Window
     public bool IsMinimized => RestoreButton.Visibility == Visibility.Visible;
     private readonly ZoneViewModel _vm;
     private readonly LocalizationService _loc = LocalizationService.Instance;
+    private readonly ShellIconService _iconService;
     private HwndSource? _src;
     private Canvas? _itemCanvas;
     private Action<string>? _langChanged;
@@ -60,6 +66,21 @@ public partial class ZoneWindow : Window
     private FrameworkElement? _de;
     private System.Windows.Shapes.Rectangle? _dropIndicator;
     private const double BarThickness = 3, BarLength = 56;
+
+    // ── Marquee multi-select (long-press + drag) ──
+    // Zone items: hold 350ms → drag draws the marquee (quick drag stays move).
+    // Mapping list: hold 350ms on an entry / plain drag on empty list area.
+    enum SelectMode { None, Hold, Draw }
+    enum SelectTarget { None, ZoneItems, ListItems }
+    const double MarqueeHoldMs = 350;
+    SelectMode _selectMode;
+    SelectTarget _selectTarget;
+    Point _selectStart, _selectCurrent;
+    bool _selectMoved;
+    bool _selectFromEmpty;
+    HashSet<Guid>? _selectStartZone;
+    HashSet<string>? _selectStartList;
+    private System.Windows.Threading.DispatcherTimer? _selectHoldTimer;
     // The item footprint is one grid cell (square); the icon is centered inside it.
     double ItemW => _zone.GridSize;
     double ItemH => _zone.GridSize + ZoneLayout.LabelArea;
@@ -93,10 +114,38 @@ public partial class ZoneWindow : Window
     private readonly EventHandler _itemsHostStatusChangedHandler;
     private readonly System.Collections.Specialized.NotifyCollectionChangedEventHandler _vmItemsChangedHandler;
 
+    // ── Folder mapping ──
+    private const int FolderMapMaxEntries = 2000;
+    private readonly ObservableCollection<FolderEntryViewModel> _folderEntries = new();
+    private CancellationTokenSource? _folderLoadCts;
+    private DateTime _lastFolderRefreshUtc = DateTime.MinValue;
+    private string _folderLoadedPath = ""; // last successfully loaded path — reload guard
+
+    // ── SubFolder flyout auto-close + drag-hover scale ──
+    // ponytail 2026-08-26: 鼠标移出 Flyout 200ms 后自动关闭;移回取消关闭。
+    // DragOver 命中 SubFolder 时给容器一个 1.06× 放大反馈(不影响正常换位:
+    // 换位路径不调用本 helper,只有命中 SubFolder 的拖拽路径触发)。
+    System.Windows.Threading.DispatcherTimer? _flyoutCloseTimer;
+    FrameworkElement? _scaledSubfolderContainer;
+    double _scaledSubfolderFrom = 1.0;
+    bool _flyoutClickOutsideHooked;
+    bool _flyoutClosing;
+    // 打开世代 token:关动画的 onComplete 只在 token 未变时才真正关 Popup,防止
+    // "关闭动画还没放完就又点开了另一个 SubFolder" 时把新开的 Flyout 误关。
+    int _flyoutOpenToken;
+    // 当前打开的 SubFolder 图标容器 — 供 FlyoutPlacementCallback / 动画原点计算使用。
+    FrameworkElement? _flyoutOriginContainer;
+
     public ZoneWindow(Zone zone, ZoneManager mgr, ShellIconService icons)
     {
         InitializeComponent();
         _zone = zone; _mgr = mgr;
+        _iconService = icons;
+        // ponytail 2026-08-26: SubfolderItemView's DataContextChanged re-wrap needs
+        // an iconService to build ZoneItemViewModel thumbnails; stash it on the
+        // view class so the unbound VM can be swapped for a SubfolderItemViewModel
+        // when the ItemsControl renders a SubFolder row.
+        DesktopZones.Views.Components.SubfolderItemView.IconService = icons;
         _vm = new ZoneViewModel(zone, mgr, icons);
         _vm.IsLocked = zone.IsLocked;
         DataContext = _vm;
@@ -107,6 +156,7 @@ public partial class ZoneWindow : Window
         ZoneTitleText.Text = zone.Name;
         SetRestoreIcon();
         ApplyLoc();
+        FolderList.ItemsSource = _folderEntries;
         _vmItemsChangedHandler = (_, _) => UpdateCanvasSize();
         _vm.Items.CollectionChanged += _vmItemsChangedHandler;
         Loaded += OnLoad;
@@ -167,6 +217,7 @@ public partial class ZoneWindow : Window
         // ponytail: 自适应对齐 — 替换 DragMove 的手动拖拽循环。
         _snapDrag = new SnapDrag(this);
         _snapResize = new SnapResize(this);
+        RefreshFolderMapping();
     }
 
     void OnHoverExpandSettingsChanged()
@@ -190,6 +241,10 @@ public partial class ZoneWindow : Window
         CtxNew.Header = _loc["Zone.New"];
         CtxNew2.Header = _loc["Zone.New"];
         CtxNewFolder.Header = cn ? "新建文件夹... / New Folder..." : "New Folder...";
+        // ponytail 2026-08-25 (Task 6): "New Subfolder" menu entry, mirrored in both
+        // ContextMenus. Localization keys Subfolder.New* live in i18n/source.*.json.
+        CtxNewSubfolder.Header = _loc["Subfolder.New"];
+        CtxNewSubfolder2.Header = _loc["Subfolder.New"];
         CtxNewTxt.Header = cn ? "文本文档 (.txt)" : "Text Document (.txt)";
         CtxNewDocx.Header = cn ? "Word 文档 (.docx)" : "Word Document (.docx)";
         CtxNewPptx.Header = cn ? "PowerPoint (.pptx)" : "PowerPoint (.pptx)";
@@ -203,11 +258,26 @@ public partial class ZoneWindow : Window
         CtxEdit.Header = _loc["Zone.Edit"];
         CtxHide.Header = _loc["Zone.Hide"];
         CtxDelete.Header = _loc["Zone.Delete"];
+        CtxMapFolder.Header = _loc["FolderMap.MenuMap"];
+        CtxPaste.Header = _loc["FolderMap.Paste"];
+        FolderMapUpBtn.ToolTip = _loc["FolderMap.Up"];
+        FolderMapRefreshBtn.ToolTip = _loc["FolderMap.Refresh"];
+        FolderMapCloseBtn.ToolTip = _loc["FolderMap.Disable"];
+        EnsureFolderEntryMenu();
+        if (_fmMenuOpen != null) _fmMenuOpen.Header = _loc["Item.Open"];
+        if (_fmMenuOpenLocation != null) _fmMenuOpenLocation.Header = _loc["Item.OpenLocation"];
+        if (_fmMenuOpenExplorer != null) _fmMenuOpenExplorer.Header = _loc["FolderMap.OpenInExplorer"];
+        if (_fmMenuRename != null) _fmMenuRename.Header = _loc["FolderMap.Rename"];
+        if (_fmMenuDelete != null) _fmMenuDelete.Header = _loc["FolderMap.Delete"];
+        FolderMapHintBtn.Content = _loc["FolderMap.ChooseAgain"];
     }
 
     void OnLoad(object s, RoutedEventArgs e)
     {
         if ((DataContext as ZoneViewModel)?.IsLocked != true) NativeMethods.PinToDesktop(this); NativeMethods.SetToolWindow(this);
+        // ponytail 2026-08-26 ghost-ring fix: kill the DWM frame shadow that hugs the
+        // collapsed RestoreButton (visible as a dark ring on the wallpaper).
+        NativeMethods.DisableDwmFrameShadow(this);
         NativeMethods.SetRoundedCorners(this, (int)_zone.CornerRadius);
         // Re-apply full style now that HWND is valid (constructor's ApplyStyle ran before
         // HWND existed). ApplyStyle internally calls ApplyAcrylic with the freshly-resolved
@@ -229,16 +299,94 @@ public partial class ZoneWindow : Window
     { if (m == NativeMethods.WM_DROPFILES) { DoDrop(w); hd = true; } return IntPtr.Zero; }
 
     void DoDrop(IntPtr drop)
-    { try { uint n = NativeMethods.DragQueryFile(drop, 0xFFFFFFFF, null, 0); for (uint i = 0; i < n; i++) { var sb = new System.Text.StringBuilder(260); NativeMethods.DragQueryFile(drop, i, sb, 260); if (!string.IsNullOrEmpty(sb.ToString())) { var (sx, sy) = FindFreeSpot(); Add(sb.ToString(), sx, sy); } } UpdateCanvasSize(); } finally { NativeMethods.DragFinish(drop); } }
+    {
+        try
+        {
+            uint n = NativeMethods.DragQueryFile(drop, 0xFFFFFFFF, null, 0);
+            var paths = new List<string>();
+            for (uint i = 0; i < n; i++)
+            {
+                var sb = new System.Text.StringBuilder(260);
+                NativeMethods.DragQueryFile(drop, i, sb, 260);
+                if (!string.IsNullOrEmpty(sb.ToString())) paths.Add(sb.ToString());
+            }
+
+            // Mapped-folder mode: dropping files lands them in the mapped folder
+            // (copy, never move) and the listing refreshes.
+            var (mappingOn, mappingPath) = ResolveFolderMapping();
+            if (mappingOn && !string.IsNullOrEmpty(mappingPath) && Directory.Exists(mappingPath))
+            {
+                var targetDir = mappingPath;
+                Task.Run(() =>
+                {
+                    foreach (var p in paths) CopyInto(p, targetDir);
+                    Dispatcher.BeginInvoke(new Action(() => RefreshFolderMapping(forceReload: true)));
+                });
+                return;
+            }
+
+            foreach (var p in paths) { var (sx, sy) = FindFreeSpot(); Add(p, sx, sy); }
+            UpdateCanvasSize();
+        }
+        finally { NativeMethods.DragFinish(drop); }
+    }
+
+    /// <summary>Copy a file/directory into the mapped folder with collision-safe
+    /// naming ("name (1).ext"). Never overwrites, never deletes.</summary>
+    static bool CopyInto(string src, string targetDir)
+    {
+        try
+        {
+            if (File.Exists(src))
+            {
+                File.Copy(src, UniqueDropPath(targetDir, Path.GetFileName(src)), overwrite: false);
+                return true;
+            }
+            if (Directory.Exists(src))
+            {
+                CopyDirectoryRecursive(src, UniqueDropPath(targetDir, Path.GetFileName(src)));
+                return true;
+            }
+            return false;
+        }
+        catch { return false; }
+    }
+
+    static string UniqueDropPath(string dir, string name)
+    {
+        var full = Path.Combine(dir, name);
+        if (!File.Exists(full) && !Directory.Exists(full)) return full;
+        string stem = Path.GetFileNameWithoutExtension(name);
+        string ext = Path.GetExtension(name);
+        for (int i = 1; ; i++)
+        {
+            full = Path.Combine(dir, $"{stem} ({i}){ext}");
+            if (!File.Exists(full) && !Directory.Exists(full)) return full;
+        }
+    }
+
+    static void CopyDirectoryRecursive(string src, string dst)
+    {
+        Directory.CreateDirectory(dst);
+        foreach (var f in Directory.EnumerateFiles(src))
+            File.Copy(f, Path.Combine(dst, Path.GetFileName(f)), overwrite: false);
+        foreach (var d in Directory.EnumerateDirectories(src))
+            CopyDirectoryRecursive(d, Path.Combine(dst, Path.GetFileName(d)));
+    }
 
     void Add(string path, double x, double y)
     {
+        AddItem(CreateImportedItem(path), x, y);
+    }
+
+    /// <summary>Build a ZoneItem from a dropped file/folder path (shortcuts re-associate
+    /// to their real target and keep the desktop .lnk's custom icon location — see
+    /// ShortcutResolver). Shared by main-zone import and SubFolder import.</summary>
+    ZoneItem CreateImportedItem(string path)
+    {
         var t = Dir(path) ? ItemType.Folder : Path.GetExtension(path).ToLowerInvariant() switch { ".lnk" => ItemType.Shortcut, ".exe" => ItemType.Application, _ => ItemType.Shortcut };
-        // Imported shortcuts re-associate to their real target AND keep the shortcut's
-        // custom icon location (no arrow overlay, desktop-identical icon, launches hit
-        // the target directly — see ShortcutResolver).
         (string target, ItemType type, string? iconLoc) = ShortcutResolver.NormalizeItem(path, t);
-        AddItem(new ZoneItem(Path.GetFileNameWithoutExtension(path), target, type, 0, 0) { IconPath = iconLoc }, x, y);
+        return new ZoneItem(Path.GetFileNameWithoutExtension(path), target, type, 0, 0) { IconPath = iconLoc };
     }
 
     /// <summary>
@@ -278,28 +426,753 @@ public partial class ZoneWindow : Window
         UpdateCanvasSize();
     }
 
-    // ── External file drops (WPF AllowDrop — shows "not allowed" for non-file drags) ──
+    // ── External file drops (WPF AllowDrop — shows "not allowed" for non-drags) ──
 
     void Window_DragEnter(object s, DragEventArgs e)
     {
+        // ponytail 2026-08-26: 内部拖拽(ZoneItemViewModel)+ 桌面文件(FileDrop)都先走
+        // SubFolder 命中检测,命中则高亮目标方框;未命中再走普通 FileDrop 分支。
+        if (TryRouteSubfolderDragOver(e)) return;
         if (e.Data.GetDataPresent(DataFormats.FileDrop)) { e.Effects = DragDropEffects.Copy; e.Handled = true; }
     }
 
     void Window_DragOver(object s, DragEventArgs e)
     {
+        if (TryRouteSubfolderDragOver(e)) return;
         if (e.Data.GetDataPresent(DataFormats.FileDrop)) { e.Effects = DragDropEffects.Copy; e.Handled = true; }
     }
 
     void Window_Drop(object s, DragEventArgs e)
     {
+        // ponytail 2026-08-26: drop 完成时清除 SubFolder 放大反馈(不管命中与否)。
+        ClearSubfolderDragScale();
+        var pos = e.GetPosition(ItemsHost);
+
+        // 1) 内部拖拽:ZoneItemViewModel payload。
+        if (e.Data.GetData(typeof(ZoneItemViewModel)) is ZoneItemViewModel srcVm)
+        {
+            // 源当前在某个 SubFolder 内 → 拖出回主分区。
+            var fromSub = TryFindOwnerSubfolder(srcVm);
+            if (fromSub != null)
+            {
+                MoveOutOfSubfolder(srcVm, fromSub, pos);
+                e.Effects = DragDropEffects.Move;
+                e.Handled = true;
+                return;
+            }
+
+            var target = FindSubfolderTarget(pos);
+            if (target != null)
+            {
+                // 嵌套拒绝:SubFolder 不能拖进另一个 SubFolder。
+                if (srcVm.Type == ItemType.SubFolder)
+                {
+                    e.Effects = DragDropEffects.None;
+                    e.Handled = true;
+                    return;
+                }
+                MoveIntoSubfolder(srcVm, target);
+                e.Effects = DragDropEffects.Move;
+                e.Handled = true;
+                return;
+            }
+            // 落到主分区空白 → 交给 Item_MouseUp 的普通换位路径。
+            return;
+        }
+
+        // 2) 桌面文件 drop。映射开启 → 复制进映射文件夹；否则导入 SubFolder/主分区。
         if (e.Data.GetData(DataFormats.FileDrop) is not string[] { Length: > 0 } files) return;
+        var (mappingOn, mappingPath) = ResolveFolderMapping();
+        if (mappingOn && !string.IsNullOrEmpty(mappingPath) && Directory.Exists(mappingPath))
+        {
+            var targetDir = mappingPath;
+            Task.Run(() =>
+            {
+                int done = 0;
+                foreach (var f in files) if (CopyInto(f, targetDir)) done++;
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    RefreshFolderMapping(forceReload: true);
+                    FlashMapStatus(done > 0
+                        ? string.Format(_loc["FolderMap.PasteDone"], done)
+                        : _loc["FolderMap.PasteNothing"]);
+                }));
+            });
+            e.Handled = true;
+            return;
+        }
+        var fileTarget = FindSubfolderTarget(pos);
         foreach (var f in files)
         {
-            var (sx, sy) = FindFreeSpot();
-            Add(f, sx, sy);
+            if (fileTarget != null) AddFileToSubfolder(f, fileTarget);
+            else { var (sx, sy) = FindFreeSpot(); Add(f, sx, sy); }
         }
         UpdateCanvasSize();
         e.Handled = true;
+    }
+
+    /// <summary>拖拽悬停路由:命中 SubFolder 时给目标方框放大反馈并设 Effects;
+    /// 命中为空/嵌套源时复原反馈并拒绝。内部拖拽(ZoneItemViewModel)直接接管事件,
+    /// 桌面文件(FileDrop)只负责高亮、不接管事件(让 DragOver 继续设 Copy)。</summary>
+    bool TryRouteSubfolderDragOver(DragEventArgs e)
+    {
+        if (e.Data.GetData(typeof(ZoneItemViewModel)) is ZoneItemViewModel srcVm)
+        {
+            // 拖出(源在 SubFolder 内)→ 主分区任意位置都是合法落点。
+            if (TryFindOwnerSubfolder(srcVm) != null)
+            {
+                ClearSubfolderDragScale();
+                e.Effects = DragDropEffects.Move;
+                e.Handled = true;
+                return true;
+            }
+            var target = FindSubfolderTarget(e.GetPosition(ItemsHost));
+            if (target == null)
+            {
+                ClearSubfolderDragScale();
+                e.Effects = DragDropEffects.None; e.Handled = true; return true;
+            }
+            if (srcVm.Type == ItemType.SubFolder)
+            {
+                ClearSubfolderDragScale();
+                e.Effects = DragDropEffects.None; e.Handled = true; return true;
+            }
+            SetSubfolderDragScale(FindContainerFor(target));
+            e.Effects = DragDropEffects.Move;
+            e.Handled = true;
+            return true;
+        }
+        if (e.Data.GetDataPresent(DataFormats.FileDrop))
+        {
+            var target = FindSubfolderTarget(e.GetPosition(ItemsHost));
+            if (target != null) SetSubfolderDragScale(FindContainerFor(target));
+            else ClearSubfolderDragScale();
+        }
+        return false;
+    }
+
+    /// <summary>Bounds-based SubFolder 命中检测。不用 InputHitTest,因为鼠标被拖拽图标
+    /// 捕获/实时跟随光标时,hit test 会返回被拖的图标本身而不是它底下的 SubFolder。
+    /// 直接按 SubFolder 图标在分区里的矩形占位判断,捕获/实时预览期间都稳定。
+    /// ponytail: 图标锁死 1×1(取消尺寸自适应),占位永远是一格。</summary>
+    ZoneItem? FindSubfolderTarget(Point p)
+    {
+        if (ItemsHost == null) return null;
+        foreach (var vm in _vm.Items)
+        {
+            if (vm.Type != ItemType.SubFolder) continue;
+            var src = vm.Source;
+            double w = 56.0;
+            double h = 56.0 + ZoneLayout.LabelArea;
+            if (p.X >= src.X && p.X <= src.X + w && p.Y >= src.Y && p.Y <= src.Y + h)
+                return src;
+        }
+        return null;
+    }
+
+    /// <summary>Move a source ZoneItem (from any zone's Items) into a target SubFolder's
+    /// SubItems. Uses the open flyout's AddItem when one is already showing for the
+    /// target (so the visual grid updates with the new entry); otherwise writes back
+    /// via whole-list replacement of host.SubItems, which fires ZoneItem's INPC.</summary>
+    void MoveIntoSubfolder(ZoneItemViewModel srcVm, ZoneItem target)
+    {
+        var srcItem = ResolveSourceZoneItem(srcVm);
+        if (srcItem == null) return;
+        if (ReferenceEquals(srcItem, target)) return;
+
+        // 从源分区移除(OnZonesChanged 会顺带刷新 VM 列表)。
+        Zone? ownerZone = null;
+        foreach (var z in _mgr.Zones)
+        {
+            if (z.Items.Remove(srcItem)) { ownerZone = z; break; }
+        }
+        if (ownerZone == null) return;
+
+        AppendToSubfolder(target, srcItem);
+        _mgr.ScheduleSaveConfig();
+        _mgr.NotifyChanged();
+        UpdateCanvasSize();
+    }
+
+    /// <summary>Add an already-created ZoneItem to a SubFolder's SubItems (drag-in /
+    /// desktop-file-import). Prefers the live flyout VM so the grid refreshes instantly,
+    /// else whole-list replacement so INPC still fires.</summary>
+    void AppendToSubfolder(ZoneItem target, ZoneItem item)
+    {
+        var liveVm = SubfolderFlyoutPopup.IsOpen
+                     && SubfolderFlyoutView.ViewModel?.HostSubItem.Id == target.Id
+                     ? SubfolderFlyoutView.ViewModel
+                     : null;
+        if (liveVm != null) liveVm.AddItem(item);
+        else target.SubItems = new List<ZoneItem>(target.SubItems) { item };
+    }
+
+    /// <summary>Import a desktop-dropped file/folder directly into a SubFolder's SubItems.</summary>
+    void AddFileToSubfolder(string path, ZoneItem target)
+    {
+        var item = CreateImportedItem(path);
+        AppendToSubfolder(target, item);
+        _mgr.ScheduleSaveConfig();
+        _mgr.NotifyChanged();
+    }
+
+    /// <summary>拖出:把当前位于 <paramref name="fromSub"/>.SubItems 里的项移回主分区
+    /// (放到 <paramref name="pos"/> 指定的 grid 位置)。</summary>
+    void MoveOutOfSubfolder(ZoneItemViewModel srcVm, ZoneItem fromSub, Point pos)
+    {
+        var srcItem = fromSub.SubItems.FirstOrDefault(i => i.Id == srcVm.Id);
+        if (srcItem == null) return;
+        fromSub.SubItems = fromSub.SubItems.Where(i => i.Id != srcVm.Id).ToList();
+
+        // 落点吸附到主分区网格,写入 owner zone 的 Items。
+        var owner = OwnerZoneOf(srcVm);
+        var targetZone = owner ?? _zone;
+        srcItem.X = _zone.SnapToGrid ? ZoneViewModel.SnapToGrid(Math.Max(0, pos.X), targetZone.GridSize) : Math.Max(0, pos.X);
+        srcItem.Y = _zone.SnapToGrid ? ZoneViewModel.SnapToGridY(Math.Max(0, pos.Y), targetZone.GridSize) : Math.Max(0, pos.Y);
+        targetZone.Items.Add(srcItem);
+
+        _mgr.ScheduleSaveConfig();
+        _mgr.NotifyChanged();
+        UpdateCanvasSize();
+    }
+
+    /// <summary>Find the SubFolder whose SubItems currently contain the item backing
+    /// <paramref name="vm"/> (drag-out source), or null when it lives in a zone's Items.</summary>
+    ZoneItem? TryFindOwnerSubfolder(ZoneItemViewModel vm)
+    {
+        foreach (var z in _mgr.Zones)
+        {
+            foreach (var it in z.Items)
+            {
+                if (it.Type != ItemType.SubFolder) continue;
+                if (it.SubItems.Any(si => si.Id == vm.Id)) return it;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>Look up the ZoneItem backing the ZoneItemViewModel by its Id, across
+    /// all zones (merged-sub-zone items report the sub-zone id in SourceZoneId).</summary>
+    ZoneItem? ResolveSourceZoneItem(ZoneItemViewModel vm)
+    {
+        foreach (var z in _mgr.Zones)
+        {
+            var found = z.Items.FirstOrDefault(i => i.Id == vm.Id);
+            if (found != null) return found;
+        }
+        return null;
+    }
+
+    // ── Subfolder flyout (Task 6) ──
+
+    /// <summary>PropertyChanged subscription on the host SubFolder ZoneItem. When its
+    /// SubItems property fires (drag-in/drag-out, preset apply), SizeInnerGrid must
+    /// re-run because the Loaded handler only sizes once. Without this, a 5th item
+    /// still renders in a 2×2 grid (Task 5 review).</summary>
+    System.ComponentModel.PropertyChangedEventHandler? _subItemsChangedHandler;
+    ZoneItem? _subItemsHost;
+
+    void NewSubfolder_Click(object s, RoutedEventArgs e)
+    {
+        // ponytail: 创建命名弹窗与单个图标重命名同款(RenameDialog),不再用 InputBox。
+        var rn = new Views.RenameDialog(_loc["Subfolder.NewDefault"], _loc["Subfolder.NewTitle"]) { Owner = this };
+        if (rn.ShowDialog() != true) return;
+        string name = rn.NewName.Trim();
+        if (string.IsNullOrWhiteSpace(name)) return;
+
+        _mgr.CreateSubfolder(_zone, name);
+        UpdateCanvasSize();
+    }
+
+    void OpenSubfolderFlyout(ZoneItem sub)
+    {
+        var token = ++_flyoutOpenToken;
+        _flyoutClosing = false;
+        var vm = new SubfolderFlyoutViewModel(sub, _iconService);
+        SubfolderFlyoutView.ViewModel = vm;
+
+        // SubItems 变化(drag-in/out)后重排内层 UniformGrid。
+        if (_subItemsChangedHandler != null && _subItemsHost != null)
+            _subItemsHost.PropertyChanged -= _subItemsChangedHandler;
+        _subItemsHost = sub;
+        _subItemsChangedHandler = (_, args) =>
+        {
+            if (args.PropertyName == nameof(ZoneItem.SubItems))
+                ResizeFlyoutGrid(vm.ItemVms.Count);
+        };
+        sub.PropertyChanged += _subItemsChangedHandler;
+
+        // 记住图标容器:定位 + 动画原点都要用它的屏幕位置。
+        _flyoutOriginContainer = FindContainerFor(sub);
+
+        // 先复位到关闭态(缩放 0 / 不透明 0),避免上次关闭残留的中间态一闪而过。
+        ResetFlyoutClosed();
+        SubfolderFlyoutPopup.IsOpen = true;
+
+        // 等布局完成后:①按"图标屏幕中心"一次性定死 flyout 的屏幕位置(AbsolutePoint
+        // offset,确定函数)②按同一份位置反推 TransformGroup 缩放锚点 ③播打开动画。
+        // 展开原点 = 图标中心,每次打开完全一致。click-outside 捕获也延后到这里
+        // (Popup 的 HWND/可视树就绪后再 Capture 才可靠)。
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (_flyoutOpenToken != token) return; // 已被新的 open/close 取代
+            HookFlyoutClickOutside();
+            TryOpenFlyoutAnimated(sub);
+        }), System.Windows.Threading.DispatcherPriority.Loaded);
+        vm.IsOpen = true;
+    }
+
+    void TryOpenFlyoutAnimated(ZoneItem sub)
+    {
+        if (SubfolderFlyoutView.ActualWidth <= 0 || SubfolderFlyoutView.ActualHeight <= 0)
+        {
+            Dispatcher.BeginInvoke(new Action(() => TryOpenFlyoutAnimated(sub)),
+                System.Windows.Threading.DispatcherPriority.ContextIdle);
+            return;
+        }
+        // 位置 + 锚点一次性定死(纯函数:图标位置、flyout 尺寸、工作区):
+        //   pos = 图标右上 + 8px,越界翻侧并夹工作区 → AbsolutePoint 的屏幕 offset
+        //   c   = 图标中心 - pos → TransformGroup 缩放锚点(以图标为原点)
+        var container = _flyoutOriginContainer ?? FindContainerFor(sub);
+        var (pos, c) = ComputeFlyoutPosAndAnchor(container, new Size(SubfolderFlyoutView.ActualWidth, SubfolderFlyoutView.ActualHeight));
+        SubfolderFlyoutPopup.HorizontalOffset = pos.X;
+        SubfolderFlyoutPopup.VerticalOffset = pos.Y;
+        SetFlyoutAnchor(c);
+        AnimateSubfolderFlyoutOpen();
+    }
+
+    /// <summary>确定性展开定位 + 动画原点。返回 (屏幕位置 pos, 缩放锚点 c):
+    /// pos 以图标右上角 + 8px 向右下展开,横向放不下翻到图标左侧、纵向放不下翻到图标
+    /// 上方,并夹在屏幕工作区内;c = 图标中心 - pos(flyout 局部坐标,允许负值)。
+    /// 全程只用图标容器的 PointToScreen(容器在可见分区窗口里,必然连着 PresentationSource),
+    /// 不再读 flyout 自身的 PointToScreen — 那会因 popup 重排时序拿到错误位置,
+    /// 或在 visual 未连接时抛异常回落到 (0,0),造成"起点有时在左、有时在右"。</summary>
+    (Point pos, Point c) ComputeFlyoutPosAndAnchor(FrameworkElement? container, Size flyoutSize)
+    {
+        const double gap = 8;
+        var wa = SystemParameters.WorkArea;
+        Point iconTL = new(0, 0);
+        double iconW = 0, iconH = 0;
+        if (container != null)
+        {
+            try
+            {
+                iconTL = container.PointToScreen(new Point(0, 0));
+                iconW = container.ActualWidth;
+                iconH = container.ActualHeight;
+            }
+            catch
+            {
+                // visual 未连接等罕见情况 → 回退到工作区中心,保证仍能弹出。
+                var center = new Point(wa.Left + (wa.Width - flyoutSize.Width) / 2,
+                                       wa.Top + (wa.Height - flyoutSize.Height) / 2);
+                return (center, new Point(flyoutSize.Width / 2, flyoutSize.Height / 2));
+            }
+        }
+        double x = iconTL.X + iconW + gap;
+        double y = iconTL.Y + gap;
+        if (x + flyoutSize.Width > wa.Right - 8)
+            x = Math.Max(wa.Left + 8, iconTL.X - flyoutSize.Width - gap); // 翻到图标左侧
+        if (y + flyoutSize.Height > wa.Bottom - 8)
+            y = Math.Max(wa.Top + 8, iconTL.Y - flyoutSize.Height - gap); // 翻到图标上方
+        var pos = new Point(x, y);
+        var iconCenter = new Point(iconTL.X + iconW / 2, iconTL.Y + iconH / 2);
+        var c = new Point(iconCenter.X - pos.X, iconCenter.Y - pos.Y);
+        return (pos, c);
+    }
+
+    /// <summary>把缩放锚点 c 写入 TransformGroup 的 [移至原点(-c), Scale, 移回(+c)] —
+    /// 与 HoverExpandBehavior.ApplyOrigin 同款组合,动画以 c(图标中心)为原点缩放。</summary>
+    void SetFlyoutAnchor(Point c)
+    {
+        SubfolderFlyoutView.FlyoutTranslateBack.X = c.X;
+        SubfolderFlyoutView.FlyoutTranslateBack.Y = c.Y;
+        SubfolderFlyoutView.FlyoutTranslateToOrigin.X = -c.X;
+        SubfolderFlyoutView.FlyoutTranslateToOrigin.Y = -c.Y;
+    }
+
+    /// <summary>把 Flyout 复位到关闭态(scale 0,不透明 0),供打开前调用,避免残留动画帧。
+    /// 不透明度取 0 而非 1:Fade 动效的打开要从 0 淡入(NormalizeFlyoutFor 里非 Fade
+    /// kind 会自行把 Opacity 抬回 1,只有 Fade 保留 0 作为 from)。</summary>
+    void ResetFlyoutClosed()
+    {
+        var st = SubfolderFlyoutView.FlyoutScale;
+        st.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+        st.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+        st.ScaleX = 0; st.ScaleY = 0;
+        SubfolderFlyoutView.BeginAnimation(OpacityProperty, null);
+        SubfolderFlyoutView.Opacity = 0;
+    }
+
+    void CloseSubfolderFlyout()
+    {
+        if (!SubfolderFlyoutPopup.IsOpen || _flyoutClosing) return;
+        _flyoutClosing = true;
+        _flyoutCloseTimer?.Stop();
+        _flyoutCloseTimer = null;
+        var token = _flyoutOpenToken;
+        AnimateSubfolderFlyoutClose(onComplete: () =>
+        {
+            // 关闭动画期间又点开了另一个 SubFolder(token 已变)→ 不要误关新开的 Flyout。
+            if (_flyoutOpenToken != token) { _flyoutClosing = false; return; }
+            _flyoutClosing = false;
+            SubfolderFlyoutPopup.IsOpen = false;
+            SubfolderFlyoutView.ViewModel = null;
+        });
+    }
+
+    // ── click-outside 关闭(分区空白 / 桌面空白)──
+    // 打开时把鼠标捕获到 Flyout 上,再挂 PreviewMouseDownOutsideCapturedElement:
+    // 任意一次发生在 Flyout 子树之外的按下(包括桌面)都会先到这里,触发关闭。
+    void HookFlyoutClickOutside()
+    {
+        if (_flyoutClickOutsideHooked) return;
+        _flyoutClickOutsideHooked = true;
+        try { System.Windows.Input.Mouse.Capture(SubfolderFlyoutView, System.Windows.Input.CaptureMode.SubTree); } catch { }
+        System.Windows.Input.Mouse.AddPreviewMouseDownOutsideCapturedElementHandler(SubfolderFlyoutView, OnFlyoutClickOutside);
+    }
+
+    void UnhookFlyoutClickOutside()
+    {
+        if (!_flyoutClickOutsideHooked) return;
+        _flyoutClickOutsideHooked = false;
+        System.Windows.Input.Mouse.RemovePreviewMouseDownOutsideCapturedElementHandler(SubfolderFlyoutView, OnFlyoutClickOutside);
+        if (System.Windows.Input.Mouse.Captured == SubfolderFlyoutView)
+        {
+            try { SubfolderFlyoutView.ReleaseMouseCapture(); } catch { }
+        }
+    }
+
+    void OnFlyoutClickOutside(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (!SubfolderFlyoutPopup.IsOpen) return;
+        CloseSubfolderFlyout();
+    }
+
+    // ponytail 2026-08-26: 鼠标进入 Flyout 取消自动关闭 timer,确保点击
+    // Style 按钮/拖出等交互不被中断。
+    void SubfolderFlyoutView_MouseEnter(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        _flyoutCloseTimer?.Stop();
+        _flyoutCloseTimer = null;
+    }
+
+    // ponytail 2026-08-26: 鼠标离开 Flyout 200ms 后自动关闭 — Win11 风格。
+    // 给用户 200ms 时间决定要不要移回去(避免在 Flyout 边缘反复进出闪烁)。
+    void SubfolderFlyoutView_MouseLeave(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        if (!SubfolderFlyoutPopup.IsOpen) return;
+        _flyoutCloseTimer ??= new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
+        _flyoutCloseTimer.Tick -= OnFlyoutCloseTick;
+        _flyoutCloseTimer.Tick += OnFlyoutCloseTick;
+        _flyoutCloseTimer.Stop();
+        _flyoutCloseTimer.Start();
+    }
+
+    void OnFlyoutCloseTick(object? s, EventArgs e)
+    {
+        _flyoutCloseTimer?.Stop();
+        _flyoutCloseTimer = null;
+        CloseSubfolderFlyout();
+    }
+
+    // ponytail 2026-08-26: 拖动到 SubFolder 上时给目标容器一个 1.06× 放大反馈。
+    // 不影响正常换位 —— 只有 FindSubfolderTarget 命中(内部拖拽/桌面文件拖入)时
+    // 才调本 helper,普通 live-X/Y 换位路径不触发 scale。命中变化时清旧 + 设新,
+    // 避免残留 scale 在错位容器上。
+    void SetSubfolderDragScale(FrameworkElement? container)
+    {
+        if (ReferenceEquals(container, _scaledSubfolderContainer)) return;
+        ClearSubfolderDragScale();
+        if (container == null) return;
+        _scaledSubfolderContainer = container;
+        var st = new ScaleTransform(1.0, 1.0);
+        container.RenderTransformOrigin = new Point(0.5, 0.5);
+        container.RenderTransform = st;
+        var ease = new System.Windows.Media.Animation.CubicEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut };
+        var dur = TimeSpan.FromMilliseconds(120);
+        st.BeginAnimation(System.Windows.Media.ScaleTransform.ScaleXProperty,
+            new System.Windows.Media.Animation.DoubleAnimation(1.0, 1.06, dur) { EasingFunction = ease });
+        st.BeginAnimation(System.Windows.Media.ScaleTransform.ScaleYProperty,
+            new System.Windows.Media.Animation.DoubleAnimation(1.0, 1.06, dur) { EasingFunction = ease });
+    }
+
+    void ClearSubfolderDragScale()
+    {
+        var container = _scaledSubfolderContainer;
+        if (container == null) return;
+        _scaledSubfolderContainer = null;
+        if (container.RenderTransform is System.Windows.Media.ScaleTransform st)
+        {
+            st.BeginAnimation(System.Windows.Media.ScaleTransform.ScaleXProperty, null);
+            st.BeginAnimation(System.Windows.Media.ScaleTransform.ScaleYProperty, null);
+            st.ScaleX = 1.0; st.ScaleY = 1.0;
+        }
+        container.RenderTransform = null;
+        container.RenderTransformOrigin = new Point(0, 0);
+    }
+
+    /// <summary>Lookup the FrameworkElement container that hosts <paramref name="sub"/>
+    /// inside ItemsHost. Returns null if the container hasn't been generated yet
+    /// (which would also mean the item isn't visible).
+    /// ponytail 2026-08-26: ItemsHost binds ObservableCollection&lt;ZoneItemViewModel&gt;,
+    /// so ContainerFromItem(raw ZoneItem) never matches — resolve the VM first.</summary>
+    FrameworkElement? FindContainerFor(ZoneItem sub)
+    {
+        if (ItemsHost == null) return null;
+        foreach (var vm in _vm.Items)
+        {
+            if (vm.Id == sub.Id)
+                return ItemsHost.ItemContainerGenerator.ContainerFromItem(vm) as FrameworkElement;
+        }
+        return null;
+    }
+
+    void SubfolderFlyout_EditStyleRequested(SubfolderFlyout flyout)
+    {
+        if (flyout.ViewModel == null) return;
+        // ponytail 2026-08-26: ensure the management window exists before routing the
+        // property editor — PropertyWindowService is a no-op while ManagementWindow is
+        // null (startup with StartMinimized + zones shown directly). See App.EnsureManagementWindow.
+        (System.Windows.Application.Current as App)?.EnsureManagementWindow();
+        PropertyWindowService.OpenOrFocus(flyout.ViewModel.HostSubItem, this);
+    }
+
+    /// <summary>拖出:从 Flyout 里把一个内层图标拖回主分区。以 itemVm 为 payload 发起
+    /// DragDrop,Window_Drop 里 TryFindOwnerSubfolder 命中 → MoveOutOfSubfolder 移回分区。</summary>
+    void SubfolderFlyout_ItemDragOutRequested(ZoneItem hostSub, ZoneItemViewModel itemVm)
+    {
+        _flyoutCloseTimer?.Stop();
+        _flyoutCloseTimer = null;
+        try { DragDrop.DoDragDrop(SubfolderFlyoutView, itemVm, DragDropEffects.Move); }
+        finally { ClearSubfolderDragScale(); }
+    }
+
+    void SubfolderFlyoutPopup_Closed(object? s, EventArgs e)
+    {
+        // 断开 host SubFolder 的 SubItems 订阅,避免 handler 泄漏到已关闭的 flyout。
+        if (_subItemsChangedHandler != null && _subItemsHost != null)
+            _subItemsHost.PropertyChanged -= _subItemsChangedHandler;
+        _subItemsChangedHandler = null;
+        _subItemsHost = null;
+        _flyoutOriginContainer = null;
+        UnhookFlyoutClickOutside();
+    }
+
+    // ── Subfolder flyout animation ──
+    // ponytail 2026-08-26: faithful port of HoverExpandBehavior.StartAnimation —
+    // per-kind open/close symmetry, from-values read from the CURRENT state,
+    // duration 200ms/HoverExpandSpeed, onComplete driven by Completed events
+    // (with from==to short-circuits). scale-around-point via the TransformGroup
+    // [TranslateToOrigin, Scale, TranslateBack] anchored at the SubFolder icon's
+    // screen center (SetFlyoutOriginFromIcon). Close is the frame-exact reverse
+    // of open (CubicEase EaseIn vs EaseOut), so the flyout shrinks back into the
+    // icon it grew from.
+    void AnimateSubfolderFlyoutOpen()
+    {
+        var vm = SubfolderFlyoutView.ViewModel;
+        if (vm == null) return;
+        var kind = vm.HostSubItem.HoverAnimation;
+        NormalizeFlyoutFor(isExpanded: true, kind);
+        var dur = new Duration(TimeSpan.FromMilliseconds(200.0 / Math.Max(0.1, vm.HostSubItem.HoverExpandSpeed)));
+        switch (kind)
+        {
+            case HoverExpandAnimationKind.None:
+                ApplyFlyoutFinal(isExpanded: true, kind);
+                return;
+            case HoverExpandAnimationKind.Fade:
+                AnimateFlyoutOpacity(SubfolderFlyoutView.Opacity, 1, dur, EasingMode.EaseOut, null);
+                return;
+            case HoverExpandAnimationKind.VerticalExpand:
+                AnimateFlyoutScaleY(SubfolderFlyoutView.FlyoutScale.ScaleY, 1, dur, EasingMode.EaseOut, null);
+                return;
+            case HoverExpandAnimationKind.DirectionalExpand:
+                AnimateFlyoutScaleX(SubfolderFlyoutView.FlyoutScale.ScaleX, 1, dur, EasingMode.EaseOut, null);
+                return;
+            case HoverExpandAnimationKind.BounceExpand:
+                AnimateFlyoutBounce(isExpand: true, dur, null);
+                return;
+            default: // ScaleExpand
+                AnimateFlyoutScaleXY(SubfolderFlyoutView.FlyoutScale.ScaleX, 1, dur, EasingMode.EaseOut, null);
+                return;
+        }
+    }
+
+    void AnimateSubfolderFlyoutClose(Action onComplete)
+    {
+        var vm = SubfolderFlyoutView.ViewModel;
+        var kind = vm != null ? vm.HostSubItem.HoverAnimation : HoverExpandAnimationKind.ScaleExpand;
+        double speed = vm != null ? Math.Max(0.1, vm.HostSubItem.HoverExpandSpeed) : 1.0;
+        NormalizeFlyoutFor(isExpanded: false, kind);
+        var dur = new Duration(TimeSpan.FromMilliseconds(200.0 / speed));
+        switch (kind)
+        {
+            case HoverExpandAnimationKind.None:
+                ApplyFlyoutFinal(isExpanded: false, kind);
+                onComplete();
+                return;
+            case HoverExpandAnimationKind.Fade:
+                AnimateFlyoutOpacity(SubfolderFlyoutView.Opacity, 0, dur, EasingMode.EaseIn, onComplete);
+                return;
+            case HoverExpandAnimationKind.VerticalExpand:
+                AnimateFlyoutScaleY(SubfolderFlyoutView.FlyoutScale.ScaleY, 0, dur, EasingMode.EaseIn, onComplete);
+                return;
+            case HoverExpandAnimationKind.DirectionalExpand:
+                AnimateFlyoutScaleX(SubfolderFlyoutView.FlyoutScale.ScaleX, 0, dur, EasingMode.EaseIn, onComplete);
+                return;
+            case HoverExpandAnimationKind.BounceExpand:
+                AnimateFlyoutBounce(isExpand: false, dur, onComplete);
+                return;
+            default: // ScaleExpand
+                AnimateFlyoutScaleXY(SubfolderFlyoutView.FlyoutScale.ScaleX, 0, dur, EasingMode.EaseIn, onComplete);
+                return;
+        }
+    }
+
+    /// <summary>Port of HoverExpandBehavior.NormalizeFor: capture the current animated
+    /// values as the new base (stale-base fix), then snap the kind's STABLE axes.
+    /// Animated axes keep their current value so the following animation starts from
+    /// the real visual state.</summary>
+    void NormalizeFlyoutFor(bool isExpanded, HoverExpandAnimationKind kind)
+    {
+        var st = SubfolderFlyoutView.FlyoutScale;
+        double sx = st.ScaleX, sy = st.ScaleY, op = SubfolderFlyoutView.Opacity;
+        st.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+        st.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+        SubfolderFlyoutView.BeginAnimation(UIElement.OpacityProperty, null);
+        st.ScaleX = sx; st.ScaleY = sy;
+        SubfolderFlyoutView.Opacity = op;
+
+        switch (kind)
+        {
+            case HoverExpandAnimationKind.VerticalExpand:
+                st.ScaleX = 1; // stable axis — ScaleY is animated
+                break;
+            case HoverExpandAnimationKind.DirectionalExpand:
+                st.ScaleY = 1; // stable axis — ScaleX is animated
+                break;
+            case HoverExpandAnimationKind.Fade:
+                st.ScaleX = 1; st.ScaleY = 1; // stable — Opacity is animated
+                break;
+            case HoverExpandAnimationKind.None:
+                if (isExpanded) { st.ScaleX = 1; st.ScaleY = 1; SubfolderFlyoutView.Opacity = 1; }
+                else { st.ScaleX = 0; st.ScaleY = 0; SubfolderFlyoutView.Opacity = 0; }
+                break;
+        }
+        // ghost-content rule: Opacity is only animated by Fade; other kinds keep 1.
+        if (kind != HoverExpandAnimationKind.Fade && kind != HoverExpandAnimationKind.None)
+            SubfolderFlyoutView.Opacity = 1;
+    }
+
+    /// <summary>Port of HoverExpandBehavior.ApplyFinal for the None kind.</summary>
+    void ApplyFlyoutFinal(bool isExpanded, HoverExpandAnimationKind kind)
+    {
+        var st = SubfolderFlyoutView.FlyoutScale;
+        double target = isExpanded ? 1 : 0;
+        switch (kind)
+        {
+            case HoverExpandAnimationKind.VerticalExpand: st.ScaleX = 1; st.ScaleY = target; break;
+            case HoverExpandAnimationKind.DirectionalExpand: st.ScaleX = target; st.ScaleY = 1; break;
+            default: st.ScaleX = target; st.ScaleY = target; break;
+        }
+        SubfolderFlyoutView.Opacity = isExpanded ? 1
+            : (kind == HoverExpandAnimationKind.Fade ? 0 : 1);
+    }
+
+    void AnimateFlyoutScaleXY(double from, double to, Duration dur, EasingMode ease, Action? onComplete)
+    {
+        var st = SubfolderFlyoutView.FlyoutScale;
+        if (Math.Abs(from - to) < 1e-9) { st.ScaleX = to; st.ScaleY = to; onComplete?.Invoke(); return; }
+        var ax = new DoubleAnimation(from, to, dur) { EasingFunction = new CubicEase { EasingMode = ease } };
+        var ay = new DoubleAnimation(from, to, dur) { EasingFunction = new CubicEase { EasingMode = ease } };
+        bool done = false;
+        Action fireOnce = () => { if (done) return; done = true; onComplete?.Invoke(); };
+        ax.Completed += (_, _) => { st.ScaleX = to; fireOnce(); };
+        ay.Completed += (_, _) => { st.ScaleY = to; fireOnce(); };
+        st.BeginAnimation(ScaleTransform.ScaleXProperty, ax);
+        st.BeginAnimation(ScaleTransform.ScaleYProperty, ay);
+    }
+
+    void AnimateFlyoutScaleX(double from, double to, Duration dur, EasingMode ease, Action? onComplete)
+    {
+        var st = SubfolderFlyoutView.FlyoutScale;
+        if (Math.Abs(from - to) < 1e-9) { st.ScaleX = to; onComplete?.Invoke(); return; }
+        var ax = new DoubleAnimation(from, to, dur) { EasingFunction = new CubicEase { EasingMode = ease } };
+        ax.Completed += (_, _) => { st.ScaleX = to; onComplete?.Invoke(); };
+        st.BeginAnimation(ScaleTransform.ScaleXProperty, ax);
+    }
+
+    void AnimateFlyoutScaleY(double from, double to, Duration dur, EasingMode ease, Action? onComplete)
+    {
+        var st = SubfolderFlyoutView.FlyoutScale;
+        if (Math.Abs(from - to) < 1e-9) { st.ScaleY = to; onComplete?.Invoke(); return; }
+        var ay = new DoubleAnimation(from, to, dur) { EasingFunction = new CubicEase { EasingMode = ease } };
+        ay.Completed += (_, _) => { st.ScaleY = to; onComplete?.Invoke(); };
+        st.BeginAnimation(ScaleTransform.ScaleYProperty, ay);
+    }
+
+    void AnimateFlyoutOpacity(double from, double to, Duration dur, EasingMode ease, Action? onComplete)
+    {
+        if (Math.Abs(from - to) < 1e-9) { SubfolderFlyoutView.Opacity = to; onComplete?.Invoke(); return; }
+        var anim = new DoubleAnimation(from, to, dur) { EasingFunction = new CubicEase { EasingMode = ease } };
+        anim.Completed += (_, _) => { SubfolderFlyoutView.Opacity = to; onComplete?.Invoke(); };
+        SubfolderFlyoutView.BeginAnimation(UIElement.OpacityProperty, anim);
+    }
+
+    void AnimateFlyoutBounce(bool isExpand, Duration dur, Action? onComplete)
+    {
+        var st = SubfolderFlyoutView.FlyoutScale;
+        // degenerate collapse (already at 0) — nothing to bounce, fire synchronously.
+        if (!isExpand && Math.Abs(st.ScaleX) < 1e-9)
+        {
+            st.ScaleX = 0; st.ScaleY = 0; onComplete?.Invoke(); return;
+        }
+        var bounce = new DoubleAnimationUsingKeyFrames();
+        var ease = new BounceEase { Bounces = 2, Bounciness = 2, EasingMode = EasingMode.EaseOut };
+        if (isExpand)
+        {
+            bounce.KeyFrames.Add(new EasingDoubleKeyFrame(st.ScaleX, KeyTime.FromTimeSpan(TimeSpan.Zero)));
+            bounce.KeyFrames.Add(new EasingDoubleKeyFrame(1.08, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(dur.TimeSpan.TotalMilliseconds * 0.6)), ease));
+            bounce.KeyFrames.Add(new EasingDoubleKeyFrame(1, KeyTime.FromTimeSpan(dur.TimeSpan)));
+        }
+        else
+        {
+            // 弹性收起:开头快速 squash 1→0.85,再 0.85→0 消失(镜像 HoverExpandBehavior)。
+            var squashTime = TimeSpan.FromMilliseconds(dur.TimeSpan.TotalMilliseconds * 0.45);
+            bounce.KeyFrames.Add(new EasingDoubleKeyFrame(st.ScaleX, KeyTime.FromTimeSpan(TimeSpan.Zero)));
+            bounce.KeyFrames.Add(new EasingDoubleKeyFrame(0.85, KeyTime.FromTimeSpan(squashTime), ease));
+            bounce.KeyFrames.Add(new EasingDoubleKeyFrame(0, KeyTime.FromTimeSpan(dur.TimeSpan),
+                new CubicEase { EasingMode = EasingMode.EaseOut }));
+        }
+        double final = isExpand ? 1 : 0;
+        bool done = false;
+        Action fireOnce = () => { if (done) return; done = true; onComplete?.Invoke(); };
+        bounce.Completed += (_, _) => { st.ScaleX = final; st.ScaleY = final; fireOnce(); };
+        st.BeginAnimation(ScaleTransform.ScaleXProperty, bounce);
+        st.BeginAnimation(ScaleTransform.ScaleYProperty, bounce);
+    }
+
+    /// <summary>Re-size the SubfolderFlyout's inner UniformGrid when SubItems grows
+    /// past 4 or 9 (2×2 → 3×3 → 4×4). Mirrors SubfolderFlyout.SizeInnerGrid without
+    /// widening that class's public surface. Walks the flyout's visual tree looking
+    /// for the UniformGrid named "InnerGrid".</summary>
+    void ResizeFlyoutGrid(int itemCount)
+    {
+        int cols = itemCount <= 4 ? 2 : itemCount <= 9 ? 3 : 4;
+        var grid = FindNamedVisualChild<System.Windows.Controls.Primitives.UniformGrid>(SubfolderFlyoutView, "InnerGrid");
+        if (grid != null) { grid.Rows = cols; grid.Columns = cols; }
+    }
+
+    static T? FindNamedVisualChild<T>(DependencyObject parent, string name) where T : FrameworkElement
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            if (child is T t && t.Name == name) return t;
+            var result = FindNamedVisualChild<T>(child, name);
+            if (result != null) return result;
+        }
+        return null;
     }
 
     // ── Recycle Bin icon state (empty ⇄ full) ──
@@ -366,6 +1239,7 @@ public partial class ZoneWindow : Window
         // containers were already generated, generator status doesn't transition again).
         Dispatcher.BeginInvoke(new Action(ApplyStyle),
             System.Windows.Threading.DispatcherPriority.Loaded);
+        RefreshFolderMapping();
         if ((DataContext as ZoneViewModel)?.IsLocked != true) NativeMethods.PinToDesktop(this);
         NativeMethods.SetRoundedCorners(this, (int)_zone.CornerRadius);
         _mgr.FireZoneVisibilityChanged(_zone.Id, true);
@@ -530,6 +1404,8 @@ public partial class ZoneWindow : Window
     {
         _saveDebounce?.Stop();
         _recycleTimer.Stop();
+        _folderLoadCts?.Cancel();
+        _folderLoadCts = null;
         _vm.Items.CollectionChanged -= _vmItemsChangedHandler;
         ItemsHost.ItemContainerGenerator.StatusChanged -= _itemsHostStatusChangedHandler;
         _zone.HoverExpandSettingsChanged -= OnHoverExpandSettingsChanged;
@@ -562,6 +1438,7 @@ public partial class ZoneWindow : Window
             // containers. Without this, any OnZonesChanged trigger (rename, delete, etc.)
             // would silently revert the previously-applied brush on all items.
             ApplyStyle();
+            RefreshFolderMapping();
         }), System.Windows.Threading.DispatcherPriority.Normal);
     }
 
@@ -657,7 +1534,25 @@ public partial class ZoneWindow : Window
 
     // ponytail: OS routes click normally now (no drill-through).
     // Kept as a no-op so the XAML handler reference in ZoneWindow.xaml keeps working.
-    void Window_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e) { }
+    void Window_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.OriginalSource is TextBox) return; // title inline editing
+        // Items / list / chrome presses are owned by their own handlers.
+        if (IsOnFolderEntry(e.OriginalSource) || IsOnItem(e.OriginalSource)) return;
+        if (IsWithinZoneChrome(e.OriginalSource)) return;
+        if (MainContent.Visibility != Visibility.Visible) return;
+        if (FolderMappingView.Visibility == Visibility.Visible) return;
+        // Empty zone area: press + drag immediately draws the marquee.
+        _selectMode = SelectMode.Draw;
+        _selectTarget = SelectTarget.ZoneItems;
+        _selectStart = e.GetPosition(this);
+        _selectCurrent = _selectStart;
+        _selectMoved = false;
+        _selectFromEmpty = true;
+        _selectStartZone = null;
+        _selectStartList = null;
+        try { Mouse.Capture(this); } catch { }
+    }
 
     // ── Resize ──
 
@@ -721,6 +1616,654 @@ public partial class ZoneWindow : Window
         UpdateCanvasSize();
     }
 
+    // ── Folder mapping ──
+    //
+    // 把电脑上的文件夹/磁盘映射到分区内容区：启用后 ItemsViewport 隐藏，内容区
+    // 变成可滚动图标网格（虚拟化换行面板），双击文件夹进入、双击文件用关联程序
+    // 打开，右上角 + 菜单与样式设置面板都能选择文件夹或磁盘。
+
+    (bool Enabled, string Path) ResolveFolderMapping()
+    {
+        // Merged master window: the visible mapping follows the selected tab —
+        // a sub-zone tab resolves that sub-zone's OWN zone-level mapping (kept
+        // when the zone joined the group), the master tab resolves the
+        // group-level mapping and falls back to the master's own mapping when
+        // the group never set one.
+        if (_zone.MergedGroupMembership.SubZoneIds.Count > 0)
+        {
+            if (_vm.SelectedSubZoneId is Guid sel && sel != _zone.Id
+                && _zone.MergedGroupMembership.SubZoneIds.Contains(sel))
+            {
+                var sub = _mgr.Zones.FirstOrDefault(z => z.Id == sel);
+                if (sub != null)
+                    return (sub.FolderMappingEnabled, sub.FolderMappingPath ?? "");
+            }
+            var gs = _zone.MergedGroupStyle;
+            if (gs.FolderMappingEnabled || !string.IsNullOrEmpty(gs.FolderMappingPath))
+                return (gs.FolderMappingEnabled, gs.FolderMappingPath ?? "");
+            return (_zone.FolderMappingEnabled, _zone.FolderMappingPath ?? "");
+        }
+        return (_zone.FolderMappingEnabled, _zone.FolderMappingPath ?? "");
+    }
+
+    /// <summary>Dual-write (zone + merged style) so the mapping survives group
+    /// disband / master promotion, then persist + repaint. When a sub-zone tab is
+    /// selected inside the merged master, the write targets that sub-zone's own
+    /// zone-level mapping instead (it keeps its mapping when joining the group).</summary>
+    void SetFolderMapping(bool enabled, string path)
+    {
+        path = NormalizeFolderMappingPath(path);
+        if (_zone.MergedGroupMembership.SubZoneIds.Count > 0
+            && _vm.SelectedSubZoneId is Guid sel && sel != _zone.Id
+            && _zone.MergedGroupMembership.SubZoneIds.Contains(sel))
+        {
+            var sub = _mgr.Zones.FirstOrDefault(z => z.Id == sel);
+            if (sub != null)
+            {
+                sub.FolderMappingEnabled = enabled;
+                sub.FolderMappingPath = path;
+                ScheduleSave();
+                // Notify the manager so the open style panel syncs its checkbox/path.
+                _mgr.NotifyChanged();
+                RefreshFolderMapping();
+                return;
+            }
+        }
+        _zone.FolderMappingEnabled = enabled;
+        _zone.FolderMappingPath = path;
+        _zone.MergedGroupStyle.FolderMappingEnabled = enabled;
+        _zone.MergedGroupStyle.FolderMappingPath = path;
+        ScheduleSave();
+        // Notify the manager so the open style panel syncs its checkbox/path
+        // (e.g. mapping turned off from the zone's ✕ button).
+        _mgr.NotifyChanged();
+        RefreshFolderMapping();
+    }
+
+    static string NormalizeFolderMappingPath(string? path)
+    {
+        path = path?.Trim() ?? "";
+        // "C:" → "C:\" so drive roots behave like directories.
+        if (path.Length == 2 && char.IsLetter(path[0]) && path[1] == ':')
+            return path + "\\";
+        return path;
+    }
+
+    static bool IsDriveRoot(string path) =>
+        path.Length == 3 && char.IsLetter(path[0]) && path[1] == ':' && path[2] == '\\';
+
+    /// <summary>Toggle the mapping view vs the item view and (re)load the listing.
+    /// Reloads are skipped when the path is unchanged (cheap on every ZonesChanged);
+    /// pass forceReload for explicit refreshes.</summary>
+    void RefreshFolderMapping(bool forceReload = false)
+    {
+        var (enabled, path) = ResolveFolderMapping();
+        bool show = enabled;
+        FolderMappingView.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        ItemsViewport.Visibility = show ? Visibility.Collapsed : Visibility.Visible;
+        // The mapping header row is part of the title-bar band — re-run the style
+        // pass so the independent-fill clip / header fill follow the toggle.
+        ApplyStyle();
+        if (!show)
+        {
+            _folderLoadCts?.Cancel();
+            _folderLoadCts = null;
+            _folderLoadedPath = "";
+            _folderEntries.Clear();
+            UpdateCanvasSize();
+            return;
+        }
+
+        _lastFolderRefreshUtc = DateTime.UtcNow;
+        FolderMapPathText.Text = path;
+        bool validDir = Directory.Exists(path);
+        bool upEnabled = validDir && !IsDriveRoot(path);
+        FolderMapUpBtn.IsEnabled = upEnabled;
+        FolderMapUpBtn.Opacity = upEnabled ? 1.0 : 0.35;
+
+        if (string.IsNullOrEmpty(path) || !validDir)
+        {
+            ShowFolderHint(_loc["FolderMap.Invalid"], withChoose: true);
+            return;
+        }
+        if (!forceReload && _folderLoadedPath == path && FolderList.Visibility == Visibility.Visible)
+            return; // unchanged — keep the current listing
+        StartFolderLoad(path);
+    }
+
+    void ShowFolderHint(string text, bool withChoose)
+    {
+        _folderLoadCts?.Cancel();
+        _folderLoadCts = null;
+        _folderLoadedPath = "";
+        _folderEntries.Clear();
+        FolderMapHintText.Text = text;
+        FolderMapHintBtn.Visibility = withChoose ? Visibility.Visible : Visibility.Collapsed;
+        FolderMapHint.Visibility = Visibility.Visible;
+        FolderList.Visibility = Visibility.Collapsed;
+    }
+
+    void StartFolderLoad(string path)
+    {
+        _folderLoadCts?.Cancel();
+        var cts = new CancellationTokenSource();
+        _folderLoadCts = cts;
+        _folderLoadedPath = path;
+        _folderEntries.Clear();
+        FolderMapHint.Visibility = Visibility.Collapsed;
+        FolderList.Visibility = Visibility.Visible;
+
+        Task.Run(() => EnumerateAndLoad(path, cts));
+    }
+
+    void EnumerateAndLoad(string path, CancellationTokenSource cts)
+    {
+        var entries = new List<FolderEntryViewModel>();
+        bool error = false;
+        bool truncated = false;
+        try
+        {
+            var opts = new EnumerationOptions
+            {
+                IgnoreInaccessible = true,
+                RecurseSubdirectories = false,
+                ReturnSpecialDirectories = false,
+            };
+            foreach (var d in Directory.EnumerateDirectories(path, "*", opts))
+            {
+                if (cts.IsCancellationRequested) return;
+                if (entries.Count >= FolderMapMaxEntries) { truncated = true; break; }
+                entries.Add(new FolderEntryViewModel(Path.GetFileName(d), d, true));
+            }
+            if (!truncated)
+            {
+                foreach (var f in Directory.EnumerateFiles(path, "*", opts))
+                {
+                    if (cts.IsCancellationRequested) return;
+                    if (entries.Count >= FolderMapMaxEntries) { truncated = true; break; }
+                    entries.Add(new FolderEntryViewModel(Path.GetFileName(f), f, false));
+                }
+            }
+        }
+        catch (Exception) { error = true; }
+
+        entries.Sort((a, b) => a.IsFolder != b.IsFolder
+            ? (a.IsFolder ? -1 : 1)
+            : string.Compare(a.Name, b.Name, StringComparison.CurrentCultureIgnoreCase));
+
+        if (cts.IsCancellationRequested) return;
+
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (cts.IsCancellationRequested) return;
+            if (error) { ShowFolderHint(_loc["FolderMap.Invalid"], withChoose: true); return; }
+            _folderEntries.Clear();
+            foreach (var e in entries) _folderEntries.Add(e);
+            ShowEmptyHintIfNone();
+        }));
+
+        // Icon pass: resolve shell icons on the background thread (cache-backed),
+        // then hand each frozen source to the UI thread in small batches.
+        const int batch = 12;
+        for (int i = 0; i < entries.Count; i += batch)
+        {
+            if (cts.IsCancellationRequested) return;
+            var batchItems = new List<(FolderEntryViewModel vm, System.Windows.Media.ImageSource icon)>();
+            for (int j = i; j < Math.Min(i + batch, entries.Count); j++)
+            {
+                var e = entries[j];
+                var icon = _iconService.GetIcon(e.FullPath,
+                    e.IsFolder ? Models.ItemType.Folder : Models.ItemType.Shortcut);
+                if (icon == null) continue;
+                try { (icon as Freezable)?.Freeze(); } catch { }
+                batchItems.Add((e, icon));
+            }
+            if (batchItems.Count > 0)
+            {
+                var chunk = batchItems;
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (cts.IsCancellationRequested) return;
+                    foreach (var (vm, icon) in chunk) vm.Icon = icon;
+                }));
+            }
+        }
+    }
+
+    void ShowEmptyHintIfNone()
+    {
+        if (_folderEntries.Count == 0)
+        {
+            FolderMapHintText.Text = _loc["FolderMap.Empty"];
+            FolderMapHintBtn.Visibility = Visibility.Visible;
+            FolderMapHint.Visibility = Visibility.Visible;
+            FolderList.Visibility = Visibility.Collapsed;
+        }
+        else
+        {
+            FolderMapHint.Visibility = Visibility.Collapsed;
+            FolderList.Visibility = Visibility.Visible;
+        }
+    }
+
+    /// <summary>Throttled re-scan when the window regains focus (2 s minimum spacing).</summary>
+    void RefreshFolderMappingIfStale()
+    {
+        if (!ResolveFolderMapping().Enabled) return;
+        if (DateTime.UtcNow - _lastFolderRefreshUtc < TimeSpan.FromSeconds(2)) return;
+        RefreshFolderMapping(forceReload: true);
+    }
+
+    void FolderMapChoose_Click(object s, RoutedEventArgs e)
+    {
+        var (_, current) = ResolveFolderMapping();
+        var dlg = new OpenFolderDialog
+        {
+            Title = _loc["FolderMap.ChooseTitle"],
+            Multiselect = false,
+        };
+        if (!string.IsNullOrEmpty(current) && Directory.Exists(current))
+            dlg.InitialDirectory = current;
+        bool? ok;
+        try { ok = dlg.ShowDialog(this); }
+        catch { ok = null; }
+        if (ok == true && !string.IsNullOrEmpty(dlg.FolderName))
+            SetFolderMapping(true, dlg.FolderName);
+    }
+
+    void FolderMapUp_Click(object s, MouseButtonEventArgs e)
+    {
+        var (_, path) = ResolveFolderMapping();
+        string? parent = FolderMapParent(path);
+        if (parent != null) SetFolderMapping(true, parent);
+        e.Handled = true;
+    }
+
+    static string? FolderMapParent(string path)
+    {
+        if (string.IsNullOrEmpty(path) || IsDriveRoot(path)) return null;
+        try
+        {
+            var parent = Directory.GetParent(path);
+            return parent?.FullName;
+        }
+        catch { return null; }
+    }
+
+    void FolderMapRefresh_Click(object s, MouseButtonEventArgs e)
+    {
+        var (enabled, _) = ResolveFolderMapping();
+        if (enabled) RefreshFolderMapping(forceReload: true);
+        e.Handled = true;
+    }
+
+    void FolderMapClose_Click(object s, MouseButtonEventArgs e)
+    {
+        // Keep the mapped path so re-enabling restores the same folder instantly.
+        SetFolderMapping(false, ResolveFolderMapping().Path);
+        e.Handled = true;
+    }
+
+    void FolderMapMenuOpen_Click(object s, RoutedEventArgs e) => OpenFolderMapSelected();
+
+    void FolderMapMenuOpenLocation_Click(object s, RoutedEventArgs e)
+    {
+        if (FolderList.SelectedItem is not FolderEntryViewModel { FullPath: { Length: > 0 } } vm) return;
+        try
+        {
+            Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{vm.FullPath}\"") { UseShellExecute = true });
+        }
+        catch { }
+    }
+
+    void FolderMapMenuOpenInExplorer_Click(object s, RoutedEventArgs e)
+    {
+        if (FolderList.SelectedItem is not FolderEntryViewModel { FullPath: { Length: > 0 } } vm) return;
+        try
+        {
+            string target = vm.IsFolder ? vm.FullPath : Path.GetDirectoryName(vm.FullPath) ?? "";
+            if (!string.IsNullOrEmpty(target))
+                Process.Start(new ProcessStartInfo("explorer.exe", $"\"{target}\"") { UseShellExecute = true });
+        }
+        catch { }
+    }
+
+    void OpenFolderMapSelected()
+    {
+        var sel = FolderList.SelectedItems.Cast<FolderEntryViewModel>()
+            .Where(x => !string.IsNullOrEmpty(x.FullPath)).ToList();
+        if (sel.Count == 0) return;
+        if (sel.Count == 1)
+        {
+            var vm = sel[0];
+            if (vm.IsFolder)
+            {
+                SetFolderMapping(true, vm.FullPath);
+                return;
+            }
+            try { Process.Start(new ProcessStartInfo(vm.FullPath) { UseShellExecute = true }); }
+            catch { }
+            return;
+        }
+        // Multi-open: files launch with their associated apps; folders open in Explorer.
+        foreach (var vm in sel)
+        {
+            try
+            {
+                if (vm.IsFolder)
+                    Process.Start(new ProcessStartInfo("explorer.exe", $"\"{vm.FullPath}\"") { UseShellExecute = true });
+                else
+                    Process.Start(new ProcessStartInfo(vm.FullPath) { UseShellExecute = true });
+            }
+            catch { }
+        }
+    }
+
+    void FolderList_MouseDoubleClick(object s, MouseButtonEventArgs e)
+    {
+        // Only left double-click navigates/opens — right double-click must not enter a folder.
+        if (e.ChangedButton != MouseButton.Left) return;
+        OpenFolderMapSelected();
+        e.Handled = true;
+    }
+
+    // ── Folder-entry context menu (code-built, opened manually on right-down so
+    //    exactly one menu opens and no focus steal closes it early) ──
+
+    ContextMenu? _folderEntryMenu;
+    MenuItem? _fmMenuOpen, _fmMenuOpenLocation, _fmMenuOpenExplorer, _fmMenuRename, _fmMenuDelete;
+    Separator? _fmMenuSep;
+
+    void EnsureFolderEntryMenu()
+    {
+        if (_folderEntryMenu != null) return;
+        _folderEntryMenu = new ContextMenu();
+        _fmMenuOpen = new MenuItem(); _fmMenuOpen.Click += FolderMapMenuOpen_Click;
+        _fmMenuOpenLocation = new MenuItem(); _fmMenuOpenLocation.Click += FolderMapMenuOpenLocation_Click;
+        _fmMenuOpenExplorer = new MenuItem(); _fmMenuOpenExplorer.Click += FolderMapMenuOpenInExplorer_Click;
+        _fmMenuRename = new MenuItem(); _fmMenuRename.Click += FolderMapMenuRename_Click;
+        _fmMenuSep = new Separator();
+        _fmMenuDelete = new MenuItem { Foreground = new SolidColorBrush(Color.FromArgb(0xFF, 0xFF, 0x66, 0x66)) };
+        _fmMenuDelete.Click += FolderMapMenuDelete_Click;
+        _folderEntryMenu.Items.Add(_fmMenuOpen);
+        _folderEntryMenu.Items.Add(_fmMenuOpenLocation);
+        _folderEntryMenu.Items.Add(_fmMenuOpenExplorer);
+        _folderEntryMenu.Items.Add(_fmMenuRename);
+        _folderEntryMenu.Items.Add(_fmMenuSep);
+        _folderEntryMenu.Items.Add(_fmMenuDelete);
+    }
+
+    void ShowFolderEntryMenu()
+    {
+        EnsureFolderEntryMenu();
+        if (_folderEntryMenu == null) return;
+        // Multi-selection: 打开/删除/重命名 act on the whole selection;
+        // 打开所在位置 is single-only (like Explorer).
+        bool multi = FolderList.SelectedItems.Count > 1;
+        if (_fmMenuOpenLocation != null) _fmMenuOpenLocation.Visibility = multi ? Visibility.Collapsed : Visibility.Visible;
+        _folderEntryMenu.PlacementTarget = FolderList;
+        _folderEntryMenu.IsOpen = true;
+    }
+
+    /// <summary>Select the entry under the cursor (no focus call — focusing the
+    /// ListBoxItem while the popup opens is what made the menu close instantly).
+    /// Right-clicking an unselected entry selects it alone first.</summary>
+    void SelectFolderEntryAtCursor()
+    {
+        if (!GetCursorPos(out var pt)) return;
+        var p = FolderList.PointFromScreen(new Point(pt.X, pt.Y));
+        if (FolderList.InputHitTest(p) is not DependencyObject hit) return;
+        while (hit != null && !ReferenceEquals(hit, FolderList))
+        {
+            if (hit is ListBoxItem item)
+            {
+                if (!item.IsSelected)
+                {
+                    FolderList.UnselectAll();
+                    item.IsSelected = true;
+                }
+                return;
+            }
+            hit = VisualTreeHelper.GetParent(hit);
+        }
+    }
+
+    List<FolderEntryViewModel> SelectedFolderEntries() =>
+        FolderList.SelectedItems.Cast<FolderEntryViewModel>()
+            .Where(x => !string.IsNullOrEmpty(x.FullPath)).ToList();
+
+    /// <summary>Rename the entry on disk (same directory as the mapping — Explorer
+    /// parity). Multi-selection renames with a base name + sequential suffix.</summary>
+    void FolderMapMenuRename_Click(object s, RoutedEventArgs e)
+    {
+        var sel = SelectedFolderEntries();
+        if (sel.Count == 0) return;
+        var (_, mapPath) = ResolveFolderMapping();
+        if (string.IsNullOrEmpty(mapPath) || !Directory.Exists(mapPath)) return;
+
+        if (sel.Count == 1)
+        {
+            RenameFolderEntry(sel[0], mapPath);
+            return;
+        }
+
+        // Batch rename: base + " (n)", extensions preserved — same styled dialog
+        // as the single-icon rename.
+        var rn = new Views.RenameDialog(sel[0].Name, _loc["Rename.Batch"], _loc["Rename.BatchPrompt"]) { Owner = this };
+        if (rn.ShowDialog() != true) return;
+        var baseName = rn.NewName.Trim();
+        if (string.IsNullOrEmpty(baseName)) return;
+        int done = 0, failed = 0;
+        int n = 0;
+        foreach (var vm in sel)
+        {
+            n++;
+            string newName = n == 1
+                ? baseName
+                : $"{Path.GetFileNameWithoutExtension(baseName)} ({n}){Path.GetExtension(baseName)}";
+            if (RenameFolderEntryCore(vm, mapPath, newName)) done++; else failed++;
+        }
+        RefreshFolderMapping(forceReload: true);
+        FlashMapStatus(failed == 0
+            ? string.Format(_loc["FolderMap.RenameDone"], done)
+            : _loc["FolderMap.RenameFailedShort"]);
+    }
+
+    void RenameFolderEntry(FolderEntryViewModel vm, string mapPath)
+    {
+        // Same styled dialog as the single-icon rename.
+        var rn = new Views.RenameDialog(vm.Name) { Owner = this };
+        if (rn.ShowDialog() != true) return;
+        var name = rn.NewName.Trim();
+        if (string.IsNullOrEmpty(name) || name == vm.Name) return;
+        if (RenameFolderEntryCore(vm, mapPath, name))
+            RefreshFolderMapping(forceReload: true);
+    }
+
+    bool RenameFolderEntryCore(FolderEntryViewModel vm, string mapPath, string newName)
+    {
+        if (newName == vm.Name) return true;
+        if (newName is "." or ".." || newName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+        {
+            MessageBox.Show(_loc["FolderMap.RenameInvalid"], _loc["FolderMap.Rename"],
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return false;
+        }
+        var newPath = Path.Combine(mapPath, newName);
+        if (File.Exists(newPath) || Directory.Exists(newPath))
+        {
+            MessageBox.Show(_loc["FolderMap.NameTaken"], _loc["FolderMap.Rename"],
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            return false;
+        }
+        try
+        {
+            if (vm.IsFolder) Directory.Move(vm.FullPath, newPath);
+            else File.Move(vm.FullPath, newPath);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(string.Format(_loc["FolderMap.RenameFailed"], ex.Message), _loc["FolderMap.Rename"],
+                MessageBoxButton.OK, MessageBoxImage.Error);
+            return false;
+        }
+    }
+
+    /// <summary>Delete the selected entries from the mapped folder. EVERY delete
+    /// asks for confirmation and warns that it syncs to the mapped folder/drive.
+    /// Deletions go to the Recycle Bin (recoverable).</summary>
+    void FolderMapMenuDelete_Click(object s, RoutedEventArgs e) => DeleteSelectedFolderEntries();
+
+    void DeleteSelectedFolderEntries()
+    {
+        var sel = SelectedFolderEntries();
+        if (sel.Count == 0) return;
+        var (enabled, path) = ResolveFolderMapping();
+        if (!enabled || string.IsNullOrEmpty(path) || !Directory.Exists(path)) return;
+        // 二次确认 + 同步警告（操作会同步到对应文件夹或磁盘）。
+        if (MessageBox.Show(
+                string.Format(_loc["FolderMap.DeleteConfirm"], sel.Count, path),
+                _loc["FolderMap.DeleteTitle"], MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+        Task.Run(() =>
+        {
+            int done = 0;
+            string? firstError = null;
+            foreach (var vm in sel)
+            {
+                try
+                {
+                    if (vm.IsFolder)
+                        Microsoft.VisualBasic.FileIO.FileSystem.DeleteDirectory(vm.FullPath,
+                            Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs,
+                            Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
+                    else
+                        Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile(vm.FullPath,
+                            Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs,
+                            Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
+                    done++;
+                }
+                catch (Exception ex) { firstError ??= ex.Message; }
+            }
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                RefreshFolderMapping(forceReload: true);
+                if (firstError != null && done == 0)
+                    FlashMapStatus(string.Format(_loc["FolderMap.DeleteFailed"], firstError));
+                else
+                    FlashMapStatus(string.Format(_loc["FolderMap.DeleteDone"], done));
+            }));
+        });
+    }
+
+    // ── Paste (zone context menu + Ctrl+V) ──
+
+    void PasteClipboard_Click(object s, RoutedEventArgs e) => PasteClipboardIntoMapping();
+
+    /// <summary>Paste clipboard contents (files / text / image) into the mapped folder.
+    /// Returns true when the mapping consumed the gesture.</summary>
+    bool PasteClipboardIntoMapping()
+    {
+        var (enabled, path) = ResolveFolderMapping();
+        if (!enabled || string.IsNullOrEmpty(path) || !Directory.Exists(path)) return false;
+
+        string targetDir = path;
+        // Snapshot clipboard contents on the UI thread (STA requirement).
+        List<string>? fileList = null;
+        string? text = null;
+        System.Windows.Media.Imaging.BitmapSource? image = null;
+        try
+        {
+            if (Clipboard.ContainsFileDropList()) fileList = Clipboard.GetFileDropList().Cast<string>().ToList();
+            else if (Clipboard.ContainsText()) text = Clipboard.GetText();
+            else if (Clipboard.ContainsImage())
+            {
+                image = Clipboard.GetImage();
+                if (image.CanFreeze) image.Freeze();
+            }
+        }
+        catch { return false; }
+
+        if (fileList == null && string.IsNullOrEmpty(text) && image == null)
+        {
+            FlashMapStatus(_loc["FolderMap.PasteNothing"]);
+            return true;
+        }
+
+        Task.Run(() =>
+        {
+            int done = 0;
+            if (fileList != null)
+            {
+                foreach (var f in fileList) if (CopyInto(f, targetDir)) done++;
+            }
+            else if (!string.IsNullOrEmpty(text))
+            {
+                var dest = UniqueDropPath(targetDir, "粘贴文本.txt");
+                try { File.WriteAllText(dest, text, System.Text.Encoding.UTF8); done = 1; } catch { }
+            }
+            else if (image != null)
+            {
+                var dest = UniqueDropPath(targetDir, "粘贴图片.png");
+                try
+                {
+                    using var fs = File.Create(dest);
+                    var enc = new System.Windows.Media.Imaging.PngBitmapEncoder();
+                    enc.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(image));
+                    enc.Save(fs);
+                    done = 1;
+                }
+                catch { }
+            }
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                RefreshFolderMapping(forceReload: true);
+                FlashMapStatus(done > 0
+                    ? string.Format(_loc["FolderMap.PasteDone"], done)
+                    : _loc["FolderMap.PasteNothing"]);
+            }));
+        });
+        return true;
+    }
+
+    /// <summary>Show a transient status in the mapping header path area, then restore
+    /// the real path.</summary>
+    System.Windows.Threading.DispatcherTimer? _mapStatusTimer;
+
+    void FlashMapStatus(string msg)
+    {
+        FolderMapPathText.Text = msg;
+        _mapStatusTimer?.Stop();
+        _mapStatusTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2.2) };
+        _mapStatusTimer.Tick += (_, _) =>
+        {
+            _mapStatusTimer.Stop();
+            var (_, path) = ResolveFolderMapping();
+            FolderMapPathText.Text = path;
+        };
+        _mapStatusTimer.Start();
+    }
+
+    /// <summary>Ctrl+V pastes clipboard files/text into the mapped folder — the
+    /// same gesture as Explorer.</summary>
+    void Window_PreviewKeyDown(object s, KeyEventArgs e)
+    {
+        if (e.OriginalSource is TextBox) return; // inline title editing keeps its own keys
+        if (e.Key == Key.Delete)
+        {
+            // Delete key deletes the selected mapped entries (same confirm flow).
+            if (ResolveFolderMapping().Enabled && FolderList.SelectedItems.Count > 0)
+            {
+                DeleteSelectedFolderEntries();
+                e.Handled = true;
+            }
+            return;
+        }
+        if (e.Key != Key.V || (Keyboard.Modifiers & ModifierKeys.Control) == 0) return;
+        if (PasteClipboardIntoMapping()) e.Handled = true;
+    }
+
     (double, double) FindFreeSpot() => ZoneLayout.FindFreeSpot(_vm.GetPlacementItems(), _zone.Width, _zone.Height, _zone.GridSize, _zone.GridSize + ZoneLayout.LabelArea);
 
     void RearrangeAll()
@@ -761,7 +2304,46 @@ public partial class ZoneWindow : Window
     // ── Right-click zone ──
 
     void Window_PreviewMouseRightButtonDown(object s, MouseButtonEventArgs e)
-    { if (IsOnItem(e.OriginalSource) || MainContent.Visibility != Visibility.Visible) return; ZoneBorder.ContextMenu.IsOpen = true; e.Handled = true; }
+    {
+        if (MainContent.Visibility != Visibility.Visible) return;
+        // Mapped-folder entries: select + open the entry menu manually — a single
+        // deterministic menu open (no ContextMenuService, no focus steal).
+        if (IsOnFolderEntry(e.OriginalSource))
+        {
+            SelectFolderEntryAtCursor();
+            ShowFolderEntryMenu();
+            e.Handled = true;
+            return;
+        }
+        // Zone items have their own ContextMenu (ContextMenuService opens it);
+        // right-clicking an unselected item selects it alone first.
+        if (IsOnItem(e.OriginalSource))
+        {
+            SelectZoneItemUnderCursor(e.OriginalSource);
+            return;
+        }
+        ZoneBorder.ContextMenu.IsOpen = true;
+        e.Handled = true;
+    }
+
+    /// <summary>Zone context menu opened — show Paste only while a folder mapping is active.</summary>
+    void ZoneMenu_Opened(object s, RoutedEventArgs e)
+    {
+        var (enabled, path) = ResolveFolderMapping();
+        bool canPaste = enabled && !string.IsNullOrEmpty(path) && Directory.Exists(path);
+        CtxPaste.Visibility = canPaste ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    static bool IsOnFolderEntry(object s)
+    {
+        var c = s as DependencyObject;
+        while (c != null)
+        {
+            if (c is ListBoxItem) return true;
+            c = VisualTreeHelper.GetParent(c);
+        }
+        return false;
+    }
     void EditZone_Click(object s, RoutedEventArgs e) { _vm.IsEditing = !_vm.IsEditing; EditBtnText.Text = _vm.IsEditing ? "✓" : "⚙"; }
     void HideZone_Click(object s, RoutedEventArgs e) { HideZone(); }
     void DeleteZone_Click(object s, RoutedEventArgs e) { if (MessageBox.Show(_loc.Get("Dialog.DeleteZoneMsg", _zone.Name), _loc["Dialog.DeleteZoneTitle"], MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes) { _mgr.DeleteZone(_zone.Id); Close(); } }
@@ -992,9 +2574,59 @@ public partial class ZoneWindow : Window
     // ── Item drag ──
 
     void Item_MouseDown(object s, MouseButtonEventArgs e)
-    { if (e.ClickCount == 2) { if (s is FrameworkElement fe && fe.DataContext is ZoneItemViewModel iv) Open(iv); e.Handled = true; return; } if (s is FrameworkElement el && el.DataContext is ZoneItemViewModel vm) { _dv = vm; _de = el; _ds = e.GetPosition(this); _is = new Point(vm.X, vm.Y); _dragging = false; el.CaptureMouse(); e.Handled = true; } }
+    {
+        if (e.ClickCount == 2)
+        {
+            if (s is FrameworkElement fe && fe.DataContext is ZoneItemViewModel iv)
+            {
+                if (iv.Type == ItemType.SubFolder)
+                {
+                    // 双击次级文件夹 = 打开 flyout(它没有可启动的 TargetPath)。
+                    var sub = ResolveSourceZoneItem(iv);
+                    if (sub != null) { OpenSubfolderFlyout(sub); e.Handled = true; return; }
+                }
+                Open(iv);
+            }
+            e.Handled = true;
+            return;
+        }
+        // Ctrl+click toggles selection (multi-select) — no drag, no flyout.
+        if (s is FrameworkElement feCtrl && feCtrl.DataContext is ZoneItemViewModel ctrlVm
+            && (Keyboard.Modifiers & ModifierKeys.Control) != 0)
+        {
+            ctrlVm.IsSelected = !ctrlVm.IsSelected;
+            e.Handled = true;
+            return;
+        }
+        // Plain click selects the clicked item alone; clicking an already-selected
+        // item keeps the multi-selection (standard Explorer behavior).
+        if (s is FrameworkElement feSel && feSel.DataContext is ZoneItemViewModel selVm
+            && !selVm.IsSelected)
+        {
+            foreach (var o in _vm.Items) o.IsSelected = false;
+            selVm.IsSelected = true;
+        }
+        // SubFolder 与普通图标同路径:记录拖拽起点 + 捕获鼠标;未拖动的单击在
+        // Item_MouseUp 里打开 flyout(点击 vs 拖拽消歧)。
+        if (s is FrameworkElement el && el.DataContext is ZoneItemViewModel vm)
+        {
+            _dv = vm; _de = el; _ds = e.GetPosition(this); _is = new Point(vm.X, vm.Y); _dragging = false; el.CaptureMouse();
+            // Long-press arms the marquee; a quick drag stays the move gesture.
+            StartMarqueeHoldTimer(SelectTarget.ZoneItems, _ds);
+            e.Handled = true;
+        }
+    }
     void Item_MouseMove(object s, MouseEventArgs e)
     {
+        // A move before the long-press completes hands the gesture back to the
+        // move-drag (cancels the pending marquee).
+        if (_selectMode == SelectMode.Hold)
+        {
+            var pd = e.GetPosition(this) - _selectStart;
+            if (Math.Abs(pd.X) >= SystemParameters.MinimumHorizontalDragDistance
+                || Math.Abs(pd.Y) >= SystemParameters.MinimumVerticalDragDistance)
+                CancelMarqueeHold();
+        }
         if (_dv == null || _de == null) return;
         var d = e.GetPosition(this) - _ds;
         if (!_dragging)
@@ -1003,22 +2635,361 @@ public partial class ZoneWindow : Window
             _dragging = true;
             _de.Opacity = 0.7;
         }
+        // live X/Y preview — icon tracks cursor; Item_MouseUp commits reorder/move.
         _dv.X = Math.Max(0, Math.Min(_is.X + d.X, _zone.Width - ItemW));
         _dv.Y = Math.Max(0, Math.Min(_is.Y + d.Y, _zone.Height - ItemH));
-        UpdateDropIndicator(_dv);
+
+        // SubFolder 命中检测(bounds-based,捕获/实时预览期间都稳定):命中 → 放大目标
+        // 方框并隐藏换位指示器;未命中 → 复原放大并显示换位指示器。
+        var overSub = FindSubfolderTarget(e.GetPosition(ItemsHost));
+        if (overSub != null && _dv.Type != ItemType.SubFolder)
+        {
+            SetSubfolderDragScale(FindContainerFor(overSub));
+            HideDropIndicator();
+        }
+        else
+        {
+            ClearSubfolderDragScale();
+            UpdateDropIndicator(_dv);
+        }
     }
 
     void Item_MouseUp(object s, MouseButtonEventArgs e)
     {
+        // A click (no move) released before the long-press completed → no marquee.
+        if (_selectMode == SelectMode.Hold)
+        {
+            _selectHoldTimer?.Stop();
+            _selectMode = SelectMode.None;
+            _selectTarget = SelectTarget.None;
+        }
         if (_dv == null) return;
         if (_de != null) { _de.ReleaseMouseCapture(); _de.Opacity = 1.0; }
         if (_dragging)
         {
-            if (_zone.SnapToGrid) ReorderItemInto(_dv, _dv.X, _dv.Y);
+            // 命中 SubFolder → 移入;否则普通换位/移动(次级文件夹图标与普通图标同规则)。
+            var overSub = FindSubfolderTarget(e.GetPosition(ItemsHost));
+            if (overSub != null && _dv.Type != ItemType.SubFolder)
+                MoveIntoSubfolder(_dv, overSub);
+            else if (_zone.SnapToGrid) ReorderItemInto(_dv, _dv.X, _dv.Y);
             else { _vm.MoveItem(_dv.Id, _dv.X, _dv.Y, snapToGrid: false); _vm.RefreshMergedItems(); }
         }
+        else if (_dv.Type == ItemType.SubFolder)
+        {
+            // 单击未拖动 → 打开 flyout(点击 vs 拖拽消歧;Ctrl+click 已在 MouseDown 拦下)。
+            var sub = ResolveSourceZoneItem(_dv);
+            if (sub != null) OpenSubfolderFlyout(sub);
+        }
         HideDropIndicator();
+        ClearSubfolderDragScale();
         _dv = null; _de = null; _dragging = false;
+    }
+
+    // ── SubFolder 图标右键菜单 ──
+
+    void SubfolderOpen_Click(object s, RoutedEventArgs e)
+    {
+        if (VM(s) is not ZoneItemViewModel v || v.Type != ItemType.SubFolder) return;
+        var sub = ResolveSourceZoneItem(v);
+        if (sub != null) OpenSubfolderFlyout(sub);
+    }
+
+    void SubfolderRename_Click(object s, RoutedEventArgs e)
+    {
+        if (VM(s) is not ZoneItemViewModel v || v.Type != ItemType.SubFolder) return;
+        // 与单个图标重命名同款弹窗(RenameDialog)。
+        var rn = new Views.RenameDialog(v.Name) { Owner = this };
+        if (rn.ShowDialog() == true && !string.IsNullOrWhiteSpace(rn.NewName))
+        {
+            v.Name = rn.NewName;
+            _mgr.SaveConfig();
+        }
+    }
+
+    /// <summary>解散次级文件夹:图标本身移除,内部图标自动排列回所属分区。
+    /// 支持多选:选中多个次级文件夹时一次全部解散(与普通图标多选删除同模式)。</summary>
+    void SubfolderDissolve_Click(object s, RoutedEventArgs e)
+    {
+        if (VM(s) is not ZoneItemViewModel v || v.Type != ItemType.SubFolder) return;
+        var sel = _vm.Items.Where(i => i.IsSelected && i.Type == ItemType.SubFolder).ToList();
+        CloseSubfolderFlyout();
+        if (sel.Count > 1 && sel.Contains(v))
+        {
+            foreach (var it in sel) DissolveSubfolder(it);
+        }
+        else
+        {
+            DissolveSubfolder(v);
+        }
+        _mgr.SaveConfig();
+        _mgr.NotifyChanged();
+        UpdateCanvasSize();
+    }
+
+    void DissolveSubfolder(ZoneItemViewModel v)
+    {
+        var sub = ResolveSourceZoneItem(v);
+        if (sub == null) return;
+        var owner = OwnerZoneOf(v) ?? _zone;
+        owner.Items.Remove(sub);
+        foreach (var inner in sub.SubItems)
+        {
+            var (sx, sy) = FindFreeSpot();
+            inner.X = sx; inner.Y = sy;
+            owner.Items.Add(inner);
+        }
+        sub.SubItems.Clear();
+    }
+
+    /// <summary>删除次级文件夹:内部图标一并删除(spec Q7-A,无需二次确认)。
+    /// 支持多选:与普通图标多选删除完全一致 — 选中多个(含普通图标/次级文件夹混选)
+    /// 时一次全部删除,带数量确认。</summary>
+    void SubfolderDelete_Click(object s, RoutedEventArgs e)
+    {
+        if (VM(s) is not ZoneItemViewModel v) return;
+        var sel = _vm.Items.Where(i => i.IsSelected).ToList();
+        if (sel.Count > 1 && sel.Contains(v))
+        {
+            if (MessageBox.Show(string.Format(_loc["ZoneItem.DeleteMultiConfirm"], sel.Count),
+                    _loc["Item.Delete"], MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                return;
+            CloseSubfolderFlyout();
+            foreach (var it in sel) _vm.DeleteItemCommand.Execute(it);
+            return;
+        }
+        CloseSubfolderFlyout();
+        _vm.DeleteItemCommand.Execute(v);
+    }
+
+    // ── Marquee multi-select (long-press + drag) ──
+    //
+    // Press holds 350ms → the drag draws a marquee and selects everything it
+    // touches (selection at gesture start is preserved). A quick drag on a zone
+    // item stays the move gesture; a drag on empty area marquees immediately.
+
+    void StartMarqueeHoldTimer(SelectTarget target, Point start)
+    {
+        _selectMode = SelectMode.Hold;
+        _selectTarget = target;
+        _selectStart = start;
+        _selectMoved = false;
+        _selectFromEmpty = false;
+        _selectHoldTimer?.Stop();
+        _selectHoldTimer = new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(MarqueeHoldMs)
+        };
+        _selectHoldTimer.Tick += (_, _) =>
+        {
+            _selectHoldTimer.Stop();
+            if (_selectMode != SelectMode.Hold) return;
+            _selectMode = SelectMode.Draw;
+            // Zone items: hand the gesture to the marquee — release the move-drag
+            // scaffolding so Item_MouseMove no longer moves the grabbed item.
+            if (_selectTarget == SelectTarget.ZoneItems)
+            {
+                _dv = null;
+                if (_de != null) { try { _de.ReleaseMouseCapture(); } catch { } _de = null; }
+                _dragging = false;
+                HideDropIndicator();
+                ClearSubfolderDragScale();
+            }
+        };
+        _selectHoldTimer.Start();
+    }
+
+    void CancelMarqueeHold()
+    {
+        if (_selectMode != SelectMode.Hold) return;
+        _selectHoldTimer?.Stop();
+        _selectMode = SelectMode.None;
+        _selectTarget = SelectTarget.None;
+        _selectStartZone = null;
+        _selectStartList = null;
+    }
+
+    /// <summary>Press on the mapping list: hold on an entry arms the marquee
+    /// (click-select still happens); empty-area press marquees immediately.</summary>
+    void FolderList_PreviewMouseLeftButtonDown(object s, MouseButtonEventArgs e)
+    {
+        // Capture so the marquee still commits when released outside the window.
+        try { Mouse.Capture(FolderList); } catch { }
+        if (IsOnFolderEntry(e.OriginalSource))
+        {
+            StartMarqueeHoldTimer(SelectTarget.ListItems, e.GetPosition(this));
+            return; // let the ListBox click-select
+        }
+        // Empty list area: suppress the ListBox's empty-click clear; a plain click
+        // clears selection in the up handler, a drag draws the marquee.
+        _selectMode = SelectMode.Draw;
+        _selectTarget = SelectTarget.ListItems;
+        _selectStart = e.GetPosition(this);
+        _selectCurrent = _selectStart;
+        _selectMoved = false;
+        _selectFromEmpty = true;
+        e.Handled = true;
+    }
+
+    /// <summary>Window-level move drives the marquee regardless of where the
+    /// press started (item / list / empty area) — moves bubble to the window.</summary>
+    void Window_MouseMove(object s, MouseEventArgs e)
+    {
+        if (_selectMode == SelectMode.None) return;
+        var p = e.GetPosition(this);
+        if (_selectMode == SelectMode.Hold)
+        {
+            if (Math.Abs(p.X - _selectStart.X) >= SystemParameters.MinimumHorizontalDragDistance
+                || Math.Abs(p.Y - _selectStart.Y) >= SystemParameters.MinimumVerticalDragDistance)
+                CancelMarqueeHold();
+            return;
+        }
+        if (_selectMode != SelectMode.Draw) return;
+        if (!_selectMoved)
+        {
+            if (Math.Abs(p.X - _selectStart.X) < 4 && Math.Abs(p.Y - _selectStart.Y) < 4) return;
+            _selectMoved = true;
+            SnapshotSelection();
+        }
+        _selectCurrent = p;
+        UpdateMarquee();
+    }
+
+    void Window_MouseLeftButtonUp(object s, MouseButtonEventArgs e)
+    {
+        if (_selectMode == SelectMode.None)
+        {
+            // Safety: release any stray marquee capture.
+            if (Mouse.Captured == FolderList || Mouse.Captured == this) Mouse.Capture(null);
+            return;
+        }
+        try { Mouse.Capture(null); } catch { }
+        _selectHoldTimer?.Stop();
+        var mode = _selectMode;
+        var target = _selectTarget;
+        var moved = _selectMoved;
+        var fromEmpty = _selectFromEmpty;
+        _selectMode = SelectMode.None;
+        _selectTarget = SelectTarget.None;
+        _selectMoved = false;
+        _selectFromEmpty = false;
+        _selectStartZone = null;
+        _selectStartList = null;
+        MarqueeRect.Visibility = Visibility.Collapsed;
+        MarqueeRect.Width = MarqueeRect.Height = 0;
+        if (mode == SelectMode.Draw && moved)
+        {
+            e.Handled = true; // gesture consumed by the marquee
+            return;
+        }
+        // Plain click on empty area clears the selection (Explorer behavior).
+        if (mode == SelectMode.Draw && !moved && fromEmpty)
+        {
+            if (target == SelectTarget.ListItems) FolderList.UnselectAll();
+            else ClearZoneItemSelection();
+        }
+    }
+
+    void SnapshotSelection()
+    {
+        if (_selectTarget == SelectTarget.ZoneItems)
+            _selectStartZone = _vm.Items.Where(i => i.IsSelected).Select(i => i.Id).ToHashSet();
+        else
+            _selectStartList = FolderList.SelectedItems.Cast<FolderEntryViewModel>()
+                .Select(f => f.FullPath).ToHashSet();
+    }
+
+    void UpdateMarquee()
+    {
+        double x1 = Math.Min(_selectStart.X, _selectCurrent.X);
+        double y1 = Math.Min(_selectStart.Y, _selectCurrent.Y);
+        double w = Math.Abs(_selectCurrent.X - _selectStart.X);
+        double h = Math.Abs(_selectCurrent.Y - _selectStart.Y);
+        MarqueeRect.Visibility = Visibility.Visible;
+        Canvas.SetLeft(MarqueeRect, x1);
+        Canvas.SetTop(MarqueeRect, y1);
+        MarqueeRect.Width = w;
+        MarqueeRect.Height = h;
+        var r = new Rect(x1, y1, w, h);
+        if (_selectTarget == SelectTarget.ZoneItems) ApplyZoneMarquee(r);
+        else ApplyListMarquee(r);
+    }
+
+    void ApplyZoneMarquee(Rect r)
+    {
+        for (int i = 0; i < ItemsHost.Items.Count; i++)
+        {
+            if (ItemsHost.ItemContainerGenerator.ContainerFromIndex(i) is not FrameworkElement fe) continue;
+            if (fe.DataContext is not ZoneItemViewModel vm) continue;
+            var p0 = fe.TranslatePoint(new Point(0, 0), this);
+            bool inRect = r.IntersectsWith(new Rect(p0.X, p0.Y, Math.Max(1, fe.ActualWidth), Math.Max(1, fe.ActualHeight)));
+            vm.IsSelected = inRect || (_selectStartZone?.Contains(vm.Id) ?? false);
+        }
+    }
+
+    void ApplyListMarquee(Rect r)
+    {
+        foreach (var item in RealizedListItems())
+        {
+            if (item.DataContext is not FolderEntryViewModel vm) continue;
+            var p0 = item.TranslatePoint(new Point(0, 0), this);
+            bool inRect = r.IntersectsWith(new Rect(p0.X, p0.Y, Math.Max(1, item.ActualWidth), Math.Max(1, item.ActualHeight)));
+            item.IsSelected = inRect || (_selectStartList?.Contains(vm.FullPath) ?? false);
+        }
+    }
+
+    List<ListBoxItem> RealizedListItems()
+    {
+        var list = new List<ListBoxItem>();
+        void Walk(DependencyObject d)
+        {
+            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(d); i++)
+            {
+                var c = VisualTreeHelper.GetChild(d, i);
+                if (c is ListBoxItem lbi) list.Add(lbi);
+                Walk(c);
+            }
+        }
+        Walk(FolderList);
+        return list;
+    }
+
+    void ClearZoneItemSelection()
+    {
+        foreach (var i in _vm.Items) i.IsSelected = false;
+    }
+
+    /// <summary>Right-click on a zone item: select it alone unless it is already
+    /// part of the current selection (keeps the multi-selection for the menu).</summary>
+    void SelectZoneItemUnderCursor(object s)
+    {
+        var c = s as DependencyObject;
+        while (c != null)
+        {
+            if (c is FrameworkElement fe && fe.DataContext is ZoneItemViewModel vm)
+            {
+                if (!vm.IsSelected)
+                {
+                    foreach (var o in _vm.Items) o.IsSelected = false;
+                    vm.IsSelected = true;
+                }
+                return;
+            }
+            c = VisualTreeHelper.GetParent(c);
+        }
+    }
+
+    static bool IsWithinZoneChrome(object s)
+    {
+        var c = s as DependencyObject;
+        while (c != null)
+        {
+            if (c is FrameworkElement fe && fe.Name is "TitleBarBg" or "ControlPoint" or "SubZoneTabsRow"
+                or "FolderMappingView" or "BottomBarBg" or "RestoreButton"
+                or "GripTL" or "GripTR" or "GripBL" or "GripBR")
+                return true;
+            c = VisualTreeHelper.GetParent(c);
+        }
+        return false;
     }
 
     // ── Item reorder (SnapToGrid) + drop indicator ──
@@ -1254,11 +3225,27 @@ public partial class ZoneWindow : Window
         if (s is not ContextMenu cm || cm.PlacementTarget is not FrameworkElement fe
             || fe.DataContext is not ZoneItemViewModel vm) return;
         bool isRecycle = vm.Type == ItemType.ShellLocation && ShellIconService.IsRecycleBin(vm.TargetPath);
+        // Multi-selection menu: only 删除 + 重命名 (single-item items are hidden).
+        bool isMulti = vm.IsSelected && _vm.Items.Count(i => i.IsSelected) > 1;
         foreach (var entry in cm.Items)
         {
-            if (entry is MenuItem { Name: "CtxEmptyRecycle" } mi)
-                mi.Visibility = isRecycle ? Visibility.Visible : Visibility.Collapsed;
+            if (entry is not MenuItem mi) continue;
+            switch (mi.Name)
+            {
+                case "CtxEmptyRecycle":
+                    mi.Visibility = isRecycle && !isMulti ? Visibility.Visible : Visibility.Collapsed;
+                    break;
+                case "CtxOpen":
+                case "CtxOpenLocation":
+                    mi.Visibility = isMulti ? Visibility.Collapsed : Visibility.Visible;
+                    break;
+                case "CtxRename":
+                case "CtxDelete":
+                    break; // shown in both modes
+            }
         }
+        if (cm.Items.OfType<Separator>().FirstOrDefault(x => x.Name == "CtxSep1") is { } sep)
+            sep.Visibility = isMulti ? Visibility.Collapsed : Visibility.Visible;
     }
 
     void ItemEmptyRecycle_Click(object s, RoutedEventArgs e)
@@ -1283,10 +3270,38 @@ public partial class ZoneWindow : Window
     void ItemRename_Click(object s, RoutedEventArgs e)
     {
         if (VM(s) is not ZoneItemViewModel v) return;
+        var sel = _vm.Items.Where(i => i.IsSelected).ToList();
+        if (sel.Count > 1 && sel.Contains(v))
+        {
+            // Batch rename: base name + sequential suffix — same styled dialog
+            // as single-icon rename (matches the mapping view).
+            var rnBatch = new Views.RenameDialog(v.Name, _loc["Rename.Batch"], _loc["Rename.BatchPrompt"]) { Owner = this };
+            if (rnBatch.ShowDialog() != true) return;
+            var baseName = rnBatch.NewName.Trim();
+            if (string.IsNullOrEmpty(baseName)) return;
+            int n = 0;
+            foreach (var it in sel) { n++; it.Name = n == 1 ? baseName : $"{baseName} ({n})"; }
+            _mgr.SaveConfig();
+            return;
+        }
         var rn = new Views.RenameDialog(v.Name) { Owner = this };
         if (rn.ShowDialog() == true) { v.Name = rn.NewName; _mgr.SaveConfig(); }
     }
-    void ItemDelete_Click(object s, RoutedEventArgs e) { if (VM(s) is ZoneItemViewModel v) _vm.DeleteItemCommand.Execute(v); }
+
+    void ItemDelete_Click(object s, RoutedEventArgs e)
+    {
+        if (VM(s) is not ZoneItemViewModel v) return;
+        var sel = _vm.Items.Where(i => i.IsSelected).ToList();
+        if (sel.Count > 1 && sel.Contains(v))
+        {
+            if (MessageBox.Show(string.Format(_loc["ZoneItem.DeleteMultiConfirm"], sel.Count),
+                    _loc["Item.Delete"], MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                return;
+            foreach (var it in sel) _vm.DeleteItemCommand.Execute(it);
+            return;
+        }
+        _vm.DeleteItemCommand.Execute(v);
+    }
 
     static ZoneItemViewModel? VM(object s) => s is MenuItem mi && mi.Parent is ContextMenu cm && cm.PlacementTarget is FrameworkElement fe && fe.DataContext is ZoneItemViewModel vm ? vm : null;
     static void Open(ZoneItemViewModel v)
@@ -1465,9 +3480,11 @@ public partial class ZoneWindow : Window
         // both (48px), not just below the top bar.
         FillRect.Margin = fillIndependent ? new Thickness(0, TitleBarLayerHeight(), 0, 0) : new Thickness(0);
 
-        // Title bar fill — both title-bar layers share the resolved fill.
+        // Title bar fill — all title-bar layers share the resolved fill (top bar,
+        // merged sub-zone tab row, and the folder-mapping header row).
         try { TitleBarBg.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.TitleBarFillColor)!); } catch { }
         try { SubZoneTabsRow.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.TitleBarFillColor)!); } catch { }
+        try { FolderMapHeaderBg.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.TitleBarFillColor)!); } catch { }
 
         // Background image — computed before the adaptive brushes below so the
         // sampling transform is fresh for both the title-bar and body regions.
@@ -1536,10 +3553,11 @@ public partial class ZoneWindow : Window
         ApplyItemTextColorAdaptive(s.FillColor);
     }
 
-    /// <summary>Combined title-bar height: 48px when the merged master's sub-zone
-    /// tab row is visible (24px top bar + 24px tab row), otherwise 24px.</summary>
+    /// <summary>Combined title-bar height: 24px top bar + 24px merged sub-zone tab
+    /// row + 26px folder-mapping header row (when mapping is enabled).</summary>
     double TitleBarLayerHeight() =>
-        _zone.MergedGroupMembership.SubZoneIds.Count > 0 ? 48 : 24;
+        24 + (_zone.MergedGroupMembership.SubZoneIds.Count > 0 ? 24 : 0)
+           + (ResolveFolderMapping().Enabled ? 26 : 0);
 
     /// <summary>Effective window size used by the background-image transform — mirrors
     /// <see cref="ApplyBackgroundImage"/>, which falls back to the model size before the
@@ -1869,6 +3887,7 @@ public partial class ZoneWindow : Window
         // brush — no separate RebuildSubZoneTabs call needed here.
         ApplyStyle();
         UpdateMergedTitle();
+        RefreshFolderMapping();
         if (zone.IsVisible) ShowZone(); else ApplyHidden();
         // ponytail: run last so it overrides ShowZone/ApplyHidden when HoverAutoExpand=true.
         // Otherwise the post-refresh Width/Height would restore the full-size window and
@@ -1918,7 +3937,12 @@ public partial class ZoneWindow : Window
         }
     }
 
-    protected override void OnActivated(EventArgs e) { base.OnActivated(e); }
+    protected override void OnActivated(EventArgs e)
+    {
+        base.OnActivated(e);
+        // Mapped folders can change outside the app — rescan (throttled) on focus.
+        RefreshFolderMappingIfStale();
+    }
 
     // ── Merge support ──
 
@@ -2114,6 +4138,9 @@ public partial class ZoneWindow : Window
         // ponytail: ApplyStyle rebuilds sub-zone tabs internally with the resolved adaptive
         // brush — no separate RebuildSubZoneTabs / ApplySubZoneTabTextColorAdaptive needed.
         ApplyStyle(); // Apply style based on selected sub-zone (also rebuilds tabs)
+        // The selected tab owns the visible folder mapping (sub-zone keeps its own
+        // mapping after joining the group) — re-resolve + reload for the new tab.
+        RefreshFolderMapping();
         RearrangeAll(); // Rearrange items for the newly selected sub-zone
         UpdateCanvasSize();
     }

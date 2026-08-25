@@ -267,6 +267,12 @@ public class ZoneItemViewModel : INotifyPropertyChanged
     private readonly ZoneItem _item;
     private readonly ShellIconService _iconService;
 
+    /// <summary>ponytail 2026-08-26: expose the underlying ZoneItem so the SubFolder
+    /// template selector + SubfolderItemView wiring can unwrap the VM (ItemsControl
+    /// binds to ObservableCollection&lt;ZoneItemViewModel&gt;, but the SubFolder
+    /// rendering needs the raw model for SubItems / CellLayout derivation).</summary>
+    public ZoneItem Source => _item;
+
     public Guid Id => _item.Id;
     public string Name
     {
@@ -328,6 +334,20 @@ public class ZoneItemViewModel : INotifyPropertyChanged
 
     /// <summary>Which zone this item belongs to (for merged views).</summary>
     public Guid SourceZoneId { get; set; }
+
+    private bool _isSelected;
+    /// <summary>Marquee / Ctrl+click multi-selection state (visual only — the
+    /// underlying model is untouched; cleared when items refresh).</summary>
+    public bool IsSelected
+    {
+        get => _isSelected;
+        set
+        {
+            if (_isSelected == value) return;
+            _isSelected = value;
+            OnPropertyChanged();
+        }
+    }
 
     public ZoneItemViewModel(ZoneItem item, ShellIconService iconService)
     {

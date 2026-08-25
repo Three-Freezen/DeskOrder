@@ -75,7 +75,8 @@ public partial class MergedGroupsPage : UserControl
             IsLocked = master.IsLocked,
             IsVisible = master.IsVisible,
         };
-        ApplyStatusBadge(row, master);
+        // ponytail: no status badge on merged-group rows (lock/hidden/merged chips
+        // removed; folder-mapping badge intentionally NOT shown here).
 
         // ponytail: long-press drag reorder — masters are a FILTERED view of
         // Zones, so the model move goes through MoveMergedGroupMaster (reorders
@@ -91,8 +92,9 @@ public partial class MergedGroupsPage : UserControl
         row.LockCommand = new RelayCommand(_ => { master.IsLocked = !master.IsLocked; _zoneManager.UpdateZone(master); });
         row.VisibilityCommand = new RelayCommand(v =>
         {
-            master.IsVisible = row.IsVisible;
-            if (master.IsVisible) _zoneManager.ShowZone(master); else _zoneManager.HideZone(master.Id);
+            // ponytail 2026-08-26: no model pre-flip — same code as the zone's own
+            // hide button (see ZonesPage).
+            if (master.IsVisible) _zoneManager.HideZone(master.Id); else _zoneManager.ShowZone(master);
         });
         row.DeleteCommand = new RelayCommand(_ => Delete(master));
         row.RenameCommand = new RelayCommand(p =>
@@ -140,33 +142,15 @@ public partial class MergedGroupsPage : UserControl
         PropertyWindowManager.Instance.DockTarget(target, _main);
     }
 
-    static void ApplyStatusBadge(EditableListRow row, Zone master)
-    {
-        if (master.IsLocked)
-        {
-            row.HasStatusBadge = true; row.StatusBadge = "已锁定";
-            row.StatusBadgeBrush = new SolidColorBrush(Color.FromArgb(0x40, 0xFF, 0xC1, 0x07));
-        }
-        else if (!master.IsVisible)
-        {
-            row.HasStatusBadge = true; row.StatusBadge = "已隐藏";
-            row.StatusBadgeBrush = new SolidColorBrush(Color.FromArgb(0x40, 0xA0, 0xA0, 0xC0));
-        }
-        else
-        {
-            row.HasStatusBadge = true; row.StatusBadge = $"{master.MergedGroupMembership.SubZoneIds.Count + 1} 个子分区";
-            row.StatusBadgeBrush = new SolidColorBrush(Color.FromArgb(0x40, 0x7C, 0x3A, 0xED));
-        }
-    }
-
     void ShowGroupContextMenu(Zone master, EditableListRow row)
     {
         var items = new List<RowContextMenu.Item>
         {
             new(master.IsVisible ? "隐藏" : "显示", () =>
             {
-                if (master.IsVisible) { master.IsVisible = false; _zoneManager.HideZone(master.Id); }
-                else { master.IsVisible = true; _zoneManager.ShowZone(master); }
+                // ponytail 2026-08-26: SAME path as the zone's own hide button (see ZonesPage).
+                if (master.IsVisible) _zoneManager.HideZone(master.Id);
+                else _zoneManager.ShowZone(master);
                 RefreshList();
             }),
             new(master.IsLocked ? "解锁" : "锁定", () =>

@@ -53,6 +53,12 @@ public class Zone : AppearanceModel
     /// <summary>标题栏填充单独设置 — 勾选后主体填充(FillColor)不再铺到标题栏下方。</summary>
     public bool TitleBarFillIndependent { get; set; } = false;
 
+    // ── Folder mapping ──
+    /// <summary>文件夹映射 — 启用后分区内容区展示映射文件夹/磁盘的内容（双写 MergedGroupStyle，
+    /// 组合分区解散后映射跟随保留）。</summary>
+    public bool FolderMappingEnabled { get; set; } = false;
+    public string FolderMappingPath { get; set; } = "";
+
     // Display state — not persisted
     [JsonIgnore]
     public bool IsEditing { get; set; }
@@ -82,6 +88,8 @@ public class Zone : AppearanceModel
             TitleTextColor = TitleTextColor,
             QuickBarMode = QuickBarMode,
             TitleBarFillIndependent = TitleBarFillIndependent,
+            FolderMappingEnabled = FolderMappingEnabled,
+            FolderMappingPath = FolderMappingPath,
             MergedGroupMembership = new MergedGroupMembership
             {
                 GroupId = MergedGroupMembership.GroupId,
@@ -111,6 +119,8 @@ public class Zone : AppearanceModel
                 BgImageOffsetY = MergedGroupStyle.BgImageOffsetY,
                 BgImageZoom = MergedGroupStyle.BgImageZoom,
                 BackgroundImageOpacity = MergedGroupStyle.BackgroundImageOpacity,
+                FolderMappingEnabled = MergedGroupStyle.FolderMappingEnabled,
+                FolderMappingPath = MergedGroupStyle.FolderMappingPath,
             },
             TitleBarTextColorAdaptive = TitleBarTextColorAdaptive,
             Items = new List<ZoneItem>(Items.ConvertAll(i => i.Clone()))

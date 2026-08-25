@@ -8,21 +8,33 @@ public partial class RenameDialog : Window
 {
     public string NewName { get; private set; }
     private readonly LocalizationService _loc = LocalizationService.Instance;
+    private readonly string? _titleOverride;
 
-    public RenameDialog(string currentName)
+    /// <summary>
+    /// Styled rename prompt shared by single- and batch-rename flows. Pass an optional
+    /// title (already localized by the caller) and an optional hint line so the batch
+    /// dialog keeps the exact same look as the single-icon rename dialog.
+    /// </summary>
+    public RenameDialog(string currentName, string? title = null, string? prompt = null)
     {
         InitializeComponent();
+        _titleOverride = title;
         NameInput.Text = currentName;
         NameInput.SelectAll();
         NameInput.Focus();
         NewName = currentName;
+        if (!string.IsNullOrEmpty(prompt))
+        {
+            PromptText.Text = prompt;
+            PromptText.Visibility = Visibility.Visible;
+        }
         ApplyLoc();
     }
 
     void ApplyLoc()
     {
         var cn = _loc.CurrentLanguage == "zh";
-        TitleLabel.Text = cn ? "重命名" : "Rename";
+        TitleLabel.Text = _titleOverride ?? (cn ? "重命名" : "Rename");
         OkBtn.Content = cn ? "确定" : "OK";
         CancelBtn.Content = cn ? "取消" : "Cancel";
     }

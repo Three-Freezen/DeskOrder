@@ -134,6 +134,7 @@ public partial class CalendarWidget : Window
     {
         if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
         NativeMethods.SetToolWindow(this);
+        NativeMethods.DisableDwmFrameShadow(this);
         ApplyAcrylic();
         ApplyBackgroundImage();
         // ponytail: subscribe to day-cell ItemsControl's StatusChanged so adaptive text

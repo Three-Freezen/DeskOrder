@@ -461,6 +461,7 @@ public partial class StickyNoteWindow : Window
     {
         if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
         NativeMethods.SetToolWindow(this);
+        NativeMethods.DisableDwmFrameShadow(this);
         ApplyAcrylic();
         ApplyBackgroundImage();
         NativeMethods.SetRoundedCorners(this, _note.CornerRadius);

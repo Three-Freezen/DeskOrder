@@ -18,9 +18,24 @@ public static class PropertyWindowService
 
     public static void Init(ManagementWindow main) { _main = main; }
 
-    public static void OpenOrFocus(object target) =>
-        _main?.OpenFloatingProperty(target);
+    /// <summary>Lazily create the ManagementWindow if it doesn't exist yet (StartMinimized
+    /// startup keeps it null until first shown). Without this, opening a property editor
+    /// from a zone/subfolder before the management UI was ever shown would no-op.</summary>
+    static void EnsureMain()
+    {
+        if (_main != null) return;
+        (System.Windows.Application.Current as App)?.EnsureManagementWindow();
+    }
 
-    public static void OpenOrFocus(object target, Window? requester) =>
+    public static void OpenOrFocus(object target)
+    {
+        EnsureMain();
+        _main?.OpenFloatingProperty(target);
+    }
+
+    public static void OpenOrFocus(object target, Window? requester)
+    {
+        EnsureMain();
         _main?.OpenFloatingProperty(target, requester);
+    }
 }

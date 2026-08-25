@@ -150,6 +150,12 @@ public static class NativeMethods
     public static extern int DwmSetWindowAttribute(IntPtr hwnd, int dwAttribute, ref int pvAttribute, int cbAttribute);
 
     [DllImport("dwmapi.dll")]
+    public static extern int DwmExtendFrameIntoClientArea(IntPtr hwnd, ref MARGINS margins);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct MARGINS { public int Left, Right, Top, Bottom; }
+
+    [DllImport("dwmapi.dll")]
     public static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
 
     /// <summary>Apply rounded corners to a WPF Window via Win11 DWM. No-op on older Windows (avoids SetWindowRgn clipping).</summary>
@@ -201,41 +207,23 @@ public static class NativeMethods
     }
 
     /// <summary>
-    /// ponytail 2026-08-25 ghost-ring fix: DWM draws a drop shadow around a layered
-    /// (transparent) window's opaque content — for a collapsed widget that's the
-    /// 36×36 RestoreButton, so the shadow hugs the button and shows as a dark ring on
-    /// the wallpaper (the reported "阴影"). Clipping the window to a rounded region
-    /// matching the button makes DWM treat it as a region window and it stops
-    /// shadowing it. <paramref name="rectDips"/> is in window/client DIP coordinates.
+    /// ponytail 2026-08-26 ghost-ring fix: DWM draws a drop shadow around borderless
+    /// layered windows' opaque content — for a collapsed widget that's the RestoreButton,
+    /// so the shadow hugs the button and shows as a dark ring on the wallpaper (the
+    /// reported "阴影"). DwmExtendFrameIntoClientArea with all margins = -1 removes the
+    /// DWM frame INCLUDING its shadow — the documented way to get a frameless,
+    /// shadow-less window.
     /// </summary>
-    public static void ClipWindowToRect(Window window, Rect rectDips)
+    public static void DisableDwmFrameShadow(Window window)
     {
-        if (window == null) return;
         var hwnd = new WindowInteropHelper(window).Handle;
         if (hwnd == IntPtr.Zero) return;
         try
         {
-            var m = PresentationSource.FromVisual(window)?.CompositionTarget?.TransformToDevice ?? System.Windows.Media.Matrix.Identity;
-            int x1 = (int)Math.Round(rectDips.Left * m.M11);
-            int y1 = (int)Math.Round(rectDips.Top * m.M22);
-            int x2 = (int)Math.Round(rectDips.Right * m.M11);
-            int y2 = (int)Math.Round(rectDips.Bottom * m.M22);
-            // CreateRoundRectRgn takes the ellipse WIDTH/HEIGHT for the corners —
-            // for a circular button that's the full button size (2× radius).
-            int r = Math.Max(2, (int)Math.Round(rectDips.Width * m.M11));
-            var rgn = CreateRoundRectRgn(x1, y1, x2, y2, r, r);
-            SetWindowRgn(hwnd, rgn, true);
+            var m = new MARGINS { Left = -1, Right = -1, Top = -1, Bottom = -1 };
+            DwmExtendFrameIntoClientArea(hwnd, ref m);
         }
-        catch { }
-    }
-
-    /// <summary>Remove a window clip region (restore the full-window shape).</summary>
-    public static void ClearWindowClip(Window window)
-    {
-        if (window == null) return;
-        var hwnd = new WindowInteropHelper(window).Handle;
-        if (hwnd == IntPtr.Zero) return;
-        try { SetWindowRgn(hwnd, IntPtr.Zero, true); } catch { }
+        catch { /* older Windows — no frame shadow to disable */ }
     }
 
     // ── Global Hotkey ──

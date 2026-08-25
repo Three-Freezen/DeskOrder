@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
+using System.Windows.Threading;
 using DesktopZones.Helpers;
 using DesktopZones.Models;
 using DesktopZones.Views;
@@ -18,6 +19,12 @@ public class ZoneManager
 
     // Guard flag to prevent re-entrant batch operations
     private bool _isBatchOperation;
+
+    // ponytail: debounce SaveConfig calls during drag — multiple ScheduleSaveConfig()
+    // within 1s coalesce into one disk write. Timer fires on the UI thread (DispatcherTimer
+    // contract), so no lock needed; each Tick stops + nulls the timer so the next Schedule
+    // creates a fresh one.
+    private DispatcherTimer? _saveDebounceTimer;
 
     public ObservableCollection<Zone> Zones { get; } = new();
 
@@ -131,6 +138,44 @@ public class ZoneManager
         ShowZone(zone);
         ZonesChanged?.Invoke();
         return zone;
+    }
+
+    /// <summary>Create a new SubFolder ZoneItem under <paramref name="owner"/>'s item list.
+    /// ponytail: simplified placement — append at the last item's X+GridSize, or (0,0) when the
+    /// owner is empty. Replace with a real "find empty cell" sweep when AutoArrange becomes
+    /// aware of SubFolder footprints (out of scope here).</summary>
+    public ZoneItem CreateSubfolder(Zone owner, string name)
+    {
+        // ponytail 2026-08-26: 占位走 ZoneLayout.FindFreeSpot,和正常 AddItem 同一路径,
+        // 自动按 GridSize + LabelArea 在当前已有 items 周围找空格子,
+        // 而不是无脑追加到 last 后面导致挤到一起或越界。
+        double itemH = owner.GridSize + ZoneLayout.LabelArea;
+        var (x, y) = ZoneLayout.FindFreeSpot(
+            owner.Items, owner.Width, owner.Height, owner.GridSize, itemH);
+        var sub = new ZoneItem(name, "", ItemType.SubFolder, x, y);
+        owner.Items.Add(sub);
+        SaveConfig();
+        ZonesChanged?.Invoke();
+        return sub;
+    }
+
+    /// <summary>Debounced SaveConfig — coalesces bursts (drag moves, batch edits) into a single
+    /// disk write after 1s of quiet. Idempotent: each call resets the 1s window; the timer fires
+    /// once, saves, then nulls itself so a later Schedule creates a fresh instance.</summary>
+    public void ScheduleSaveConfig()
+    {
+        if (_saveDebounceTimer == null)
+        {
+            _saveDebounceTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            _saveDebounceTimer.Tick += (_, _) =>
+            {
+                _saveDebounceTimer!.Stop();
+                _saveDebounceTimer = null;
+                SaveConfig();
+            };
+        }
+        _saveDebounceTimer.Stop();
+        _saveDebounceTimer.Start();
     }
 
     public void DeleteZone(Guid zoneId)

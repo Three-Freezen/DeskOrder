@@ -52,8 +52,17 @@ public class PanelService
         _window.Show();
     }
 
-    /// <summary>Hides the panel window. The instance is kept (no teardown).</summary>
-    public void Hide() => _window?.Hide();
+    /// <summary>
+    /// Minimizes the panel through the SAME code path as the panel window's own
+    /// top-right "─" button (PanelWindow.HidePanel: persist position, disable
+    /// PanelEnabled, close). The Closed → WindowClosed chain releases the singleton,
+    /// so a later Show() recreates the window.
+    /// </summary>
+    public void Hide()
+    {
+        // Route through the window's own minimize-button logic, never raw Window.Hide().
+        _window?.HidePanel();
+    }
 
     /// <summary>Closes the panel window (firing WindowClosed) and clears the singleton.
     /// Use when the user disables Panel globally; a subsequent Show will recreate.</summary>

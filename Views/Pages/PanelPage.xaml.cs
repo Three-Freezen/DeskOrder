@@ -52,7 +52,8 @@ public partial class PanelPage : UserControl
         var hotkey = cfg.PanelHotkey.PanelHotkeyEnabled
             ? ManagementWindow.GetHotkeyLabel(cfg.PanelHotkey.PanelHotkeyModifiers, cfg.PanelHotkey.PanelHotkeyKey)
             : "未设置";
-        CountLabel.Text = $"{hotkey} · {(cfg.Panel.PanelEnabled ? "已启用" : "未启用")}";
+        // ponytail: enabled-state display removed from the header per design.
+        CountLabel.Text = hotkey;
         ListHost.ItemsSource = new List<EditableListRow> { BuildRow(cfg) };
         // ponytail 2026-08-25: mirror ZonesPage — reapply row selection after
         // rebuild so the blue glow (IsSelected DataTrigger on EditableListRow)
@@ -71,7 +72,7 @@ public partial class PanelPage : UserControl
             IsLocked = false,
             IsVisible = cfg.Panel.PanelEnabled,
         };
-        ApplyStatusBadge(row, cfg);
+        // ponytail: no status badge on the panel row — enabled-state chip removed.
         row.LockCommand = new RelayCommand(_ => { /* panel lock not applicable */ });
         row.VisibilityCommand = new RelayCommand(_ =>
         {
@@ -110,15 +111,6 @@ public partial class PanelPage : UserControl
         PropertyWindowManager.Instance.DockTarget(panel, _main);
         _selected = panel;
         SetSelection(ListHost, panel);
-    }
-
-    static void ApplyStatusBadge(EditableListRow row, AppConfig cfg)
-    {
-        row.HasStatusBadge = true;
-        row.StatusBadge = cfg.Panel.PanelEnabled ? "已启用" : "未启用";
-        row.StatusBadgeBrush = cfg.Panel.PanelEnabled
-            ? new SolidColorBrush(Color.FromArgb(0x40, 0x4A, 0xC0, 0x4A))
-            : new SolidColorBrush(Color.FromArgb(0x40, 0xA0, 0xA0, 0xC0));
     }
 
     void Toggle_Click(object sender, RoutedEventArgs e)

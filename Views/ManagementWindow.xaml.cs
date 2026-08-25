@@ -484,6 +484,27 @@ public partial class ManagementWindow : Window
                     // — UpdateZone refreshes the merged window + persists.
                     _zoneManager.UpdateZone(g.Master);
                     break;
+                case ZoneItem sub when sub.Type == ItemType.SubFolder:
+                    // ponytail 2026-08-26: ZoneItem edits mutate the live instance
+                    // in place (sub is the same reference as parentZone.Items[i]),
+                    // so persist via the parent Zone. UpdateZone already handles
+                    // SaveConfig + ZonesChanged + window.RefreshZone — no need to
+                    // touch _zoneWindows here. Reference equality on Contains() is
+                    // safe because PropertyPanel edits the live ZoneItem.
+                    var parent = _zoneManager.Zones.FirstOrDefault(z => z.Items.Contains(sub));
+                    if (parent != null)
+                    {
+                        _zoneManager.UpdateZone(parent);
+                    }
+                    else
+                    {
+                        // ponytail: defensive — the subfolder SHOULD belong to a
+                        // Zone. If it doesn't (delete race, dangling ref), skip
+                        // rather than throwing into the PropertyPanel callback.
+                        System.Diagnostics.Debug.WriteLine(
+                            $"[WirePropertyPanelPersist] Subfolder ZoneItem {sub.Id} has no parent Zone — skipping persist");
+                    }
+                    break;
             }
             // ponytail: edit = intent to keep the docked tab (previously ZonesPage
             // pinned on every edit). Pin the tab for the edited target so it
@@ -959,7 +980,9 @@ public partial class ManagementWindow : Window
         {
             if (_panelService == null) return;
             var config = _configService.Load();
-            if (_panelService.IsOpen) _panelService.CloseAndClear();
+            // ponytail: minimize routes through PanelService.Hide → PanelWindow.HidePanel,
+            // the SAME code the panel's own top-right "─" button runs.
+            if (_panelService.IsOpen) _panelService.Hide();
             else _panelService.Show(config);
         }
         catch (Exception ex) { System.Windows.MessageBox.Show(ex.ToString(), "PanelToggle Error"); }
@@ -1579,7 +1602,7 @@ public partial class ManagementWindow : Window
         {
             "zones"    => $"{zones} 分区",
             "merged"   => $"{merged} 个组合",
-            "panel"    => _panelService?.IsOpen == true ? "1 面板 · 已启用" : "未启用",
+            "panel"    => "1 面板",
             "calendar" => $"{calendars} 个日历",
             "clock"    => $"{clocks} 个时钟",
             "sticky"   => $"{notes} 张便签",

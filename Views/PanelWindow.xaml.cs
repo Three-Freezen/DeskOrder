@@ -1147,15 +1147,27 @@ public partial class PanelWindow : Window
         catch { }
     }
 
-    // ── Hide ──
+    // ── Hide (minimize) ──
 
-    void HideButton_Click(object s, MouseButtonEventArgs e)
+    /// <summary>
+    /// Single minimize entry point for the panel — the top-right "─" button and every
+    /// external entry (PanelService.Hide/Toggle, ManagementWindow.TogglePanel, the
+    /// right-click "Hide Panel" item) all route through here. Persists the position,
+    /// disables the panel in config so the next launch agrees, then closes the window
+    /// (OnClosed re-runs the same save chain harmlessly).
+    /// </summary>
+    public void HidePanel()
     {
         SavePosition(null, EventArgs.Empty);
         var config = _configService.Load();
         config.Panel.PanelEnabled = false;
         _configService.Save(config);
         Close();
+    }
+
+    void HideButton_Click(object s, MouseButtonEventArgs e)
+    {
+        HidePanel();
         e?.Handled = true;
     }
 

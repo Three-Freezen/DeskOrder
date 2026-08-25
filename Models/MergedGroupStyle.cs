@@ -34,4 +34,8 @@ public class MergedGroupStyle
     public double BgImageOffsetY { get; set; } = 0;
     public double BgImageZoom { get; set; } = 1.0;
     public double BackgroundImageOpacity { get; set; } = 40;
+
+    // ── Folder mapping (组合分区内容区展示映射文件夹/磁盘的内容) ──
+    public bool FolderMappingEnabled { get; set; } = false;
+    public string FolderMappingPath { get; set; } = "";
 }

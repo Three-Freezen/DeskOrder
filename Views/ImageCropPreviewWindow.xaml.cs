@@ -51,9 +51,9 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
     // Real widget title-bar height (DIP) — drives the title-bar/body divider line
     // and the drag snap in the preview. 0 = no title bar (clock/calendar).
     private double _titleBarHeight;
-    // Second divider inside the title bar (DIP) — the boundary between the merged
-    // group's top bar and its sub-zone tab row. 0 = single-row title bar.
-    private double _titleBarInnerDividerHeight;
+    // Inner dividers inside the title bar (DIP) — one per extra band below the top
+    // bar (merged sub-zone tab row at 24, folder-mapping header row at 24/48).
+    private List<double> _titleBarInnerDividers = new();
     const double TitleBarSnapThreshold = 8.0;
 
     // Borderless window corner resize — same WM_NCLBUTTONDOWN loop ZoneWindow uses.
@@ -99,7 +99,7 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
         double initialOpacity = 40,
         string cropShape = "Rectangle",
         double titleBarHeight = 0,
-        double titleBarInnerDividerHeight = 0)
+        IReadOnlyList<double>? titleBarInnerDividerHeights = null)
     {
         InitializeComponent();
 
@@ -112,7 +112,7 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
         _initialOpacity = initialOpacity;
         _cropShape = cropShape;
         _titleBarHeight = titleBarHeight;
-        _titleBarInnerDividerHeight = titleBarInnerDividerHeight;
+        _titleBarInnerDividers = titleBarInnerDividerHeights?.ToList() ?? new List<double>();
 
         // Initialize current state
         _currentOffsetX = initialOffsetX;
@@ -576,8 +576,11 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
         catch { brush = Brushes.White; }
 
         AddDividerLine(zoneLeft, zoneTop + _titleBarHeight * _previewScale, brush);
-        if (_titleBarInnerDividerHeight > 0 && _titleBarInnerDividerHeight < _titleBarHeight)
-            AddDividerLine(zoneLeft, zoneTop + _titleBarInnerDividerHeight * _previewScale, brush, thin: true);
+        // Inner dividers: merged sub-zone tab row boundary (24) and/or the
+        // folder-mapping header boundary (48 for merged, 24 for a plain zone).
+        foreach (var inner in _titleBarInnerDividers)
+            if (inner > 0 && inner < _titleBarHeight)
+                AddDividerLine(zoneLeft, zoneTop + inner * _previewScale, brush, thin: true);
     }
 
     void AddDividerLine(double zoneLeft, double y, Brush brush, bool thin = false)

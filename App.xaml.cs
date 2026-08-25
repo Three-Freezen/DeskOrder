@@ -42,6 +42,9 @@ public partial class App : System.Windows.Application
     public NotesService? NotesService => _notesService;
     public WidgetService? WidgetService => _widgetService;
     public ManagementWindow? ManagementWindow => _managementWindow;
+    /// <summary>Exposed so panels can sync their field tree when a zone window
+    /// mutates state directly (e.g. folder mapping toggled from the zone's ✕).</summary>
+    public ZoneManager? ZoneManager => _zoneManager;
 
     // ── Global hotkey ──
     private const int WM_HOTKEY = 0x0312;
@@ -384,42 +387,30 @@ public partial class App : System.Windows.Application
     {
         if (_notesService.Windows.TryGetValue(noteId, out var window))
         {
-            if (window is StickyNoteWindow snw && snw.RestoreButton.Visibility == Visibility.Visible)
+            // NotesService.Windows is typed Dictionary<Guid, StickyNoteWindow>, so every
+            // branch below routes through the SAME ShowNote/HideNote code the note's own
+            // title-bar "─" minimize button runs — never raw Window.Hide().
+            if (window.RestoreButton.Visibility == Visibility.Visible)
             {
                 // Minimized to restore button → show full note
-                snw.ShowNote();
+                window.ShowNote();
             }
             else if (window.IsVisible)
             {
                 if (window.IsActive)
                 {
-                    if (window is StickyNoteWindow snwHide && snwHide.IsLoaded)
-                    {
-                        // Use HideNote to properly handle EnableRestoreButton
-                        snwHide.HideNote();
-                    }
-                    else
-                    {
-                        window.Hide();
-                    }
+                    // Minimize via the same code as the top-right "─" button
+                    // (HideNote handles EnableRestoreButton correctly).
+                    window.HideNote();
                 }
                 else
                 {
-                    if (window is StickyNoteWindow snw2)
-                        snw2.BringToFront();
-                    else
-                    {
-                        window.Activate();
-                        window.Topmost = true;
-                    }
+                    window.BringToFront();
                 }
             }
             else
             {
-                if (window is StickyNoteWindow snw3)
-                    snw3.ShowNote();
-                else
-                    window.Show();
+                window.ShowNote();
             }
         }
         else
@@ -436,27 +427,19 @@ public partial class App : System.Windows.Application
     {
         if (_notesService.Windows.TryGetValue(note.Id, out var window))
         {
-            if (window is StickyNoteWindow snw)
-            {
-                // ponytail: 2026-08-26 — single source of truth: the RestoreButton (the
-                // minimized indicator) + window visibility, routed through ShowNote/HideNote.
-                // The previous MainContent.Visibility check misread mid-animation windows and
-                // left a transparent ghost behind.
-                bool show = !snw.IsVisible || snw.RestoreButton.Visibility == Visibility.Visible;
+            // ponytail: 2026-08-26 — single source of truth: the RestoreButton (the
+            // minimized indicator) + window visibility, routed through ShowNote/HideNote
+            // — the SAME code the note's own title-bar "─" minimize button runs. The
+            // previous MainContent.Visibility check misread mid-animation windows and
+            // left a transparent ghost behind. (NotesService.Windows is typed
+            // Dictionary<Guid, StickyNoteWindow>, so the old non-StickyNoteWindow
+            // raw-Hide/Show branches were unreachable.)
+            bool show = !window.IsVisible || window.RestoreButton.Visibility == Visibility.Visible;
 #if DEBUG
-                Helpers.DzTrace.Log($"[Toggle] ToggleNoteWindow -> {(show ? "ShowNote" : "HideNote")} (winVisible={snw.IsVisible} content={snw.MainContent.Visibility} btn={snw.RestoreButton.Visibility})");
+            Helpers.DzTrace.Log($"[Toggle] ToggleNoteWindow -> {(show ? "ShowNote" : "HideNote")} (winVisible={window.IsVisible} content={window.MainContent.Visibility} btn={window.RestoreButton.Visibility})");
 #endif
-                if (show) snw.ShowNote();
-                else snw.HideNote();
-            }
-            else if (window.IsVisible)
-            {
-                window.Hide();
-            }
-            else
-            {
-                window.Show();
-            }
+            if (show) window.ShowNote();
+            else window.HideNote();
         }
         else
         {
@@ -703,15 +686,23 @@ public partial class App : System.Windows.Application
 
     private void ShowManagementWindow()
     {
-        if (_managementWindow == null)
-        {
-            _managementWindow = new ManagementWindow(_zoneManager!, _configService!, _notesService, _widgetService, _panelService);
-            _managementWindow.Closed += (_, _) => _managementWindow = null;
-            _managementWindow.Icon = AppIcon;
-        }
-        _managementWindow.Show();
+        EnsureManagementWindow();
+        _managementWindow!.Show();
         _managementWindow.Activate();
         _managementWindow.WindowState = WindowState.Normal;
+    }
+
+    /// <summary>Create the ManagementWindow (if it doesn't exist yet) WITHOUT showing it.
+    /// Needed because the property editor (PropertyWindowService) routes through the
+    /// ManagementWindow, and with StartMinimized=true the window is never constructed at
+    /// startup — so opening a SubFolder/zone settings panel before first opening the
+    /// management UI would otherwise silently no-op.</summary>
+    public void EnsureManagementWindow()
+    {
+        if (_managementWindow != null) return;
+        _managementWindow = new ManagementWindow(_zoneManager!, _configService!, _notesService, _widgetService, _panelService);
+        _managementWindow.Closed += (_, _) => _managementWindow = null;
+        _managementWindow.Icon = AppIcon;
     }
 
     private static Icon CreateAppIcon()

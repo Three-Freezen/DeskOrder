@@ -24,8 +24,8 @@
             <TextBlock x:Name="TitleLabel" Text="{loc:Loc Key=Motion.Title}" FontSize="13" FontWeight="SemiBold"
                        Foreground="{DynamicResource Brush.Text.Primary}" Margin="0,4,0,12"/>
 
-            <!-- Origin mode -->
-            <Grid Grid.Row="1" Margin="0,0,0,10">
+            <!-- Origin mode (hidden for SubFolder targets — origin is always the icon) -->
+            <Grid Grid.Row="1" Margin="0,0,0,10" x:Name="OriginRow">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>

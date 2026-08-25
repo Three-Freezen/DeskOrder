@@ -1,0 +1,88 @@
+<UserControl x:Class="DesktopZones.Views.Components.SubfolderFlyout"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:DesktopZones.ViewModels"
+             xmlns:loc="clr-namespace:DesktopZones.Helpers">
+    <!-- ponytail 2026-08-26: size-to-content。内格单元 = HostSubItem.GridSize 的正方形
+         (默认 56×56),2×2 四图标 = 2·GridSize 的正方形内容区;图标在上、名称压格底。
+         RenderTransform 用 TransformGroup[移至原点(-c), Scale, 移回(+c)] — 与
+         HoverExpandBehavior 同款 scale-around-point 组合,缩放锚点 c 由 ZoneWindow
+         按"SubFolder 图标屏幕中心"在打开时设置(允许负值,flyout 停在图标右下时
+         锚点在自身之外)。 -->
+    <UserControl.RenderTransform>
+        <TransformGroup>
+            <TranslateTransform x:Name="FlyoutTranslateToOrigin"/>
+            <ScaleTransform x:Name="FlyoutScale" ScaleX="0" ScaleY="0"/>
+            <TranslateTransform x:Name="FlyoutTranslateBack"/>
+        </TransformGroup>
+    </UserControl.RenderTransform>
+
+    <Border CornerRadius="{Binding HostSubItem.CornerRounded, Converter={x:Static vm:BoolToCornerRadiusConverter.Instance}}"
+            Background="#18000000"
+            BorderBrush="#40FFFFFF"
+            BorderThickness="1"
+            Padding="8">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- Header: name + ⚙ style button (Edit Style...) -->
+            <DockPanel Grid.Row="0" LastChildFill="True" Margin="0,0,0,6">
+                <Border DockPanel.Dock="Right" Width="26" Height="22" CornerRadius="4"
+                        Background="#30FFFFFF" Cursor="Hand"
+                        MouseLeftButtonDown="StyleBtn_Click"
+                        MouseEnter="StyleBtn_Enter" MouseLeave="StyleBtn_Leave"
+                        ToolTip="{loc:Loc Key=Subfolder.EditStyle}">
+                    <TextBlock Text="⚙" FontSize="12" Foreground="#C0FFFFFF"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <TextBlock Text="{Binding HostSubItem.Name}" FontSize="11"
+                           Foreground="#E0FFFFFF" VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis" Margin="0,0,8,0"/>
+            </DockPanel>
+
+            <!-- Adaptive inner grid (2×2 / 3×3 / 4×4 based on count). Bind to ItemVms
+                 (ZoneItemViewModel OC) so each row's .Icon is available. Cell size follows
+                 the host SubFolder's GridSize; ElementName 绑定直取 ItemsControl 的
+                 DataContext(SubfolderFlyoutViewModel),不依赖 AncestorType 查找。 -->
+            <ItemsControl x:Name="InnerItems" Grid.Row="1" ItemsSource="{Binding ItemVms}"
+                          AllowDrop="True"
+                          DragEnter="Items_DragEnter"
+                          DragOver="Items_DragOver"
+                          Drop="Items_Drop">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <UniformGrid x:Name="InnerGrid"/>
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Grid Width="{Binding DataContext.CellWidth, ElementName=InnerItems}"
+                              Height="{Binding DataContext.CellHeight, ElementName=InnerItems}"
+                              Margin="2"
+                              Background="Transparent" Cursor="Hand"
+                              MouseLeftButtonDown="Item_MouseDown"
+                              MouseMove="Item_MouseMove"
+                              MouseLeftButtonUp="Item_MouseUp">
+                            <Image Source="{Binding Icon}"
+                                   Width="{Binding DataContext.IconSize, ElementName=InnerItems}"
+                                   Height="{Binding DataContext.IconSize, ElementName=InnerItems}"
+                                   Stretch="Uniform" HorizontalAlignment="Center"
+                                   VerticalAlignment="Top" Margin="0,2,0,0"
+                                   RenderOptions.BitmapScalingMode="HighQuality"/>
+                            <TextBlock Text="{Binding Name}" FontSize="9"
+                                       Foreground="#E0FFFFFF" TextAlignment="Center"
+                                       TextTrimming="CharacterEllipsis"
+                                       MaxWidth="{Binding DataContext.CellWidth, ElementName=InnerItems}"
+                                       Margin="1,0,1,2"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Bottom"/>
+                        </Grid>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </Grid>
+    </Border>
+</UserControl>

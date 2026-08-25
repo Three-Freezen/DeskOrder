@@ -13,7 +13,8 @@ public enum PresetKind
     Calendar,
     StickyNote,
     MergedGroup,
-    Panel
+    Panel,
+    Subfolder,
 }
 
 /// <summary>
@@ -39,6 +40,7 @@ public class PresetRecord
         PresetKind.StickyNote => "StickyNotes",
         PresetKind.MergedGroup => "MergedGroups",
         PresetKind.Panel => "Panels",
+        PresetKind.Subfolder => "Subfolders",
         _ => "Zones"
     };
 }

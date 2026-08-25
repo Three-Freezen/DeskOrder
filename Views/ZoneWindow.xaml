@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:l="clr-namespace:DesktopZones.Services"
         xmlns:loc="clr-namespace:DesktopZones.Helpers"
+        xmlns:c="clr-namespace:DesktopZones.Views.Components"
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
@@ -13,10 +14,94 @@
         UseLayoutRounding="True"
         PreviewMouseLeftButtonDown="Window_PreviewMouseLeftButtonDown"
         PreviewMouseRightButtonDown="Window_PreviewMouseRightButtonDown"
+        PreviewKeyDown="Window_PreviewKeyDown"
+        MouseMove="Window_MouseMove"
+        MouseLeftButtonUp="Window_MouseLeftButtonUp"
         AllowDrop="True"
         DragEnter="Window_DragEnter"
         DragOver="Window_DragOver"
         Drop="Window_Drop">
+
+    <Window.Resources>
+        <ResourceDictionary>
+            <!-- ponytail 2026-08-25: ZoneWindow.ItemsControl template selector (Task 6).
+                 Type=SubFolder → SubfolderItemView; everything else → original item
+                 template (key "ZoneItemTemplate"). The selector lives in
+                 Views/Components/SubfolderItemTemplateSelector.cs. -->
+            <DataTemplate x:Key="ZoneItemTemplate">
+                <Grid Width="{Binding ItemSize}" Height="{Binding ItemHeight}"
+                      Background="Transparent"
+                      MouseLeftButtonDown="Item_MouseDown"
+                      MouseMove="Item_MouseMove"
+                      MouseLeftButtonUp="Item_MouseUp"
+                      MouseEnter="Item_Enter"
+                      MouseLeave="Item_Leave"
+                      Cursor="Hand">
+                    <Grid.ContextMenu>
+                        <ContextMenu Opened="ItemMenu_Opened">
+                            <MenuItem x:Name="CtxOpen" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.Open]}" Click="ItemOpen_Click"/>
+                            <MenuItem x:Name="CtxOpenLocation" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.OpenLocation]}" Click="ItemOpenLocation_Click"/>
+                            <MenuItem x:Name="CtxEmptyRecycle" Visibility="Collapsed"
+                                      Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.EmptyRecycleBin]}"
+                                      Click="ItemEmptyRecycle_Click"/>
+                            <MenuItem x:Name="CtxRename" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.Rename]}" Click="ItemRename_Click"/>
+                            <Separator x:Name="CtxSep1"/>
+                            <MenuItem x:Name="CtxDelete" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.Delete]}" Click="ItemDelete_Click" Foreground="#FF6666"/>
+                        </ContextMenu>
+                    </Grid.ContextMenu>
+                    <Image Source="{Binding Icon}" Width="{Binding IconSize}" Height="{Binding IconSize}"
+                           Stretch="Uniform"
+                           RenderOptions.BitmapScalingMode="HighQuality"
+                           HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,2,0,0"/>
+                    <TextBlock Text="{Binding Name}" FontSize="10"
+                               Foreground="#E0FFFFFF" TextAlignment="Center"
+                               TextTrimming="CharacterEllipsis"
+                               MaxWidth="{Binding ItemSize}" Margin="1,0,1,1"
+                               HorizontalAlignment="Center" VerticalAlignment="Bottom"/>
+                    <!-- Multi-select highlight (marquee / Ctrl+click) -->
+                    <Border x:Name="SelBox" Visibility="Collapsed" IsHitTestVisible="False"
+                            Background="#26FFFFFF" BorderBrush="#80FFFFFF" BorderThickness="1.2"
+                            CornerRadius="6"/>
+                </Grid>
+                <DataTemplate.Triggers>
+                    <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                        <Setter TargetName="SelBox" Property="Visibility" Value="Visible"/>
+                    </DataTrigger>
+                </DataTemplate.Triggers>
+            </DataTemplate>
+            <DataTemplate x:Key="SubfolderItemTemplate">
+                <Grid Background="Transparent" Cursor="Hand"
+                      MouseLeftButtonDown="Item_MouseDown"
+                      MouseMove="Item_MouseMove"
+                      MouseLeftButtonUp="Item_MouseUp">
+                    <Grid.ContextMenu>
+                        <!-- ponytail: 次级文件夹右键菜单 — 打开/重命名/解散/删除。
+                             与普通图标同款重命名弹窗;解散=图标散入分区(自动排列),删除=连同内部图标一起删。 -->
+                        <ContextMenu>
+                            <MenuItem x:Name="CtxSubOpen" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.Open]}" Click="SubfolderOpen_Click"/>
+                            <MenuItem x:Name="CtxSubRename" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.Rename]}" Click="SubfolderRename_Click"/>
+                            <MenuItem x:Name="CtxSubDissolve" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Subfolder.Dissolve]}" Click="SubfolderDissolve_Click"/>
+                            <Separator/>
+                            <MenuItem x:Name="CtxSubDelete" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.Delete]}" Click="SubfolderDelete_Click" Foreground="#FF6666"/>
+                        </ContextMenu>
+                    </Grid.ContextMenu>
+                    <c:SubfolderItemView/>
+                    <!-- Multi-select highlight (marquee / Ctrl+click) -->
+                    <Border x:Name="SubSelBox" Visibility="Collapsed" IsHitTestVisible="False"
+                            Background="#26FFFFFF" BorderBrush="#80FFFFFF" BorderThickness="1.2"
+                            CornerRadius="6"/>
+                </Grid>
+                <DataTemplate.Triggers>
+                    <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                        <Setter TargetName="SubSelBox" Property="Visibility" Value="Visible"/>
+                    </DataTrigger>
+                </DataTemplate.Triggers>
+            </DataTemplate>
+            <c:SubfolderItemTemplateSelector x:Key="SubfolderItemTemplateSelector"
+                                             ZoneItemTemplate="{StaticResource ZoneItemTemplate}"
+                                             SubfolderItemTemplate="{StaticResource SubfolderItemTemplate}"/>
+        </ResourceDictionary>
+    </Window.Resources>
 
     <Grid>
         <!-- FULL ZONE -->
@@ -38,10 +123,13 @@
                         CornerRadius="8"
                         Background="Transparent">
                     <Border.ContextMenu>
-                        <ContextMenu>
+                        <ContextMenu Opened="ZoneMenu_Opened">
                             <MenuItem x:Name="CtxImport" Header="Import Files..." Click="ImportFiles_Click"/>
                             <MenuItem x:Name="CtxImportFolder" Header="Import Folder..." Click="ImportFolder_Click"/>
                             <MenuItem x:Name="CtxImportShell" Header="Import System Items..." Click="ImportShellItems_Click"/>
+                            <MenuItem x:Name="CtxPaste" Header="Paste" Click="PasteClipboard_Click" Visibility="Collapsed"/>
+                            <Separator/>
+                            <MenuItem x:Name="CtxNewSubfolder" Header="New Subfolder..." Click="NewSubfolder_Click"/>
                             <Separator/>
                             <MenuItem x:Name="CtxNew" Header="New">
                                 <MenuItem x:Name="CtxNewFolder" Header="New Folder..." Click="NewFolder_Click"/>
@@ -114,12 +202,14 @@
                                             Cursor="Hand" Margin="0,0,3,0"
                                             MouseLeftButtonDown="ImportBtn_Click"
                                             MouseEnter="Ctrl_Enter" MouseLeave="Ctrl_Leave"
-                                            ToolTip="Import">
+                                            ToolTip="Import or New Subfolder...">
                                     <Border.ContextMenu>
                                         <ContextMenu>
                                             <MenuItem x:Name="CtxImportFiles" Header="Import Files..." Click="ImportFiles_Click"/>
                                             <MenuItem x:Name="CtxImportFolder2" Header="Import Folder..." Click="ImportFolder_Click"/>
                                             <MenuItem x:Name="CtxImportShell2" Header="Import System Items..." Click="ImportShellItems_Click"/>
+                                            <Separator/>
+                                            <MenuItem x:Name="CtxNewSubfolder2" Header="New Subfolder..." Click="NewSubfolder_Click"/>
                                             <Separator/>
                                             <MenuItem x:Name="CtxNew2" Header="New">
                                                 <MenuItem x:Name="CtxNewFolder2" Header="New Folder..." Click="NewFolder_Click"/>
@@ -129,6 +219,8 @@
                                                 <MenuItem x:Name="CtxNewPptx2" Header="PowerPoint (.pptx)" Click="NewPptx_Click"/>
                                                 <MenuItem x:Name="CtxNewXlsx2" Header="Excel Workbook (.xlsx)" Click="NewXlsx_Click"/>
                                             </MenuItem>
+                                            <Separator/>
+                                            <MenuItem x:Name="CtxMapFolder" Header="Map Folder..." Click="FolderMapChoose_Click"/>
                                         </ContextMenu>
                                     </Border.ContextMenu>
                                         <TextBlock x:Name="ImportBtnText" Text="+" FontSize="11" FontWeight="Bold"
@@ -187,46 +279,138 @@
                                     <Setter Property="Canvas.Top" Value="{Binding Y}"/>
                                 </Style>
                             </ItemsControl.ItemContainerStyle>
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <Grid Width="{Binding ItemSize}" Height="{Binding ItemHeight}"
-                                          Background="Transparent"
-                                          MouseLeftButtonDown="Item_MouseDown"
-                                          MouseMove="Item_MouseMove"
-                                          MouseLeftButtonUp="Item_MouseUp"
-                                          MouseEnter="Item_Enter"
-                                          MouseLeave="Item_Leave"
-                                          Cursor="Hand">
-                                        <Grid.ContextMenu>
-                                            <ContextMenu Opened="ItemMenu_Opened">
-                                                <MenuItem Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.Open]}" Click="ItemOpen_Click"/>
-                                                <MenuItem Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.OpenLocation]}" Click="ItemOpenLocation_Click"/>
-                                                <MenuItem x:Name="CtxEmptyRecycle" Visibility="Collapsed"
-                                                          Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.EmptyRecycleBin]}"
-                                                          Click="ItemEmptyRecycle_Click"/>
-                                                <MenuItem Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.Rename]}" Click="ItemRename_Click"/>
-                                                <Separator/>
-                                                <MenuItem Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.Delete]}" Click="ItemDelete_Click" Foreground="#FF6666"/>
-                                            </ContextMenu>
-                                        </Grid.ContextMenu>
-
-                                        <!-- Windows-native icon style: icon on top, name below, no overlay box. -->
-                                        <Image Source="{Binding Icon}" Width="{Binding IconSize}" Height="{Binding IconSize}"
-                                               Stretch="Uniform"
-                                               RenderOptions.BitmapScalingMode="HighQuality"
-                                               HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,2,0,0"/>
-                                        <TextBlock Text="{Binding Name}" FontSize="10"
-                                                   Foreground="#E0FFFFFF" TextAlignment="Center"
-                                                   TextTrimming="CharacterEllipsis"
-                                                   MaxWidth="{Binding ItemSize}" Margin="1,0,1,1"
-                                                   HorizontalAlignment="Center" VerticalAlignment="Bottom"/>
-                                    </Grid>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
+                            <ItemsControl.ItemTemplateSelector>
+                                <c:SubfolderItemTemplateSelector ZoneItemTemplate="{StaticResource ZoneItemTemplate}"
+                                                                 SubfolderItemTemplate="{StaticResource SubfolderItemTemplate}"/>
+                            </ItemsControl.ItemTemplateSelector>
                         </ItemsControl>
                         <Canvas x:Name="DropIndicatorLayer" IsHitTestVisible="False" Background="Transparent"/>
                         </Grid>
                         </ScrollViewer>
+
+                        <!-- Folder mapping view (visible when folder mapping is enabled) -->
+                        <Border x:Name="FolderMappingView" Grid.Row="2" Visibility="Collapsed"
+                                Background="#40000000" ClipToBounds="True">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="26"/>
+                                    <RowDefinition Height="*"/>
+                                </Grid.RowDefinitions>
+
+                                <!-- Header: up / path / refresh / disable — part of the
+                                     title-bar band (fills + crop dividers include it). -->
+                                <Border x:Name="FolderMapHeaderBg" Grid.Row="0" Background="#22FFFFFF">
+                                    <DockPanel LastChildFill="True">
+                                        <Border x:Name="FolderMapUpBtn" Width="20" Height="18" CornerRadius="3"
+                                                Background="#30FFFFFF" Cursor="Hand" Margin="4,0,0,0"
+                                                VerticalAlignment="Center"
+                                                MouseLeftButtonDown="FolderMapUp_Click"
+                                                MouseEnter="Ctrl_Enter" MouseLeave="Ctrl_Leave"
+                                                ToolTip="{loc:Loc Key=FolderMap.Up}">
+                                            <TextBlock x:Name="FolderMapUpText" Text="↰" FontSize="10" Foreground="#A0FFFFFF"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <Border x:Name="FolderMapCloseBtn" Width="20" Height="18" CornerRadius="3"
+                                                Background="#30FFFFFF" Cursor="Hand" Margin="0,0,4,0"
+                                                VerticalAlignment="Center" DockPanel.Dock="Right"
+                                                MouseLeftButtonDown="FolderMapClose_Click"
+                                                MouseEnter="Ctrl_Enter" MouseLeave="Ctrl_Leave"
+                                                ToolTip="{loc:Loc Key=FolderMap.Disable}">
+                                            <TextBlock x:Name="FolderMapCloseText" Text="✕" FontSize="9" Foreground="#A0FFFFFF"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <Border x:Name="FolderMapRefreshBtn" Width="20" Height="18" CornerRadius="3"
+                                                Background="#30FFFFFF" Cursor="Hand" Margin="0,0,3,0"
+                                                VerticalAlignment="Center" DockPanel.Dock="Right"
+                                                MouseLeftButtonDown="FolderMapRefresh_Click"
+                                                MouseEnter="Ctrl_Enter" MouseLeave="Ctrl_Leave"
+                                                ToolTip="{loc:Loc Key=FolderMap.Refresh}">
+                                            <TextBlock x:Name="FolderMapRefreshText" Text="⟳" FontSize="10" Foreground="#A0FFFFFF"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <TextBlock x:Name="FolderMapPathText" Text="" FontSize="10" Foreground="#A0FFFFFF"
+                                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                                                   Margin="6,0,6,0"/>
+                                    </DockPanel>
+                                </Border>
+
+                                <ListBox x:Name="FolderList" Grid.Row="1" Background="Transparent"
+                                         BorderThickness="0" SelectionMode="Extended"
+                                         Margin="10,10,0,0"
+                                         ScrollViewer.CanContentScroll="True"
+                                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                         ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                         PreviewMouseLeftButtonDown="FolderList_PreviewMouseLeftButtonDown"
+                                         MouseDoubleClick="FolderList_MouseDoubleClick">
+                                    <ListBox.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <c:VirtualizingWrapPanel ItemWidth="76" ItemHeight="66" Spacing="4"/>
+                                        </ItemsPanelTemplate>
+                                    </ListBox.ItemsPanel>
+                                    <ListBox.ItemContainerStyle>
+                                        <Style TargetType="ListBoxItem">
+                                            <Setter Property="Background" Value="Transparent"/>
+                                            <Setter Property="Padding" Value="0"/>
+                                            <Setter Property="Margin" Value="0"/>
+                                            <Setter Property="BorderThickness" Value="0"/>
+                                            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                            <Setter Property="VerticalContentAlignment" Value="Stretch"/>
+                                            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+                                            <!-- Custom template: no ListBoxItemChrome, so the hover/selected
+                                                 highlight is the zone's translucent white — never the
+                                                 system-blue chrome. -->
+                                            <Setter Property="Template">
+                                                <Setter.Value>
+                                                    <ControlTemplate TargetType="ListBoxItem">
+                                                        <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                                                                CornerRadius="6" SnapsToDevicePixels="True">
+                                                            <ContentPresenter/>
+                                                        </Border>
+                                                    </ControlTemplate>
+                                                </Setter.Value>
+                                            </Setter>
+                                            <Style.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter Property="Background" Value="#18FFFFFF"/>
+                                                </Trigger>
+                                                <Trigger Property="IsSelected" Value="True">
+                                                    <Setter Property="Background" Value="#30FFFFFF"/>
+                                                </Trigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </ListBox.ItemContainerStyle>
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <!-- Same geometry logic as a normal zone item: icon fills the
+                                                 top of the cell, name sits directly underneath. -->
+                                            <Border Width="76" Height="66" Background="Transparent"
+                                                    CornerRadius="6" ToolTip="{Binding FullPath}">
+                                                <Grid>
+                                                    <Image Source="{Binding Icon}" Width="48" Height="48" Stretch="Uniform"
+                                                           RenderOptions.BitmapScalingMode="HighQuality"
+                                                           HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,2,0,0"/>
+                                                    <TextBlock Text="{Binding Name}" FontSize="10" Foreground="#E0FFFFFF"
+                                                               TextAlignment="Center" TextTrimming="CharacterEllipsis"
+                                                               HorizontalAlignment="Center" VerticalAlignment="Bottom"
+                                                               Margin="1,0,1,1" MaxWidth="72"/>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+
+                                <!-- Status hint (empty / invalid / loading) -->
+                                <StackPanel x:Name="FolderMapHint" Grid.Row="1" Visibility="Collapsed"
+                                            VerticalAlignment="Center" HorizontalAlignment="Center">
+                                    <TextBlock x:Name="FolderMapHintText" FontSize="11" Foreground="#A0FFFFFF"
+                                               HorizontalAlignment="Center" TextWrapping="Wrap"
+                                               TextAlignment="Center" Margin="16,0"/>
+                                    <Button x:Name="FolderMapHintBtn" Content="Choose again" Cursor="Hand"
+                                            Margin="0,10,0,0" Padding="12,4,12,4" FontSize="11"
+                                            Click="FolderMapChoose_Click"/>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
 
                         <!-- Bottom bar (no move — only visual) -->
                         <Border x:Name="BottomBarBg" Grid.Row="3" Height="8"
@@ -255,6 +439,12 @@
             </Grid>
         </Border>
 
+        <!-- Marquee multi-select overlay (long-press + drag on items / drag on empty area) -->
+        <Canvas x:Name="MarqueeLayer" IsHitTestVisible="False" Background="Transparent">
+            <Rectangle x:Name="MarqueeRect" Visibility="Collapsed" IsHitTestVisible="False"
+                       Stroke="#C08AB4F8" StrokeThickness="1" Fill="#228AB4F8"/>
+        </Canvas>
+
         <!-- Restore button (draggable with long press) -->
         <Border x:Name="RestoreButton"
                 Visibility="Collapsed"
@@ -271,5 +461,22 @@
                        FontSize="18" Foreground="#C0FFFFFF"
                        HorizontalAlignment="Center" VerticalAlignment="Center"/>
         </Border>
+
+        <!-- ponytail 2026-08-26: SubFolder flyout — StaysOpen=True (ZoneWindow 自己管
+             关闭)。Placement=AbsolutePoint:位置由 code-behind 在 flyout 布局完成后一次性
+             确定(图标右侧 8px,越界翻侧 + 夹工作区),不再走 Custom 回调 — 回调的 target-
+             relative 坐标与 Popup 重排会引入"每次展开位置/原点漂移"。打开动画锚点 =
+             图标屏幕中心(按同一份位置数据反推,不读 flyout 自身 PointToScreen),视觉上
+             "以图标为原点向右下角展开",关闭动画原路缩回图标。关闭:点击 Flyout 外
+             (分区空白/桌面)、鼠标移出(200ms timer)都会触发反向动画后关闭。 -->
+        <Popup x:Name="SubfolderFlyoutPopup" Placement="AbsolutePoint"
+               AllowsTransparency="True" StaysOpen="True"
+               Closed="SubfolderFlyoutPopup_Closed">
+            <c:SubfolderFlyout x:Name="SubfolderFlyoutView"
+                               MouseEnter="SubfolderFlyoutView_MouseEnter"
+                               MouseLeave="SubfolderFlyoutView_MouseLeave"
+                               EditStyleRequested="SubfolderFlyout_EditStyleRequested"
+                               ItemDragOutRequested="SubfolderFlyout_ItemDragOutRequested"/>
+        </Popup>
     </Grid>
 </Window>
