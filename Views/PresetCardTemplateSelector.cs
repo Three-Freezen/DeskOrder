@@ -21,6 +21,8 @@ public class PresetCardTemplateSelector : DataTemplateSelector
     public DataTemplate? StickyNoteTemplate { get; set; }
     public DataTemplate? MergedGroupTemplate { get; set; }
     public DataTemplate? PanelTemplate { get; set; }
+    // ponytail 2026-08-26: SubFolder 预设卡(样式预览 + 下方名称/日期信息栏)。
+    public DataTemplate? SubfolderTemplate { get; set; }
 
     public override DataTemplate? SelectTemplate(object item, DependencyObject container)
     {
@@ -35,6 +37,7 @@ public class PresetCardTemplateSelector : DataTemplateSelector
             PresetKind.StickyNote => StickyNoteTemplate,
             PresetKind.MergedGroup => MergedGroupTemplate,
             PresetKind.Panel => PanelTemplate,
+            PresetKind.Subfolder => SubfolderTemplate,
             _ => null
         };
     }

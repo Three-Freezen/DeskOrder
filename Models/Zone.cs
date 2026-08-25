@@ -76,6 +76,24 @@ public class Zone : AppearanceModel
     public bool FolderMappingEnabled { get; set; } = false;
     public string FolderMappingPath { get; set; } = "";
 
+    // ── Auto-organize ──
+    /// <summary>自动整理扩展名集合（含预设 + 用户自定义，统一存这里）。小写、含前导点。</summary>
+    [JsonPropertyName("autoOrganizeExtensions")]
+    public List<string> AutoOrganizeExtensions { get; set; } = new();
+
+    /// <summary>文件名要素集合（全用户自定义）。子串匹配，case-insensitive。</summary>
+    [JsonPropertyName("autoOrganizeNameTokens")]
+    public List<string> AutoOrganizeNameTokens { get; set; } = new();
+
+    /// <summary>监听路径。空字符串 = 未配置；新建分区默认 %USERPROFILE%\Desktop。</summary>
+    [JsonPropertyName("autoOrganizeWatchPath")]
+    public string AutoOrganizeWatchPath { get; set; } = "";
+
+    /// <summary>派生属性：任一行启用即 true。仅用于 UI / watcher 判断，序列化忽略。</summary>
+    [JsonIgnore]
+    public bool AutoOrganizeEnabled =>
+        AutoOrganizeExtensions.Count > 0 || AutoOrganizeNameTokens.Count > 0;
+
     // Display state — not persisted
     [JsonIgnore]
     public bool IsEditing { get; set; }
@@ -109,6 +127,9 @@ public class Zone : AppearanceModel
             TitleBarFillIndependent = TitleBarFillIndependent,
             FolderMappingEnabled = FolderMappingEnabled,
             FolderMappingPath = FolderMappingPath,
+            AutoOrganizeExtensions = new List<string>(AutoOrganizeExtensions),
+            AutoOrganizeNameTokens = new List<string>(AutoOrganizeNameTokens),
+            AutoOrganizeWatchPath = AutoOrganizeWatchPath,
             MergedGroupMembership = new MergedGroupMembership
             {
                 GroupId = MergedGroupMembership.GroupId,

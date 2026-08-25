@@ -159,6 +159,12 @@ public partial class App : System.Windows.Application
 
         _zoneManager.Initialize();
 
+        // 自动整理：注入 ZoneManager + 启动时挂载已启用分区；之后跟随 ZonesChanged
+        // 自动同步 watcher 集合（规则/监听路径/启停即时生效，删除分区自动卸载）。
+        AutoOrganizeService.Instance.Initialize(_zoneManager);
+        AutoOrganizeService.Instance.SyncAll(_zoneManager.Zones);
+        _zoneManager.ZonesChanged += () => AutoOrganizeService.Instance.SyncAll(_zoneManager.Zones);
+
         var config = _configService.Load();
         // Apply persisted language preference
         if (!string.IsNullOrEmpty(config.Language))
@@ -786,6 +792,7 @@ public partial class App : System.Windows.Application
             NativeMethods.UnregisterHotKey(_mainHwnd, HOTKEY_ID_PANEL);
         }
         _reminderService?.Dispose();
+        AutoOrganizeService.Instance.Dispose();
         _zoneManager?.Shutdown();
         _trayIcon?.Dispose();
         DisposeSingleInstance();
@@ -801,6 +808,7 @@ public partial class App : System.Windows.Application
             NativeMethods.UnregisterHotKey(_mainHwnd, HOTKEY_ID_PANEL);
         }
         _reminderService?.Dispose();
+        AutoOrganizeService.Instance.Dispose();
         _zoneManager?.Shutdown();
         _trayIcon?.Dispose();
         DisposeSingleInstance();

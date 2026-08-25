@@ -115,10 +115,12 @@ public partial class PropertyPanel : UserControl
         Unloaded += (_, _) =>
         {
             _loc.LanguageChanged -= OnLanguageChanged;
+            ThemeService.Changed -= OnThemeChanged;
             if (_zoneChangedHandler != null && Application.Current is App app2 && app2.ZoneManager is ZoneManager zm2)
                 zm2.ZonesChanged -= _zoneChangedHandler;
         };
         _loc.LanguageChanged += OnLanguageChanged;
+        ThemeService.Changed += OnThemeChanged;
         // ponytail: folder-mapping sync — the zone window can toggle the mapping
         // (✕ button / + menu / navigation), and the panel's checkbox + path row
         // rebuild when the manager reports a change to the current target's state.
@@ -130,6 +132,9 @@ public partial class PropertyPanel : UserControl
     }
 
     void OnLanguageChanged(string _) => OnTargetChanged();
+
+    /// <summary>主题切换时重建字段树，重新解析自适应文字（chip 前景色）与主题 brush。</summary>
+    void OnThemeChanged(AppThemeMode _) => OnTargetChanged();
 
     // ── Folder-mapping state sync (zone window ↔ style panel) ──
 
@@ -728,7 +733,272 @@ public partial class PropertyPanel : UserControl
             () => { CaptureFolderMappingState(); Save(z); });
         root.Children.Add(fm);
 
+        // 自动整理 — 样式设置界面最后一项（MergedGroup 不支持）。
+        root.Children.Add(BuildAutoOrganizeSection(z));
+
         FieldScroller.Content = root;
+    }
+
+    // ── Auto-organize section（仅 Zone 类型）──
+
+    /// <summary>自动整理 section：扩展名 / 文件名要素两行独立开关 + 监听路径 + 手动扫描。</summary>
+    FrameworkElement BuildAutoOrganizeSection(Zone z)
+    {
+        var sec = MakeSection(_loc["ZoneProp.Section.AutoOrganize"]);
+
+        sec.Children.Add(MakeCheckRow(
+            _loc["ZoneProp.AutoOrganize.ExtensionEnabled"],
+            z.AutoOrganizeExtensions.Count > 0,
+            v =>
+            {
+                ToggleExtension(z, v);
+                AutoOrganizeService.Instance.AttachZone(z);
+                Rebuild(z);
+                Save(z);
+            }));
+
+        sec.Children.Add(MakeAutoOrganizeExtChipRow(z));
+
+        sec.Children.Add(MakeCheckRow(
+            _loc["ZoneProp.AutoOrganize.NameEnabled"],
+            z.AutoOrganizeNameTokens.Count > 0,
+            v =>
+            {
+                ToggleName(z, v);
+                AutoOrganizeService.Instance.AttachZone(z);
+                Rebuild(z);
+                Save(z);
+            }));
+
+        sec.Children.Add(MakeNameTokenChipRow(z));
+
+        sec.Children.Add(MakeAutoOrganizePathRow(z));
+
+        sec.Children.Add(MakeScanExistingButton(z));
+
+        return sec;
+    }
+
+    static void ToggleExtension(Zone z, bool on)
+    {
+        if (!on) z.AutoOrganizeExtensions.Clear();
+    }
+
+    static void ToggleName(Zone z, bool on)
+    {
+        if (!on) z.AutoOrganizeNameTokens.Clear();
+    }
+
+    FrameworkElement MakeAutoOrganizeExtChipRow(Zone z)
+    {
+        var dock = new DockPanel { Margin = new Thickness(0, 4, 0, 4), LastChildFill = true };
+
+        var add = MakeAddButton(
+            _loc["ZoneProp.AutoOrganize.Picker.AddCustom"],
+            () => OpenPicker(z, AutoOrganizePickerKind.Extension));
+        DockPanel.SetDock(add, Dock.Right);
+        dock.Children.Add(add);
+
+        var label = new TextBlock
+        {
+            Text = _loc["ZoneProp.AutoOrganize.ExtensionLabel"] + ":",
+            Foreground = (Brush)FindResource("Brush.Text.Secondary"),
+            FontSize = 11,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 8, 0),
+        };
+        DockPanel.SetDock(label, Dock.Left);
+        dock.Children.Add(label);
+
+        var preview = new TextBlock
+        {
+            Text = z.AutoOrganizeExtensions.Count == 0
+                ? "—"
+                : string.Join("  ", z.AutoOrganizeExtensions.Take(8).Select(e => $"[{e}]")),
+            Foreground = (Brush)FindResource("Brush.Text.Primary"),
+            FontSize = 11,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        dock.Children.Add(preview);
+        return dock;
+    }
+
+    void OpenPicker(Zone z, AutoOrganizePickerKind kind)
+    {
+        var owner = CachedOwner ?? Window.GetWindow(this);
+        var w = new AutoOrganizePickerWindow(z, kind) { Owner = owner };
+        if (w.ShowDialog() == true)
+        {
+            AutoOrganizeService.Instance.AttachZone(z);
+            Rebuild(z);
+            Save(z);
+        }
+    }
+
+    FrameworkElement MakeNameTokenChipRow(Zone z)
+    {
+        var dock = new DockPanel { Margin = new Thickness(0, 4, 0, 4), LastChildFill = true };
+
+        var add = MakeAddButton(
+            _loc["ZoneProp.AutoOrganize.Picker.AddToken"],
+            () => OpenPicker(z, AutoOrganizePickerKind.Token));
+        DockPanel.SetDock(add, Dock.Right);
+        dock.Children.Add(add);
+
+        var label = new TextBlock
+        {
+            Text = _loc["ZoneProp.AutoOrganize.NameLabel"] + ":",
+            Foreground = (Brush)FindResource("Brush.Text.Secondary"),
+            FontSize = 11,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 8, 0),
+        };
+        DockPanel.SetDock(label, Dock.Left);
+        dock.Children.Add(label);
+
+        var preview = new TextBlock
+        {
+            Text = z.AutoOrganizeNameTokens.Count == 0
+                ? "—"
+                : string.Join("  ", z.AutoOrganizeNameTokens.Take(8).Select(t => $"[{t}]")),
+            Foreground = (Brush)FindResource("Brush.Text.Primary"),
+            FontSize = 11,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        dock.Children.Add(preview);
+        return dock;
+    }
+
+    FrameworkElement MakeAutoOrganizePathRow(Zone z)
+    {
+        var dock = new DockPanel { Margin = new Thickness(0, 4, 0, 4), LastChildFill = true };
+
+        var browse = MakePanelButton(
+            _loc["ZoneProp.AutoOrganize.ChoosePath"],
+            (_, _) => PickAutoOrganizePath(z),
+            minWidth: 80);
+        browse.Margin = new Thickness(8, 0, 0, 0);
+        DockPanel.SetDock(browse, Dock.Right);
+        dock.Children.Add(browse);
+
+        var label = new TextBlock
+        {
+            Text = _loc["ZoneProp.AutoOrganize.WatchPath"] + ":",
+            Foreground = (Brush)FindResource("Brush.Text.Secondary"),
+            FontSize = 11,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 8, 0),
+        };
+        DockPanel.SetDock(label, Dock.Left);
+        dock.Children.Add(label);
+
+        var pathBox = new TextBox
+        {
+            Text = z.AutoOrganizeWatchPath,
+            FontSize = 11,
+            Padding = new Thickness(4, 2, 4, 2),
+            VerticalAlignment = VerticalAlignment.Center,
+            ToolTip = _loc["ZoneProp.AutoOrganize.WatchPathPlaceholder"],
+        };
+        pathBox.LostFocus += (_, _) =>
+        {
+            var raw = (pathBox.Text ?? "").Trim();
+            if (raw == z.AutoOrganizeWatchPath) return;
+            z.AutoOrganizeWatchPath = raw;
+            AutoOrganizeService.Instance.AttachZone(z);
+            Save(z);
+        };
+        pathBox.KeyDown += (_, e) => { if (e.Key == Key.Enter) Keyboard.ClearFocus(); };
+        dock.Children.Add(pathBox);
+        return dock;
+    }
+
+    void PickAutoOrganizePath(Zone z)
+    {
+        var owner = CachedOwner ?? Window.GetWindow(this);
+        var dlg = new Microsoft.Win32.OpenFolderDialog
+        {
+            Title = _loc["ZoneProp.AutoOrganize.ChoosePath"],
+            Multiselect = false,
+            InitialDirectory = string.IsNullOrEmpty(z.AutoOrganizeWatchPath)
+                ? Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)
+                : z.AutoOrganizeWatchPath,
+        };
+        bool? ok;
+        try { ok = owner != null ? dlg.ShowDialog(owner) : dlg.ShowDialog(); }
+        catch { ok = null; }
+        if (ok == true && !string.IsNullOrEmpty(dlg.FolderName))
+        {
+            z.AutoOrganizeWatchPath = dlg.FolderName;
+            AutoOrganizeService.Instance.AttachZone(z);
+            Rebuild(z);
+            Save(z);
+        }
+    }
+
+    FrameworkElement MakeScanExistingButton(Zone z)
+    {
+        bool enabled = !string.IsNullOrWhiteSpace(z.AutoOrganizeWatchPath)
+            && (z.AutoOrganizeExtensions.Count > 0 || z.AutoOrganizeNameTokens.Count > 0);
+        var btn = MakePanelButton(_loc["ZoneProp.AutoOrganize.ScanExisting"], null, minWidth: 120);
+        btn.Margin = new Thickness(0, 8, 0, 0);
+        btn.HorizontalAlignment = HorizontalAlignment.Left;
+        btn.IsEnabled = enabled;
+        btn.Click += async (_, _) =>
+        {
+            btn.IsEnabled = false;
+            int n = await AutoOrganizeService.Instance.ScanExistingAsync(z);
+            btn.IsEnabled = true;
+            var msg = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                _loc["ZoneProp.AutoOrganize.ScanDone"], n);
+            if (App.Notify != null)
+                App.Notify("Auto-organize", msg);
+            else
+                MessageBox.Show(msg, "Auto-organize", MessageBoxButton.OK, MessageBoxImage.Information);
+            Rebuild(z);
+        };
+        return btn;
+    }
+
+    Button MakePanelButton(string content, RoutedEventHandler? onClick, double? minWidth = null)
+    {
+        var btn = new Button
+        {
+            Content = content,
+            Background = (Brush)FindResource("Brush.Bg.Input"),
+            Foreground = (Brush)FindResource("Brush.Text.Secondary"),
+            BorderBrush = (Brush)FindResource("Brush.Border.Subtle"),
+            BorderThickness = new Thickness(1),
+            Cursor = Cursors.Hand,
+            FontSize = 11,
+            Padding = new Thickness(10, 4, 10, 4),
+        };
+        if (minWidth.HasValue) btn.MinWidth = minWidth.Value;
+        if (onClick != null) btn.Click += onClick;
+        return btn;
+    }
+
+    Button MakeAddButton(string tooltip, Action onClick)
+    {
+        var btn = new Button
+        {
+            Content = "+",
+            Width = 28,
+            Height = 28,
+            FontSize = 16,
+            Padding = new Thickness(0),
+            Background = (Brush)FindResource("Brush.Bg.Input"),
+            Foreground = (Brush)FindResource("Brush.Text.Secondary"),
+            BorderBrush = (Brush)FindResource("Brush.Border.Subtle"),
+            BorderThickness = new Thickness(1),
+            Cursor = Cursors.Hand,
+            ToolTip = tooltip,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        btn.Click += (_, _) => onClick();
+        return btn;
     }
 
     // ── Field tree for merged groups ──
@@ -1004,11 +1274,17 @@ public partial class PropertyPanel : UserControl
             p => { sub.FillOpacityOverride = p; Save(sub); });
         appearance.Children.Add(fillOpacityRow);
         _fillGated.Add(fillOpacityRow);
-        appearance.Children.Add(MakeCheckRow("液态玻璃", sub.EnableLiquidGlass,
-            v => { sub.EnableLiquidGlass = v; Save(sub); }));
+        // 液态玻璃 — 与主分区同款:开关 + 右侧"…"按钮打开玻璃设置二级对话框。
+        // ponytail 2026-08-26: 开启"填充跟随主分区"后本行与图片行一起禁用
+        // (跟随 = 玻璃/图片完全取自主分区)。
+        var glassRow = MakeCheckRowWithSideBtn("液态玻璃", sub.EnableLiquidGlass,
+            v => { sub.EnableLiquidGlass = v; Save(sub); },
+            _loc["ZoneProp.LiquidGlassSettingsEllipsis"], _ => OpenSubfolderGlassDialog(sub));
+        appearance.Children.Add(glassRow);
+        _fillGated.Add(glassRow);
         // ponytail: SubFolder 背景图片预览尺寸固定 128×128 (flyout 内部格大小),
         // 不像 Zone 跟随 Width/Height。TitleBarHeight=0 因为 SubFolder 没有标题栏。
-        appearance.Children.Add(MakeBgImageRow("", new BgImageBinding
+        var bgRow = MakeBgImageRow("", new BgImageBinding
         {
             GetPath = () => sub.BackgroundImagePath,
             SetPath = v => sub.BackgroundImagePath = v ?? "",
@@ -1025,7 +1301,9 @@ public partial class PropertyPanel : UserControl
             CropShape = "Rectangle",
             TitleBarHeight = 0,
             OnSave = () => Save(sub),
-        }));
+        });
+        appearance.Children.Add(bgRow);
+        _fillGated.Add(bgRow);
         // ponytail 2026-08-26: "背景图片透明度"独立行删除 — 多出来的设置(背景图
         // 不透明度回到模型默认值,不再单列一行)。
         root.Children.Add(appearance);
@@ -2012,6 +2290,10 @@ public partial class PropertyPanel : UserControl
         dst.BackgroundImagePath = src.BackgroundImagePath;
         dst.BackgroundImageOpacity = src.BackgroundImageOpacity;
         dst.EnableLiquidGlass = src.EnableLiquidGlass;
+        dst.GlassBlurAmount = src.GlassBlurAmount;
+        dst.GlassTintOpacity = src.GlassTintOpacity;
+        dst.GlassTintLuminosity = src.GlassTintLuminosity;
+        dst.GlassColorMode = src.GlassColorMode;
         dst.GridSize = src.GridSize;
         dst.SnapToGrid = src.SnapToGrid;
         dst.AutoArrange = src.AutoArrange;
@@ -2293,6 +2575,26 @@ public partial class PropertyPanel : UserControl
         m.GlassTintLuminosity = lum;
         m.GlassColorMode = mode;
         Save(m);
+    }
+
+    /// <summary>ponytail 2026-08-26: SubFolder 版液态玻璃设置 — ZoneItem 自带玻璃
+    /// 四参数(与 AppearanceModel 同款),对话框复用 AcrylicHelper.ShowLiquidGlassDialog。</summary>
+    void OpenSubfolderGlassDialog(ZoneItem sub)
+    {
+        var owner = CachedOwner ?? Window.GetWindow(this);
+        if (owner == null) { MessageBox.Show(_loc["PropertyPanel.NoOwnerWindow"]); return; }
+        int blur = sub.GlassBlurAmount;
+        int tint = sub.GlassTintOpacity;
+        int lum = sub.GlassTintLuminosity;
+        string mode = sub.GlassColorMode;
+        var cn = LocalizationService.Instance.CurrentLanguage == "zh";
+        if (!AcrylicHelper.ShowLiquidGlassDialog(owner, _loc["ZoneProp.Section.LiquidGlass"],
+            ref blur, ref tint, ref lum, ref mode, cn)) return;
+        sub.GlassBlurAmount = blur;
+        sub.GlassTintOpacity = tint;
+        sub.GlassTintLuminosity = lum;
+        sub.GlassColorMode = mode;
+        Save(sub);
     }
 
     // ponytail 2026-08-25: PanelConfig is not an AppearanceModel — the panel

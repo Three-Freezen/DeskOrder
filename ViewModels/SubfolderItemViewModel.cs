@@ -41,6 +41,14 @@ public class SubfolderItemViewModel : INotifyPropertyChanged
         }
         OnPropertyChanged(nameof(CellLayout));
         OnPropertyChanged(nameof(SubItemCount));
+        // ponytail 2026-08-26: 填充相关字段变化 → 刷新填充层画刷/背景图。
+        // (逐个属性判断太琐碎,Source 变化频率低,全量通知即可。)
+        OnPropertyChanged(nameof(OverrideFill));
+        OnPropertyChanged(nameof(BoxFill));
+        OnPropertyChanged(nameof(BgImage));
+        OnPropertyChanged(nameof(BgImageBrush));
+        OnPropertyChanged(nameof(BgOpacity));
+        OnPropertyChanged(nameof(GlassBrush));
     }
 
     private void RebuildThumbnails()
@@ -68,6 +76,25 @@ public class SubfolderItemViewModel : INotifyPropertyChanged
     public int CellLayout => 1;
 
     public int SubItemCount => Source.SubItems.Count;
+
+    // ── 填充跟随主分区 ──
+    // 跟随(默认):图标格填充层为空 → 透明,主分区主体填充(颜色/液态玻璃/背景图)
+    // 直接透出 — 这就是"同步主分区主体部分的填充"。不跟随时用 Source 的 override
+    // 字段渲染自身填充。边框固定(#40FFFFFF),不参与同步。
+
+    /// <summary>不跟随时解析出的自身填充;跟随主分区时为 null(透出主分区)。</summary>
+    public SubfolderFill? OverrideFill => Source.FillFollowsZone ? null : SubfolderFill.FromOverride(Source);
+
+    public System.Windows.Media.Brush? BoxFill => OverrideFill?.FillBrush;
+
+    public System.Windows.Media.ImageSource? BgImage => OverrideFill?.BgImage;
+
+    /// <summary>背景图 ImageBrush — 自动裁剪适应格子,不参与布局测量。</summary>
+    public System.Windows.Media.Brush? BgImageBrush => OverrideFill?.BgImageBrush;
+
+    public double BgOpacity => OverrideFill?.BgOpacity01 ?? 0;
+
+    public System.Windows.Media.Brush? GlassBrush => OverrideFill?.GlassBrush;
 
     public event PropertyChangedEventHandler? PropertyChanged;
     void OnPropertyChanged([CallerMemberName] string? name = null)

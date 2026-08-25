@@ -172,6 +172,47 @@ public class ZoneManager
         return sub;
     }
 
+    /// <summary>Add a file/folder path to a zone — shared entry point for auto-organize.
+    /// Uses the same normalization (ShortcutResolver) + collision-aware placement
+    /// (ZoneLayout.FindFreeSpot) as the manual drag-drop import path. Dedups by
+    /// TargetPath (case-insensitive) and returns whether an item was actually added.</summary>
+    public bool AddItem(Guid zoneId, string path)
+    {
+        var zone = Zones.FirstOrDefault(z => z.Id == zoneId);
+        if (zone == null) return false;
+        if (zone.Items.Any(i => string.Equals(i.TargetPath, path, StringComparison.OrdinalIgnoreCase)))
+            return false;
+
+        var type = Directory.Exists(path)
+            ? ItemType.Folder
+            : Path.GetExtension(path).ToLowerInvariant() switch
+            {
+                ".lnk" => ItemType.Shortcut,
+                ".exe" => ItemType.Application,
+                _ => ItemType.Shortcut,
+            };
+        var (target, normalizedType, iconLoc) = ShortcutResolver.NormalizeItem(path, type);
+        var item = new ZoneItem(Path.GetFileNameWithoutExtension(path), target, normalizedType, 0, 0)
+        {
+            IconPath = iconLoc,
+        };
+
+        // 导入时就按原始路径 + 文件类型解析并缓存图标（渲染端 ZoneItemViewModel 直接命中
+        // 共享缓存，避免懒解析在文件尚未写完时把 null 图标缓存成永久空白）。
+        ShellIconService.Instance.GetIcon(item.TargetPath, item.Type, item.IconPath);
+
+        double itemW = zone.GridSize;
+        double itemH = zone.GridSize + ZoneLayout.LabelArea;
+        var (x, y) = ZoneLayout.FindFreeSpot(zone.Items, zone.Width, zone.Height, itemW, itemH);
+        item.X = x;
+        item.Y = y;
+
+        zone.Items.Add(item);
+        SaveConfig();
+        NotifyChanged();
+        return true;
+    }
+
     /// <summary>Debounced SaveConfig — coalesces bursts (drag moves, batch edits) into a single
     /// disk write after 1s of quiet. Idempotent: each call resets the 1s window; the timer fires
     /// once, saves, then nulls itself so a later Schedule creates a fresh instance.</summary>
@@ -253,7 +294,7 @@ public class ZoneManager
         }
         else
         {
-            var window = new ZoneWindow(zone, this, new ShellIconService());
+            var window = new ZoneWindow(zone, this, ShellIconService.Instance);
             window.Show();
             _zoneWindows[zone.Id] = window;
             // ponytail: batch "Show All" wave — a freshly created window starts expanded

@@ -4,11 +4,14 @@
              xmlns:vm="clr-namespace:DesktopZones.ViewModels"
              xmlns:loc="clr-namespace:DesktopZones.Helpers">
     <!-- ponytail 2026-08-26: size-to-content。内格单元 = HostSubItem.GridSize 的正方形
-         (默认 56×56),2×2 四图标 = 2·GridSize 的正方形内容区;图标在上、名称压格底。
+         (默认 56×56),2×2 / 3×3 / 4×4… 按数量自动扩大。图标在上、名称压格底。
          RenderTransform 用 TransformGroup[移至原点(-c), Scale, 移回(+c)] — 与
          HoverExpandBehavior 同款 scale-around-point 组合,缩放锚点 c 由 ZoneWindow
          按"SubFolder 图标屏幕中心"在打开时设置(允许负值,flyout 停在图标右下时
-         锚点在自身之外)。 -->
+         锚点在自身之外)。
+         ponytail 2026-08-26: 填充层跟随主分区(ZoneWindow 打开时按"跟随/自身 override"
+         解析好传入 VM):填充色 → 背景图(ImageBrush 自动裁剪) → 液态玻璃渐变/真玻璃;
+         外框无描边(2026-08-27 起),填充层全幅铺满。 -->
     <UserControl.RenderTransform>
         <TransformGroup>
             <TranslateTransform x:Name="FlyoutTranslateToOrigin"/>
@@ -17,72 +20,107 @@
         </TransformGroup>
     </UserControl.RenderTransform>
 
+    <!-- ponytail 2026-08-27: 删除外层玻璃描边框(原 BorderBrush #40FFFFFF + Padding 8
+         会在模糊背景上形成一圈灰框)。主体填充层现在全幅铺满整个界面(含原边框/内边距
+         区域),内容用 Margin=8 与边缘保持间距;圆角由 CornerRadius+ClipToBounds 裁剪。 -->
     <Border CornerRadius="{Binding HostSubItem.CornerRounded, Converter={x:Static vm:BoolToCornerRadiusConverter.Instance}}"
-            Background="#18000000"
-            BorderBrush="#40FFFFFF"
-            BorderThickness="1"
-            Padding="8">
+            Background="Transparent"
+            ClipToBounds="True">
         <Grid>
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-            </Grid.RowDefinitions>
+            <Rectangle Fill="{Binding FillBrush}" IsHitTestVisible="False"/>
+            <Rectangle Fill="{Binding BgImageBrush}" Opacity="{Binding BgOpacity}"
+                       IsHitTestVisible="False"/>
+            <Rectangle Fill="{Binding GlassBrush}" IsHitTestVisible="False"/>
+            <Grid Margin="8">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
 
-            <!-- Header: name + ⚙ style button (Edit Style...) -->
-            <DockPanel Grid.Row="0" LastChildFill="True" Margin="0,0,0,6">
-                <Border DockPanel.Dock="Right" Width="26" Height="22" CornerRadius="4"
-                        Background="#30FFFFFF" Cursor="Hand"
-                        MouseLeftButtonDown="StyleBtn_Click"
-                        MouseEnter="StyleBtn_Enter" MouseLeave="StyleBtn_Leave"
-                        ToolTip="{loc:Loc Key=Subfolder.EditStyle}">
-                    <TextBlock Text="⚙" FontSize="12" Foreground="#C0FFFFFF"
-                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                </Border>
-                <TextBlock Text="{Binding HostSubItem.Name}" FontSize="11"
-                           Foreground="#E0FFFFFF" VerticalAlignment="Center"
-                           TextTrimming="CharacterEllipsis" Margin="0,0,8,0"/>
-            </DockPanel>
+                <!-- Header: name + ⚙ style button (Edit Style...) -->
+                <DockPanel Grid.Row="0" LastChildFill="True" Margin="0,0,0,6">
+                    <Border DockPanel.Dock="Right" Width="26" Height="22" CornerRadius="4"
+                            Background="#30FFFFFF" Cursor="Hand"
+                            MouseLeftButtonDown="StyleBtn_Click"
+                            MouseEnter="StyleBtn_Enter" MouseLeave="StyleBtn_Leave"
+                            ToolTip="{loc:Loc Key=Subfolder.EditStyle}">
+                        <TextBlock Text="⚙" FontSize="12" Foreground="#C0FFFFFF"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <TextBlock Text="{Binding HostSubItem.Name}" FontSize="11"
+                               Foreground="#E0FFFFFF" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" Margin="0,0,8,0"/>
+                </DockPanel>
 
-            <!-- Adaptive inner grid (2×2 / 3×3 / 4×4 based on count). Bind to ItemVms
-                 (ZoneItemViewModel OC) so each row's .Icon is available. Cell size follows
-                 the host SubFolder's GridSize; ElementName 绑定直取 ItemsControl 的
-                 DataContext(SubfolderFlyoutViewModel),不依赖 AncestorType 查找。 -->
-            <ItemsControl x:Name="InnerItems" Grid.Row="1" ItemsSource="{Binding ItemVms}"
-                          AllowDrop="True"
-                          DragEnter="Items_DragEnter"
-                          DragOver="Items_DragOver"
-                          Drop="Items_Drop">
-                <ItemsControl.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <UniformGrid x:Name="InnerGrid"/>
-                    </ItemsPanelTemplate>
-                </ItemsControl.ItemsPanel>
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate>
-                        <Grid Width="{Binding DataContext.CellWidth, ElementName=InnerItems}"
-                              Height="{Binding DataContext.CellHeight, ElementName=InnerItems}"
-                              Margin="2"
-                              Background="Transparent" Cursor="Hand"
-                              MouseLeftButtonDown="Item_MouseDown"
-                              MouseMove="Item_MouseMove"
-                              MouseLeftButtonUp="Item_MouseUp">
-                            <Image Source="{Binding Icon}"
-                                   Width="{Binding DataContext.IconSize, ElementName=InnerItems}"
-                                   Height="{Binding DataContext.IconSize, ElementName=InnerItems}"
-                                   Stretch="Uniform" HorizontalAlignment="Center"
-                                   VerticalAlignment="Top" Margin="0,2,0,0"
-                                   RenderOptions.BitmapScalingMode="HighQuality"/>
-                            <TextBlock Text="{Binding Name}" FontSize="9"
-                                       Foreground="#E0FFFFFF" TextAlignment="Center"
-                                       TextTrimming="CharacterEllipsis"
-                                       MaxWidth="{Binding DataContext.CellWidth, ElementName=InnerItems}"
-                                       Margin="1,0,1,2"
-                                       HorizontalAlignment="Center"
-                                       VerticalAlignment="Bottom"/>
-                        </Grid>
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
+                <!-- Adaptive inner grid (2×2 / 3×3 / 4×4… by count). Bind to ItemVms
+                     (ZoneItemViewModel OC) so each row's .Icon is available. Cell size follows
+                     the host SubFolder's GridSize; ElementName 绑定直取 ItemsControl 的
+                     DataContext(SubfolderFlyoutViewModel),不依赖 AncestorType 查找。 -->
+                <ItemsControl x:Name="InnerItems" Grid.Row="1" ItemsSource="{Binding ItemVms}"
+                              Background="Transparent"
+                              AllowDrop="True"
+                              DragEnter="Items_DragEnter"
+                              DragOver="Items_DragOver"
+                              Drop="Items_Drop">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <UniformGrid x:Name="InnerGrid"/>
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Width="{Binding DataContext.CellWidth, ElementName=InnerItems}"
+                                  Height="{Binding DataContext.CellHeight, ElementName=InnerItems}"
+                                  Margin="2"
+                                  Background="Transparent" Cursor="Hand"
+                                  MouseEnter="Cell_Enter" MouseLeave="Cell_Leave"
+                                  MouseLeftButtonDown="Item_MouseDown"
+                                  MouseMove="Item_MouseMove"
+                                  MouseLeftButtonUp="Item_MouseUp">
+                                <!-- ponytail 2026-08-26: 内层图标与主分区同款操作 —
+                                     右键菜单(打开/重命名/删除)、悬停高光、拖拽换位(蓝色
+                                     竖条指示)、Ctrl+点选/Ctrl+A 全选、双击打开。 -->
+                                <Grid.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem Header="{loc:Loc Key=Item.Open}" Click="CtxOpen_Click"/>
+                                        <MenuItem Header="{loc:Loc Key=Item.OpenLocation}" Click="CtxOpenLocation_Click"/>
+                                        <MenuItem Header="{loc:Loc Key=Item.Rename}" Click="CtxRename_Click"/>
+                                        <Separator/>
+                                        <MenuItem Header="{loc:Loc Key=Item.Delete}" Foreground="#FF6666" Click="CtxDelete_Click"/>
+                                    </ContextMenu>
+                                </Grid.ContextMenu>
+                                <!-- ponytail 2026-08-27: 删除图标格子主题卡片 —
+                                     图标直接铺在主体填充上,不再有深色底+描边。
+                                     悬停高光/多选框/右键菜单照旧。 -->
+                                <Image Source="{Binding Icon}"
+                                       Width="{Binding DataContext.IconSize, ElementName=InnerItems}"
+                                       Height="{Binding DataContext.IconSize, ElementName=InnerItems}"
+                                       Stretch="Uniform" HorizontalAlignment="Center"
+                                       VerticalAlignment="Top" Margin="0,2,0,0"
+                                       RenderOptions.BitmapScalingMode="HighQuality"/>
+                                <TextBlock Text="{Binding Name}" FontSize="9"
+                                           Foreground="#E0FFFFFF" TextAlignment="Center"
+                                           TextTrimming="CharacterEllipsis"
+                                           MaxWidth="{Binding DataContext.CellWidth, ElementName=InnerItems}"
+                                           Margin="1,0,1,2"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Bottom"/>
+                                <!-- Multi-select highlight (Ctrl+click / Ctrl+A) -->
+                                <Border x:Name="CellSelBox" Visibility="Collapsed" IsHitTestVisible="False"
+                                        Background="#26FFFFFF" BorderBrush="#80FFFFFF" BorderThickness="1.2"
+                                        CornerRadius="4"/>
+                            </Grid>
+                            <DataTemplate.Triggers>
+                                <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                    <Setter TargetName="CellSelBox" Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </DataTemplate.Triggers>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </Grid>
+            <!-- 拖拽换位的蓝色竖条指示层(覆盖整个 Flyout,IsHitTestVisible=false) -->
+            <Canvas x:Name="DropLayer" IsHitTestVisible="False"/>
         </Grid>
     </Border>
 </UserControl>

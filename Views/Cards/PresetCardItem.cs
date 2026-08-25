@@ -55,6 +55,47 @@ public class PresetCardItem : INotifyPropertyChanged
     /// <summary>Panel preset's border color as hex string.</summary>
     public string PanelBorderColor => (Payload as PanelPresetConfig)?.PanelBorderColor ?? "";
 
+    // ── Subfolder preset card surface (Payload = the preset's ZoneItem) ──
+    /// <summary>ponytail 2026-08-26: 次级文件夹预设卡只预览样式 — 填充色(无 override
+    /// 时用默认暗色)、圆角、背景图、液态玻璃;名称/日期放在卡片下方信息栏,卡片上
+    /// 不放额外内容。</summary>
+    public string SubfolderFillColor
+    {
+        get
+        {
+            var s = (Payload as ZoneItem)?.FillColorOverride;
+            return string.IsNullOrEmpty(s) ? "#08000000" : s;
+        }
+    }
+
+    /// <summary>Subfolder preset fill as a <see cref="SolidColorBrush"/>.</summary>
+    public System.Windows.Media.Brush? SubfolderFillBrush
+    {
+        get
+        {
+            try
+            {
+                var c = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(SubfolderFillColor)!;
+                return new System.Windows.Media.SolidColorBrush(c);
+            }
+            catch { return null; }
+        }
+    }
+
+    /// <summary>Subfolder preset glass preview brush — null when the preset has no glass.</summary>
+    public System.Windows.Media.Brush? SubfolderGlassBrush
+    {
+        get
+        {
+            if ((Payload as ZoneItem)?.EnableLiquidGlass != true) return null;
+            var mode = (Payload as ZoneItem)?.GlassColorMode;
+            if (string.IsNullOrEmpty(mode)) mode = "Default";
+            return (System.Windows.Media.Brush)new LiquidGlassBrushConverter().Convert(
+                mode, typeof(System.Windows.Media.Brush), null,
+                System.Globalization.CultureInfo.InvariantCulture);
+        }
+    }
+
     /// <summary>Clock-only: which display mode the preset stores on disk. Null for non-Clock kinds.</summary>
     public ClockDisplayMode? ClockMode => Payload is DesktopClock c ? c.Mode : null;
 

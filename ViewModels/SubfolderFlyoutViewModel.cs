@@ -33,7 +33,49 @@ public class SubfolderFlyoutViewModel : INotifyPropertyChanged
     /// back as another INPC and loop forever.</summary>
     private bool _suppressWriteback;
 
+    // ponytail 2026-08-26: flyout 内部拖拽换位的暂存区。拖拽过程中 ItemVms.Move
+    // 只改集合顺序、不写回 HostSubItem.SubItems — 否则每次 Move 都触发 SubItems
+    // INPC → RebuildItemVms 清空重建 → 拖拽中的容器被销毁、鼠标捕获丢失、被拖 VM
+    // 变陈旧。松手时 Commit 一次性写回,Cancel 则按模型顺序重建还原。
+    private bool _transientReorder;
+    private bool _orderDirty;
+
     public ZoneItem HostSubItem => _hostSubItem;
+
+    /// <summary>打开时由 ZoneWindow 解析好的填充(跟随主分区 → 主分区风格;否则
+    /// SubFolder 自身 override)。为空时回落到自身 override / 默认暗色。</summary>
+    public SubfolderFill Fill { get; }
+
+    /// <summary>填充色画刷(alpha 已乘透明度)。</summary>
+    public System.Windows.Media.Brush? FillBrush => Fill.FillBrush;
+
+    /// <summary>背景图(路径无效时 null)。</summary>
+    public System.Windows.Media.ImageSource? BgImage => Fill.BgImage;
+
+    /// <summary>背景图 ImageBrush — 自动裁剪适应面板,不参与布局测量(防撑大)。</summary>
+    public System.Windows.Media.Brush? BgImageBrush => Fill.BgImageBrush;
+
+    /// <summary>背景图不透明度(0..1)。</summary>
+    public double BgOpacity => Fill.BgOpacity01;
+
+    /// <summary>ponytail 2026-08-26: Flyout 打开时优先给 Popup HWND 开真玻璃(DWM,
+    /// 与主分区同配方)。成功时隐藏渐变兜底,失败时才显示渐变。由 ZoneWindow 在
+    /// 打开流程里设置。</summary>
+    private bool _showGlassFallback;
+    public bool ShowGlassFallback
+    {
+        get => _showGlassFallback;
+        set
+        {
+            if (_showGlassFallback == value) return;
+            _showGlassFallback = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(GlassBrush));
+        }
+    }
+
+    /// <summary>液态玻璃渐变画刷(真玻璃成功时 null,失败时渐变兜底)。</summary>
+    public System.Windows.Media.Brush? GlassBrush => _showGlassFallback ? Fill.GlassBrush : null;
 
     /// <summary>ZoneItemViewModels for each entry in HostSubItem.SubItems.
     /// ponytail 2026-08-25: exposed as ItemVms (ZoneItemViewModel OC) instead of
@@ -61,10 +103,15 @@ public class SubfolderFlyoutViewModel : INotifyPropertyChanged
     /// <summary>Icon render size inside a flyout cell (grid cell minus label + padding).</summary>
     public double IconSize => Math.Max(20, GridSize - 16);
 
-    public SubfolderFlyoutViewModel(ZoneItem hostSubItem, ShellIconService iconService)
+    public SubfolderFlyoutViewModel(ZoneItem hostSubItem, ShellIconService iconService, SubfolderFill? fill = null)
     {
         _hostSubItem = hostSubItem;
         _iconService = iconService;
+        // ponytail 2026-08-26: 填充由 ZoneWindow 按"跟随主分区 / 自身 override"解析后
+        // 传入(主分区风格只有 ZoneWindow 能拿到 ResolveStyle());为空时兜底自身 override。
+        Fill = fill ?? (hostSubItem.FillFollowsZone
+            ? new SubfolderFill("#08000000", 100, null, 0, null)
+            : SubfolderFill.FromOverride(hostSubItem));
 
         _hostSubItem.PropertyChanged += OnHostPropertyChanged;
         ItemVms.CollectionChanged += OnItemVmsCollectionChanged;
@@ -105,11 +152,17 @@ public class SubfolderFlyoutViewModel : INotifyPropertyChanged
     private void OnItemVmsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         if (_suppressWriteback) return;
+        // 拖拽换位暂存中:只记录"顺序已变",不写回 — 写回会触发 SubItems INPC 重建。
+        if (_transientReorder) { _orderDirty = true; return; }
+        WriteBackOrder();
+    }
 
-        // ponytail: rebuild the source list from the live ItemVms via the VM→source map.
-        // VMs added through raw ItemVms.Add (without going through AddItem) have no
-        // registered source; bailing out keeps the host model consistent rather than
-        // writing a half-populated list.
+    /// <summary>rebuild the source list from the live ItemVms via the VM→source map.
+    /// VMs added through raw ItemVms.Add (without going through AddItem) have no
+    /// registered source; bailing out keeps the host model consistent rather than
+    /// writing a half-populated list.</summary>
+    void WriteBackOrder()
+    {
         var newSources = new List<ZoneItem>(ItemVms.Count);
         foreach (var vm in ItemVms)
         {
@@ -118,6 +171,26 @@ public class SubfolderFlyoutViewModel : INotifyPropertyChanged
             newSources.Add(src);
         }
         _hostSubItem.SubItems = newSources;
+    }
+
+    /// <summary>开始拖拽换位暂存(拖拽开始时调用)。</summary>
+    public void BeginTransientReorder() { _transientReorder = true; _orderDirty = false; }
+
+    /// <summary>提交暂存顺序:一次性写回 HostSubItem.SubItems(松手且换位过时调用)。</summary>
+    public void CommitTransientReorder()
+    {
+        _transientReorder = false;
+        if (_orderDirty) { _orderDirty = false; WriteBackOrder(); }
+    }
+
+    /// <summary>取消暂存:按模型当前顺序重建 ItemVms,还原拖拽期间的临时换位
+    /// (拖出主分区/取消拖拽时调用)。</summary>
+    public void CancelTransientReorder()
+    {
+        _transientReorder = false;
+        bool dirty = _orderDirty;
+        _orderDirty = false;
+        if (dirty) RebuildItemVms();
     }
 
     /// <summary>Public add path used by ZoneWindow drag-drop (Task 6). Registers

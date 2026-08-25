@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:loc="clr-namespace:DesktopZones.Helpers"
         xmlns:local="clr-namespace:DesktopZones.Views"
         xmlns:Models="clr-namespace:DesktopZones.Models"
+        xmlns:vm="clr-namespace:DesktopZones.ViewModels"
         Title="Load Preset"
         Width="640" Height="540"
         MinWidth="560" MinHeight="460"
@@ -876,6 +877,55 @@
             </Border>
         </DataTemplate>
 
+        <DataTemplate x:Key="SubfolderCardTemplate">
+            <!-- ponytail 2026-08-26: SubFolder 预设卡 — 纯样式预览(填充色/背景图/液态玻璃/
+                 圆角),卡片上不放名称等额外内容;名称 + 日期放在下方信息栏(参考分区卡片)。
+                 面板里不再有预设卡列表,预设卡统一挪到本二级界面。 -->
+            <Border Style="{StaticResource CardFrameStyle}"
+                    MouseEnter="Card_MouseEnter"
+                    MouseLeave="Card_MouseLeave"
+                    MouseLeftButtonDown="Card_MouseLeftButtonDown"
+                    Loaded="Card_Loaded">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Border Margin="8,8,8,2" ClipToBounds="True"
+                            BorderBrush="#30FFFFFF" BorderThickness="1"
+                            CornerRadius="{Binding Payload.CornerRounded, Converter={x:Static vm:BoolToCornerRadiusConverter.Instance}}">
+                        <Border.Background>
+                            <Binding Path="SubfolderFillBrush" FallbackValue="#08000000"/>
+                        </Border.Background>
+                        <Grid>
+                            <!-- Background image (only when path set) -->
+                            <Image Source="{Binding Payload.BackgroundImagePath}" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality">
+                                <Image.Opacity>
+                                    <Binding Path="Payload.BackgroundImageOpacity" Converter="{StaticResource PercentToOpacity}" FallbackValue="0.3"/>
+                                </Image.Opacity>
+                                <Image.Style>
+                                    <Style TargetType="Image">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Payload.BackgroundImagePath}" Value="">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Image.Style>
+                            </Image>
+                            <!-- Liquid glass preview (null when the preset has no glass) -->
+                            <Rectangle Fill="{Binding SubfolderGlassBrush}" IsHitTestVisible="False"/>
+                        </Grid>
+                    </Border>
+                    <StackPanel Grid.Row="1" Margin="12,4,12,8" VerticalAlignment="Top">
+                        <TextBlock Text="{Binding Name}" Foreground="{DynamicResource Brush.Text.Primary}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Text="{Binding CreatedAt, StringFormat=yyyy-MM-dd}" Foreground="{DynamicResource Brush.Text.Tertiary}" FontSize="10" Margin="0,2,0,0"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </DataTemplate>
+
         <local:PresetCardTemplateSelector x:Key="CardSelector"
                 ZoneTemplate="{StaticResource ZoneCardTemplate}"
                 ClockAnalogTemplate="{StaticResource ClockAnalogCardTemplate}"
@@ -883,7 +933,8 @@
                 CalendarTemplate="{StaticResource CalendarCardTemplate}"
                 StickyNoteTemplate="{StaticResource StickyNoteCardTemplate}"
                 MergedGroupTemplate="{StaticResource MergedGroupCardTemplate}"
-                PanelTemplate="{StaticResource PanelCardTemplate}"/>
+                PanelTemplate="{StaticResource PanelCardTemplate}"
+                SubfolderTemplate="{StaticResource SubfolderCardTemplate}"/>
     </Window.Resources>
 
     <Border Background="{DynamicResource Brush.Bg.Chrome}" CornerRadius="12" BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1">

@@ -147,6 +147,36 @@ public class ZoneItem : INotifyPropertyChanged
         set => SetField(ref _enableLiquidGlass, value);
     }
 
+    // ── 液态玻璃设置(ponytail 2026-08-26:与 AppearanceModel 同款字段,供 SubFolder
+    //    自身的液态玻璃对话框使用;渲染只读 GlassColorMode 画渐变) ──
+    private int _glassBlurAmount = 18;
+    public int GlassBlurAmount
+    {
+        get => _glassBlurAmount;
+        set => SetField(ref _glassBlurAmount, value);
+    }
+
+    private int _glassTintOpacity = 50;
+    public int GlassTintOpacity
+    {
+        get => _glassTintOpacity;
+        set => SetField(ref _glassTintOpacity, value);
+    }
+
+    private int _glassTintLuminosity = 100;
+    public int GlassTintLuminosity
+    {
+        get => _glassTintLuminosity;
+        set => SetField(ref _glassTintLuminosity, value);
+    }
+
+    private string _glassColorMode = "Default";
+    public string GlassColorMode
+    {
+        get => _glassColorMode;
+        set => SetField(ref _glassColorMode, value);
+    }
+
     private int _gridSize = 56;
     public int GridSize
     {
@@ -223,6 +253,10 @@ public class ZoneItem : INotifyPropertyChanged
             BackgroundImagePath = BackgroundImagePath,
             BackgroundImageOpacity = BackgroundImageOpacity,
             EnableLiquidGlass = EnableLiquidGlass,
+            GlassBlurAmount = GlassBlurAmount,
+            GlassTintOpacity = GlassTintOpacity,
+            GlassTintLuminosity = GlassTintLuminosity,
+            GlassColorMode = GlassColorMode,
             GridSize = GridSize,
             SnapToGrid = SnapToGrid,
             AutoArrange = AutoArrange,

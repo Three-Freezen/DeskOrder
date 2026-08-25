@@ -11,6 +11,10 @@ namespace DesktopZones.Services;
 
 public class ShellIconService
 {
+    /// <summary>共享实例 — ZoneWindow / PanelWindow / ZoneManager 都从这里取图标，
+    /// 这样 ZoneManager 在导入时预热的图标缓存能被渲染端直接命中。</summary>
+    public static ShellIconService Instance { get; } = new();
+
     /// <summary>SHIL_JUMBO — the 256px source resolution the desktop draws icons from.</summary>
     private const int JumboSize = 256;
 
@@ -67,19 +71,25 @@ public class ShellIconService
             return GetRecycleBinStateIcon();
 
         string cacheKey = iconLocation ?? path;
-        return _iconCache.GetOrAdd(cacheKey, _ =>
+        if (_iconCache.TryGetValue(cacheKey, out var cached))
+            return cached;
+
+        ImageSource? src = null;
+        if (iconLocation != null)
+            src = GetIconLocationImage(iconLocation);
+        src ??= type switch
         {
-            ImageSource? src = null;
-            if (iconLocation != null)
-                src = GetIconLocationImage(iconLocation);
-            src ??= type switch
-            {
-                Models.ItemType.ShellLocation => GetShellLocationIcon(path) ?? _folderIcon,
-                Models.ItemType.Folder => GetSystemIcon(path, true) ?? _folderIcon,
-                _ => GetSystemIcon(path, true)
-            };
-            return CropLetterboxed(src);
-        });
+            Models.ItemType.ShellLocation => GetShellLocationIcon(path) ?? _folderIcon,
+            Models.ItemType.Folder => GetSystemIcon(path, true) ?? _folderIcon,
+            _ => GetSystemIcon(path, true)
+        };
+        src = CropLetterboxed(src);
+
+        // 解析失败（文件刚创建仍在写入/被占用）时不要缓存 null — 否则监听
+        // 导入的图标会永久空白；等文件就绪后的重试会再次解析并成功缓存。
+        if (src != null)
+            _iconCache.TryAdd(cacheKey, src);
+        return src;
     }
 
     /// <summary>
@@ -208,8 +218,11 @@ public class ShellIconService
     private ImageSource? GetRecycleBinStateIcon()
     {
         bool full = RecycleBinHasItems();
-        return _iconCache.GetOrAdd(RecycleBinSpec + (full ? "|full" : "|empty"),
-            _ => BuildRecycleBinIcon(full) ?? GetShellLocationIcon(RecycleBinSpec) ?? _folderIcon);
+        string key = RecycleBinSpec + (full ? "|full" : "|empty");
+        if (_iconCache.TryGetValue(key, out var cached)) return cached;
+        var icon = BuildRecycleBinIcon(full) ?? GetShellLocationIcon(RecycleBinSpec) ?? _folderIcon;
+        if (icon != null) _iconCache.TryAdd(key, icon);
+        return icon;
     }
 
     private static ImageSource? BuildRecycleBinIcon(bool full)

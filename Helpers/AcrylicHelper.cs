@@ -100,6 +100,55 @@ public static class AcrylicHelper
     };
 
     /// <summary>
+    /// ponytail 2026-08-26: 可见的"液态玻璃"渐变预览画刷(3 停靠点)。用于预设卡 /
+    /// SubFolder 图标格 / SubFolder Flyout 等非 DWM 表面 — 实时窗口本体走 EnableBlur
+    /// 的 DWM 玻璃路径,不用这个。与 Views/LoadPresetDialog.xaml.cs 的
+    /// LiquidGlassBrushConverter 保持同一套底色表与停靠点 alpha(0xC0)。
+    /// </summary>
+    public static LinearGradientBrush MakePreviewGlassBrush(string? mode)
+    {
+        string m = mode ?? "Default";
+        if (!s_PreviewGlassBase.TryGetValue(m, out var baseColor))
+            baseColor = s_PreviewGlassBase["Default"];
+
+        const byte stopAlpha = 0xC0;
+        baseColor = Color.FromArgb(stopAlpha, baseColor.R, baseColor.G, baseColor.B);
+
+        var brush = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(1, 1) };
+        brush.GradientStops.Add(new GradientStop(LightenGlass(baseColor, 0.35), 0.0));
+        brush.GradientStops.Add(new GradientStop(baseColor, 0.5));
+        brush.GradientStops.Add(new GradientStop(DarkenGlass(baseColor, 0.30), 1.0));
+        brush.Freeze();
+        return brush;
+    }
+
+    static readonly IReadOnlyDictionary<string, Color> s_PreviewGlassBase = new Dictionary<string, Color>
+    {
+        ["Default"]       = Color.FromArgb(0xFF, 0x70, 0x95, 0xC5),
+        ["Accent"]        = Color.FromArgb(0xFF, 0x40, 0x90, 0xE2),
+        ["GlassWhite"]    = Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF),
+        ["MistGrey"]      = Color.FromArgb(0xFF, 0xC0, 0xC0, 0xC0),
+        ["DeepBlack"]     = Color.FromArgb(0xFF, 0x10, 0x10, 0x10),
+        ["OceanBlue"]     = Color.FromArgb(0xFF, 0x11, 0x85, 0xFF),
+        ["AuroraCyan"]    = Color.FromArgb(0xFF, 0x00, 0xD4, 0xD4),
+        ["RosePink"]      = Color.FromArgb(0xFF, 0xFF, 0x69, 0xB4),
+        ["BordeauxRed"]   = Color.FromArgb(0xFF, 0x8B, 0x00, 0x00),
+        ["ForestGreen"]   = Color.FromArgb(0xFF, 0x22, 0x8B, 0x22),
+        ["RoyalPurple"]   = Color.FromArgb(0xFF, 0x6A, 0x0D, 0xAD),
+        ["SunsetOrange"]  = Color.FromArgb(0xFF, 0xFF, 0x8C, 0x00),
+        ["ChampagneGold"] = Color.FromArgb(0xFF, 0xDA, 0xA5, 0x20),
+        ["MorandiSage"]   = Color.FromArgb(0xFF, 0x87, 0xA9, 0x6B),
+    };
+
+    static Color LightenGlass(Color c, double amt) => Color.FromArgb(c.A,
+        (byte)Math.Min(255, c.R + (255 - c.R) * amt),
+        (byte)Math.Min(255, c.G + (255 - c.G) * amt),
+        (byte)Math.Min(255, c.B + (255 - c.B) * amt));
+
+    static Color DarkenGlass(Color c, double amt) => Color.FromArgb(c.A,
+        (byte)(c.R * (1 - amt)), (byte)(c.G * (1 - amt)), (byte)(c.B * (1 - amt)));
+
+    /// <summary>
     /// Resolve a color mode name to an ARGB tint color (0xAARRGGBB).
     /// The caller will apply tintOpacity (alpha) and tintLuminosity (brightness).
     /// </summary>
@@ -319,16 +368,21 @@ public static class AcrylicHelper
     /// <param name="colorMode">Color preset name (Default, Accent, GlassWhite, etc.).</param>
     public static BlurResult EnableBlur(Window window, int blurAmount, int tintOpacity, int tintLuminosity, string colorMode)
     {
-#if DEBUG
-        DesktopZones.Helpers.DzTrace.Log($"[acrylic] EnableBlur({window.GetType().Name}, blur={blurAmount}, opacity={tintOpacity}, lum={tintLuminosity}, mode={colorMode})");
-#endif
-        var hwnd = new WindowInteropHelper(window).Handle;
-        if (hwnd == IntPtr.Zero) return BlurResult.Fail("Window handle not created yet");
-
         // ponytail: remember (window → settings) so OnSystemAccentChanged can re-apply
         // when the system accent changes. Override existing entry if EnableBlur is
         // called again with different params (e.g. user edited settings live).
         _registered[window] = (blurAmount, tintOpacity, tintLuminosity, colorMode);
+        return EnableBlur(new WindowInteropHelper(window).Handle, blurAmount, tintOpacity, tintLuminosity, colorMode);
+    }
+
+    /// <summary>
+    /// ponytail 2026-08-26: HWND 版重载 — 给 Popup 子窗口(SubFolder Flyout)开真玻璃。
+    /// 与 Window 版同一套 DWM 配方;不注册 _registered(Popup 生命周期短,不参与
+    /// 系统强调色变化的批量重刷)。
+    /// </summary>
+    public static BlurResult EnableBlur(IntPtr hwnd, int blurAmount, int tintOpacity, int tintLuminosity, string colorMode)
+    {
+        if (hwnd == IntPtr.Zero) return BlurResult.Fail("Window handle not created yet");
 
         // Check DWM is on
         bool dwmOn = true;
@@ -342,7 +396,7 @@ public static class AcrylicHelper
 
         if (blurAmount <= 0)
         {
-            DisableBlur(window);
+            DisableBlur(hwnd);
             return BlurResult.Ok;
         }
 
@@ -366,19 +420,19 @@ public static class AcrylicHelper
     /// <summary>Disable blur on a window.</summary>
     public static BlurResult DisableBlur(Window window)
     {
-#if DEBUG
-        DesktopZones.Helpers.DzTrace.Log($"[acrylic] DisableBlur({window.GetType().Name})");
-#endif
-        var hwnd = new WindowInteropHelper(window).Handle;
-        if (hwnd == IntPtr.Zero) return BlurResult.Fail("Window handle not created yet");
-
         // ponytail: drop the registry entry so OnSystemAccentChanged doesn't try to
         // re-apply to a torn-down window.
         _registered.Remove(window);
+        try { return DisableBlur(new WindowInteropHelper(window).Handle); }
+        catch { return BlurResult.Fail("Window handle not created yet"); }
+    }
 
+    /// <summary>ponytail 2026-08-26: HWND 版重载 — 关闭 Popup 子窗口上的玻璃。</summary>
+    public static BlurResult DisableBlur(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero) return BlurResult.Fail("Window handle not created yet");
         var primary = TryBlurBehind(hwnd, false);
         var secondary = TrySetAccent(hwnd, ACCENT_DISABLED, 0, 0);
-
         if (primary.Success || secondary.Success) return BlurResult.Ok;
         return BlurResult.Fail(primary.Error ?? secondary.Error ?? "unknown");
     }

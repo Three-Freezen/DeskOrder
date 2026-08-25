@@ -55,8 +55,15 @@ public class PropertyWindowManager
         // 1. Already floating — just activate.
         if (_floating.TryGetValue(target, out var existing))
         {
-            RestoreAndActivate(existing);
-            return;
+            if (existing.IsVisible)
+            {
+                RestoreAndActivate(existing);
+                return;
+            }
+            // ponytail 2026-08-26: 关闭动画中/不可见的残影窗口 — 激活它用户也看不到
+            // (正淡出),直接丢弃走全新打开。Closed 回调按实例判等,旧窗口的 Closed
+            // 不会误删新窗口的条目。
+            _floating.Remove(target);
         }
 
         // 2. Docked shows the same target — clear it so we don't end up with two
@@ -72,6 +79,7 @@ public class PropertyWindowManager
 
         // 3. Open fresh floating at requester (or persisted / main window) position.
         var pos = ResolvePopPosition(target, requester, main, configService, cursorScreen);
+        System.Diagnostics.Trace.WriteLine($"[SubFlyout] PopOutTarget: pos=({pos.x:F0},{pos.y:F0}) → OpenFloating");
         OpenFloating(target, configService, main, pos, initialSize);
     }
 
@@ -147,7 +155,9 @@ public class PropertyWindowManager
         w.Closed += (_, _) =>
         {
             FlushPendingPersist();
-            _floating.Remove(target);
+            // 按实例判等:只清理自己的条目,避免旧窗口(残影)的 Closed 误删新窗口。
+            if (_floating.TryGetValue(target, out var cur) && ReferenceEquals(cur, w))
+                _floating.Remove(target);
         };
         // ponytail: flip the panel into "floating mode" — swap toggle icon to
         // dock-back, fire the spin animation. Subscribe DockRequested so the
@@ -168,7 +178,12 @@ public class PropertyWindowManager
                 args.Handled = true;
         };
         _floating[target] = w;
+        System.Diagnostics.Trace.WriteLine($"[SubFlyout] OpenFloating: 即将 Show() — Left={w.Left:F0} Top={w.Top:F0} {w.Width:F0}x{w.Height:F0} Topmost={w.Topmost} State={w.WindowState}");
         w.Show();
+        // ponytail 2026-08-26: Show 后显式 Activate — 无 Owner 的浮动窗口也要抢到
+        // 前台焦点,避免被分区窗口(桌面挂件)压住看不见。
+        w.Activate();
+        System.Diagnostics.Trace.WriteLine($"[SubFlyout] OpenFloating: Show 完成 — IsVisible={w.IsVisible} Left={w.Left:F0} Top={w.Top:F0} Opacity={w.Opacity}");
     }
 
     /// <summary>夹取窗口左上角到工作区,保证至少有一部分可见(兜底历史遗留的屏幕外坐标)。</summary>

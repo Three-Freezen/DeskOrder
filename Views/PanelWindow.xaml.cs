@@ -30,7 +30,7 @@ public partial class PanelWindow : Window
 
     private readonly ZoneManager _zoneManager;
     private readonly ConfigService _configService;
-    private readonly ShellIconService _iconService = new();
+    private readonly ShellIconService _iconService = ShellIconService.Instance;
     private readonly LocalizationService _loc = LocalizationService.Instance;
     private readonly System.Windows.Threading.DispatcherTimer _clockTimer;
     private readonly System.Windows.Threading.DispatcherTimer _recycleTimer = new() { Interval = TimeSpan.FromSeconds(2.5) };

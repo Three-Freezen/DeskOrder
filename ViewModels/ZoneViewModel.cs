@@ -1,9 +1,11 @@
 using System;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.IO;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 using DesktopZones.Helpers;
 using DesktopZones.Models;
 using DesktopZones.Services;
@@ -319,17 +321,74 @@ public class ZoneItemViewModel : INotifyPropertyChanged
     }
 
     private ImageSource? _icon;
+    private DispatcherTimer? _iconRetryTimer;
+    private int _iconRetryCount;
+    private const int IconRetryMax = 10;
+    private static readonly TimeSpan IconRetryInterval = TimeSpan.FromMilliseconds(600);
+
     public ImageSource? Icon
     {
-        get => _icon ??= _iconService.GetIcon(TargetPath, Type, IconPath);
-        set { _icon = value; OnPropertyChanged(); }
+        get
+        {
+            if (_icon == null && _iconRetryTimer == null)
+            {
+                _icon = _iconService.GetIcon(TargetPath, Type, IconPath);
+                // 文件刚创建仍在写入/被占用时 shell 解析失败：定时重试直到成功
+                //（监听导入时文件尚未写完 → 图标空白的修复）。重试进行中不再重复解析，
+                // 由定时器统一重试。
+                if (_icon == null) ScheduleIconRetry();
+            }
+            return _icon;
+        }
+        set
+        {
+            _icon = value;
+            CancelIconRetry();
+            OnPropertyChanged();
+        }
     }
 
     /// <summary>Drop the cached icon so the next Icon read re-resolves it (recycle-bin state changes).</summary>
     public void RefreshIcon()
     {
+        _iconRetryCount = 0;
+        CancelIconRetry();
         _icon = null;
         OnPropertyChanged(nameof(Icon));
+    }
+
+    void ScheduleIconRetry()
+    {
+        if (_iconRetryTimer != null || _iconRetryCount >= IconRetryMax) return;
+        // 目标已不存在（shell 虚拟项除外）时重试无意义。
+        if (Type != ItemType.ShellLocation
+            && !File.Exists(TargetPath) && !Directory.Exists(TargetPath))
+            return;
+
+        _iconRetryTimer = new DispatcherTimer { Interval = IconRetryInterval };
+        _iconRetryTimer.Tick += (_, _) =>
+        {
+            _iconRetryTimer.Stop();
+            _iconRetryTimer = null;
+            _iconRetryCount++;
+            var src = _iconService.GetIcon(TargetPath, Type, IconPath);
+            if (src != null)
+            {
+                _icon = src;
+                OnPropertyChanged(nameof(Icon));
+            }
+            else if (_iconRetryCount < IconRetryMax)
+            {
+                ScheduleIconRetry();
+            }
+        };
+        _iconRetryTimer.Start();
+    }
+
+    void CancelIconRetry()
+    {
+        _iconRetryTimer?.Stop();
+        _iconRetryTimer = null;
     }
 
     /// <summary>Which zone this item belongs to (for merged views).</summary>

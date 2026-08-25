@@ -1,8 +1,12 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
+using DesktopZones.Helpers;
 using DesktopZones.Models;
 using DesktopZones.ViewModels;
 
@@ -31,30 +35,542 @@ public partial class SubfolderFlyout : UserControl
     /// it back into the owning zone (drag-out).</summary>
     public event Action<ZoneItem, ZoneItemViewModel>? ItemDragOutRequested;
 
+    // ── ponytail 2026-08-26: 内层图标与主分区同款操作 ──
+    /// <summary>双击/右键菜单"打开"内层图标。</summary>
+    public event Action<ZoneItemViewModel>? ItemOpenRequested;
+    /// <summary>右键菜单"打开所在位置"(与主分区一致)。</summary>
+    public event Action<ZoneItemViewModel>? ItemOpenLocationRequested;
+    /// <summary>右键菜单"重命名"内层图标。</summary>
+    public event Action<ZoneItemViewModel>? ItemRenameRequested;
+    /// <summary>右键菜单"删除"内层图标(ZoneWindow 侧支持多选批量确认)。</summary>
+    public event Action<ZoneItemViewModel>? ItemDeleteRequested;
+    /// <summary>flyout 内部换位/删除完成后触发(模型已写回 HostSubItem.SubItems),
+    /// 供 ZoneWindow 保存配置。</summary>
+    public event Action? ItemsChanged;
+
     private Point _dragStart;
     private ZoneItemViewModel? _dragVm;
     private bool _dragArmed;
+    private bool _dragging;       // 已越过拖拽阈值
+    private bool _dragOutStarted; // 已转交 DoDragDrop(拖出主分区)
+    private bool _reordered;      // 本次拖拽在 flyout 内部发生过换位
+
+    static readonly Brush CellHoverBrush = new SolidColorBrush(Color.FromArgb(0x22, 0xFF, 0xFF, 0xFF));
 
     public SubfolderFlyout()
     {
         InitializeComponent();
         Loaded += (_, _) => SizeInnerGrid();
+        // ponytail 2026-08-26: 长按拖拽批量选择(与主分区 marquee 同款)。
+        // 空白处按下 → 立即框选;单元格长按 350ms → 框选(快速拖动仍是换位)。
+        InnerItems.MouseLeftButtonDown += InnerItems_MouseLeftButtonDown;
+        MouseMove += Flyout_MouseMove;
+        MouseLeftButtonUp += Flyout_MouseLeftButtonUp;
+        // ponytail 2026-08-26: 右键菜单打开时,菜单 Popup 会拿到鼠标 → Flyout 收到
+        // WM_MOUSELEAVE。ZoneWindow 的"移出 200ms 自动关闭"必须被抑制,否则右键后
+        // 200ms flyout 就开始播关闭动画(右键图标层"触发关闭动画"的根源)。
+        ContextMenuOpening += OnContextMenuOpening;
+    }
+
+    bool _ctxMenuOpen;
+    /// <summary>Flyout 打开着右键菜单时返回 true(ZoneWindow 抑制自动关闭)。</summary>
+    public bool IsContextMenuOpen => _ctxMenuOpen;
+
+    void OnContextMenuOpening(object sender, ContextMenuEventArgs e)
+    {
+        // 从事件 Source 链上找持有 ContextMenu 的元素 — ContextMenuOpening 的
+        // e.Source 可能是格子里的内层元素(Image/TextBlock),直接读 fe.ContextMenu
+        // 会拿不到,导致 _ctxMenuOpen 不置位 → MouseLeave 启动的关闭 timer 不被抑制。
+        var cm = FindContextMenu(e.Source as DependencyObject);
+        if (cm != null)
+        {
+            cm.Closed -= OnCtxMenuClosed;
+            cm.Closed += OnCtxMenuClosed;
+            _ctxMenuOpen = true;
+        }
+    }
+
+    static ContextMenu? FindContextMenu(DependencyObject? d)
+    {
+        while (d != null)
+        {
+            if (d is FrameworkElement fe && fe.ContextMenu != null) return fe.ContextMenu;
+            d = VisualTreeHelper.GetParent(d);
+        }
+        return null;
+    }
+
+    void OnCtxMenuClosed(object sender, RoutedEventArgs e)
+    {
+        _ctxMenuOpen = false;
+        // 菜单 Popup 打开时抢走了鼠标捕获 — 关闭后立即还给 Flyout,保证
+        // "点击外部关闭"判定基准不变(否则后续 Flyout 内部点击会被误判外部)。
+        ReCaptureToFlyout();
     }
 
     void SizeInnerGrid()
     {
-        // Adaptive grid sizing:
-        //   1-4   items → 2×2
-        //   5-9   items → 3×3
-        //   10+   items → 4×4  (>16 wraps / scrolls on ItemsControl)
+        // Adaptive grid sizing — 图标超出后网格依次扩大:2×2 → 3×3 → 4×4 → … → 9×9
+        // (cols = ⌈√n⌉,最少 2;容量永远 ≥ 数量,不会溢出裁剪)。
         if (ViewModel == null) return;
         int count = ViewModel.ItemVms.Count;
-        int cols = count <= 4 ? 2 : count <= 9 ? 3 : 4;
-        var grid = (UniformGrid?)FindName("InnerGrid");
+        int cols = Math.Max(2, (int)Math.Ceiling(Math.Sqrt(count)));
+        var grid = FindVisualChild<UniformGrid>(this);
         if (grid != null) { grid.Rows = cols; grid.Columns = cols; }
     }
 
     public void RefreshGrid() => SizeInnerGrid();
+
+    // ── 真玻璃(DWM) — 与主分区同配方:优先给 Popup HWND 开模糊,失败才用渐变兜底 ──
+
+    /// <summary>尝试给 Popup 子窗口开真玻璃。成功返回 true(调用方隐藏渐变兜底)。</summary>
+    public bool TryApplyRealGlass(SubfolderFill fill)
+    {
+        if (!fill.HasGlass) return false;
+        try
+        {
+            var src = PresentationSource.FromVisual(this) as System.Windows.Interop.HwndSource;
+            if (src == null || src.Handle == IntPtr.Zero) return false;
+            var r = AcrylicHelper.EnableBlur(src.Handle, fill.GlassBlur, fill.GlassTintOpacity,
+                fill.GlassTintLuminosity, fill.GlassMode!);
+            return r.Success;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>关闭 Popup 子窗口上的玻璃(Closed 时调用,失败无害)。</summary>
+    public void DisableGlass()
+    {
+        try
+        {
+            var src = PresentationSource.FromVisual(this) as System.Windows.Interop.HwndSource;
+            if (src != null && src.Handle != IntPtr.Zero) AcrylicHelper.DisableBlur(src.Handle);
+        }
+        catch { }
+    }
+
+    // ── 内层图标拖拽:flyout 内部实时换位 + 拖出主分区(委托 ZoneWindow) ──
+
+    void Item_MouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is FrameworkElement fe && fe.DataContext is ZoneItemViewModel vm)
+        {
+            // 双击 = 打开(与主分区一致)。
+            if (e.ClickCount == 2)
+            {
+                ItemOpenRequested?.Invoke(vm);
+                e.Handled = true;
+                return;
+            }
+            // Ctrl+点选切换多选(与主分区一致,不进入拖拽)。
+            if ((Keyboard.Modifiers & ModifierKeys.Control) != 0)
+            {
+                vm.IsSelected = !vm.IsSelected;
+                e.Handled = true;
+                return;
+            }
+            // 普通点选:选中点击项(已选中则保持多选,与资源管理器一致)。
+            if (!vm.IsSelected && ViewModel != null)
+            {
+                foreach (var o in ViewModel.ItemVms) o.IsSelected = false;
+                vm.IsSelected = true;
+            }
+            _dragVm = vm;
+            _dragStart = e.GetPosition(this);
+            _dragArmed = true;
+            _dragging = false;
+            _dragOutStarted = false;
+            _reordered = false;
+            // 拖拽期间换位只暂存在 ItemVms 里,松手才写回 HostSubItem.SubItems —
+            // 避免每次 Move 触发 SubItems INPC 重建集合(容器销毁 → 捕获丢失)。
+            ViewModel?.BeginTransientReorder();
+            fe.CaptureMouse();
+            // ponytail: 单元格捕获会顶掉 Flyout 的子树捕获,导致后续点击被
+            // "点击外部"误判 → 每次交互结束后把捕获还给 Flyout 自己。
+            // 长按 350ms → 进入框选(与主分区 marquee 同款)。
+            _marqueeStart = e.GetPosition(this);
+            StartMarqueeHoldTimer();
+        }
+    }
+
+    void Item_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_dragArmed || _dragVm == null || ViewModel == null) return;
+        if (e.LeftButton != MouseButtonState.Pressed)
+        {
+            CancelDrag(sender);
+            return;
+        }
+        var local = e.GetPosition(this);
+        var d = local - _dragStart;
+        if (!_dragging
+            && Math.Abs(d.X) < SystemParameters.MinimumHorizontalDragDistance
+            && Math.Abs(d.Y) < SystemParameters.MinimumVerticalDragDistance)
+            return;
+        if (!_dragging)
+        {
+            _dragging = true;
+            StopMarqueeHoldTimer(); // 快速拖动胜出 → 取消长按框选
+            if (sender is FrameworkElement fe)
+            {
+                fe.Opacity = 0.6;
+                fe.RenderTransformOrigin = new Point(0.5, 0.5);
+                fe.RenderTransform = new ScaleTransform(1.05, 1.05);
+            }
+        }
+
+        // 光标离开 flyout 边界 → 一次性转交拖出(DoDragDrop 阻塞直到拖放结束)。
+        if (!_dragOutStarted
+            && (local.X < 0 || local.Y < 0 || local.X > ActualWidth || local.Y > ActualHeight))
+        {
+            _dragOutStarted = true;
+            HideDropBar();
+            StopMarqueeHoldTimer();
+            // 还原拖拽期间的临时换位(拖出只移动被拖项,其余保持模型顺序)。
+            ViewModel.CancelTransientReorder();
+            if (sender is FrameworkElement fe2) { try { fe2.ReleaseMouseCapture(); } catch { } }
+            ItemDragOutRequested?.Invoke(ViewModel.HostSubItem, _dragVm);
+            return;
+        }
+        if (_dragOutStarted) return;
+
+        // flyout 内部 → 实时换位 + 蓝色竖条指示(与主分区拖拽同款反馈)。
+        int hover = HoveredIndex(e.GetPosition(InnerItems));
+        int cur = ViewModel.ItemVms.IndexOf(_dragVm);
+        UpdateDropBar(hover, cur);
+        if (hover >= 0 && hover != cur)
+        {
+            ViewModel.ItemVms.Move(cur, hover); // 暂存换位,松手才写回模型
+            _reordered = true;
+        }
+    }
+
+    void Item_MouseUp(object sender, MouseButtonEventArgs e)
+    {
+        bool wasDragging = _dragging;
+        bool wasDragOut = _dragOutStarted;
+        bool reordered = _reordered;
+        StopMarqueeHoldTimer();
+        _dragArmed = false;
+        _dragging = false;
+        _dragOutStarted = false;
+        _reordered = false;
+        ResetDragVisual(sender);
+        HideDropBar();
+        _dragVm = null;
+        if (wasDragging && !wasDragOut)
+        {
+            if (reordered)
+            {
+                // 一次性写回 HostSubItem.SubItems → 图标格缩略图 / 网格自动刷新。
+                ViewModel?.CommitTransientReorder();
+                ItemsChanged?.Invoke();
+            }
+            else
+            {
+                ViewModel?.CancelTransientReorder();
+            }
+        }
+        else
+        {
+            ViewModel?.CancelTransientReorder();
+        }
+        ReCaptureToFlyout();
+    }
+
+    void CancelDrag(object sender)
+    {
+        _dragArmed = false;
+        _dragging = false;
+        _dragOutStarted = false;
+        _reordered = false;
+        StopMarqueeHoldTimer();
+        ResetDragVisual(sender);
+        HideDropBar();
+        _dragVm = null;
+        ViewModel?.CancelTransientReorder();
+        ReCaptureToFlyout();
+    }
+
+    void ResetDragVisual(object sender)
+    {
+        if (sender is FrameworkElement fe)
+        {
+            fe.Opacity = 1.0;
+            fe.RenderTransform = null;
+        }
+    }
+
+    /// <summary>把鼠标子树捕获还给 Flyout 自己,保证"点击外部关闭"判定基准正确
+    /// (单元格捕获会顶掉 Flyout 的捕获,让后续 Flyout 内部点击被误判为外部)。</summary>
+    void ReCaptureToFlyout()
+    {
+        try { Mouse.Capture(this, CaptureMode.SubTree); } catch { }
+    }
+
+    // ── 长按拖拽批量选择(与主分区 marquee 同款) ──
+    // 单元格长按 350ms → 进入框选;ItemsControl 空白处按下 → 立即框选。
+    // 框选矩形与主分区 MarqueeRect 同款视觉;选中的项 IsSelected=true(Ctrl+A /
+    // Delete 批量删除共享同一选中状态)。
+
+    const double MarqueeHoldMs = 350;
+    bool _marqueeArmed;   // 单元格长按计时中
+    bool _marqueeActive;  // 框选拖拽进行中
+    bool _marqueeMoved;
+    Point _marqueeStart;
+    HashSet<Guid>? _marqueeStartSel;
+    System.Windows.Threading.DispatcherTimer? _marqueeHoldTimer;
+    System.Windows.Shapes.Rectangle? _marqueeRect;
+
+    /// <summary>框选进行中(供 ZoneWindow 抑制"鼠标移出自动关闭")。</summary>
+    public bool IsMarqueeActive => _marqueeArmed || _marqueeActive;
+
+    void StartMarqueeHoldTimer()
+    {
+        _marqueeArmed = true;
+        _marqueeHoldTimer?.Stop();
+        _marqueeHoldTimer = new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(MarqueeHoldMs)
+        };
+        _marqueeHoldTimer.Tick += (_, _) =>
+        {
+            _marqueeHoldTimer.Stop();
+            if (!_marqueeArmed) return;
+            _marqueeArmed = false;
+            // 长按成立 → 拖拽脚手架让位给框选。
+            _marqueeActive = true;
+            _marqueeMoved = false;
+            _marqueeStartSel = ViewModel?.ItemVms.Where(i => i.IsSelected).Select(i => i.Id).ToHashSet();
+            _marqueeStart = Mouse.GetPosition(this);
+            _dragVm = null;
+            _dragArmed = false;
+            _dragging = false;
+            _dragOutStarted = false;
+            _reordered = false;
+            ViewModel?.CancelTransientReorder();
+            ReCaptureToFlyout();
+        };
+        _marqueeHoldTimer.Start();
+    }
+
+    void StopMarqueeHoldTimer()
+    {
+        _marqueeArmed = false;
+        _marqueeHoldTimer?.Stop();
+        _marqueeHoldTimer = null;
+    }
+
+    /// <summary>ItemsControl 空白处(格间距/网格外空白)按下 → 立即框选;单元格按下
+    /// 由单元格自己处理(点选/拖拽/长按)。</summary>
+    void InnerItems_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (IsOnInnerItem(e.OriginalSource as System.Windows.DependencyObject)) return;
+        StopMarqueeHoldTimer();
+        _marqueeActive = true;
+        _marqueeMoved = false;
+        _marqueeStart = e.GetPosition(this);
+        _marqueeStartSel = ViewModel?.ItemVms.Where(i => i.IsSelected).Select(i => i.Id).ToHashSet();
+        try { Mouse.Capture(this, CaptureMode.SubTree); } catch { }
+        e.Handled = true;
+    }
+
+    static bool IsOnInnerItem(System.Windows.DependencyObject? d)
+    {
+        while (d != null)
+        {
+            if (d is FrameworkElement { DataContext: ZoneItemViewModel }) return true;
+            d = VisualTreeHelper.GetParent(d);
+        }
+        return false;
+    }
+
+    void Flyout_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (_marqueeArmed)
+        {
+            // 长按计时期间快速移动 → 取消框选(交给拖拽换位)。
+            var p = e.GetPosition(this);
+            if (Math.Abs(p.X - _marqueeStart.X) >= SystemParameters.MinimumHorizontalDragDistance
+                || Math.Abs(p.Y - _marqueeStart.Y) >= SystemParameters.MinimumVerticalDragDistance)
+                StopMarqueeHoldTimer();
+            return;
+        }
+        if (!_marqueeActive) return;
+        var pt = e.GetPosition(this);
+        if (!_marqueeMoved)
+        {
+            if (Math.Abs(pt.X - _marqueeStart.X) < 4 && Math.Abs(pt.Y - _marqueeStart.Y) < 4) return;
+            _marqueeMoved = true;
+        }
+        UpdateMarqueeRect(pt);
+    }
+
+    void Flyout_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        bool active = _marqueeActive;
+        bool moved = _marqueeMoved;
+        StopMarqueeHoldTimer();
+        _marqueeActive = false;
+        _marqueeMoved = false;
+        _marqueeStartSel = null;
+        HideMarqueeRect();
+        if (active && moved)
+        {
+            e.Handled = true; // 框选手势已消费(选择在拖动中实时应用)
+        }
+        else if (active && !moved)
+        {
+            // 空白处普通点击 → 清空选择(资源管理器行为,与主分区一致)。
+            if (ViewModel != null)
+                foreach (var i in ViewModel.ItemVms) i.IsSelected = false;
+        }
+    }
+
+    void UpdateMarqueeRect(Point current)
+    {
+        double x1 = Math.Min(_marqueeStart.X, current.X);
+        double y1 = Math.Min(_marqueeStart.Y, current.Y);
+        double w = Math.Abs(current.X - _marqueeStart.X);
+        double h = Math.Abs(current.Y - _marqueeStart.Y);
+        var rect = EnsureMarqueeRect();
+        rect.Visibility = Visibility.Visible;
+        Canvas.SetLeft(rect, x1);
+        Canvas.SetTop(rect, y1);
+        rect.Width = w;
+        rect.Height = h;
+        if (ViewModel == null) return;
+        var r = new Rect(x1, y1, w, h);
+        for (int i = 0; i < InnerItems.Items.Count; i++)
+        {
+            if (InnerItems.ItemContainerGenerator.ContainerFromIndex(i) is not FrameworkElement fe) continue;
+            if (fe.DataContext is not ZoneItemViewModel vm) continue;
+            var p0 = fe.TransformToVisual(this).Transform(new Point(0, 0));
+            bool inRect = r.IntersectsWith(new Rect(p0.X, p0.Y, Math.Max(1, fe.ActualWidth), Math.Max(1, fe.ActualHeight)));
+            vm.IsSelected = inRect || (_marqueeStartSel?.Contains(vm.Id) ?? false);
+        }
+    }
+
+    System.Windows.Shapes.Rectangle EnsureMarqueeRect()
+    {
+        if (_marqueeRect == null)
+        {
+            _marqueeRect = new System.Windows.Shapes.Rectangle
+            {
+                RadiusX = 3,
+                RadiusY = 3,
+                StrokeThickness = 1.2,
+                IsHitTestVisible = false,
+                Visibility = Visibility.Collapsed,
+                Fill = new SolidColorBrush(Color.FromArgb(0x26, 0x40, 0x90, 0xE2))
+            };
+            _marqueeRect.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, "Brush.Accent");
+            DropLayer.Children.Add(_marqueeRect);
+        }
+        return _marqueeRect;
+    }
+
+    void HideMarqueeRect()
+    {
+        if (_marqueeRect != null) _marqueeRect.Visibility = Visibility.Collapsed;
+    }
+
+    /// <summary>命中检测:光标落在哪个内层格子里(返回 ItemVms 下标,-1 = 空白)。</summary>
+    int HoveredIndex(Point pt)
+    {
+        for (int i = 0; i < InnerItems.Items.Count; i++)
+        {
+            if (InnerItems.ItemContainerGenerator.ContainerFromIndex(i) is FrameworkElement fe)
+            {
+                var r = fe.TransformToVisual(InnerItems)
+                          .TransformBounds(new Rect(0, 0, fe.ActualWidth, fe.ActualHeight));
+                if (r.Contains(pt)) return i;
+            }
+        }
+        return -1;
+    }
+
+    // ── 蓝色竖条指示(与主分区 UpdateDropIndicator 同款视觉) ──
+
+    System.Windows.Shapes.Rectangle? _dropBar;
+    System.Windows.Shapes.Rectangle EnsureDropBar()
+    {
+        if (_dropBar == null)
+        {
+            _dropBar = new System.Windows.Shapes.Rectangle
+            {
+                Width = 3,
+                RadiusX = 1.5,
+                RadiusY = 1.5,
+                Opacity = 0.95,
+                IsHitTestVisible = false,
+                Visibility = Visibility.Collapsed
+            };
+            _dropBar.SetResourceReference(System.Windows.Shapes.Shape.FillProperty, "Brush.Accent");
+            DropLayer.Children.Add(_dropBar);
+        }
+        return _dropBar;
+    }
+
+    void UpdateDropBar(int hoverIdx, int curIdx)
+    {
+        if (hoverIdx < 0 || hoverIdx == curIdx)
+        {
+            HideDropBar();
+            return;
+        }
+        if (InnerItems.ItemContainerGenerator.ContainerFromIndex(hoverIdx) is not FrameworkElement fe)
+        {
+            HideDropBar();
+            return;
+        }
+        var r = fe.TransformToVisual(DropLayer)
+                  .TransformBounds(new Rect(0, 0, fe.ActualWidth, fe.ActualHeight));
+        var bar = EnsureDropBar();
+        bar.Height = Math.Max(12, r.Height - 6);
+        // 向后拖 → 竖条贴目标格右缘;向前拖 → 贴左缘。
+        Canvas.SetLeft(bar, hoverIdx > curIdx ? r.Right + 1 : r.Left - 4);
+        Canvas.SetTop(bar, r.Top + 3);
+        bar.Visibility = Visibility.Visible;
+    }
+
+    void HideDropBar()
+    {
+        if (_dropBar != null) _dropBar.Visibility = Visibility.Collapsed;
+    }
+
+    // ── 悬停高光(与主分区 Item_Enter/Item_Leave 同款) ──
+
+    void Cell_Enter(object sender, MouseEventArgs e)
+    {
+        if (sender is Grid g) g.Background = CellHoverBrush;
+    }
+
+    void Cell_Leave(object sender, MouseEventArgs e)
+    {
+        if (sender is Grid g) g.Background = Brushes.Transparent;
+    }
+
+    // ── 内层图标右键菜单(与主分区同款:打开/重命名/删除) ──
+
+    void CtxOpen_Click(object sender, RoutedEventArgs e)
+    {
+        if (MenuVm(sender) is ZoneItemViewModel vm) ItemOpenRequested?.Invoke(vm);
+    }
+    void CtxOpenLocation_Click(object sender, RoutedEventArgs e)
+    {
+        if (MenuVm(sender) is ZoneItemViewModel vm) ItemOpenLocationRequested?.Invoke(vm);
+    }
+    void CtxRename_Click(object sender, RoutedEventArgs e)
+    {
+        if (MenuVm(sender) is ZoneItemViewModel vm) ItemRenameRequested?.Invoke(vm);
+    }
+    void CtxDelete_Click(object sender, RoutedEventArgs e)
+    {
+        if (MenuVm(sender) is ZoneItemViewModel vm) ItemDeleteRequested?.Invoke(vm);
+    }
+    static ZoneItemViewModel? MenuVm(object s)
+        => s is MenuItem mi && mi.DataContext is ZoneItemViewModel vm ? vm : null;
 
     void StyleBtn_Click(object sender, MouseButtonEventArgs e)
     {
@@ -71,40 +587,7 @@ public partial class SubfolderFlyout : UserControl
         if (sender is Border b) b.Background = new SolidColorBrush(Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF));
     }
 
-    // ── Drag-out of flyout inner items (delegated to ZoneWindow) ──
-    void Item_MouseDown(object sender, MouseButtonEventArgs e)
-    {
-        if (sender is FrameworkElement fe && fe.DataContext is ZoneItemViewModel vm)
-        {
-            _dragVm = vm;
-            _dragStart = e.GetPosition(this);
-            _dragArmed = true;
-            fe.CaptureMouse();
-        }
-    }
-
-    void Item_MouseMove(object sender, MouseEventArgs e)
-    {
-        if (!_dragArmed || _dragVm == null || ViewModel == null) return;
-        if (e.LeftButton != MouseButtonState.Pressed)
-        {
-            _dragArmed = false; _dragVm = null;
-            return;
-        }
-        var d = e.GetPosition(this) - _dragStart;
-        if (Math.Abs(d.X) < SystemParameters.MinimumHorizontalDragDistance &&
-            Math.Abs(d.Y) < SystemParameters.MinimumVerticalDragDistance) return;
-        _dragArmed = false;
-        if (sender is FrameworkElement fe) { try { fe.ReleaseMouseCapture(); } catch { } }
-        ItemDragOutRequested?.Invoke(ViewModel.HostSubItem, _dragVm);
-        _dragVm = null;
-    }
-
-    void Item_MouseUp(object sender, MouseButtonEventArgs e)
-    {
-        _dragArmed = false;
-        _dragVm = null;
-    }
+    // ── Drop-in (delegated to ZoneWindow) ──
 
     void Items_DragEnter(object sender, DragEventArgs e)
     {
@@ -117,4 +600,16 @@ public partial class SubfolderFlyout : UserControl
         e.Effects = DragDropEffects.Move; e.Handled = true;
     }
     void Items_Drop(object sender, DragEventArgs e) { /* delegated to ZoneWindow */ }
+
+    static T? FindVisualChild<T>(DependencyObject parent) where T : FrameworkElement
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            if (child is T t) return t;
+            var deeper = FindVisualChild<T>(child);
+            if (deeper != null) return deeper;
+        }
+        return null;
+    }
 }

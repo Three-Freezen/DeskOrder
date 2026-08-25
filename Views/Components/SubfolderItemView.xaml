@@ -15,30 +15,41 @@
 
         <!-- 方框:永远 2×2 四个缩略图槽(参考 Win11 开始菜单应用文件夹)。
              空槽有半透明占位底,有内容时显示对应缩略图。缩略图 Source 由 code-behind
-             直接赋值(SubfolderItemView.xaml.cs → UpdateThumbs),不依赖 XAML 索引绑定。 -->
+             直接赋值(SubfolderItemView.xaml.cs → UpdateThumbs),不依赖 XAML 索引绑定。
+             ponytail 2026-08-26: 填充层跟随主分区 — 跟随时各填充层为空(完全透明,
+             主分区主体填充直接透出),不跟随时用 SubFolder 自身 override 渲染
+             (填充色/背景图/液态玻璃)。边框固定不同步。 -->
         <Border Grid.Row="0"
                 CornerRadius="{Binding Source.CornerRounded, Converter={x:Static vm:BoolToCornerRadiusConverter.Instance}}"
-                Background="#08000000"
+                Background="Transparent"
                 BorderBrush="#40FFFFFF"
-                BorderThickness="1">
-            <UniformGrid Rows="2" Columns="2" Margin="4">
-                <Border Background="#14FFFFFF" CornerRadius="3" Margin="1.5">
-                    <Image x:Name="ThumbImg0" Stretch="Uniform" Margin="2"
-                           RenderOptions.BitmapScalingMode="HighQuality"/>
-                </Border>
-                <Border Background="#14FFFFFF" CornerRadius="3" Margin="1.5">
-                    <Image x:Name="ThumbImg1" Stretch="Uniform" Margin="2"
-                           RenderOptions.BitmapScalingMode="HighQuality"/>
-                </Border>
-                <Border Background="#14FFFFFF" CornerRadius="3" Margin="1.5">
-                    <Image x:Name="ThumbImg2" Stretch="Uniform" Margin="2"
-                           RenderOptions.BitmapScalingMode="HighQuality"/>
-                </Border>
-                <Border Background="#14FFFFFF" CornerRadius="3" Margin="1.5">
-                    <Image x:Name="ThumbImg3" Stretch="Uniform" Margin="2"
-                           RenderOptions.BitmapScalingMode="HighQuality"/>
-                </Border>
-            </UniformGrid>
+                BorderThickness="1"
+                ClipToBounds="True">
+            <Grid>
+                <Rectangle Fill="{Binding BoxFill}" IsHitTestVisible="False"/>
+                <!-- 背景图走 ImageBrush:自动裁剪适应格子,不参与布局测量(防撑大) -->
+                <Rectangle Fill="{Binding BgImageBrush}" Opacity="{Binding BgOpacity}"
+                           IsHitTestVisible="False"/>
+                <Rectangle Fill="{Binding GlassBrush}" IsHitTestVisible="False"/>
+                <UniformGrid Rows="2" Columns="2" Margin="4">
+                    <Border Background="#14FFFFFF" CornerRadius="3" Margin="1.5">
+                        <Image x:Name="ThumbImg0" Stretch="Uniform" Margin="2"
+                               RenderOptions.BitmapScalingMode="HighQuality"/>
+                    </Border>
+                    <Border Background="#14FFFFFF" CornerRadius="3" Margin="1.5">
+                        <Image x:Name="ThumbImg1" Stretch="Uniform" Margin="2"
+                               RenderOptions.BitmapScalingMode="HighQuality"/>
+                    </Border>
+                    <Border Background="#14FFFFFF" CornerRadius="3" Margin="1.5">
+                        <Image x:Name="ThumbImg2" Stretch="Uniform" Margin="2"
+                               RenderOptions.BitmapScalingMode="HighQuality"/>
+                    </Border>
+                    <Border Background="#14FFFFFF" CornerRadius="3" Margin="1.5">
+                        <Image x:Name="ThumbImg3" Stretch="Uniform" Margin="2"
+                               RenderOptions.BitmapScalingMode="HighQuality"/>
+                    </Border>
+                </UniformGrid>
+            </Grid>
         </Border>
 
         <!-- 名字 label 放到方框外面,和正常图标布局一致 -->

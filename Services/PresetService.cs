@@ -360,6 +360,10 @@ public class PresetService
         target.BackgroundImagePath = src.BackgroundImagePath;
         target.BackgroundImageOpacity = src.BackgroundImageOpacity;
         target.EnableLiquidGlass = src.EnableLiquidGlass;
+        target.GlassBlurAmount = src.GlassBlurAmount;
+        target.GlassTintOpacity = src.GlassTintOpacity;
+        target.GlassTintLuminosity = src.GlassTintLuminosity;
+        target.GlassColorMode = src.GlassColorMode;
         target.GridSize = src.GridSize;
         target.SnapToGrid = src.SnapToGrid;
         target.AutoArrange = src.AutoArrange;

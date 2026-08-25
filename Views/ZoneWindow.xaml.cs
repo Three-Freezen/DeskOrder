@@ -150,9 +150,16 @@ public partial class ZoneWindow : Window
         // SubfolderFlyout 事件委托回 ZoneWindow(主分区命令都住在这里);
         // ItemsChanged = flyout 内部换位/删除后保存。
         SubfolderFlyoutView.ItemOpenRequested += OnFlyoutItemOpen;
+        SubfolderFlyoutView.ItemOpenLocationRequested += OnFlyoutItemOpenLocation;
         SubfolderFlyoutView.ItemRenameRequested += OnFlyoutItemRename;
         SubfolderFlyoutView.ItemDeleteRequested += OnFlyoutItemDelete;
         SubfolderFlyoutView.ItemsChanged += OnFlyoutItemsChanged;
+        // ponytail 2026-08-26: 键盘焦点可能落在 Popup 内(主窗口收不到 Ctrl+A/Delete),
+        // flyout 侧再挂一份同样的快捷键处理。
+        SubfolderFlyoutView.PreviewKeyDown += (_, e) =>
+        {
+            if (TryHandleFlyoutKeys(e)) e.Handled = true;
+        };
         _vm = new ZoneViewModel(zone, mgr, icons);
         _vm.IsLocked = zone.IsLocked;
         DataContext = _vm;
@@ -709,7 +716,8 @@ public partial class ZoneWindow : Window
 
     /// <summary>ponytail 2026-08-26: 解析 SubFolder 打开的填充 — 跟随主分区时取
     /// ResolveStyle() 的主分区主体填充(填充色/背景图/液态玻璃,不含边框);不跟随时取
-    /// SubFolder 自身的 override 字段。边框固定不同步(设计如此)。</summary>
+    /// SubFolder 自身的 override 字段。边框固定不同步(设计如此)。跟随模式下自身
+    /// 的液态玻璃/背景图被禁用(面板里灰显),渲染完全取自主分区。</summary>
     SubfolderFill ResolveSubfolderFill(ZoneItem sub)
     {
         if (!sub.FillFollowsZone)
@@ -718,17 +726,19 @@ public partial class ZoneWindow : Window
         return new SubfolderFill(
             s.FillColor, 100,
             s.BgImagePath, s.BgImageOpacity,
-            _zone.EnableAcrylic ? _zone.GlassColorMode : null);
+            _zone.EnableAcrylic ? _zone.GlassColorMode : null,
+            _zone.GlassBlurAmount, _zone.GlassTintOpacity, _zone.GlassTintLuminosity);
     }
 
     void OpenSubfolderFlyout(ZoneItem sub)
     {
         // ponytail 2026-08-26: 左键/双击/菜单"打开"已开启的同一个 SubFolder → 直接播
-        // 关闭动画(不要重播打开动画 — 重开会 Reset 缩放/不透明度,视觉上卡一帧)。
-        if (SubfolderFlyoutPopup.IsOpen && !_flyoutClosing
-            && SubfolderFlyoutView.ViewModel?.HostSubItem.Id == sub.Id)
+        // 关闭动画,绝不重播打开动画。注意:点击图标时,鼠标按下已触发"点击外部"的
+        // 关闭动画(_flyoutClosing=true),此时松手的再次打开必须直接 return —
+        // 否则会把正在关闭的 flyout Reset 重开,视觉上卡一帧。
+        if (SubfolderFlyoutPopup.IsOpen && SubfolderFlyoutView.ViewModel?.HostSubItem.Id == sub.Id)
         {
-            CloseSubfolderFlyout();
+            if (!_flyoutClosing) CloseSubfolderFlyout();
             return;
         }
         var token = ++_flyoutOpenToken;
@@ -783,6 +793,11 @@ public partial class ZoneWindow : Window
         SubfolderFlyoutPopup.HorizontalOffset = pos.X;
         SubfolderFlyoutPopup.VerticalOffset = pos.Y;
         SetFlyoutAnchor(c);
+        // ponytail 2026-08-26: 真玻璃 — 与主分区同配方给 Popup HWND 开 DWM 模糊,
+        // 视觉上与主分区玻璃一致;失败才显示渐变兜底(ShowGlassFallback)。
+        var fill = SubfolderFlyoutView.ViewModel?.Fill;
+        if (fill != null)
+            SubfolderFlyoutView.ViewModel.ShowGlassFallback = !SubfolderFlyoutView.TryApplyRealGlass(fill);
         AnimateSubfolderFlyoutOpen();
     }
 
@@ -905,13 +920,35 @@ public partial class ZoneWindow : Window
     void OnFlyoutClickOutside(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
         if (!SubfolderFlyoutPopup.IsOpen) return;
-        // ponytail 2026-08-26: 右键菜单(ContextMenu 弹出层)内的点击不算"点击外部" —
-        // 否则内层图标的 打开/重命名/删除 菜单刚一点击就把 flyout 关掉了。
-        for (System.Windows.DependencyObject? cur = e.OriginalSource as System.Windows.DependencyObject;
-             cur != null;
-             cur = System.Windows.LogicalTreeHelper.GetParent(cur))
+        // ponytail 2026-08-27: 右键菜单打开期间,任何按下一律不关闭 — 菜单 Popup 的
+        // 按下/菜单项点击是"点击外部"判定最容易误伤的场景,直接整段豁免。
+        if (SubfolderFlyoutView.IsContextMenuOpen) return;
+        // ponytail 2026-08-26: 右键菜单(ContextMenu)里的点击不算"点击外部"。右键打开
+        // 菜单后点菜单项时,按下点属于菜单自己的 Popup 源 — 旧实现用 GetPosition
+        // 跨源换算,抛异常被 catch 吞掉后反而走了关闭分支,这就是"右键之后还触发
+        // 关闭动画"的根源。现在:按下点属于其它 Popup 源(右键菜单等)→ 直接豁免;
+        // 属于分区窗口等非 Popup 源 → 照常关闭;异常一律保守不关闭。
+        var flyoutSrc = System.Windows.PresentationSource.FromVisual(SubfolderFlyoutView);
+        if (e.OriginalSource is System.Windows.Media.Visual d
+            && System.Windows.PresentationSource.FromVisual(d) is { } pressSrc
+            && !ReferenceEquals(pressSrc, flyoutSrc))
         {
-            if (cur is System.Windows.Controls.ContextMenu) return;
+            if (pressSrc.RootVisual?.GetType().Name == "PopupRoot") return; // 右键菜单等 Popup
+            CloseSubfolderFlyout(); // 分区窗口/其它窗口
+            return;
+        }
+        // 同一源(Flyout 自己的 Popup 内)→ 坐标判定:落在 Flyout 范围内不算外部。
+        try
+        {
+            var p = e.GetPosition(SubfolderFlyoutView);
+            if (p.X >= 0 && p.Y >= 0
+                && p.X <= SubfolderFlyoutView.ActualWidth && p.Y <= SubfolderFlyoutView.ActualHeight)
+                return;
+        }
+        catch
+        {
+            // 跨源/未连接等异常 → 保守处理:不关闭(别再把异常误判成"点击外部")。
+            return;
         }
         CloseSubfolderFlyout();
     }
@@ -929,6 +966,11 @@ public partial class ZoneWindow : Window
     void SubfolderFlyoutView_MouseLeave(object sender, System.Windows.Input.MouseEventArgs e)
     {
         if (!SubfolderFlyoutPopup.IsOpen) return;
+        // 框选拖拽中(可能把鼠标拖出 Flyout 范围)不自动关闭。
+        if (SubfolderFlyoutView.IsMarqueeActive) return;
+        // 右键菜单打开中(菜单 Popup 抢走鼠标 → Flyout 收到 MouseLeave)不自动关闭 —
+        // 否则右键一开菜单 200ms 后 flyout 就开始播关闭动画(右键图标层误关的根源)。
+        if (SubfolderFlyoutView.IsContextMenuOpen) return;
         _flyoutCloseTimer ??= new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
         _flyoutCloseTimer.Tick -= OnFlyoutCloseTick;
         _flyoutCloseTimer.Tick += OnFlyoutCloseTick;
@@ -940,7 +982,27 @@ public partial class ZoneWindow : Window
     {
         _flyoutCloseTimer?.Stop();
         _flyoutCloseTimer = null;
+        if (!SubfolderFlyoutPopup.IsOpen) return;
+        // ponytail 2026-08-27: 右键菜单 Popup 抢走鼠标 → Flyout 收 MouseLeave → 200ms
+        // timer 启动;若 ContextMenuOpening 恰好晚于 MouseLeave 生效,这里必须复查,
+        // 否则右键打开菜单后 flyout 会被误关(用户反馈"右键触发关闭动画")。
+        if (SubfolderFlyoutView.IsContextMenuOpen || SubfolderFlyoutView.IsMarqueeActive) return;
+        // 鼠标已回到 Flyout 内(菜单在附近开关等瞬态)→ 不关。
+        if (IsMouseInsideFlyout()) return;
         CloseSubfolderFlyout();
+    }
+
+    /// <summary>鼠标当前是否落在 SubFolder Flyout 范围内(跨窗口也有效,用于
+    /// timer 关闭前的最终复查)。</summary>
+    bool IsMouseInsideFlyout()
+    {
+        try
+        {
+            var p = System.Windows.Input.Mouse.GetPosition(SubfolderFlyoutView);
+            return p.X >= 0 && p.Y >= 0
+                && p.X <= SubfolderFlyoutView.ActualWidth && p.Y <= SubfolderFlyoutView.ActualHeight;
+        }
+        catch { return false; }
     }
 
     // ponytail 2026-08-26: 拖动到 SubFolder 上时给目标容器一个 1.06× 放大反馈。
@@ -1017,7 +1079,16 @@ public partial class ZoneWindow : Window
         _flyoutCloseTimer?.Stop();
         _flyoutCloseTimer = null;
         try { DragDrop.DoDragDrop(SubfolderFlyoutView, itemVm, DragDropEffects.Move); }
-        finally { ClearSubfolderDragScale(); }
+        finally
+        {
+            ClearSubfolderDragScale();
+            // DoDragDrop 会顶掉 Flyout 的子树捕获 — 拖放结束后还回,否则后续
+            // Flyout 内部点击会被"点击外部"误判关闭。
+            if (SubfolderFlyoutPopup.IsOpen)
+            {
+                try { System.Windows.Input.Mouse.Capture(SubfolderFlyoutView, System.Windows.Input.CaptureMode.SubTree); } catch { }
+            }
+        }
     }
 
     // ── 内层图标与主分区同款操作(委托自 SubfolderFlyout) ──
@@ -1029,6 +1100,30 @@ public partial class ZoneWindow : Window
         {
             MessageBox.Show($"{_loc["Item.FailedToOpen"]}\n{ex.Message}",
                 _loc["Item.FailedToOpen.Title"], MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    /// <summary>Flyout 内层图标"打开所在位置" — 与主分区图标同款逻辑(单一入口)。</summary>
+    void OnFlyoutItemOpenLocation(ZoneItemViewModel vm) => OpenItemLocation(vm);
+
+    /// <summary>打开所在位置:ShellLocation 直接解析打开;快捷方式/应用在资源管理器中
+    /// 定位到文件;其余按目录打开。主分区图标与 flyout 内层图标共用。</summary>
+    void OpenItemLocation(ZoneItemViewModel v)
+    {
+        if (v.Type == ItemType.ShellLocation)
+        {
+            ShellLocationResolver.Open(v.TargetPath, v.Type);
+            return;
+        }
+        if (v.Type is ItemType.Shortcut or ItemType.Application)
+        {
+            var d = Path.GetDirectoryName(v.TargetPath);
+            if (!string.IsNullOrEmpty(d))
+                System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{v.TargetPath}\"");
+        }
+        else
+        {
+            System.Diagnostics.Process.Start("explorer.exe", v.TargetPath);
         }
     }
 
@@ -1045,9 +1140,23 @@ public partial class ZoneWindow : Window
 
     void OnFlyoutItemDelete(ZoneItemViewModel vm)
     {
-        // 与主分区一致:单个删除直接删(无确认)。ItemVms.Remove → CollectionChanged
-        // 写回 HostSubItem.SubItems → 图标格 2×2 缩略图 / flyout 网格自动刷新。
-        SubfolderFlyoutView.ViewModel?.ItemVms.Remove(vm);
+        // 与主分区一致:单个删除直接删(无确认);多选删除弹确认后一次全删。
+        // ItemVms.Remove → CollectionChanged 写回 HostSubItem.SubItems →
+        // 图标格缩略图 / flyout 网格自动刷新。
+        var fvm = SubfolderFlyoutView.ViewModel;
+        if (fvm == null) return;
+        var sel = fvm.ItemVms.Where(i => i.IsSelected).ToList();
+        if (sel.Count > 1 && sel.Contains(vm))
+        {
+            if (MessageBox.Show(string.Format(_loc["ZoneItem.DeleteMultiConfirm"], sel.Count),
+                    _loc["Item.Delete"], MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                return;
+            foreach (var it in sel) fvm.ItemVms.Remove(it);
+        }
+        else
+        {
+            fvm.ItemVms.Remove(vm);
+        }
         OnFlyoutItemsChanged();
     }
 
@@ -1060,6 +1169,8 @@ public partial class ZoneWindow : Window
 
     void SubfolderFlyoutPopup_Closed(object? s, EventArgs e)
     {
+        // ponytail 2026-08-26: 关闭 Popup 子窗口上的真玻璃(失败无害)。
+        SubfolderFlyoutView.DisableGlass();
         // 断开 host SubFolder 的 SubItems 订阅,避免 handler 泄漏到已关闭的 flyout。
         if (_subItemsChangedHandler != null && _subItemsHost != null)
             _subItemsHost.PropertyChanged -= _subItemsChangedHandler;
@@ -1268,7 +1379,8 @@ public partial class ZoneWindow : Window
     /// for the UniformGrid named "InnerGrid".</summary>
     void ResizeFlyoutGrid(int itemCount)
     {
-        int cols = itemCount <= 4 ? 2 : itemCount <= 9 ? 3 : 4;
+        // 图标超出后网格依次扩大:2×2 → 3×3 → 4×4 → … → 9×9 (cols = ⌈√n⌉,最少 2)。
+        int cols = Math.Max(2, (int)Math.Ceiling(Math.Sqrt(itemCount)));
         var grid = FindNamedVisualChild<System.Windows.Controls.Primitives.UniformGrid>(SubfolderFlyoutView, "InnerGrid");
         if (grid != null) { grid.Rows = cols; grid.Columns = cols; }
     }
@@ -2374,9 +2486,39 @@ public partial class ZoneWindow : Window
 
     /// <summary>Ctrl+V pastes clipboard files/text into the mapped folder — the
     /// same gesture as Explorer.</summary>
+    /// <summary>flyout 打开时的键盘操作:Ctrl+A 全选内层图标 / Delete 删除选中项
+    /// (与主分区多选删除同款确认)。返回 true = 已处理。</summary>
+    bool TryHandleFlyoutKeys(KeyEventArgs e)
+    {
+        if (!SubfolderFlyoutPopup.IsOpen || SubfolderFlyoutView.ViewModel is not { } fvm) return false;
+        if (e.Key == Key.A && (Keyboard.Modifiers & ModifierKeys.Control) != 0)
+        {
+            foreach (var it in fvm.ItemVms) it.IsSelected = true;
+            return true;
+        }
+        if (e.Key == Key.Delete)
+        {
+            var sel = fvm.ItemVms.Where(i => i.IsSelected).ToList();
+            if (sel.Count > 0)
+            {
+                if (sel.Count == 1
+                    || MessageBox.Show(string.Format(_loc["ZoneItem.DeleteMultiConfirm"], sel.Count),
+                        _loc["Item.Delete"], MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
+                {
+                    foreach (var it in sel) fvm.ItemVms.Remove(it);
+                    OnFlyoutItemsChanged();
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
     void Window_PreviewKeyDown(object s, KeyEventArgs e)
     {
         if (e.OriginalSource is TextBox) return; // inline title editing keeps its own keys
+        // ponytail 2026-08-26: flyout 打开时,Ctrl+A 全选 / Delete 删除选中项。
+        if (TryHandleFlyoutKeys(e)) { e.Handled = true; return; }
         if (e.Key == Key.Delete)
         {
             // Delete key deletes the selected mapped entries (same confirm flow).
@@ -3401,7 +3543,11 @@ public partial class ZoneWindow : Window
                 item.RefreshIcon();
         }
     }
-    void ItemOpenLocation_Click(object s, RoutedEventArgs e) { if (VM(s) is not ZoneItemViewModel v) return; if (v.Type == ItemType.ShellLocation) { ShellLocationResolver.Open(v.TargetPath, v.Type); return; } if (v.Type is ItemType.Shortcut or ItemType.Application) { var d = Path.GetDirectoryName(v.TargetPath); if (!string.IsNullOrEmpty(d)) System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{v.TargetPath}\""); } else System.Diagnostics.Process.Start("explorer.exe", v.TargetPath); }
+    void ItemOpenLocation_Click(object s, RoutedEventArgs e)
+    {
+        if (VM(s) is not ZoneItemViewModel v) return;
+        OpenItemLocation(v);
+    }
     void ItemRename_Click(object s, RoutedEventArgs e)
     {
         if (VM(s) is not ZoneItemViewModel v) return;
