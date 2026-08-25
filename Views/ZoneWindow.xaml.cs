@@ -1627,8 +1627,9 @@ public partial class ZoneWindow : Window
 
     // ── Window-level mouse: body drag (Tile mode) + Ctrl marquee ──
 
-    // ponytail 2026-08-26 (磁贴模式): 主体空白按下 = 拖动整窗（复用 _snapDrag 合并检测），
-    // Ctrl+按下 = 保留原有框选。双击由 Window_MouseDoubleClick 处理（自定义图标打开）。
+    // ponytail 2026-08-26 (磁贴模式): 磁贴模式下主体空白按下 = 拖动整窗（复用 _snapDrag 合并检测）；
+    // 非磁贴模式保留原有框选（批量选择）。Ctrl+按下 = 始终框选。
+    // 双击由 Window_MouseDoubleClick 处理（自定义图标打开）。
     void Window_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (e.OriginalSource is TextBox) return; // title inline editing
@@ -1656,8 +1657,18 @@ public partial class ZoneWindow : Window
             return;
         }
 
-        // 主体空白 = 拖动整窗（复用 _snapDrag + 合并检测）。
-        StartBodyDrag(e);
+        // 磁贴模式：主体空白 = 拖动整窗（复用 _snapDrag + 合并检测）。
+        if (_zone.TileMode) { StartBodyDrag(e); return; }
+
+        // 非磁贴模式：空白区域按下 + 拖动 = 框选（批量选择），单击清除选择。
+        _selectMode = SelectMode.Draw;
+        _selectTarget = SelectTarget.ZoneItems;
+        _selectStart = e.GetPosition(this);
+        _selectCurrent = _selectStart;
+        _selectMoved = false;
+        _selectFromEmpty = true;
+        _selectStartZone = null;
+        _selectStartList = null;
     }
 
     /// <summary>从主体空白触发的窗口拖动，复用 TitleBar_Drag 同款 _snapDrag + 合并检测。</summary>
