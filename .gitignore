@@ -3,3 +3,5 @@ obj/
 .vs/
 *.user
 *.suo
+debug_clock.log
+*.log

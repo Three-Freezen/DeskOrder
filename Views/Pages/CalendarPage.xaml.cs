@@ -26,6 +26,7 @@ public partial class CalendarPage : UserControl
 {
     readonly ManagementWindow _main;
     readonly WidgetService? _widgetService;
+    readonly LocalizationService _loc = LocalizationService.Instance;
     DesktopCalendar? _selected;
     // ponytail: live row collection bound to ListHost — drag reorder moves rows
     // through this OC (mirroring PropertyTabStrip's Tabs OC) so the ItemsControl
@@ -60,7 +61,7 @@ public partial class CalendarPage : UserControl
     {
         if (_widgetService == null) return;
         var cals = _widgetService.Calendars;
-        CountLabel.Text = $"{cals.Count} 项";
+        CountLabel.Text = _loc.Get("CalendarPage.ItemCount", cals.Count);
         // 拖动排序即列表顺序：不再重排，Rows 直接镜像 Calendars 的持久化顺序。
         _rows.Clear();
         foreach (var c in cals) _rows.Add(BuildRow(c));
@@ -74,7 +75,7 @@ public partial class CalendarPage : UserControl
         {
             Tag = cal,
             Title = $"Calendar {cal.DisplayYear}-{cal.DisplayMonth:D2}",
-            Subtitle = $"{(int)cal.Width}×{(int)cal.Height} · {cal.Notes.Count} 备注",
+            Subtitle = $"{(int)cal.Width}×{(int)cal.Height} · {_loc.Get("CalendarPage.Subtitle", cal.Notes.Count)}",
             IconKey = "Icon.Calendar",
             IsLocked = cal.IsLocked,
             IsVisible = cal.IsVisible,
@@ -115,11 +116,7 @@ public partial class CalendarPage : UserControl
             // floating editor while the docked panel already showed this calendar.
             Select(cal);
         };
-        row.PreviewMouseRightButtonUp += (_, e) =>
-        {
-            Select(cal);
-            ShowCalendarContextMenu(cal, row);
-        };
+        // 右键菜单已取消：显示/隐藏与删除移到属性面板顶部状态区。
         return row;
     }
 
@@ -135,16 +132,6 @@ public partial class CalendarPage : UserControl
         }
     }
 
-    void ShowCalendarContextMenu(DesktopCalendar cal, EditableListRow row)
-    {
-        var items = new List<RowContextMenu.Item>
-        {
-            new(cal.IsVisible ? "隐藏日历" : "显示日历", () => _main.ToggleCalendarWindow(cal)),
-        };
-        items.Add(new("删除日历", () => Delete(cal), Danger: true));
-        RowContextMenu.Show(row, items);
-    }
-
     void NewCalendar_Click(object sender, RoutedEventArgs e)
     {
         _main.NewCalendar();
@@ -153,8 +140,8 @@ public partial class CalendarPage : UserControl
 
     void Delete(DesktopCalendar cal)
     {
-        if (MessageBox.Show($"删除日历「Calendar {cal.DisplayYear}-{cal.DisplayMonth:D2}」？",
-            "删除日历", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+        if (MessageBox.Show(_loc.Get("CalendarPage.DeleteConfirm", $"Calendar {cal.DisplayYear}-{cal.DisplayMonth:D2}"),
+            _loc["CalendarPage.DeleteTitle"], MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
         _main.DeleteCalendar(cal);
         if (ReferenceEquals(_selected, cal)) _selected = null;
         RefreshList();

@@ -121,8 +121,6 @@ public class ConfigService
         Move<bool>("PanelEnabled", v => p.PanelEnabled = v);
         Move<string>("PanelTitleBarFillColor", v => p.PanelTitleBarFillColor = v);
         Move<string>("PanelFillColor", v => p.PanelFillColor = v);
-        Move<bool>("PanelTextColorAdaptive", v => p.PanelTextColorAdaptive = v);
-        Move<bool>("PanelTitleBarTextColorAdaptive", v => p.PanelTitleBarTextColorAdaptive = v);
         Move<string>("PanelBorderColor", v => p.PanelBorderColor = v);
         Move<double>("PanelControlOpacity", v => p.PanelControlOpacity = v);
         Move<string>("PanelBackgroundImagePath", v => p.PanelBackgroundImagePath = v);

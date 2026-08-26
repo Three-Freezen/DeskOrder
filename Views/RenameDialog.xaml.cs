@@ -33,10 +33,9 @@ public partial class RenameDialog : Window
 
     void ApplyLoc()
     {
-        var cn = _loc.CurrentLanguage == "zh";
-        TitleLabel.Text = _titleOverride ?? (cn ? "重命名" : "Rename");
-        OkBtn.Content = cn ? "确定" : "OK";
-        CancelBtn.Content = cn ? "取消" : "Cancel";
+        TitleLabel.Text = _titleOverride ?? _loc["Rename.Title"];
+        OkBtn.Content = _loc["Rename.Ok"];
+        CancelBtn.Content = _loc["Rename.Cancel"];
     }
 
     private void Ok_Click(object sender, RoutedEventArgs e)

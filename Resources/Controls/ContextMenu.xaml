@@ -1,100 +1,185 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:swc="clr-namespace:System.Windows.Controls;assembly=PresentationFramework"
+                    xmlns:helpers="clr-namespace:DesktopZones.Helpers">
 
-  <!-- ═══════════════════════════════════════════
-       ContextMenu — spec §5.3
-       bg.surface, 1px border.default, 6px corner radius, 4px vertical padding
-       MenuItem: 32px high, 4px corner radius, 4px horizontal margin,
-                 optional 16px icon area (text starts at 34px when present, 10px otherwise)
-       ═══════════════════════════════════════════ -->
+  <!-- ═══════════════════════════════════════════════════════════
+       ContextMenu — Windows 11 原生右键菜单「外观复刻」
+       · 颜色 100% 跟随 Windows 系统主题(浅色/深色/高对比),
+         不跟随应用自己的主题 —— 由 Helpers/MenuThemeService
+         在系统主题变化时改写下面 Menu.* 画刷,菜单用 DynamicResource
+         自动跟随。
+       · 视觉: 8px 圆角 · 1px 细边 · Segoe UI Variable Text
+       · MenuItem: 36px 行高 · 24px 图标区 · ▸ 子菜单箭头 ·
+         4px 圆角悬停 · 系统默认箭头光标(非 Hand)
+       · Separator: 1px 实线,左右贯穿整个菜单(负边距抵消外框
+         Padding=4),颜色与样式设置界面同款(不透明,不随背景变化)
+       · 子菜单: PART_Popup 与主菜单同一套圆角 + 毛玻璃
+       · 管理界面(ManagementWindow)用的是自绘 Popup 菜单,
+         不使用本文件里的隐式样式 —— 天然不受影响。
+       ═══════════════════════════════════════════════════════════ -->
 
+  <!-- ── Windows 原生菜单调色板(默认 = Windows 浅色;由 MenuThemeService 运行期替换) ── -->
+  <SolidColorBrush x:Key="Menu.Bg.Surface"        Color="#C0FFFFFF"/>
+  <SolidColorBrush x:Key="Menu.Bg.Hover"          Color="#F5F5F5"/>
+  <SolidColorBrush x:Key="Menu.Border.Subtle"     Color="#D0D0D0"/>
+  <SolidColorBrush x:Key="Menu.Text.Primary"      Color="#1A1A1A"/>
+  <SolidColorBrush x:Key="Menu.Text.Secondary"    Color="#666666"/>
+  <SolidColorBrush x:Key="Menu.Text.Tertiary"     Color="#9A9A9A"/>
+  <SolidColorBrush x:Key="Menu.Text.Disabled"     Color="#ABABAB"/>
+  <SolidColorBrush x:Key="Menu.Separator"         Color="#E4E7EC"/>
+
+  <!-- ── ContextMenu ─────────────────────────────────────────── -->
+  <!-- DropShadowEffect 不能放在 Popup 根元素上(AllowsTransparency=True 时被 WPF
+       忽略);阴影交给 DWM acrylic 加上半透明白底自然呈现。 -->
   <Style TargetType="ContextMenu">
-    <Setter Property="Background" Value="{DynamicResource Brush.Bg.Surface}"/>
-    <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border.Default}"/>
+    <Setter Property="Background"      Value="{DynamicResource Menu.Bg.Surface}"/>
+    <Setter Property="BorderBrush"     Value="{DynamicResource Menu.Border.Subtle}"/>
     <Setter Property="BorderThickness" Value="1"/>
-    <Setter Property="Padding" Value="0,4"/>
-    <Setter Property="FontSize" Value="12"/>
-    <Setter Property="Foreground" Value="{DynamicResource Brush.Text.Primary}"/>
+    <Setter Property="Padding"         Value="4"/>
+    <Setter Property="FontFamily"      Value="Segoe UI Variable Text, Segoe UI"/>
+    <Setter Property="FontSize"        Value="14"/>
+    <Setter Property="Foreground"      Value="{DynamicResource Menu.Text.Primary}"/>
+    <!-- Win11 acrylic: DWM 模糊自动挂到 Popup HWND(Opened/Closed 生命周期) -->
+    <Setter Property="helpers:AcrylicHelper.EnableContextMenuAcrylic" Value="True"/>
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="ContextMenu">
-          <Border Background="{TemplateBinding Background}"
+          <!-- 圆角方案 = 管理界面 RowContextMenu 同款:内容内缩(Padding=4)+
+               CornerRadius,不做 ClipToBounds / Clip —— 子元素根本不碰到
+               圆角区域;DWM 模糊区域在 AcrylicHelper 里同样按圆角裁(RoundRectRgn)。 -->
+          <Border x:Name="RootBorder"
+                  Background="{TemplateBinding Background}"
                   BorderBrush="{TemplateBinding BorderBrush}"
                   BorderThickness="{TemplateBinding BorderThickness}"
-                  CornerRadius="6"
+                  CornerRadius="8"
                   Padding="{TemplateBinding Padding}">
-            <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Contained"/>
+            <StackPanel IsItemsHost="True"
+                        KeyboardNavigation.DirectionalNavigation="Contained"/>
           </Border>
         </ControlTemplate>
       </Setter.Value>
     </Setter>
   </Style>
 
+  <!-- ── MenuItem ────────────────────────────────────────────── -->
   <Style TargetType="MenuItem">
-    <Setter Property="Background" Value="Transparent"/>
-    <Setter Property="Foreground" Value="{DynamicResource Brush.Text.Primary}"/>
-    <Setter Property="FontSize" Value="12"/>
-    <Setter Property="MinHeight" Value="32"/>
-    <Setter Property="Margin" Value="4,1"/>
-    <Setter Property="Padding" Value="10,0"/>
-    <Setter Property="Cursor" Value="Hand"/>
+    <Setter Property="Background"   Value="Transparent"/>
+    <Setter Property="Foreground"   Value="{DynamicResource Menu.Text.Primary}"/>
+    <Setter Property="FontFamily"   Value="Segoe UI Variable Text, Segoe UI"/>
+    <Setter Property="FontSize"     Value="14"/>
+    <Setter Property="MinHeight"    Value="36"/>
+    <Setter Property="Margin"       Value="2,1"/>
+    <Setter Property="Padding"      Value="8,0"/>
+    <Setter Property="Cursor"       Value="Arrow"/>
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="MenuItem">
-          <Border x:Name="Bd"
-                  Background="{TemplateBinding Background}"
-                  CornerRadius="4"
-                  Padding="{TemplateBinding Padding}"
-                  SnapsToDevicePixels="True">
-            <Grid>
-              <Grid.ColumnDefinitions>
-                <!-- Icon gutter: 16px when present, 0 when absent (handled via Icon binding) -->
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
-              </Grid.ColumnDefinitions>
+          <Grid>
+            <Border x:Name="Bd"
+                    Background="{TemplateBinding Background}"
+                    CornerRadius="4"
+                    Padding="{TemplateBinding Padding}"
+                    SnapsToDevicePixels="True">
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <!-- 图标区:有图标时 24px,无图标时 0px -->
+                  <ColumnDefinition x:Name="IconCol" Width="24"/>
+                  <!-- 标题文字 -->
+                  <ColumnDefinition Width="*"/>
+                  <!-- 右侧快捷键文字 -->
+                  <ColumnDefinition Width="Auto"/>
+                  <!-- 子菜单箭头 ▸ -->
+                  <ColumnDefinition x:Name="ArrowCol" Width="Auto"/>
+                </Grid.ColumnDefinitions>
 
-              <!-- Optional icon area: renders only when Icon is set -->
-              <ContentPresenter x:Name="Icon"
-                                Grid.Column="0"
-                                Width="16" Height="16"
-                                Margin="0,0,8,0"
-                                VerticalAlignment="Center"
-                                HorizontalAlignment="Left"
-                                ContentSource="Icon"
-                                SnapsToDevicePixels="True"/>
+                <!-- 可选图标(有 Icon 时显示) -->
+                <ContentPresenter x:Name="Icon"
+                                  Grid.Column="0"
+                                  Width="20" Height="20"
+                                  Margin="0,0,8,0"
+                                  VerticalAlignment="Center"
+                                  HorizontalAlignment="Left"
+                                  ContentSource="Icon"
+                                  SnapsToDevicePixels="True"/>
 
-              <!-- Header text -->
-              <ContentPresenter Grid.Column="1"
-                                ContentSource="Header"
-                                VerticalAlignment="Center"
-                                HorizontalAlignment="Left"
-                                RecognizesAccessKey="True"/>
+                <!-- 标题文字 -->
+                <ContentPresenter x:Name="HeaderPart"
+                                  Grid.Column="1"
+                                  ContentSource="Header"
+                                  VerticalAlignment="Center"
+                                  HorizontalAlignment="Left"
+                                  RecognizesAccessKey="True"/>
 
-              <!-- Right-side input gesture text (e.g. shortcut hint) -->
-              <TextBlock Grid.Column="2"
-                         x:Name="InputGestureText"
-                         Margin="16,0,0,0"
-                         VerticalAlignment="Center"
-                         FontSize="11"
-                         Foreground="{DynamicResource Brush.Text.Tertiary}"
-                         Text="{TemplateBinding InputGestureText}"/>
-            </Grid>
-          </Border>
+                <!-- 右侧快捷键提示(如 Ctrl+Z) -->
+                <TextBlock x:Name="InputGestureText"
+                           Grid.Column="2"
+                           Margin="24,0,0,0"
+                           VerticalAlignment="Center"
+                           FontSize="12"
+                           Foreground="{DynamicResource Menu.Text.Tertiary}"
+                           Text="{TemplateBinding InputGestureText}"/>
+
+                <!-- 子菜单箭头(有子项时显示) -->
+                <Path x:Name="SubmenuArrow"
+                      Grid.Column="3"
+                      Data="M0,0L4,4L0,8"
+                      Stroke="{DynamicResource Menu.Text.Secondary}"
+                      StrokeThickness="1.2"
+                      StrokeStartLineCap="Round"
+                      StrokeEndLineCap="Round"
+                      StrokeLineJoin="Round"
+                      Margin="8,0,4,0"
+                      VerticalAlignment="Center"
+                      HorizontalAlignment="Center"/>
+              </Grid>
+            </Border>
+
+            <!-- 子菜单弹层:MenuItem 打开子菜单必须存在 PART_Popup;
+                 与主菜单同款圆角 + 调色板 + 毛玻璃(AcrylicHelper 挂 DWM)。 -->
+            <Popup x:Name="PART_Popup"
+                   AllowsTransparency="True"
+                   Focusable="False"
+                   Placement="Right"
+                   HorizontalOffset="-1"
+                   VerticalOffset="-3"
+                   PopupAnimation="Fade"
+                   IsOpen="{TemplateBinding IsSubmenuOpen}">
+              <Border Background="{DynamicResource Menu.Bg.Surface}"
+                      BorderBrush="{DynamicResource Menu.Border.Subtle}"
+                      BorderThickness="1"
+                      CornerRadius="8"
+                      Padding="4"
+                      MinWidth="{Binding RelativeSource={RelativeSource TemplatedParent}, Path=ActualWidth}">
+                <StackPanel IsItemsHost="True"
+                            KeyboardNavigation.DirectionalNavigation="Contained"/>
+              </Border>
+            </Popup>
+          </Grid>
 
           <ControlTemplate.Triggers>
-            <!-- When icon absent, push header to 0px left padding -->
+            <!-- 无图标时:隐藏图标列,内容左移 -->
             <Trigger Property="Icon" Value="{x:Null}">
-              <Setter TargetName="Icon" Property="Width" Value="0"/>
-              <Setter TargetName="Icon" Property="Margin" Value="0"/>
+              <Setter TargetName="IconCol" Property="Width"  Value="0"/>
+              <Setter TargetName="Icon"    Property="Width"  Value="0"/>
+              <Setter TargetName="Icon"    Property="Margin" Value="0"/>
             </Trigger>
 
-            <Trigger Property="IsHighlighted" Value="True">
-              <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Bg.Hover}"/>
+            <!-- 无子菜单时:隐藏箭头列和箭头图形 -->
+            <Trigger Property="HasItems" Value="False">
+              <Setter TargetName="ArrowCol"     Property="Width"      Value="0"/>
+              <Setter TargetName="SubmenuArrow" Property="Visibility" Value="Collapsed"/>
             </Trigger>
+
+            <!-- 悬停高亮:Win11 中性灰圆角背景 -->
+            <Trigger Property="IsHighlighted" Value="True">
+              <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Menu.Bg.Hover}"/>
+            </Trigger>
+
+            <!-- 禁用态 -->
             <Trigger Property="IsEnabled" Value="False">
-              <Setter Property="Foreground" Value="{DynamicResource Brush.Text.Disabled}"/>
-              <Setter Property="Cursor" Value="Arrow"/>
+              <Setter Property="Foreground" Value="{DynamicResource Menu.Text.Disabled}"/>
+              <Setter Property="Cursor"     Value="Arrow"/>
             </Trigger>
           </ControlTemplate.Triggers>
         </ControlTemplate>
@@ -102,17 +187,43 @@
     </Setter>
   </Style>
 
-  <!-- Separator inside menu -->
-  <Style TargetType="Separator">
-    <Setter Property="Background" Value="{DynamicResource Brush.Border.Subtle}"/>
-    <Setter Property="Height" Value="1"/>
-    <Setter Property="Margin" Value="4,4"/>
+  <!-- ── Separator(菜单内) ───────────────────────────────────── -->
+  <!-- WPF 的 MenuBase 会给菜单里的 Separator 强制 SetResourceReference
+       (StyleProperty, MenuItem.SeparatorStyleKey),隐式样式根本不会命中 ——
+       这就是之前「分割线不贯穿」的根因(主题样式自带 15px 侧边距)。
+       必须在 SeparatorStyleKey 键下再提供一份同款样式,覆盖主题样式。 -->
+  <Style x:Key="{x:Static swc:MenuItem.SeparatorStyleKey}" TargetType="Separator">
+    <Setter Property="Background"         Value="{DynamicResource Menu.Separator}"/>
+    <Setter Property="Height"             Value="1"/>
+    <Setter Property="HorizontalAlignment" Value="Stretch"/>
+    <!-- 横向 -4 负边距把 ContextMenu 外框的 Padding=4 抵消掉,线条左右
+         贯穿整条菜单栏;模板内 Border 不再加 Margin(避免二次偏移)。 -->
+    <Setter Property="Margin"             Value="-4,4"/>
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="Separator">
           <Border Background="{TemplateBinding Background}"
                   Height="{TemplateBinding Height}"
-                  Margin="{TemplateBinding Margin}"/>
+                  HorizontalAlignment="Stretch"
+                  SnapsToDevicePixels="True"/>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!-- ── Separator(菜单外兜底,与菜单内同款) ───────────────────── -->
+  <Style TargetType="Separator">
+    <Setter Property="Background"          Value="{DynamicResource Menu.Separator}"/>
+    <Setter Property="Height"              Value="1"/>
+    <Setter Property="HorizontalAlignment" Value="Stretch"/>
+    <Setter Property="Margin"              Value="0,4"/>
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="Separator">
+          <Border Background="{TemplateBinding Background}"
+                  Height="{TemplateBinding Height}"
+                  HorizontalAlignment="Stretch"
+                  SnapsToDevicePixels="True"/>
         </ControlTemplate>
       </Setter.Value>
     </Setter>

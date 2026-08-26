@@ -27,6 +27,7 @@ public partial class ClockPage : UserControl
 {
     readonly ManagementWindow _main;
     readonly WidgetService? _widgetService;
+    readonly LocalizationService _loc = LocalizationService.Instance;
     DesktopClock? _selected;
     // ponytail: live row collection bound to ListHost — drag reorder moves rows
     // through this OC (mirroring PropertyTabStrip's Tabs OC) so the ItemsControl
@@ -61,7 +62,7 @@ public partial class ClockPage : UserControl
     {
         if (_widgetService == null) return;
         var clocks = _widgetService.Clocks;
-        CountLabel.Text = $"{clocks.Count} 项";
+        CountLabel.Text = _loc.Get("ClockPage.ItemCount", clocks.Count);
         // 拖动排序即列表顺序：不再重排，Rows 直接镜像 Clocks 的持久化顺序。
         _rows.Clear();
         foreach (var c in clocks) _rows.Add(BuildRow(c));
@@ -71,8 +72,8 @@ public partial class ClockPage : UserControl
 
     EditableListRow BuildRow(DesktopClock clock)
     {
-        var mode = clock.Mode == ClockDisplayMode.Digital ? "数字" : "钟表";
-        var format = clock.Use24Hour ? "24 小时" : "12 小时";
+        var mode = clock.Mode == ClockDisplayMode.Digital ? _loc["ClockPage.Digital"] : _loc["ClockPage.Analog"];
+        var format = clock.Use24Hour ? _loc["ClockPage.Format24"] : _loc["ClockPage.Format12"];
         var row = new EditableListRow
         {
             Tag = clock,
@@ -121,11 +122,7 @@ public partial class ClockPage : UserControl
             // floating editor while the docked panel already showed this clock.
             Select(clock);
         };
-        row.PreviewMouseRightButtonUp += (_, e) =>
-        {
-            Select(clock);
-            ShowClockContextMenu(clock, row);
-        };
+        // 右键菜单已取消：显示/隐藏与删除移到属性面板顶部状态区。
         return row;
     }
 
@@ -144,16 +141,6 @@ public partial class ClockPage : UserControl
         }
     }
 
-    void ShowClockContextMenu(DesktopClock clock, EditableListRow row)
-    {
-        var items = new List<RowContextMenu.Item>
-        {
-            new(clock.IsVisible ? "隐藏时钟" : "显示时钟", () => _main.ToggleClockWindow(clock)),
-        };
-        items.Add(new("删除时钟", () => Delete(clock), Danger: true));
-        RowContextMenu.Show(row, items);
-    }
-
     void NewClock_Click(object sender, RoutedEventArgs e)
     {
         _main.NewClock();
@@ -162,7 +149,7 @@ public partial class ClockPage : UserControl
 
     void Delete(DesktopClock clock)
     {
-        if (MessageBox.Show($"删除时钟「Clock」？", "删除时钟",
+        if (MessageBox.Show(_loc.Get("ClockPage.DeleteConfirm", "Clock"), _loc["ClockPage.DeleteTitle"],
             MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
         _main.DeleteClock(clock);
         if (ReferenceEquals(_selected, clock)) _selected = null;

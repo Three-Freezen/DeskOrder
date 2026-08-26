@@ -11,6 +11,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
+using DesktopZones.Helpers;
 using DesktopZones.Models;
 using DesktopZones.Services;
 using DesktopZones.Views.Cards;
@@ -73,6 +74,14 @@ public partial class LoadPresetDialog : Window, INotifyPropertyChanged
         _widgetService = widgetService;
         _onCardPicked = onCardPicked;
         _presets = new ObservableCollection<PresetRecord>(service.LoadAll());
+
+        // 尖角裁切修复：去掉 DWM 给无边框分层窗口绘制的矩形阴影并请求 Win11 圆角，
+        // 与主窗口(ZoneWindow 等)同一套处理，避免圆角内容四周残留直角阴影。
+        Loaded += (_, _) =>
+        {
+            NativeMethods.DisableDwmFrameShadow(this);
+            NativeMethods.SetRoundedCorners(this, 12);
+        };
 
         // Card template is selected by PresetCardTemplateSelector (declared in XAML)
         // based on each item's Kind — no per-call template wiring needed.
@@ -278,12 +287,10 @@ public partial class LoadPresetDialog : Window, INotifyPropertyChanged
         {
             SetCardSelectedStyle(prev, selected: false);
             SetCardZIndex(prev, 0);
-            AnimateScale(prev, 1.0, 1.0);
         }
 
         SetCardSelectedStyle(card, selected: true);
         SetCardZIndex(card, 1);
-        AnimateScale(card, HoverScaleX, HoverScaleY);
 
         SelectedPreset = item.Record;
         SelectedPayload = item.Payload;

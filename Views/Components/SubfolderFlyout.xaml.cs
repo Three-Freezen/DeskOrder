@@ -6,6 +6,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using DesktopZones.Helpers;
 using DesktopZones.Models;
 using DesktopZones.ViewModels;
@@ -611,5 +612,292 @@ public partial class SubfolderFlyout : UserControl
             if (deeper != null) return deeper;
         }
         return null;
+    }
+
+    // ── Open/close animation + position (ponytail 2026-08-26: 与分区和面板共用)
+    // ZoneWindow 与 PanelWindow 各自管 popup 生命周期(IsOpen / token / IsContextMenuOpen
+    // 抑制),但动画 + 定位 + click-outside 全在这一个 UserControl 上。 ──
+
+    /// <summary>把 Flyout 复位到关闭态(scale 0,不透明 0),供打开前调用,避免残留动画帧。
+    /// 不透明度取 0 而非 1:Fade 动效的打开要从 0 淡入(NormalizeFor 里非 Fade kind
+    /// 会自行把 Opacity 抬回 1,只有 Fade 保留 0 作为 from)。</summary>
+    public void ResetToClosed()
+    {
+        var st = FlyoutScale;
+        st.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+        st.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+        st.ScaleX = 0; st.ScaleY = 0;
+        BeginAnimation(UIElement.OpacityProperty, null);
+        Opacity = 0;
+    }
+
+    /// <summary>把缩放锚点 c 写入 TransformGroup 的 [移至原点(-c), Scale, 移回(+c)] —
+    /// 与 HoverExpandBehavior.ApplyOrigin 同款组合,动画以 c(图标中心)为原点缩放。</summary>
+    public void SetAnchor(Point c)
+    {
+        FlyoutTranslateBack.X = c.X;
+        FlyoutTranslateBack.Y = c.Y;
+        FlyoutTranslateToOrigin.X = -c.X;
+        FlyoutTranslateToOrigin.Y = -c.Y;
+    }
+
+    /// <summary>打开动画:按 HostSubItem.HoverAnimation 类型播 ScaleExpand/Fade/
+    /// VerticalExpand/DirectionalExpand/BounceExpand/None。duration 200ms /
+    /// HoverExpandSpeed,onComplete 走 Completed 事件(from==to 直接同步 fire)。</summary>
+    public void AnimateOpen()
+    {
+        var vm = ViewModel;
+        if (vm == null) return;
+        var kind = vm.HostSubItem.HoverAnimation;
+        NormalizeFlyoutFor(isExpanded: true, kind);
+        var dur = new Duration(TimeSpan.FromMilliseconds(200.0 / Math.Max(0.1, vm.HostSubItem.HoverExpandSpeed)));
+        switch (kind)
+        {
+            case HoverExpandAnimationKind.None:
+                ApplyFlyoutFinal(isExpanded: true, kind);
+                return;
+            case HoverExpandAnimationKind.Fade:
+                AnimateFlyoutOpacity(Opacity, 1, dur, EasingMode.EaseOut, null);
+                return;
+            case HoverExpandAnimationKind.VerticalExpand:
+                AnimateFlyoutScaleY(FlyoutScale.ScaleY, 1, dur, EasingMode.EaseOut, null);
+                return;
+            case HoverExpandAnimationKind.DirectionalExpand:
+                AnimateFlyoutScaleX(FlyoutScale.ScaleX, 1, dur, EasingMode.EaseOut, null);
+                return;
+            case HoverExpandAnimationKind.BounceExpand:
+                AnimateFlyoutBounce(isExpand: true, dur, null);
+                return;
+            default: // ScaleExpand
+                AnimateFlyoutScaleXY(FlyoutScale.ScaleX, 1, dur, EasingMode.EaseOut, null);
+                return;
+        }
+    }
+
+    /// <summary>关闭动画:与打开互为镜像(EaseIn vs EaseOut),flyout 缩回原点。</summary>
+    public void AnimateClose(Action? onComplete)
+    {
+        var vm = ViewModel;
+        var kind = vm != null ? vm.HostSubItem.HoverAnimation : HoverExpandAnimationKind.ScaleExpand;
+        double speed = vm != null ? Math.Max(0.1, vm.HostSubItem.HoverExpandSpeed) : 1.0;
+        NormalizeFlyoutFor(isExpanded: false, kind);
+        var dur = new Duration(TimeSpan.FromMilliseconds(200.0 / speed));
+        switch (kind)
+        {
+            case HoverExpandAnimationKind.None:
+                ApplyFlyoutFinal(isExpanded: false, kind);
+                onComplete?.Invoke();
+                return;
+            case HoverExpandAnimationKind.Fade:
+                AnimateFlyoutOpacity(Opacity, 0, dur, EasingMode.EaseIn, onComplete);
+                return;
+            case HoverExpandAnimationKind.VerticalExpand:
+                AnimateFlyoutScaleY(FlyoutScale.ScaleY, 0, dur, EasingMode.EaseIn, onComplete);
+                return;
+            case HoverExpandAnimationKind.DirectionalExpand:
+                AnimateFlyoutScaleX(FlyoutScale.ScaleX, 0, dur, EasingMode.EaseIn, onComplete);
+                return;
+            case HoverExpandAnimationKind.BounceExpand:
+                AnimateFlyoutBounce(isExpand: false, dur, onComplete);
+                return;
+            default: // ScaleExpand
+                AnimateFlyoutScaleXY(FlyoutScale.ScaleX, 0, dur, EasingMode.EaseIn, onComplete);
+                return;
+        }
+    }
+
+    /// <summary>ponytail: 关闭时若 flyout 处于 None 之外的过渡态,目标值强制收敛,免得
+    /// 动画 in-flight 时 BeginAnimation(null) 残留中间帧被下一次打开带走。</summary>
+    void NormalizeFlyoutFor(bool isExpanded, HoverExpandAnimationKind kind)
+    {
+        var st = FlyoutScale;
+        double sx = st.ScaleX, sy = st.ScaleY, op = Opacity;
+        st.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+        st.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+        BeginAnimation(UIElement.OpacityProperty, null);
+        st.ScaleX = sx; st.ScaleY = sy;
+        Opacity = op;
+
+        switch (kind)
+        {
+            case HoverExpandAnimationKind.VerticalExpand: st.ScaleX = 1; break; // stable axis
+            case HoverExpandAnimationKind.DirectionalExpand: st.ScaleY = 1; break;
+            case HoverExpandAnimationKind.Fade: st.ScaleX = 1; st.ScaleY = 1; break; // stable
+            case HoverExpandAnimationKind.None:
+                if (isExpanded) { st.ScaleX = 1; st.ScaleY = 1; Opacity = 1; }
+                else { st.ScaleX = 0; st.ScaleY = 0; Opacity = 0; }
+                break;
+        }
+        if (kind != HoverExpandAnimationKind.Fade && kind != HoverExpandAnimationKind.None)
+            Opacity = 1;
+    }
+
+    /// <summary>Port of HoverExpandBehavior.ApplyFinal for the None kind.</summary>
+    void ApplyFlyoutFinal(bool isExpanded, HoverExpandAnimationKind kind)
+    {
+        var st = FlyoutScale;
+        double target = isExpanded ? 1 : 0;
+        switch (kind)
+        {
+            case HoverExpandAnimationKind.VerticalExpand: st.ScaleX = 1; st.ScaleY = target; break;
+            case HoverExpandAnimationKind.DirectionalExpand: st.ScaleX = target; st.ScaleY = 1; break;
+            default: st.ScaleX = target; st.ScaleY = target; break;
+        }
+        Opacity = isExpanded ? 1 : (kind == HoverExpandAnimationKind.Fade ? 0 : 1);
+    }
+
+    void AnimateFlyoutScaleXY(double from, double to, Duration dur, EasingMode ease, Action? onComplete)
+    {
+        var st = FlyoutScale;
+        if (Math.Abs(from - to) < 1e-9) { st.ScaleX = to; st.ScaleY = to; onComplete?.Invoke(); return; }
+        var ax = new DoubleAnimation(from, to, dur) { EasingFunction = new CubicEase { EasingMode = ease } };
+        var ay = new DoubleAnimation(from, to, dur) { EasingFunction = new CubicEase { EasingMode = ease } };
+        bool done = false;
+        Action fireOnce = () => { if (done) return; done = true; onComplete?.Invoke(); };
+        ax.Completed += (_, _) => { st.ScaleX = to; fireOnce(); };
+        ay.Completed += (_, _) => { st.ScaleY = to; fireOnce(); };
+        st.BeginAnimation(ScaleTransform.ScaleXProperty, ax);
+        st.BeginAnimation(ScaleTransform.ScaleYProperty, ay);
+    }
+
+    void AnimateFlyoutScaleX(double from, double to, Duration dur, EasingMode ease, Action? onComplete)
+    {
+        var st = FlyoutScale;
+        if (Math.Abs(from - to) < 1e-9) { st.ScaleX = to; onComplete?.Invoke(); return; }
+        var ax = new DoubleAnimation(from, to, dur) { EasingFunction = new CubicEase { EasingMode = ease } };
+        ax.Completed += (_, _) => { st.ScaleX = to; onComplete?.Invoke(); };
+        st.BeginAnimation(ScaleTransform.ScaleXProperty, ax);
+    }
+
+    void AnimateFlyoutScaleY(double from, double to, Duration dur, EasingMode ease, Action? onComplete)
+    {
+        var st = FlyoutScale;
+        if (Math.Abs(from - to) < 1e-9) { st.ScaleY = to; onComplete?.Invoke(); return; }
+        var ay = new DoubleAnimation(from, to, dur) { EasingFunction = new CubicEase { EasingMode = ease } };
+        ay.Completed += (_, _) => { st.ScaleY = to; onComplete?.Invoke(); };
+        st.BeginAnimation(ScaleTransform.ScaleYProperty, ay);
+    }
+
+    void AnimateFlyoutOpacity(double from, double to, Duration dur, EasingMode ease, Action? onComplete)
+    {
+        if (Math.Abs(from - to) < 1e-9) { Opacity = to; onComplete?.Invoke(); return; }
+        var anim = new DoubleAnimation(from, to, dur) { EasingFunction = new CubicEase { EasingMode = ease } };
+        anim.Completed += (_, _) => { Opacity = to; onComplete?.Invoke(); };
+        BeginAnimation(UIElement.OpacityProperty, anim);
+    }
+
+    void AnimateFlyoutBounce(bool isExpand, Duration dur, Action? onComplete)
+    {
+        var st = FlyoutScale;
+        if (!isExpand && Math.Abs(st.ScaleX) < 1e-9)
+        {
+            st.ScaleX = 0; st.ScaleY = 0; onComplete?.Invoke(); return;
+        }
+        var bounce = new DoubleAnimationUsingKeyFrames();
+        var ease = new BounceEase { Bounces = 2, Bounciness = 2, EasingMode = EasingMode.EaseOut };
+        if (isExpand)
+        {
+            bounce.KeyFrames.Add(new EasingDoubleKeyFrame(st.ScaleX, KeyTime.FromTimeSpan(TimeSpan.Zero)));
+            bounce.KeyFrames.Add(new EasingDoubleKeyFrame(1.08, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(dur.TimeSpan.TotalMilliseconds * 0.6)), ease));
+            bounce.KeyFrames.Add(new EasingDoubleKeyFrame(1, KeyTime.FromTimeSpan(dur.TimeSpan)));
+        }
+        else
+        {
+            var squashTime = TimeSpan.FromMilliseconds(dur.TimeSpan.TotalMilliseconds * 0.45);
+            bounce.KeyFrames.Add(new EasingDoubleKeyFrame(st.ScaleX, KeyTime.FromTimeSpan(TimeSpan.Zero)));
+            bounce.KeyFrames.Add(new EasingDoubleKeyFrame(0.85, KeyTime.FromTimeSpan(squashTime), ease));
+            bounce.KeyFrames.Add(new EasingDoubleKeyFrame(0, KeyTime.FromTimeSpan(dur.TimeSpan),
+                new CubicEase { EasingMode = EasingMode.EaseOut }));
+        }
+        double final = isExpand ? 1 : 0;
+        bool done = false;
+        Action fireOnce = () => { if (done) return; done = true; onComplete?.Invoke(); };
+        bounce.Completed += (_, _) => { st.ScaleX = final; st.ScaleY = final; fireOnce(); };
+        st.BeginAnimation(ScaleTransform.ScaleXProperty, bounce);
+        st.BeginAnimation(ScaleTransform.ScaleYProperty, bounce);
+    }
+
+    /// <summary>确定性展开定位 + 动画原点。返回 (屏幕位置 pos, 缩放锚点 c):
+    /// pos 以图标右上角 + 8px 向右下展开,横向放不下翻到图标左侧、纵向放不下翻到图标
+    /// 上方,并夹在屏幕工作区内;c = 图标中心 - pos(flyout 局部坐标,允许负值)。
+    /// 全程只用图标容器的 PointToScreen(容器在可见分区/面板窗口里,必然连着
+    /// PresentationSource),不再读 flyout 自身的 PointToScreen — 那会因 popup 重排
+    /// 时序拿到错误位置,或在 visual 未连接时抛异常回落到 (0,0)。
+    /// ponytail: 全程统一到 DIP。PointToScreen / SystemParameters.WorkArea 返回物理
+    /// 像素,而 Popup 的 AbsolutePoint offset 与 RenderTransform 平移都是 DIP —
+    /// 125%/150% 缩放下直接把物理像素塞给 offset 会被再放大一遍。</summary>
+    public static (Point pos, Point c) ComputePosAndAnchor(FrameworkElement? container, Size flyoutSize)
+    {
+        const double gap = 8;
+        double sx = 1, sy = 1;
+        try
+        {
+            var d = VisualTreeHelper.GetDpi((System.Windows.Media.Visual?)container!);
+            sx = d.DpiScaleX; sy = d.DpiScaleY;
+        }
+        catch { }
+        var waPx = SystemParameters.WorkArea;
+        var wa = new Rect(waPx.Left / sx, waPx.Top / sy, waPx.Width / sx, waPx.Height / sy);
+        Point iconTL = new(0, 0);
+        double iconW = 0, iconH = 0;
+        if (container != null)
+        {
+            try
+            {
+                var tl = container.PointToScreen(new Point(0, 0));
+                iconTL = new Point(tl.X / sx, tl.Y / sy);
+                iconW = container.ActualWidth;
+                iconH = container.ActualHeight;
+            }
+            catch
+            {
+                var center = new Point(wa.Left + (wa.Width - flyoutSize.Width) / 2,
+                                       wa.Top + (wa.Height - flyoutSize.Height) / 2);
+                return (center, new Point(flyoutSize.Width / 2, flyoutSize.Height / 2));
+            }
+        }
+        double x = iconTL.X + iconW + gap;
+        double y = iconTL.Y + gap;
+        if (x + flyoutSize.Width > wa.Right - 8)
+            x = Math.Max(wa.Left + 8, iconTL.X - flyoutSize.Width - gap);
+        if (y + flyoutSize.Height > wa.Bottom - 8)
+            y = Math.Max(wa.Top + 8, iconTL.Y - flyoutSize.Height - gap);
+        var pos = new Point(x, y);
+        var iconCenter = new Point(iconTL.X + iconW / 2, iconTL.Y + iconH / 2);
+        var c = new Point(iconCenter.X - pos.X, iconCenter.Y - pos.Y);
+        return (pos, c);
+    }
+
+    // ── Click-outside(打开 flyout 后挂上,关闭时拆掉;捕获子树防止 Flyout 内按下被误判) ──
+
+    /// <summary>Fired when a mouse-down is detected outside the flyout's captured subtree.
+    /// Caller decides whether to close (ZoneWindow / PanelWindow 各有自己的关窗策略)。
+    /// MouseButtonEventArgs 透传过去,让 caller 做 popup 源/坐标判定(IsContextMenuOpen
+    /// 之类的 flyout 状态 caller 自己也能查;这里只透传 WPF 原始事件)。</summary>
+    public event Action<System.Windows.Input.MouseButtonEventArgs>? ClickOutsideRequested;
+
+    bool _clickOutsideHooked;
+    public void HookClickOutside()
+    {
+        if (_clickOutsideHooked) return;
+        _clickOutsideHooked = true;
+        try { System.Windows.Input.Mouse.Capture(this, System.Windows.Input.CaptureMode.SubTree); } catch { }
+        System.Windows.Input.Mouse.AddPreviewMouseDownOutsideCapturedElementHandler(this, OnPreviewMouseDownOutsideCapturedElement);
+    }
+
+    public void UnhookClickOutside()
+    {
+        if (!_clickOutsideHooked) return;
+        _clickOutsideHooked = false;
+        System.Windows.Input.Mouse.RemovePreviewMouseDownOutsideCapturedElementHandler(this, OnPreviewMouseDownOutsideCapturedElement);
+        if (System.Windows.Input.Mouse.Captured == this)
+        {
+            try { ReleaseMouseCapture(); } catch { }
+        }
+    }
+
+    void OnPreviewMouseDownOutsideCapturedElement(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        ClickOutsideRequested?.Invoke(e);
     }
 }

@@ -1,6 +1,7 @@
 <Window x:Class="DesktopZones.Views.CalendarWidget"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:DesktopZones.Helpers"
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
@@ -19,9 +20,9 @@
                 BorderThickness="1">
             <Border.ContextMenu>
                 <ContextMenu>
-                    <MenuItem x:Name="CtxToggleRestore" Header="Disable Restore" Click="ToggleRestore_Click"/>
+                    <MenuItem x:Name="CtxToggleRestore" Header="{loc:Loc Key=Calendar.DisableRestore}" Click="ToggleRestore_Click"/>
                     <Separator/>
-                    <MenuItem x:Name="CtxDelete" Header="Delete Calendar" Click="DeleteCalendar_Click" Foreground="#FF6666"/>
+                    <MenuItem x:Name="CtxDelete" Header="{loc:Loc Key=Calendar.Delete}" Click="DeleteCalendar_Click" Foreground="#FF6666"/>
                 </ContextMenu>
             </Border.ContextMenu>
             <Grid>
@@ -101,7 +102,7 @@
                 </Grid>
 
                 <!-- Today button -->
-                <Button Grid.Row="1" x:Name="TodayBtn" Content="Today"
+                <Button Grid.Row="1" x:Name="TodayBtn" Content="{loc:Loc Key=Calendar.Today}"
                         FontSize="10" Foreground="#6C63FF" Background="Transparent"
                         BorderBrush="#406C63FF" BorderThickness="1"
                         Padding="8,3" Cursor="Hand"

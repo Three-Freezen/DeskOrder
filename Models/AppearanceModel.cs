@@ -46,15 +46,6 @@ public abstract class AppearanceModel
     /// </summary>
     public bool HoverAutoExpand { get; set; } = false;
 
-    // ── Text color adaptive ──
-    /// <summary>
-    /// Auto-pick text/icon foreground color based on the widget's effective fill color.
-    /// True = adaptive (overrides user-set TextColor); false = use configured TextColor.
-    /// Default true: existing widgets enable this on first deserialize (C# field init fills
-    /// missing JSON keys). Title bar elements use a separate flag on the subclass.
-    /// </summary>
-    public bool TextColorAdaptive { get; set; } = true;
-
     // ── Hover restore animation (per-instance, spec §7.1 #2) ──
     // ponytail: EnableRestoreButton (above) gates the entire feature — when off
     // the RestoreButton is hidden and no hover/click animation runs. When on,

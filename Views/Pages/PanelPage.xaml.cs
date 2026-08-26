@@ -26,6 +26,7 @@ public partial class PanelPage : UserControl
     readonly ManagementWindow _main;
     readonly ConfigService _configService;
     readonly PanelService? _panelService;
+    readonly LocalizationService _loc = LocalizationService.Instance;
     PanelConfig? _selected; // ponytail: track singleton selection so RefreshList() re-applies the blue glow on rebuild.
 
     public PanelPage(ManagementWindow main, ConfigService configService, PanelService? panelService)
@@ -51,7 +52,7 @@ public partial class PanelPage : UserControl
         var cfg = _main.LiveConfig;
         var hotkey = cfg.PanelHotkey.PanelHotkeyEnabled
             ? ManagementWindow.GetHotkeyLabel(cfg.PanelHotkey.PanelHotkeyModifiers, cfg.PanelHotkey.PanelHotkeyKey)
-            : "未设置";
+            : _loc["PanelPage.NotSet"];
         // ponytail: enabled-state display removed from the header per design.
         CountLabel.Text = hotkey;
         ListHost.ItemsSource = new List<EditableListRow> { BuildRow(cfg) };
@@ -66,8 +67,8 @@ public partial class PanelPage : UserControl
         var row = new EditableListRow
         {
             Tag = cfg.Panel,
-            Title = "控制面板",
-            Subtitle = $"快捷键 {ManagementWindow.GetHotkeyLabel(cfg.PanelHotkey.PanelHotkeyModifiers, cfg.PanelHotkey.PanelHotkeyKey)}",
+            Title = _loc["PanelPage.PanelTitle"],
+            Subtitle = _loc.Get("PanelPage.Hotkey", ManagementWindow.GetHotkeyLabel(cfg.PanelHotkey.PanelHotkeyModifiers, cfg.PanelHotkey.PanelHotkeyKey)),
             IconKey = "Icon.Panel",
             IsLocked = false,
             IsVisible = cfg.Panel.PanelEnabled,

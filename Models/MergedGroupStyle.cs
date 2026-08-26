@@ -30,7 +30,8 @@ public class MergedGroupStyle
     public bool UseUnifiedFill { get; set; } = true;     // true=unified fill, false=keep original
     /// <summary>磁贴模式 — 隐藏两层标题栏与底部 8px 分割条（组合分区整体形态）。</summary>
     public bool TileMode { get; set; } = false;
-    public bool TitleBarTextColorAdaptive { get; set; } = true;
+    public string ButtonColor { get; set; } = "#80FFFFFF";
+    public string TextColor { get; set; } = "#E0FFFFFF";
     /// <summary>标题栏填充单独设置 — 统一填充模式下主体填充不铺到标题栏下方。</summary>
     public bool TitleBarFillIndependent { get; set; } = false;
     public string BackgroundImagePath { get; set; } = "";

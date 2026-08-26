@@ -88,8 +88,7 @@ public partial class ZonesPage : UserControl
             _zoneManager.MoveZone(z2.Id, targetIdx);
             MoveRow(_rows, src, targetIdx);
         };
-        ApplyStatusBadge(row, z);
-
+        // 文件夹映射状态徽章已移入属性面板顶部状态区（PropertyPanel 状态 chips）。
         row.LockCommand = new RelayCommand(_ => { z.IsLocked = !z.IsLocked; _zoneManager.UpdateZone(z); });
         row.VisibilityCommand = new RelayCommand(v =>
         {
@@ -121,11 +120,8 @@ public partial class ZonesPage : UserControl
             }
             Select(z);
         };
-        row.PreviewMouseRightButtonUp += (_, e) =>
-        {
-            Select(z);
-            ShowZoneContextMenu(z, row);
-        };
+        // 右键菜单已取消（用户 2026-08-2x）：显示/锁定/删除/加入组合全部移到
+        // 属性面板顶部的状态区，此处不再响应右键。
         return row;
     }
 
@@ -140,47 +136,6 @@ public partial class ZonesPage : UserControl
         PropertyWindowManager.Instance.DockTarget(z, _main);
         _selected = z;
         SetSelection(ListHost, z);
-    }
-
-    static void ApplyStatusBadge(EditableListRow row, Zone z)
-    {
-        var loc = LocalizationService.Instance;
-        // ponytail: status chips no longer surface lock/hidden/merged — the badge
-        // slot is reserved for the folder-mapping state.
-        if (z.FolderMappingEnabled || z.MergedGroupStyle.FolderMappingEnabled)
-        {
-            row.HasStatusBadge = true;
-            row.StatusBadge = loc["Manage.Status.FolderMapping"];
-            row.StatusBadgeBrush = new SolidColorBrush(Color.FromArgb(0x40, 0x4A, 0xC0, 0x4A));
-        }
-        else
-        {
-            row.HasStatusBadge = false;
-        }
-    }
-
-    void ShowZoneContextMenu(Zone z, EditableListRow row)
-    {
-        var loc = LocalizationService.Instance;
-        var items = new List<RowContextMenu.Item>
-        {
-            new(z.IsVisible ? loc["Manage.Zone.Hide"] : loc["Manage.Zone.Show"], () =>
-            {
-                // ponytail 2026-08-26: SAME path as the zone's own hide button —
-                // no model pre-flip; ShowZone/HideZone own the state.
-                if (z.IsVisible) _zoneManager.HideZone(z.Id);
-                else _zoneManager.ShowZone(z);
-                RefreshList();
-            }),
-            new(z.IsLocked ? loc["Manage.Zone.Unlock"] : loc["Manage.Zone.Lock"], () =>
-            {
-                z.IsLocked = !z.IsLocked; _zoneManager.UpdateZone(z); RefreshList();
-            }),
-        };
-        var otherGroups = _zoneManager.Zones.Any(o => o.MergedGroupMembership.SubZoneIds.Count > 0 && o.Id != z.Id);
-        if (otherGroups) items.Add(new(loc["Manage.Zone.AddToMerge"], () => _main.ShowMergeDialog(z)));
-        items.Add(new(loc["Manage.Zone.Delete"], () => Delete(z), Danger: true));
-        RowContextMenu.Show(row, items);
     }
 
     void NewZone_Click(object sender, RoutedEventArgs e)

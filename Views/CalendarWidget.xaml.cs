@@ -137,8 +137,8 @@ public partial class CalendarWidget : Window
         NativeMethods.DisableDwmFrameShadow(this);
         ApplyAcrylic();
         ApplyBackgroundImage();
-        // ponytail: subscribe to day-cell ItemsControl's StatusChanged so adaptive text
-        // auto-recolors whenever WPF finishes generating containers (first show, month
+        // ponytail: subscribe to day-cell ItemsControl's StatusChanged so the fixed text
+        // colors auto-reapply whenever WPF finishes generating containers (first show, month
         // switch, preset load, etc.). Hook must be after Loaded so the visual tree is up.
         SubscribeDayCellStatusChanged();
         // Set rounded corners LAST after all sizing is complete
@@ -172,45 +172,7 @@ public partial class CalendarWidget : Window
         // ponytail: force re-render — FillRect paints more reliably than
         // Border.Background inside a transparent window.
         FillRect.InvalidateVisual();
-        ApplyBodyTextColorAdaptive(fillColorStr);
-    }
-
-    /// <summary>Adaptive text/icon color based on the widget's effective fill. When the
-    /// calendar has a background image, samples 5 points from it instead of using FillColor.</summary>
-    void ApplyBodyTextColorAdaptive(string effectiveFill)
-    {
-#if DEBUG
-        System.Diagnostics.Debug.WriteLine(
-            $"[adaptive] CalendarWidget: bg={effectiveFill} adaptive={_calendar.TextColorAdaptive}");
-#endif
-        if (!_calendar.TextColorAdaptive) return;
-        SolidColorBrush brush;
-        if (CalBgImage?.Source is BitmapSource bmp && !string.IsNullOrEmpty(_calendar.BackgroundImagePath))
-        {
-            brush = AdaptiveTextColor.ResolveBrush(AdaptiveTextColor.ResolveTextColorForImage(bmp));
-        }
-        else
-        {
-            brush = AdaptiveTextColor.ResolveBrush(effectiveFill);
-        }
-        // ponytail: month nav arrows + LockBtn + NotesDateLabel now ride the same adaptive
-        // brush as HideBtn (calendar has no separate title-bar adaptive, body toggle covers all)
-        if (LockBtn != null) LockBtn.Foreground = brush;
-        if (PrevMonthBtn != null) PrevMonthBtn.Foreground = brush;
-        if (NextMonthBtn != null) NextMonthBtn.Foreground = brush;
-        if (NotesDateLabel != null) NotesDateLabel.Foreground = brush;
-        if (MonthTitleText != null) MonthTitleText.Foreground = brush;
-        if (TodayBtn != null) TodayBtn.Foreground = brush;
-        if (HideBtn != null) HideBtn.Foreground = brush;
-        if (RestoreIconChar != null) RestoreIconChar.Foreground = brush;
-        // DOW headers
-        for (int i = 0; i <= 6; i++)
-        {
-            var tb = FindName($"Dow{i}") as TextBlock;
-            if (tb != null) tb.Foreground = brush;
-        }
-        // Day cells (dynamic items inside ItemsControl)
-        ApplyToDayCells(brush);
+        ApplyDefaultTextColors();
     }
 
     void ApplyToDayCells(System.Windows.Media.Brush brush)
@@ -256,15 +218,14 @@ public partial class CalendarWidget : Window
                 }
             }
         }
-        // NotesDateLabel + AddNoteBtn live at calendar-widget level — set directly.
-        if (NotesDateLabel != null) NotesDateLabel.Foreground = brush;
-        if (AddNoteBtn != null) AddNoteBtn.Foreground = brush;
+        // NotesDateLabel + AddNoteBtn live at calendar-widget level — set in
+        // ApplyDefaultTextColors (label = content color, button = button color).
         return anyApplied;
     }
 
     /// <summary>Subscribe to the day-cells ItemsControl's ItemContainerGenerator.StatusChanged
     /// so that whenever WPF finishes generating containers (after RebuildCells, month-switch,
-    /// preset load, etc.) we re-apply the adaptive brush automatically. Idempotent — safe to
+    /// preset load, etc.) we re-apply the fixed text colors automatically. Idempotent — safe to
     /// call from the constructor once the visual tree is up.</summary>
     void SubscribeDayCellStatusChanged()
     {
@@ -289,9 +250,8 @@ public partial class CalendarWidget : Window
     {
         if (sender is not ItemContainerGenerator gen) return;
         if (gen.Status != System.Windows.Controls.Primitives.GeneratorStatus.ContainersGenerated) return;
-        // Containers ready — re-run adaptive to color any cells that were added/regenerated.
-        string fillColorStr = _calendar.FillColor;
-        ApplyBodyTextColorAdaptive(fillColorStr);
+        // Containers ready — re-run the fixed text colors on any cells that were added/regenerated.
+        ApplyDefaultTextColors();
     }
 
     static IEnumerable<ItemsControl> EnumerateItemsControls(DependencyObject parent)
@@ -311,40 +271,45 @@ public partial class CalendarWidget : Window
         for (int i = 0; i < count; i++)
         {
             var child = VisualTreeHelper.GetChild(node, i);
+            // Content only — buttons are colored separately by 按钮颜色.
             if (child is TextBlock tb) tb.Foreground = brush;
-            else if (child is Control c) c.Foreground = brush;
             ApplyBrushRecursive(child, brush);
         }
     }
 
-    /// <summary>Re-apply body text adaptive using the current model+config. Call when the
-    /// adaptive toggle changes (e.g. settings dialog live preview).</summary>
+    /// <summary>Re-apply the fixed foregrounds (day cells use TextColor; chrome uses its
+    /// hardcoded defaults).</summary>
     public void RefreshTextColorAdaptive()
     {
-        string fillColorStr = _calendar.FillColor;
-        if (_calendar.TextColorAdaptive) ApplyBodyTextColorAdaptive(fillColorStr);
-        else ApplyDefaultTextColors();
+        ApplyDefaultTextColors();
     }
 
-    /// <summary>Restore hard-coded / user-configured foregrounds when adaptive is off.</summary>
+    /// <summary>Apply the fixed foregrounds split:
+    /// 主体内容颜色 → 月份标题/星期表头/日期格/备注标签/备注内容；按钮颜色 → 所有按钮。</summary>
     void ApplyDefaultTextColors()
     {
-        if (MonthTitleText != null) MonthTitleText.Foreground = new SolidColorBrush(Color.FromArgb(0xEE, 0xFF, 0xFF, 0xFF));
-        if (TodayBtn != null) TodayBtn.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#6C63FF")!);
-        if (HideBtn != null) HideBtn.Foreground = new SolidColorBrush(Color.FromArgb(0x40, 0xFF, 0xFF, 0xFF));
-        // ponytail: LockBtn + month nav + NotesDateLabel — restore XAML defaults when adaptive is off
-        if (LockBtn != null) LockBtn.Foreground = new SolidColorBrush(Color.FromArgb(0x40, 0xFF, 0xFF, 0xFF));
-        if (PrevMonthBtn != null) PrevMonthBtn.Foreground = new SolidColorBrush(Color.FromArgb(0xAA, 0xFF, 0xFF, 0xFF));
-        if (NextMonthBtn != null) NextMonthBtn.Foreground = new SolidColorBrush(Color.FromArgb(0xAA, 0xFF, 0xFF, 0xFF));
-        // NotesDateLabel XAML default is "#AAA0C0" — 3-char hex = RGB-only, alpha=0xFF
-        if (NotesDateLabel != null) NotesDateLabel.Foreground = new SolidColorBrush(Color.FromRgb(0xAA, 0xA0, 0xC0));
-        if (RestoreIconChar != null) RestoreIconChar.Foreground = new SolidColorBrush(Color.FromArgb(0xC0, 0xFF, 0xFF, 0xFF));
+        SolidColorBrush content, buttons;
+        try { content = new SolidColorBrush((Color)ColorConverter.ConvertFromString(_calendar.TextColor)!); } catch { content = Brushes.White; }
+        try { buttons = new SolidColorBrush((Color)ColorConverter.ConvertFromString(_calendar.ButtonColor)!); } catch { buttons = Brushes.White; }
+
+        // Content — 主体内容颜色.
+        if (MonthTitleText != null) MonthTitleText.Foreground = content;
+        if (NotesDateLabel != null) NotesDateLabel.Foreground = content;
         for (int i = 0; i <= 6; i++)
         {
             var tb = FindName($"Dow{i}") as TextBlock;
-            if (tb != null) tb.Foreground = new SolidColorBrush(Color.FromArgb(0xFF, 0x80, 0x80, 0xA0));
+            if (tb != null) tb.Foreground = content;
         }
-        ApplyToDayCells(new SolidColorBrush((Color)ColorConverter.ConvertFromString(_calendar.TextColor)!));
+        ApplyToDayCells(content);
+
+        // Buttons — 按钮颜色.
+        if (TodayBtn != null) TodayBtn.Foreground = buttons;
+        if (HideBtn != null) HideBtn.Foreground = buttons;
+        if (LockBtn != null) LockBtn.Foreground = buttons;
+        if (PrevMonthBtn != null) PrevMonthBtn.Foreground = buttons;
+        if (NextMonthBtn != null) NextMonthBtn.Foreground = buttons;
+        if (AddNoteBtn != null) AddNoteBtn.Foreground = buttons;
+        if (RestoreIconChar != null) RestoreIconChar.Foreground = buttons;
     }
 
     void ApplyAcrylic()
@@ -481,7 +446,7 @@ public partial class CalendarWidget : Window
     /// ZoneWindow.RefreshZone's "KEY FIX" pattern — see ClockWidget.RefreshAppearance for rationale.
     /// <paramref name="rebuildCells"/> defaults true for backwards compat with callers that don't
     /// know about the parameter; pass false for pure cosmetic tweaks (FillColor, BorderColor,
-    /// TextColorAdaptive toggle) to avoid the ItemContainerGenerator race window.</summary>
+    /// TextColor) to avoid the ItemContainerGenerator race window.</summary>
     public void RefreshAppearance(DesktopCalendar? calendar = null, bool rebuildCells = true)
     {
         if (calendar != null) _calendar = calendar;
@@ -544,19 +509,16 @@ public partial class CalendarWidget : Window
     void ToggleRestore_Click(object s, RoutedEventArgs e)
     {
         _calendar.EnableRestoreButton = !_calendar.EnableRestoreButton;
-        var cn = _loc.CurrentLanguage == "zh";
         if (s is MenuItem mi)
             mi.Header = _calendar.EnableRestoreButton
-                ? (cn ? "关闭恢复按钮" : "Disable Restore")
-                : (cn ? "启用恢复按钮" : "Enable Restore");
+                ? _loc["Calendar.DisableRestore"]
+                : _loc["Calendar.EnableRestore"];
     }
 
     void RebuildDisplay()
     {
         _vm.RebuildCells();
-        MonthTitleText.Text = _loc.CurrentLanguage == "zh"
-            ? $"{_vm.DisplayYear}年{_vm.DisplayMonth}月"
-            : $"{_vm.DisplayMonth}/{_vm.DisplayYear}";
+        MonthTitleText.Text = _loc.Get("Calendar.MonthYear", _vm.DisplayYear, _vm.DisplayMonth);
     }
 
     void Window_Drag(object s, MouseButtonEventArgs e)
@@ -640,9 +602,8 @@ public partial class CalendarWidget : Window
 
     void ShowNoteDialog(string dateKey, CalendarNoteViewModel? existingNote)
     {
-        var cn = _loc.CurrentLanguage == "zh";
         bool isEdit = existingNote != null;
-        var title = isEdit ? (cn ? "编辑备注" : "Edit Note") : _loc["Calendar.AddNote"];
+        var title = isEdit ? _loc["Calendar.EditNote"] : _loc["Calendar.AddNote"];
         var existingPriority = existingNote?.Priority ?? NotePriority.None;
         var existingContent = existingNote?.Content ?? "";
         var existingReminder = existingNote != null &&
@@ -708,10 +669,10 @@ public partial class CalendarWidget : Window
         var priorityPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
         Grid.SetRow(priorityPanel, 2);
         var cmb = ComboBoxHelper.Create(width: 120);
-        cmb.Items.Add(cn ? "无" : "None");
-        cmb.Items.Add(cn ? "低" : "Low");
-        cmb.Items.Add(cn ? "中" : "Normal");
-        cmb.Items.Add(cn ? "高" : "High");
+        cmb.Items.Add(_loc["Calendar.Priority.None"]);
+        cmb.Items.Add(_loc["Calendar.Priority.Low"]);
+        cmb.Items.Add(_loc["Calendar.Priority.Normal"]);
+        cmb.Items.Add(_loc["Calendar.Priority.High"]);
         cmb.SelectedIndex = existingPriority switch
         {
             NotePriority.Low => 1,
@@ -721,7 +682,7 @@ public partial class CalendarWidget : Window
         };
         priorityPanel.Children.Add(new TextBlock
         {
-            Text = cn ? "优先级:" : "Priority:",
+            Text = _loc["Calendar.Priority"],
             VerticalAlignment = VerticalAlignment.Center,
             Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0xA0)),
             FontSize = 11, Margin = new Thickness(0, 0, 6, 0)
@@ -734,7 +695,7 @@ public partial class CalendarWidget : Window
         Grid.SetRow(reminderPanel, 3);
         var reminderCheck = new CheckBox
         {
-            Content = cn ? "提醒" : "Reminder",
+            Content = _loc["Calendar.Reminder"],
             Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0xA0)),
             FontSize = 11,
             IsChecked = existingReminder.HasValue,

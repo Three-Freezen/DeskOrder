@@ -387,16 +387,19 @@ public class PropertyWindowManager
     // labels). Notes keep their per-instance title when set.
     public static string TitleOf(object target)
     {
+        var loc = LocalizationService.Instance;
         if (target is StickyNote n && !string.IsNullOrEmpty(n.Title)) return n.Title;
         return target switch
         {
             Zone z => z.Name,
             MergedGroupTarget g => string.IsNullOrEmpty(g.Master.MergedGroupMembership.DisplayName)
                 ? g.Master.Name : g.Master.MergedGroupMembership.DisplayName,
-            DesktopClock c => c.Mode == ClockDisplayMode.Digital ? "Clock (数字)" : "Clock (钟表)",
-            DesktopCalendar cal => $"Calendar {cal.DisplayYear}-{cal.DisplayMonth:D2}",
-            StickyNote => "便签",
-            PanelConfig => "控制面板",
+            DesktopClock c => c.Mode == ClockDisplayMode.Digital
+                ? $"{loc["Breadcrumb.Clock"]} ({loc["ClockProp.Digital"]})"
+                : $"{loc["Breadcrumb.Clock"]} ({loc["ClockProp.Analog"]})",
+            DesktopCalendar cal => $"{loc["Breadcrumb.Calendar"]} {cal.DisplayYear}-{cal.DisplayMonth:D2}",
+            StickyNote => loc["StickyNotePage.FallbackTitle"],
+            PanelConfig => loc["PanelPage.PanelTitle"],
             // ponytail 2026-08-26: SubFolder 编辑面板的标题直接取 ZoneItem.Name
             // (用户消息:右键重命名即可),不要回落到 "ZoneItem"。
             ZoneItem si => si.Name,

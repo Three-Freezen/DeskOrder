@@ -337,7 +337,7 @@ public partial class ClockWidget : Window
         // ponytail: force re-render — FillRect as a child paints more reliably than
         // Border.Background inside a transparent window with AllowsTransparency=True.
         FillRect.InvalidateVisual();
-        ApplyBodyTextColorAdaptive(fillColorStr);
+        ApplyDefaultTextColors();
     }
 
     /// <summary>Pick the fill color for the active widget.
@@ -348,45 +348,39 @@ public partial class ClockWidget : Window
     string ResolveEffectiveFill() =>
         _clock.Mode == ClockDisplayMode.Analog ? _clock.AnalogFillColor : _clock.DigitalFillColor;
 
-    /// <summary>Adaptive text/icon color based on the widget's effective fill.
-    /// When <see cref="DesktopClock.TextColorAdaptive"/> is true, overrides the user-set
-    /// TextColor / accent colors so the text stays legible on any background. When the
-    /// analog clock has a face image, samples 5 points from it instead of using FillColor.</summary>
-    void ApplyBodyTextColorAdaptive(string effectiveFill)
+    /// <summary>Re-apply the fixed body content colors (digital time uses TextColor; the
+    /// remaining chrome uses its hardcoded defaults).</summary>
+    public void RefreshTextColorAdaptive()
     {
-#if DEBUG
-        System.Diagnostics.Debug.WriteLine(
-            $"[adaptive] ClockWidget: bg={effectiveFill} adaptive={_clock.TextColorAdaptive}");
-#endif
-        if (!_clock.TextColorAdaptive) return;
-        SolidColorBrush brush;
-        // Prefer background-image sampling for the analog face when present.
-        if (ClockBgImage?.Source is BitmapSource bmp && !string.IsNullOrEmpty(_clock.BackgroundImagePath))
-        {
-            brush = AdaptiveTextColor.ResolveBrush(AdaptiveTextColor.ResolveTextColorForImage(bmp));
-        }
-        else
-        {
-            brush = AdaptiveTextColor.ResolveBrush(effectiveFill);
-        }
-        if (TimeText != null) TimeText.Foreground = brush;
-        if (DateText != null) DateText.Foreground = brush;
-        if (AnalogDateText != null) AnalogDateText.Foreground = brush;
-        if (HourHand != null) HourHand.Stroke = brush;
-        if (MinuteHand != null) MinuteHand.Stroke = brush;
-        if (SecondHand != null) SecondHand.Stroke = brush;
-        if (HideBtn != null) HideBtn.Foreground = brush;
-        if (LockBtn != null) LockBtn.Foreground = brush;
-        if (RestoreIconChar != null) RestoreIconChar.Foreground = brush;
-        // Refresh MarkerCanvas tick strokes; the analog dial border too.
+        ApplyDefaultTextColors();
+    }
+
+    /// <summary>Apply the fixed foregrounds split:
+    /// 主体内容颜色 → 时间/日期/指针/表盘；按钮颜色 → 锁/隐藏/恢复按钮；
+    /// 秒针颜色 → 仅秒针。</summary>
+    void ApplyDefaultTextColors()
+    {
+        SolidColorBrush content, buttons, second;
+        try { content = new SolidColorBrush((Color)ColorConverter.ConvertFromString(_clock.TextColor)!); } catch { content = Brushes.White; }
+        try { buttons = new SolidColorBrush((Color)ColorConverter.ConvertFromString(_clock.ButtonColor)!); } catch { buttons = Brushes.White; }
+        try { second = new SolidColorBrush((Color)ColorConverter.ConvertFromString(_clock.SecondHandColor)!); } catch { second = new SolidColorBrush(Color.FromRgb(0xFF, 0x66, 0x66)); }
+
+        // Digital + analog date — 主体内容颜色.
+        if (TimeText != null) TimeText.Foreground = content;
+        if (DateText != null) DateText.Foreground = content;
+        if (AnalogDateText != null) AnalogDateText.Foreground = content;
+
+        // Hands — 主体内容颜色（秒针除外）.
+        if (HourHand != null) HourHand.Stroke = content;
+        if (MinuteHand != null) MinuteHand.Stroke = content;
+        if (SecondHand != null) SecondHand.Stroke = second;
+
+        // Ticks — 主体内容颜色.
         if (MarkerCanvas != null)
-        {
             foreach (var child in MarkerCanvas.Children)
-            {
-                if (child is Line ln) ln.Stroke = brush;
-            }
-        }
-        // Outer dial ellipse + center dot
+                if (child is Line ln) ln.Stroke = content;
+
+        // Dial ellipse stroke + center dot — 主体内容颜色.
         if (AnalogPanel != null)
         {
             for (int i = 0; i < VisualTreeHelper.GetChildrenCount(AnalogPanel); i++)
@@ -394,15 +388,13 @@ public partial class ClockWidget : Window
                 var ch = VisualTreeHelper.GetChild(AnalogPanel, i);
                 if (ch is Ellipse el)
                 {
-                    if (el.Width == 200 && el.Height == 200) el.Stroke = brush;
-                    else if (el.Width == 10 && el.Height == 10) el.Fill = brush;
+                    if (el.Width == 200 && el.Height == 200) el.Stroke = content;
+                    else if (el.Width == 10 && el.Height == 10) el.Fill = content;
                 }
             }
         }
-        // ponytail: analog face background + date-window Border now ride the adaptive brush
-        // instead of staying at hardcoded #18000000 / #20FFFFFF / #40FFFFFF. Tinted to the
-        // adaptive hue at the original alpha so contrast on the hands/ticks is preserved.
-        var c = brush.Color;
+        // Face fill + date window tinted to the content color (keeps alpha structure).
+        var c = content.Color;
         if (AnalogFaceEllipse != null)
             AnalogFaceEllipse.Fill = new SolidColorBrush(Color.FromArgb(0x18, c.R, c.G, c.B));
         if (DateWindowBorder != null)
@@ -410,39 +402,11 @@ public partial class ClockWidget : Window
             DateWindowBorder.Background = new SolidColorBrush(Color.FromArgb(0x20, c.R, c.G, c.B));
             DateWindowBorder.BorderBrush = new SolidColorBrush(Color.FromArgb(0x40, c.R, c.G, c.B));
         }
-    }
 
-    /// <summary>Re-apply body text adaptive using the current model+config. Call when the
-    /// adaptive toggle changes (e.g. settings dialog live preview) or when switching modes
-    /// (so digital↔analog picks the right per-mode fill).</summary>
-    public void RefreshTextColorAdaptive()
-    {
-        string fillColorStr = ResolveEffectiveFill();
-        if (_clock.TextColorAdaptive) ApplyBodyTextColorAdaptive(fillColorStr);
-        else ApplyDefaultTextColors();
-    }
-
-    /// <summary>Restore hard-coded / user-configured foregrounds when adaptive is off.</summary>
-    void ApplyDefaultTextColors()
-    {
-        if (TimeText != null) TimeText.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(_clock.TextColor)!);
-        if (DateText != null) DateText.Foreground = new SolidColorBrush(Color.FromArgb(0xAA, 0xFF, 0xFF, 0xFF));
-        if (AnalogDateText != null) AnalogDateText.Foreground = new SolidColorBrush(Color.FromArgb(0xAA, 0xFF, 0xFF, 0xFF));
-        if (HourHand != null) HourHand.Stroke = new SolidColorBrush(Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF));
-        if (MinuteHand != null) MinuteHand.Stroke = new SolidColorBrush(Color.FromArgb(0xCC, 0xFF, 0xFF, 0xFF));
-        if (SecondHand != null) SecondHand.Stroke = new SolidColorBrush(Color.FromArgb(0xFF, 0xFF, 0x66, 0x66));
-        if (HideBtn != null) HideBtn.Foreground = new SolidColorBrush(Color.FromArgb(0x60, 0xFF, 0xFF, 0xFF));
-        if (LockBtn != null) LockBtn.Foreground = new SolidColorBrush(Color.FromArgb(0x60, 0xFF, 0xFF, 0xFF));
-        if (RestoreIconChar != null) RestoreIconChar.Foreground = new SolidColorBrush(Color.FromArgb(0xC0, 0xFF, 0xFF, 0xFF));
-        // ponytail: reset face bg + date window to XAML defaults so toggling adaptive off
-        // doesn't leave the last adaptive tint stuck on these elements.
-        if (AnalogFaceEllipse != null)
-            AnalogFaceEllipse.Fill = new SolidColorBrush(Color.FromArgb(0x18, 0x00, 0x00, 0x00));
-        if (DateWindowBorder != null)
-        {
-            DateWindowBorder.Background = new SolidColorBrush(Color.FromArgb(0x20, 0xFF, 0xFF, 0xFF));
-            DateWindowBorder.BorderBrush = new SolidColorBrush(Color.FromArgb(0x40, 0xFF, 0xFF, 0xFF));
-        }
+        // Buttons — 按钮颜色.
+        if (HideBtn != null) HideBtn.Foreground = buttons;
+        if (LockBtn != null) LockBtn.Foreground = buttons;
+        if (RestoreIconChar != null) RestoreIconChar.Foreground = buttons;
     }
 
     void ApplyAcrylic()
@@ -649,14 +613,13 @@ public partial class ClockWidget : Window
 
     void UpdateContextMenuLabels()
     {
-        var cn = _loc.CurrentLanguage == "zh";
         bool isAnalog = _clock.Mode == ClockDisplayMode.Analog;
         CtxSwitchMode.Header = isAnalog ? _loc["Clock.DigitalMode"] : _loc["Clock.AnalogMode"];
         CtxToggleSeconds.Header = _clock.ShowSeconds ? _loc["Clock.HideSeconds"] : _loc["Clock.ShowSeconds"];
         CtxToggle24h.Header = _clock.Use24Hour ? _loc["Clock.Format12h"] : _loc["Clock.Format24h"];
         CtxToggleRestore.Header = _clock.EnableRestoreButton
-            ? (cn ? "关闭恢复按钮" : "Disable Restore")
-            : (cn ? "启用恢复按钮" : "Enable Restore");
+            ? _loc["Clock.DisableRestore"]
+            : _loc["Clock.EnableRestore"];
         CtxDelete.Header = _loc["Clock.Delete"];
     }
 
@@ -714,10 +677,9 @@ public partial class ClockWidget : Window
         GenerateMarkers();
         UpdateContextMenuLabels();
         _widgetService.UpdateClock(_clock);
-        // ponytail: re-apply adaptive using the new mode's fill (Digital vs Analog) so the
-        // brush computed for the previous mode doesn't bleed into the new one. OnClocksChanged
-        // already calls SyncFillRect → ApplyBodyTextColorAdaptive, but doing it here as well
-        // makes the refresh deterministic regardless of WidgetService event ordering.
+        // ponytail: re-apply the fixed text colors for the new mode (Digital vs Analog).
+        // OnClocksChanged already calls SyncFillRect → ApplyDefaultTextColors, but doing it
+        // here as well makes the refresh deterministic regardless of WidgetService ordering.
         RefreshTextColorAdaptive();
     }
 
@@ -740,11 +702,10 @@ public partial class ClockWidget : Window
     void ToggleRestore_Click(object s, RoutedEventArgs e)
     {
         _clock.EnableRestoreButton = !_clock.EnableRestoreButton;
-        var cn = _loc.CurrentLanguage == "zh";
         if (s is MenuItem mi)
             mi.Header = _clock.EnableRestoreButton
-                ? (cn ? "关闭恢复按钮" : "Disable Restore")
-                : (cn ? "启用恢复按钮" : "Enable Restore");
+                ? _loc["Clock.DisableRestore"]
+                : _loc["Clock.EnableRestore"];
     }
 
     void HideBtn_Click(object s, RoutedEventArgs e)

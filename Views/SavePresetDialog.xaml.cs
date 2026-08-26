@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Threading;
+using DesktopZones.Helpers;
 using DesktopZones.Models;
 using DesktopZones.Services;
 
@@ -26,6 +27,14 @@ public partial class SavePresetDialog : Window
         NameBox.Text = _service.SuggestNextName();
         NameBox.Focus();
         NameBox.SelectAll();
+
+        // 尖角裁切修复：去掉 DWM 给无边框分层窗口绘制的矩形阴影并请求 Win11 圆角，
+        // 与主窗口(ZoneWindow 等)同一套处理，避免圆角内容四周残留直角阴影。
+        Loaded += (_, _) =>
+        {
+            NativeMethods.DisableDwmFrameShadow(this);
+            NativeMethods.SetRoundedCorners(this, 12);
+        };
     }
 
     private void ApplyLoc()
@@ -95,7 +104,7 @@ public partial class SavePresetDialog : Window
         }
         catch (System.Exception ex)
         {
-            MessageBox.Show($"Failed to save preset:\n{ex.Message}", "DeskOrder",
+            MessageBox.Show(string.Format(LocalizationService.Instance["Settings.SaveFailed"], ex.Message), "DeskOrder",
                 MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }

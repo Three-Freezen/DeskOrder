@@ -85,5 +85,9 @@ public class PanelService
         _window.ApplyAcrylic();
         _window.ApplyStyle();
         _window.ApplyBackgroundImage();
+        // ponytail: cards carry the body content color (PanelTextColor) and are built in
+        // RebuildDisplay — ApplyStyle only re-brushes the top bar, so without this the
+        // 主体内容颜色 edit looks like a no-op until some other RebuildDisplay trigger.
+        _window.RebuildDisplay();
     }
 }

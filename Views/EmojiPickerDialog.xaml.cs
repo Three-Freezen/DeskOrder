@@ -64,9 +64,8 @@ public partial class EmojiPickerDialog : Window
 
     void ApplyLoc()
     {
-        var cn = _loc.CurrentLanguage == "zh";
-        TitleLabel.Text = cn ? "选择图标" : "Pick Emoji";
-        CancelBtn.Content = cn ? "取消" : "Cancel";
+        TitleLabel.Text = _loc["EmojiPicker.Title"];
+        CancelBtn.Content = _loc["EmojiPicker.Cancel"];
     }
 
     void Cancel_Click(object s, RoutedEventArgs e) { DialogResult = false; Close(); }

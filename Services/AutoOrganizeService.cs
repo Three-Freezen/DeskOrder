@@ -59,7 +59,12 @@ public sealed class AutoOrganizeService : IDisposable
 
     void AttachZoneCore(Zone z)
     {
-        if (!z.AutoOrganizeEnabled) { DetachZoneCore(z.Id); return; }
+        // 监听开关关闭 → 不管有没有规则都暂停 watcher（保留规则，下次勾选即可恢复）。
+        if (!z.AutoOrganizeWatching || !z.AutoOrganizeEnabled)
+        {
+            DetachZoneCore(z.Id);
+            return;
+        }
         if (string.IsNullOrWhiteSpace(z.AutoOrganizeWatchPath)) { DetachZoneCore(z.Id); return; }
         if (!Directory.Exists(z.AutoOrganizeWatchPath))
         {
@@ -125,23 +130,25 @@ public sealed class AutoOrganizeService : IDisposable
         return added;
     }
 
-    /// <summary>匹配函数（纯函数，便于测试与未来扩展）。</summary>
+    /// <summary>匹配函数（纯函数，便于测试与未来扩展）。
+    /// 子开关（ExtEnabled / NameEnabled）为 false 时，对应规则列表不参与匹配（但内容保留）。</summary>
     public static bool Matches(Zone z, string filePath)
     {
         var ext = Path.GetExtension(filePath)?.ToLowerInvariant() ?? "";
         var name = Path.GetFileName(filePath);
 
-        bool extEnabled = z.AutoOrganizeExtensions.Count > 0;
-        bool nameEnabled = z.AutoOrganizeNameTokens.Count > 0;
-        if (!extEnabled && !nameEnabled) return false;
+        // 子开关控制：取消勾选 = 该类规则不参与匹配，但规则列表不删除
+        bool extActive = z.AutoOrganizeExtEnabled && z.AutoOrganizeExtensions.Count > 0;
+        bool nameActive = z.AutoOrganizeNameEnabled && z.AutoOrganizeNameTokens.Count > 0;
+        if (!extActive && !nameActive) return false;
 
-        bool extHit = extEnabled && z.AutoOrganizeExtensions
+        bool extHit = extActive && z.AutoOrganizeExtensions
             .Any(t => string.Equals(t, ext, StringComparison.OrdinalIgnoreCase));
-        bool nameHit = nameEnabled && z.AutoOrganizeNameTokens
+        bool nameHit = nameActive && z.AutoOrganizeNameTokens
             .Any(t => name.IndexOf(t, StringComparison.OrdinalIgnoreCase) >= 0);
 
-        if (extEnabled && nameEnabled) return extHit && nameHit;
-        if (extEnabled) return extHit;
+        if (extActive && nameActive) return extHit && nameHit;
+        if (extActive) return extHit;
         return nameHit;
     }
 
@@ -149,7 +156,7 @@ public sealed class AutoOrganizeService : IDisposable
     bool TryAddItem(Zone z, string path) => _zoneManager?.AddItem(z.Id, path) ?? false;
 
     static string PathMissingReason() =>
-        LocalizationService.Instance.CurrentLanguage == "zh" ? "路径不存在" : "Path does not exist";
+        LocalizationService.Instance["AutoOrganize.WatcherPathMissing"];
 
     void NotifyFailureOnce(Zone z, string reason)
     {
@@ -166,9 +173,9 @@ public sealed class AutoOrganizeService : IDisposable
         RunOnUi(() =>
         {
             if (App.Notify != null)
-                App.Notify("Auto-organize", $"{z.Name}: {msg}");
+                App.Notify(LocalizationService.Instance["ZoneProp.Section.AutoOrganize"], $"{z.Name}: {msg}");
             else
-                MessageBox.Show($"{z.Name}\n{msg}", "Auto-organize", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show($"{z.Name}\n{msg}", LocalizationService.Instance["ZoneProp.Section.AutoOrganize"], MessageBoxButton.OK, MessageBoxImage.Warning);
         });
     }
 
@@ -201,6 +208,8 @@ public sealed class AutoOrganizeService : IDisposable
 
         // 本 watcher 对应的配置快照，用于跳过无变化重建。
         readonly string _path;
+        readonly bool _extEnabled;
+        readonly bool _nameEnabled;
         readonly int _extHash;
         readonly int _tokenHash;
 
@@ -211,6 +220,8 @@ public sealed class AutoOrganizeService : IDisposable
             _owner = owner;
             Zone = z;
             _path = z.AutoOrganizeWatchPath ?? "";
+            _extEnabled = z.AutoOrganizeExtEnabled;
+            _nameEnabled = z.AutoOrganizeNameEnabled;
             _extHash = HashSet(z.AutoOrganizeExtensions);
             _tokenHash = HashSet(z.AutoOrganizeNameTokens);
 
@@ -228,7 +239,10 @@ public sealed class AutoOrganizeService : IDisposable
 
         public bool MatchesConfig(Zone z) =>
             string.Equals(_path, z.AutoOrganizeWatchPath ?? "", StringComparison.OrdinalIgnoreCase)
+            && z.AutoOrganizeWatching
             && z.AutoOrganizeEnabled
+            && _extEnabled == z.AutoOrganizeExtEnabled
+            && _nameEnabled == z.AutoOrganizeNameEnabled
             && _extHash == HashSet(z.AutoOrganizeExtensions)
             && _tokenHash == HashSet(z.AutoOrganizeNameTokens);
 

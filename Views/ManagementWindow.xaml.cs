@@ -512,6 +512,82 @@ public partial class ManagementWindow : Window
             if (panel == DockedPanel && DockedTabs != null)
                 DockedTabs.PinTab(Components.PropertyWindowManager.TargetKey(obj));
         };
+
+        // ── 状态区操作回调（PropertyPanel 顶部实时状态条）──
+        // 列表行右键菜单已取消，显示/锁定/删除/组合/快捷键操作全部移到面板状态区。
+
+        panel.ToggleVisibility = obj =>
+        {
+            switch (obj)
+            {
+                case Zone z:
+                    // HideZone 自带「无恢复按钮则彻底隐藏」语义（ZoneManager 内部处理）。
+                    if (z.IsVisible) _zoneManager.HideZone(z.Id);
+                    else _zoneManager.ShowZone(z);
+                    break;
+                case MergedGroupTarget g:
+                    if (g.Master.IsVisible) _zoneManager.HideZone(g.Master.Id);
+                    else _zoneManager.ShowZone(g.Master);
+                    break;
+                case DesktopClock c: ToggleClockWindowImpl(c); break;
+                case DesktopCalendar cal: ToggleCalendarWindowImpl(cal); break;
+                case StickyNote n: ToggleNoteWindow(n); break;
+                case PanelConfig p:
+                    p.PanelEnabled = !p.PanelEnabled;
+                    _configService.Save(LiveConfig);
+                    if (p.PanelEnabled) _panelService?.Show(LiveConfig);
+                    else _panelService?.CloseAndClear();
+                    break;
+            }
+        };
+
+        panel.DeleteTarget = obj =>
+        {
+            switch (obj)
+            {
+                case Zone z: DeleteZoneWithConfirm(z); break;
+                case MergedGroupTarget g:
+                    if (MessageBox.Show(_loc.Get("MergePage.DisbandConfirm",
+                            g.Master.MergedGroupMembership.DisplayName),
+                            _loc["MergePage.DisbandTitle"],
+                            MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
+                        DisbandEntireGroup(g.Master);
+                    break;
+                case DesktopClock c:
+                    if (MessageBox.Show(_loc.Get("ClockPage.DeleteConfirm", "Clock"),
+                            _loc["ClockPage.DeleteTitle"],
+                            MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
+                        DeleteClock(c);
+                    break;
+                case DesktopCalendar cal:
+                    if (MessageBox.Show(_loc.Get("CalendarPage.DeleteConfirm",
+                            $"Calendar {cal.DisplayYear}-{cal.DisplayMonth:D2}"),
+                            _loc["CalendarPage.DeleteTitle"],
+                            MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
+                        DeleteCalendar(cal);
+                    break;
+                case StickyNote n:
+                    if (MessageBox.Show(_loc.Get("StickyNotePage.DeleteConfirm", n.Title),
+                            _loc["StickyNotePage.DeleteTitle"],
+                            MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
+                        DeleteNote(n);
+                    break;
+            }
+        };
+
+        panel.AddZoneToMerge = z => ShowMergeDialog(z);
+        panel.DisbandSingleFromGroup = z => DisbandSingleZoneImpl(z);
+        // 快捷键菜单选择/录制完成后，回调面板刷新状态区的当前值文本。
+        panel.ShowNoteHotkeyMenu = (note, placement) => NoteHotkeySetImpl(note, placement, () => panel.RefreshStatusArea());
+        // PanelHotkey 字段在 AppConfig 上（PanelConfig 自身不含热键），始终用 LiveConfig。
+        panel.ShowPanelHotkeyMenu = (_, placement) => PanelHotkeySetImpl(LiveConfig, placement, () => panel.RefreshStatusArea());
+        panel.GetPanelHotkeyLabel = () =>
+        {
+            var h = LiveConfig.PanelHotkey;
+            return h.PanelHotkeyEnabled
+                ? GetHotkeyLabel(h.PanelHotkeyModifiers, h.PanelHotkeyKey)
+                : _loc["Hotkey.None"];
+        };
     }
 
     /// <summary>Resolve a domain target from a TabStrip key ("Type:Id"). Looks
@@ -565,11 +641,9 @@ public partial class ManagementWindow : Window
     public void ShowMergeDialog(Zone sourceZone) => ShowMergeDialogImpl(sourceZone);
     public void DisbandEntireGroup(Zone masterZone)
     {
-        var cn = _loc.CurrentLanguage == "zh";
         var result = MessageBox.Show(
-            cn ? $"确定要解散组合分区「{masterZone.MergedGroupMembership.DisplayName}」吗？\n所有分区将恢复为独立窗口。"
-               : $"Disband merged group \"{masterZone.MergedGroupMembership.DisplayName}\"?\nAll zones will return to individual windows.",
-            cn ? "解散组合" : "Disband Group",
+            _loc.Get("Merge.ConfirmDisband", masterZone.MergedGroupMembership.DisplayName),
+            _loc["Merge.DisbandTitle"],
             MessageBoxButton.YesNo, MessageBoxImage.Question);
         if (result == MessageBoxResult.Yes)
             _zoneManager.DisbandMergedGroup(masterZone.MergedGroupMembership.GroupId.Value);
@@ -663,13 +737,10 @@ public partial class ManagementWindow : Window
     /// <summary>Confirm before performing a full hide-all (used by sidebar).</summary>
     public bool ConfirmHideAll()
     {
-        var cn = _loc.CurrentLanguage == "zh";
         var totalZones = _zoneManager?.Zones?.Count ?? 0;
-        var msg = cn
-            ? $"隐藏全部 {totalZones} 个窗口？\n可从托盘菜单或本窗口恢复。"
-            : $"Hide all {totalZones} windows?\nYou can restore from the tray menu or this window.";
+        var msg = _loc.Get("Merge.HideAllConfirm", totalZones);
         var res = MessageBox.Show(msg,
-            cn ? "全部隐藏" : "Hide All",
+            _loc["Merge.HideAll"],
             MessageBoxButton.YesNo, MessageBoxImage.Question);
         return res == MessageBoxResult.Yes;
     }
@@ -985,7 +1056,7 @@ public partial class ManagementWindow : Window
             if (_panelService.IsOpen) _panelService.Hide();
             else _panelService.Show(config);
         }
-        catch (Exception ex) { System.Windows.MessageBox.Show(ex.ToString(), "PanelToggle Error"); }
+        catch (Exception ex) { System.Windows.MessageBox.Show(ex.ToString(), _loc["Merge.PanelToggleError"]); }
     }
 
     void TogglePropertyPanel() => SetPropertyPanelVisible(!_propertyPanelVisible, persist: true);
@@ -1005,14 +1076,23 @@ public partial class ManagementWindow : Window
         catch { }
     }
 
-    void NoteHotkeySetImpl(StickyNote note, Button btn)
+    // ── 快捷键预设菜单（便签/面板共用）──
+    //
+    // 状态区快捷键行的「设置快捷键」按钮弹出预设菜单（无/Alt+X/Ctrl+X/…）+
+    // 「新增…」自定义录制。泛化实现消除便签/面板两套重复代码。
+
+    void ShowHotkeyPresetMenuImpl(
+        FrameworkElement placement,
+        (string Label, int Modifiers, int Key, bool Enabled)[] presets,
+        Func<(int Modifiers, int Key, bool Enabled)> getCurrent,
+        Action<(int Modifiers, int Key, bool Enabled)> onPick,
+        Action onCustom)
     {
         try
         {
-            var cn = _loc.CurrentLanguage == "zh";
             var popup = new System.Windows.Controls.Primitives.Popup
             {
-                PlacementTarget = btn,
+                PlacementTarget = placement,
                 Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom,
                 StaysOpen = false,
                 AllowsTransparency = true
@@ -1028,15 +1108,16 @@ public partial class ManagementWindow : Window
             };
 
             var stack = new StackPanel();
-            foreach (var preset in HotkeyPresets)
+            var current = getCurrent();
+            foreach (var preset in presets)
             {
                 var captured = preset;
                 string label = captured.Enabled
                     ? GetHotkeyLabel(captured.Modifiers, captured.Key)
-                    : (cn ? "无" : "None");
-                bool isCurrent = note.HotkeyEnabled == captured.Enabled
-                    && note.HotkeyModifiers == captured.Modifiers
-                    && note.HotkeyKey == captured.Key;
+                    : _loc["Hotkey.None"];
+                bool isCurrent = current.Enabled == captured.Enabled
+                    && current.Modifiers == captured.Modifiers
+                    && current.Key == captured.Key;
 
                 var item = new Border
                 {
@@ -1053,11 +1134,7 @@ public partial class ManagementWindow : Window
                 };
                 item.MouseLeftButtonDown += (_, _) =>
                 {
-                    note.HotkeyEnabled = captured.Enabled;
-                    note.HotkeyModifiers = captured.Modifiers;
-                    note.HotkeyKey = captured.Key;
-                    _notesService?.UpdateNote(note);
-                    if (System.Windows.Application.Current is App app) app.RefreshNoteHotkeys();
+                    onPick((captured.Modifiers, captured.Key, captured.Enabled));
                     popup.IsOpen = false;
                 };
                 item.MouseEnter += (s3, _) => { if (s3 is Border b3 && !isCurrent) b3.Background = ThemeBrushes.AccentWashModern; };
@@ -1082,14 +1159,14 @@ public partial class ManagementWindow : Window
             };
             newItem.Child = new TextBlock
             {
-                Text = cn ? "新增..." : "New...",
+                Text = _loc["Hotkey.New"],
                 FontSize = 11,
                 Foreground = ThemeBrushes.AccentSolidModern
             };
             newItem.MouseLeftButtonDown += (_, _) =>
             {
                 popup.IsOpen = false;
-                ShowNoteHotkeyRecorderDialogImpl(note);
+                onCustom();
             };
             newItem.MouseEnter += (s3, _) => { if (s3 is Border b3) b3.Background = ThemeBrushes.BgHoverModern; };
             newItem.MouseLeave += (s3, _) => { if (s3 is Border b3) b3.Background = Brushes.Transparent; };
@@ -1102,12 +1179,49 @@ public partial class ManagementWindow : Window
         catch { }
     }
 
-    void ShowNoteHotkeyRecorderDialogImpl(StickyNote note)
+    void NoteHotkeySetImpl(StickyNote note, FrameworkElement placement, Action? onSaved = null)
     {
-        var cn = _loc.CurrentLanguage == "zh";
+        ShowHotkeyPresetMenuImpl(placement, HotkeyPresets,
+            getCurrent: () => (note.HotkeyModifiers, note.HotkeyKey, note.HotkeyEnabled),
+            onPick: picked =>
+            {
+                note.HotkeyEnabled = picked.Enabled;
+                note.HotkeyModifiers = picked.Modifiers;
+                note.HotkeyKey = picked.Key;
+                _notesService?.UpdateNote(note);
+                if (System.Windows.Application.Current is App app) app.RefreshNoteHotkeys();
+                onSaved?.Invoke();
+            },
+            onCustom: () => ShowNoteHotkeyRecorderDialogImpl(note, onSaved));
+    }
+
+    void PanelHotkeySetImpl(AppConfig cfg, FrameworkElement placement, Action? onSaved = null)
+    {
+        ShowHotkeyPresetMenuImpl(placement, PanelHotkeyPresets,
+            getCurrent: () => (cfg.PanelHotkey.PanelHotkeyModifiers, cfg.PanelHotkey.PanelHotkeyKey, cfg.PanelHotkey.PanelHotkeyEnabled),
+            onPick: picked =>
+            {
+                cfg.PanelHotkey.PanelHotkeyEnabled = picked.Enabled;
+                cfg.PanelHotkey.PanelHotkeyModifiers = picked.Modifiers;
+                cfg.PanelHotkey.PanelHotkeyKey = picked.Key;
+                if (System.Windows.Application.Current is App app)
+                {
+                    if (picked.Enabled) app.RegisterPanelHotkey(picked.Modifiers, picked.Key);
+                    else app.UnregisterPanelHotkey();
+                }
+                _configService.Save(cfg);
+                onSaved?.Invoke();
+            },
+            onCustom: () => ShowPanelHotkeyRecorderDialogImpl(cfg, onSaved));
+    }
+
+    // ── 快捷键录制对话框（泛化：UI 骨架共享，保存回调按目标类型分派）──
+
+    void ShowHotkeyRecorderDialogImpl(Action<int, int> onSave, Action? onSaved = null)
+    {
         var dlg = new Window
         {
-            Title = cn ? "录制快捷键" : "Record Hotkey",
+            Title = _loc["Hotkey.Record"],
             Width = 320, Height = 180,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Owner = this,
@@ -1135,7 +1249,7 @@ public partial class ManagementWindow : Window
         titleBar.MouseLeftButtonDown += (_, _) => { try { dlg.DragMove(); } catch { } };
         titleBar.Child = new TextBlock
         {
-            Text = cn ? "录制快捷键" : "Record Hotkey",
+            Text = _loc["Hotkey.Record"],
             FontSize = 14, FontWeight = FontWeights.SemiBold,
             Foreground = ThemeBrushes.TextPrimaryModern,
             VerticalAlignment = VerticalAlignment.Center
@@ -1145,7 +1259,7 @@ public partial class ManagementWindow : Window
 
         var instruction = new TextBlock
         {
-            Text = cn ? "请按下快捷键组合..." : "Press hotkey combination...",
+            Text = _loc["Hotkey.PressHint"],
             FontSize = 12, Foreground = ThemeBrushes.TextSecondaryModern,
             HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, 12)
         };
@@ -1168,7 +1282,7 @@ public partial class ManagementWindow : Window
         var buttonPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
         var cancelButton = new Button
         {
-            Content = cn ? "取消" : "Cancel", Width = 60, Height = 28, FontSize = 11, Cursor = Cursors.Hand,
+            Content = _loc["Common.Cancel"], Width = 60, Height = 28, FontSize = 11, Cursor = Cursors.Hand,
             Background = ThemeBrushes.BgHoverModern,
             Foreground = ThemeBrushes.TextSecondaryModern,
             BorderThickness = new Thickness(1),
@@ -1178,7 +1292,7 @@ public partial class ManagementWindow : Window
         cancelButton.Click += (_, _) => dlg.Close();
         var saveButton = new Button
         {
-            Content = cn ? "保存" : "Save", Width = 60, Height = 28, FontSize = 11, Cursor = Cursors.Hand,
+            Content = _loc["Common.Save"], Width = 60, Height = 28, FontSize = 11, Cursor = Cursors.Hand,
             Background = ThemeBrushes.AccentSolidModern,
             Foreground = ThemeBrushes.TextTertiaryModern,
             BorderThickness = new Thickness(0),
@@ -1219,22 +1333,42 @@ public partial class ManagementWindow : Window
 
         saveButton.Click += (_, _) =>
         {
-            if (note.CustomHotkeys == null) note.CustomHotkeys = new List<CustomHotkey>();
-            note.CustomHotkeys.Add(new CustomHotkey { Modifiers = recordedModifiers, Key = recordedKey });
-            note.HotkeyEnabled = true;
-            note.HotkeyModifiers = recordedModifiers;
-            note.HotkeyKey = recordedKey;
-            _notesService?.UpdateNote(note);
-            if (System.Windows.Application.Current is App app) app.RefreshNoteHotkeys();
+            onSave(recordedModifiers, recordedKey);
+            onSaved?.Invoke();
             dlg.Close();
         };
 
         dlg.ShowDialog();
     }
 
+    void ShowNoteHotkeyRecorderDialogImpl(StickyNote note, Action? onSaved = null)
+    {
+        ShowHotkeyRecorderDialogImpl((mods, key) =>
+        {
+            if (note.CustomHotkeys == null) note.CustomHotkeys = new List<CustomHotkey>();
+            note.CustomHotkeys.Add(new CustomHotkey { Modifiers = mods, Key = key });
+            note.HotkeyEnabled = true;
+            note.HotkeyModifiers = mods;
+            note.HotkeyKey = key;
+            _notesService?.UpdateNote(note);
+            if (System.Windows.Application.Current is App app) app.RefreshNoteHotkeys();
+        }, onSaved);
+    }
+
+    void ShowPanelHotkeyRecorderDialogImpl(AppConfig cfg, Action? onSaved = null)
+    {
+        ShowHotkeyRecorderDialogImpl((mods, key) =>
+        {
+            cfg.PanelHotkey.PanelHotkeyEnabled = true;
+            cfg.PanelHotkey.PanelHotkeyModifiers = mods;
+            cfg.PanelHotkey.PanelHotkeyKey = key;
+            _configService.Save(cfg);
+            if (System.Windows.Application.Current is App app) app.RegisterPanelHotkey(mods, key);
+        }, onSaved);
+    }
+
     void ShowMergedGroupContextMenuImpl(Zone masterZone, Button placementBtn)
     {
-        var cn = _loc.CurrentLanguage == "zh";
         var popup = new System.Windows.Controls.Primitives.Popup
         {
             AllowsTransparency = true,
@@ -1274,12 +1408,12 @@ public partial class ManagementWindow : Window
         }
 
         if (masterZone.MergedGroupMembership.SubZoneIds.Count > 0)
-            stack.Children.Add(MakeItem(cn ? "分离单个分区" : "Disband Single Zone", () => DisbandSingleZoneImpl(masterZone)));
-        stack.Children.Add(MakeItem(cn ? "解散组合分区" : "Disband Entire Group", () => DisbandEntireGroup(masterZone)));
+            stack.Children.Add(MakeItem(_loc["Merge.DisbandSingle"], () => DisbandSingleZoneImpl(masterZone)));
+        stack.Children.Add(MakeItem(_loc["Merge.DisbandAll"], () => DisbandEntireGroup(masterZone)));
         stack.Children.Add(new Border { Height = 1, Background = ThemeBrushes.BorderSubtleModern, Margin = new Thickness(6, 4, 6, 4) });
-        stack.Children.Add(MakeItem(cn ? "添加分区到组合" : "Add Zone to Group", () => ShowMergeDialogImpl(masterZone)));
+        stack.Children.Add(MakeItem(_loc["Merge.AddZone"], () => ShowMergeDialogImpl(masterZone)));
         if (_zoneManager.Zones.Any(z => z.MergedGroupMembership.SubZoneIds.Count > 0 && z.Id != masterZone.Id))
-            stack.Children.Add(MakeItem(cn ? "与其他组合合并" : "Merge with Another Group", () => MergeWithAnotherGroupImpl(masterZone)));
+            stack.Children.Add(MakeItem(_loc["Merge.MergeBtn"], () => MergeWithAnotherGroupImpl(masterZone)));
 
         menuBorder.Child = stack;
         popup.Child = menuBorder;
@@ -1296,8 +1430,7 @@ public partial class ManagementWindow : Window
 
     void DisbandSingleZoneImpl(Zone masterZone)
     {
-        var cn = _loc.CurrentLanguage == "zh";
-        var dialogTitle = cn ? "选择要分离的分区" : "Select Zone to Disband";
+        var dialogTitle = _loc["Merge.SelectZoneToDisband"];
         var dialog = new Window
         {
             Title = dialogTitle, Width = 300, Height = 250,
@@ -1318,7 +1451,7 @@ public partial class ManagementWindow : Window
 
         var header = new TextBlock
         {
-            Text = cn ? "选择要从组合中分离的分区：" : "Select zone to remove from group:",
+            Text = _loc["Merge.SelectZoneLabel"],
             FontSize = 13, FontWeight = FontWeights.SemiBold,
             Foreground = ThemeBrushes.TextPrimaryModern,
             Margin = new Thickness(0, 0, 0, 12)
@@ -1350,9 +1483,9 @@ public partial class ManagementWindow : Window
         grid.Children.Add(listBox);
 
         var btnRow = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-        var cancelBtn = new Button { Content = cn ? "取消" : "Cancel", Width = 70, Height = 28, Background = ThemeBrushes.BgHoverModern, Foreground = ThemeBrushes.TextPrimaryModern, BorderThickness = new Thickness(0), FontSize = 11, Cursor = Cursors.Hand, Margin = new Thickness(0, 0, 8, 0) };
+        var cancelBtn = new Button { Content = _loc["Common.Cancel"], Width = 70, Height = 28, Background = ThemeBrushes.BgHoverModern, Foreground = ThemeBrushes.TextPrimaryModern, BorderThickness = new Thickness(0), FontSize = 11, Cursor = Cursors.Hand, Margin = new Thickness(0, 0, 8, 0) };
         cancelBtn.Click += (_, _) => dialog.Close();
-        var disbandBtn = new Button { Content = cn ? "分离" : "Disband", Width = 80, Height = 28, Background = ThemeBrushes.AccentSolidModern, Foreground = Brushes.White, BorderThickness = new Thickness(0), FontSize = 11, Cursor = Cursors.Hand };
+        var disbandBtn = new Button { Content = _loc["Merge.DisbandSingle"], Width = 80, Height = 28, Background = ThemeBrushes.AccentSolidModern, Foreground = Brushes.White, BorderThickness = new Thickness(0), FontSize = 11, Cursor = Cursors.Hand };
         disbandBtn.Click += (_, _) =>
         {
             if (listBox.SelectedItem is ListBoxItem item && item.Tag is Zone selectedZone)
@@ -1372,16 +1505,15 @@ public partial class ManagementWindow : Window
 
     void MergeWithAnotherGroupImpl(Zone sourceMaster)
     {
-        var cn = _loc.CurrentLanguage == "zh";
         var otherGroups = _zoneManager.Zones.Where(z => z.MergedGroupMembership.SubZoneIds.Count > 0 && z.Id != sourceMaster.Id).ToList();
         if (otherGroups.Count == 0)
         {
-            MessageBox.Show(cn ? "没有其他组合分区可合并。" : "No other merged groups to merge with.",
-                cn ? "合并" : "Merge", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(_loc["Merge.NoTargets"],
+                _loc["Merge.Info"], MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
-        var mergeTargetTitle = cn ? "选择要合并的目标组合" : "Select Target Group to Merge";
+        var mergeTargetTitle = _loc["Merge.SelectTarget"];
         var dialog = new Window { Title = mergeTargetTitle, Width = 360, Height = 300, WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = this, ResizeMode = ResizeMode.NoResize };
 
         var bgBorder = new Border { Background = ThemeBrushes.BgChromeModern, CornerRadius = new CornerRadius(8), Padding = new Thickness(16), Child = new Grid() };
@@ -1390,7 +1522,7 @@ public partial class ManagementWindow : Window
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        var header = new TextBlock { Text = cn ? "选择要合并的目标组合：" : "Select target group to merge with:", FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = ThemeBrushes.TextPrimaryModern, Margin = new Thickness(0, 0, 0, 12) };
+        var header = new TextBlock { Text = _loc["Merge.SelectTargetLabel"], FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = ThemeBrushes.TextPrimaryModern, Margin = new Thickness(0, 0, 0, 12) };
         Grid.SetRow(header, 0);
         grid.Children.Add(header);
 
@@ -1408,9 +1540,9 @@ public partial class ManagementWindow : Window
         grid.Children.Add(listBox);
 
         var btnRow = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-        var cancelBtn = new Button { Content = cn ? "取消" : "Cancel", Width = 70, Height = 28, Background = ThemeBrushes.BgHoverModern, Foreground = ThemeBrushes.TextPrimaryModern, BorderThickness = new Thickness(0), FontSize = 11, Cursor = Cursors.Hand, Margin = new Thickness(0, 0, 8, 0) };
+        var cancelBtn = new Button { Content = _loc["Common.Cancel"], Width = 70, Height = 28, Background = ThemeBrushes.BgHoverModern, Foreground = ThemeBrushes.TextPrimaryModern, BorderThickness = new Thickness(0), FontSize = 11, Cursor = Cursors.Hand, Margin = new Thickness(0, 0, 8, 0) };
         cancelBtn.Click += (_, _) => dialog.Close();
-        var mergeBtn = new Button { Content = cn ? "合并" : "Merge", Width = 80, Height = 28, Background = ThemeBrushes.AccentSolidModern, Foreground = Brushes.White, BorderThickness = new Thickness(0), FontSize = 11, Cursor = Cursors.Hand };
+        var mergeBtn = new Button { Content = _loc["Merge.MergeBtn"], Width = 80, Height = 28, Background = ThemeBrushes.AccentSolidModern, Foreground = Brushes.White, BorderThickness = new Thickness(0), FontSize = 11, Cursor = Cursors.Hand };
         mergeBtn.Click += (_, _) =>
         {
             if (listBox.SelectedItem is ListBoxItem item && item.Tag is Zone targetGroup)
@@ -1436,7 +1568,6 @@ public partial class ManagementWindow : Window
 
     void ShowMergeDialogImpl(Zone sourceZone)
     {
-        var cn = _loc.CurrentLanguage == "zh";
         var eligibleZones = _zoneManager.Zones
             .Where(z => z.Id != sourceZone.Id
                 && (sourceZone.MergedGroupMembership.GroupId == null
@@ -1459,12 +1590,12 @@ public partial class ManagementWindow : Window
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        var header = new TextBlock { Text = cn ? "选择要合并的分区（可多选）：" : "Select zones to merge (multi-select):", FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = ThemeBrushes.TextPrimaryModern, Margin = new Thickness(0, 0, 0, 12) };
+        var header = new TextBlock { Text = _loc["Merge.SelectZonesToMerge"], FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = ThemeBrushes.TextPrimaryModern, Margin = new Thickness(0, 0, 0, 12) };
         Grid.SetRow(header, 0);
         grid.Children.Add(header);
 
         var selectAllPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
-        var selectAllCheckBox = new CheckBox { Content = cn ? "全选" : "Select All", Foreground = ThemeBrushes.TextPrimaryModern, FontSize = 12, IsChecked = false };
+        var selectAllCheckBox = new CheckBox { Content = _loc["Merge.SelectAll"], Foreground = ThemeBrushes.TextPrimaryModern, FontSize = 12, IsChecked = false };
         selectAllPanel.Children.Add(selectAllCheckBox);
         Grid.SetRow(selectAllPanel, 1);
         grid.Children.Add(selectAllPanel);
@@ -1498,7 +1629,7 @@ public partial class ManagementWindow : Window
             var selected = checkBoxes.Where(cb => cb.IsChecked == true).Select(cb => cb.Tag as Zone).Where(z => z != null).ToList();
             if (selected.Count == 0)
             {
-                MessageBox.Show(cn ? "请至少选择一个分区" : "Please select at least one zone", cn ? "提示" : "Info", MessageBoxButton.OK, MessageBoxImage.Information);
+                MessageBox.Show(_loc["Merge.SelectAtLeastOne"], _loc["Merge.Info"], MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
             foreach (var tz in selected) _zoneManager.MergeZones(sourceZone.Id, tz!.Id);
@@ -1600,14 +1731,14 @@ public partial class ManagementWindow : Window
         int calendars = _widgetService?.Calendars?.Count ?? 0;
         return section switch
         {
-            "zones"    => $"{zones} 分区",
-            "merged"   => $"{merged} 个组合",
-            "panel"    => "1 面板",
-            "calendar" => $"{calendars} 个日历",
-            "clock"    => $"{clocks} 个时钟",
-            "sticky"   => $"{notes} 张便签",
-            "about"    => "关于页面",
-            "settings" => "设置面板",
+            "zones"    => _loc.Get("Manage.Sidebar.Zones", zones),
+            "merged"   => _loc.Get("Manage.Sidebar.MergedGroups", merged),
+            "panel"    => _loc["Manage.Sidebar.Panel"],
+            "calendar" => _loc.Get("Manage.Sidebar.Calendars", calendars),
+            "clock"    => _loc.Get("Manage.Sidebar.Clocks", clocks),
+            "sticky"   => _loc.Get("Manage.Sidebar.Notes", notes),
+            "about"    => _loc["Manage.Sidebar.About"],
+            "settings" => _loc["Manage.Sidebar.Settings"],
             _          => ""
         };
     }

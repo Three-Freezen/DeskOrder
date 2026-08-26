@@ -170,9 +170,7 @@ public partial class AutoOrganizePickerWindow : Window
     void Add_Click(object sender, RoutedEventArgs e)
     {
         bool isExt = _kind == AutoOrganizePickerKind.Extension;
-        var tokenInvalid = LocalizationService.Instance.CurrentLanguage == "zh"
-            ? "长度 1-50"
-            : "1-50 chars";
+        var tokenInvalid = _loc["AutoOrganizePicker.TokenLength"];
         var input = new ChipInputPopup(
             isExt ? _loc["ZoneProp.AutoOrganize.Picker.AddCustom"] : _loc["ZoneProp.AutoOrganize.Picker.AddToken"],
             isExt ? _loc["ZoneProp.AutoOrganize.Picker.CustomPlaceholder"] : _loc["ZoneProp.AutoOrganize.NameLabel"],

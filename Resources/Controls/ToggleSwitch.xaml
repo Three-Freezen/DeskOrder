@@ -33,10 +33,38 @@
           <ControlTemplate.Triggers>
             <!-- ponytail 2026-08-25: 镂空 Switch — 开启时 Track = Accent.Solid（深 accent 填充），
                  Dot = Accent.On（同色淡化 60%，镂空效果），不用 ColorAnimation 因为 brush 是 SolidColorBrush 的 Color DP。
-                 关闭时恢复 Brush.Bg.Active 灰色 Track + Brush.Text.Tertiary 灰色 Dot。 -->
+                 关闭时恢复 Brush.Bg.Active 灰色 Track + Brush.Text.Tertiary 灰色 Dot。
+                 状态区要求开关带滑动动画：IsChecked 进出用 EnterActions/ExitActions 平移 DotTransform（2→18），
+                 程序设置 IsChecked 同样播放，保证实时同步刷新时开关滑动到位。 -->
             <Trigger Property="IsChecked" Value="True">
               <Setter TargetName="Track" Property="Background" Value="{DynamicResource Brush.Accent.Solid}"/>
               <Setter TargetName="Dot" Property="Background" Value="{DynamicResource Brush.Accent.On}"/>
+              <Trigger.EnterActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="DotTransform"
+                                     Storyboard.TargetProperty="X"
+                                     To="18" Duration="0:0:0.15">
+                      <DoubleAnimation.EasingFunction>
+                        <QuadraticEase EasingMode="EaseOut"/>
+                      </DoubleAnimation.EasingFunction>
+                    </DoubleAnimation>
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Trigger.ExitActions>
+                <BeginStoryboard>
+                  <Storyboard>
+                    <DoubleAnimation Storyboard.TargetName="DotTransform"
+                                     Storyboard.TargetProperty="X"
+                                     To="2" Duration="0:0:0.15">
+                      <DoubleAnimation.EasingFunction>
+                        <QuadraticEase EasingMode="EaseOut"/>
+                      </DoubleAnimation.EasingFunction>
+                    </DoubleAnimation>
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.ExitActions>
             </Trigger>
             <Trigger Property="IsEnabled" Value="False">
               <Setter TargetName="Track" Property="Opacity" Value="0.5"/>

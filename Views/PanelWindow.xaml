@@ -15,7 +15,11 @@
         AllowDrop="True"
         DragEnter="Panel_DragEnter"
         DragOver="Panel_DragOver"
-        Drop="Panel_Drop">
+        Drop="Panel_Drop"
+        PreviewMouseLeftButtonDown="Panel_PreviewMouseLeftButtonDown"
+        PreviewKeyDown="Panel_PreviewKeyDown"
+        MouseMove="Panel_MouseMove"
+        MouseLeftButtonUp="Panel_MouseLeftButtonUp">
     <Window.Resources>
         <!-- ponytail 2026-08-24: locked dark-theme dropdown chrome. Same hex
              palette StickyNoteWindow uses so the Panel's zone-selector popup
@@ -169,6 +173,7 @@
                                     <ContextMenu>
                                         <MenuItem x:Name="CtxImportFiles" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Panel.ImportFiles]}" Click="ImportFile_Click"/>
                                         <MenuItem x:Name="CtxImportFolder" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Panel.ImportFolder]}" Click="ImportFolder_Click"/>
+                                        <MenuItem x:Name="CtxNewSubfolder" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Subfolder.New]}" Click="NewSubfolder_Click"/>
                                         <Separator/>
                                         <MenuItem x:Name="CtxNew" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Panel.New]}">
                                             <MenuItem x:Name="CtxNewFolder" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Panel.NewFolder]}" Click="NewFolder_Click"/>
@@ -214,8 +219,13 @@
                     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
                                   HorizontalScrollBarVisibility="Disabled"
                                   Background="Transparent" Margin="8,4,8,8"
+                                  PreviewMouseLeftButtonDown="ContentArea_PreviewMouseLeftButtonDown"
                                   MouseRightButtonDown="ContentArea_RightClick">
-                        <StackPanel x:Name="ContentStack"/>
+                        <Grid>
+                            <StackPanel x:Name="ContentStack"/>
+                            <!-- 拖动框选层（与分区 MarqueeLayer 同款，随内容一起滚动） -->
+                            <Canvas x:Name="MarqueeLayer" IsHitTestVisible="False" Background="Transparent"/>
+                        </Grid>
                     </ScrollViewer>
                 </Grid>
             </Grid>

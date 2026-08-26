@@ -1,9 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Interop;
@@ -11,6 +13,8 @@ using System.Windows.Media.Imaging;
 using DesktopZones.Helpers;
 using DesktopZones.Models;
 using DesktopZones.Services;
+using DesktopZones.ViewModels;
+using DesktopZones.Views.Components;
 using Microsoft.Win32;
 
 namespace DesktopZones.Views;
@@ -39,6 +43,22 @@ public partial class PanelWindow : Window
     private bool _isGridView = true;
     private Zone? _selectedZone;
     private Action<string>? _langChanged;
+
+    // ── 移植自分区:拖动选中 + 次级文件夹浮层 ──
+    private readonly HashSet<Guid> _selectedItemIds = new();
+    private readonly Dictionary<Guid, (Border Card, Border Highlight, ZoneItem Item, Zone Zone)> _panelCards = new();
+    private bool _marqueeActive;
+    private bool _marqueeMoved;
+    private Point _marqueeStart;
+    private HashSet<Guid>? _marqueeStartSel;
+    private System.Windows.Shapes.Rectangle? _marqueeRect;
+    private Popup? _subfolderPopup;
+    private SubfolderFlyout? _subfolderFlyout;
+    // ponytail 2026-08-26: 与分区 OpenSubfolderFlyout 一致 — 关闭动画进行中点开新
+    // SubFolder 时,token 递增;老 close onComplete 检 token 失配直接 return,避免
+    // 把刚开的新 flyout 误关。_flyoutClosing 防重入(re-guard 关闭请求)。
+    private bool _flyoutClosing;
+    private int _flyoutOpenToken;
 
     public PanelWindow(ZoneManager zoneManager, ConfigService configService)
     {
@@ -91,7 +111,7 @@ public partial class PanelWindow : Window
         if (ClockText == null || DateText == null) return;
         var now = DateTime.Now;
         ClockText.Text = now.ToString("HH:mm:ss");
-        DateText.Text = now.ToString("yyyy年M月d日 dddd");
+        DateText.Text = now.ToString(_loc["Panel.DateFormat"]);
     }
 
     void PopulateZoneSelector()
@@ -99,8 +119,7 @@ public partial class PanelWindow : Window
         if (ZoneSelector == null) return;
         var prevSelection = ZoneSelector.SelectedIndex;
         ZoneSelector.Items.Clear();
-        var cn = _loc.CurrentLanguage == "zh";
-        ZoneSelector.Items.Add(cn ? "全部分区" : "All Zones");
+        ZoneSelector.Items.Add(_loc["Panel.AllZones"]);
         foreach (var zone in _zoneManager.Zones)
         {
             ZoneSelector.Items.Add(zone.Name);
@@ -257,19 +276,20 @@ public partial class PanelWindow : Window
         }
         catch { }
 
-        // ponytail: top-bar text adaptive — PanelTopBar = ClockText / DateText / TitleText /
-        // SearchPlaceholder + SearchBox. Mirror ZoneTitleText pattern: adaptive on → adaptive
-        // brush computed from PanelTitleBarFillColor over PanelFillColor (visible top-bar
-        // color); adaptive off → XAML default stays (no hardcoded hex fallback in C#).
-        if (config.Panel.PanelTitleBarTextColorAdaptive)
-        {
-            var tbBrush = AdaptiveTextColor.ResolveBrushOver(config.Panel.PanelTitleBarFillColor, config.Panel.PanelFillColor);
-            if (TitleText != null) TitleText.Foreground = tbBrush;
-            if (ClockText != null) ClockText.Foreground = tbBrush;
-            if (DateText != null) DateText.Foreground = tbBrush;
-            if (SearchPlaceholder != null) SearchPlaceholder.Foreground = tbBrush;
-            if (SearchBox != null) SearchBox.Foreground = tbBrush;
-        }
+        // Top-bar content color — fixed 按钮颜色 (replaces the old title-bar adaptive).
+        // Panel top bar = ClockText / DateText / TitleText + the 5 glyph buttons
+        // (▦/≡/+/⚙/─). The search box keeps its own XAML defaults.
+        SolidColorBrush topBarBrush;
+        try { topBarBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(config.Panel.PanelButtonColor)!); }
+        catch { topBarBrush = Brushes.White; }
+        if (TitleText != null) TitleText.Foreground = topBarBrush;
+        if (ClockText != null) ClockText.Foreground = topBarBrush;
+        if (DateText != null) DateText.Foreground = topBarBrush;
+        ApplyButtonGlyphForeground(GridToggleBtn, topBarBrush);
+        ApplyButtonGlyphForeground(ListToggleBtn, topBarBrush);
+        ApplyButtonGlyphForeground(ImportBtn, topBarBrush);
+        ApplyButtonGlyphForeground(SettingsBtn, topBarBrush);
+        ApplyButtonGlyphForeground(HideBtn, topBarBrush);
 
         // 按钮透明度 — top-bar control chrome rides PanelControlOpacity, Zone-style.
         var controlOpacity = Math.Max(0.05, config.Panel.PanelControlOpacity / 100.0);
@@ -280,10 +300,16 @@ public partial class PanelWindow : Window
         if (HideBtn != null) HideBtn.Opacity = controlOpacity;
     }
 
-    /// <summary>Re-apply full style. Replaces the old RefreshTextColorAdaptive (which only
-    /// re-brushed text); since cards are rebuilt with the correct brush at creation time
-    /// and top-bar XAML defaults stay when adaptive is off, a single ApplyStyle() covers
-    /// the live-preview case from settings dialog.</summary>
+    /// <summary>Set the foreground of a top-bar glyph button (a <see cref="Border"/> whose
+    /// single child is the glyph <see cref="TextBlock"/>).</summary>
+    static void ApplyButtonGlyphForeground(Border? btn, Brush brush)
+    {
+        if (btn?.Child is TextBlock tb) tb.Foreground = brush;
+    }
+
+    /// <summary>Re-apply full style: cards are rebuilt with the fixed content-color brushes
+    /// at creation time and the top bar is re-brushed by ApplyStyle, so a single ApplyStyle()
+    /// + RebuildDisplay() covers the live-preview case from the settings dialog.</summary>
     public void RefreshTextColorAdaptive()
     {
         ApplyStyle();
@@ -365,6 +391,9 @@ public partial class PanelWindow : Window
             {
                 if (ContentStack == null) return;
                 ContentStack.Children.Clear();
+                _panelCards.Clear();
+                _selectedItemIds.Clear();
+                CloseSubfolderFlyoutIfOrphaned();
 
                 string search = SearchBox?.Text?.Trim() ?? "";
                 bool hasSearch = !string.IsNullOrEmpty(search);
@@ -373,23 +402,13 @@ public partial class PanelWindow : Window
                     ? new[] { _selectedZone }
                     : _zoneManager.Zones.ToArray();
 
-                // ponytail: resolve adaptive brushes ONCE before creating cards, so each
-                // card is built with the correct brush at creation time. No need for a
-                // post-creation re-brush walk (which raced with the BeginInvoke timing).
-                // Mirror ZoneTitleText: adaptive on → computed brush; adaptive off → null
-                // (XAML default stays). Cards still match the title bar's contract.
+                // ponytail: resolve the fixed content colors ONCE before creating cards, so
+                // each card is built with the correct brush at creation time.
                 var cfg = _zoneManager.GetConfig();
-                Brush? titleBarBrush = cfg.Panel.PanelTitleBarTextColorAdaptive
-                    ? AdaptiveTextColor.ResolveBrushOver(cfg.Panel.PanelTitleBarFillColor, cfg.Panel.PanelFillColor)
-                    : null;
+                Brush? titleBarBrush = null;
                 Brush? bodyBrush = null;
-                if (cfg.Panel.PanelTextColorAdaptive)
-                {
-                    if (BgImage?.Source is BitmapSource bmp && !string.IsNullOrEmpty(cfg.Panel.PanelBackgroundImagePath))
-                        bodyBrush = AdaptiveTextColor.ResolveBrush(AdaptiveTextColor.ResolveTextColorForImage(bmp));
-                    else
-                        bodyBrush = AdaptiveTextColor.ResolveBrush(cfg.Panel.PanelFillColor);
-                }
+                try { titleBarBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(cfg.Panel.PanelButtonColor)!); } catch { }
+                try { bodyBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(cfg.Panel.PanelTextColor)!); } catch { }
 
                 if (_isGridView)
                 {
@@ -447,8 +466,7 @@ public partial class PanelWindow : Window
             Background = new SolidColorBrush(Color.FromArgb(0x12, 0xFF, 0xFF, 0xFF)),
             Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center
         };
-        // ponytail: mirror ZoneTitleText — adaptive on → titleBarBrush; adaptive off → XAML
-        // default stays (no hardcoded hex fallback). Pass null when adaptive is off.
+        // ponytail: zone header icon + name ride the fixed title-bar content color.
         var iconTb = new TextBlock
         {
             Text = string.IsNullOrEmpty(zone.IconChar) ? "⊞" : zone.IconChar,
@@ -475,6 +493,9 @@ public partial class PanelWindow : Window
 
     Border CreateItemCard(ZoneItem item, Zone zone, bool isGrid = true, Brush? bodyBrush = null)
     {
+        if (item.Type == ItemType.SubFolder)
+            return CreateSubfolderCard(item, zone, isGrid, bodyBrush);
+
         var card = new Border
         {
             Background = Brushes.Transparent,
@@ -489,23 +510,23 @@ public partial class PanelWindow : Window
         card.MouseLeave += Item_Leave;
         card.ContextMenu = CreateItemContextMenu(item, zone);
 
+        FrameworkElement content;
         if (isGrid)
         {
             // Grid view: icon centered, name below
             card.Width = 80; card.Height = 80;
             card.Margin = new Thickness(4);
             var stack = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-            var iconImg = new System.Windows.Controls.Image
+            var iconImg = new Image
             {
                 Width = 40, Height = 40, Stretch = Stretch.Uniform,
-                Source = _iconService.GetIcon(item.TargetPath, item.Type),
+                Source = ResolveItemIcon(item),
                 HorizontalAlignment = HorizontalAlignment.Center,
                 Margin = new Thickness(0, 0, 0, 4)
             };
             RenderOptions.SetBitmapScalingMode(iconImg, BitmapScalingMode.HighQuality);
             stack.Children.Add(iconImg);
-            // ponytail: mirror ZoneTitleText — adaptive on → bodyBrush; adaptive off → XAML
-            // default stays. No hardcoded hex fallback; caller decides whether to override.
+            // ponytail: item name rides the fixed body content color.
             var nameTb = new TextBlock
             {
                 Text = item.Name, FontSize = 10,
@@ -516,7 +537,7 @@ public partial class PanelWindow : Window
             };
             if (bodyBrush != null) nameTb.Foreground = bodyBrush;
             stack.Children.Add(nameTb);
-            card.Child = stack;
+            content = stack;
         }
         else
         {
@@ -526,10 +547,10 @@ public partial class PanelWindow : Window
             var grid = new Grid();
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            var iconImg = new System.Windows.Controls.Image
+            var iconImg = new Image
             {
                 Width = 20, Height = 20, Stretch = Stretch.Uniform,
-                Source = _iconService.GetIcon(item.TargetPath, item.Type),
+                Source = ResolveItemIcon(item),
                 Margin = new Thickness(0, 0, 8, 0),
                 VerticalAlignment = VerticalAlignment.Center
             };
@@ -545,9 +566,152 @@ public partial class PanelWindow : Window
             if (bodyBrush != null) nameTb.Foreground = bodyBrush;
             Grid.SetColumn(nameTb, 1);
             grid.Children.Add(nameTb);
-            card.Child = grid;
+            content = grid;
         }
+
+        AttachSelectionOverlay(card, content, item, zone);
         return card;
+    }
+
+    /// <summary>次级文件夹卡片:网格视图复用分区同款 2×2 缩略图控件,列表视图用
+    /// 小型 2×2 预览 + 名称 + 内部项数量。双击弹出内部图标浮层。</summary>
+    Border CreateSubfolderCard(ZoneItem item, Zone zone, bool isGrid, Brush? bodyBrush)
+    {
+        var card = new Border
+        {
+            Background = Brushes.Transparent,
+            CornerRadius = new CornerRadius(4),
+            Cursor = Cursors.Hand,
+            Tag = (item, zone)
+        };
+        card.MouseLeftButtonDown += Item_Click;
+        card.MouseRightButtonDown += Item_RightClick;
+        card.MouseEnter += Item_Enter;
+        card.MouseLeave += Item_Leave;
+        card.ContextMenu = CreateItemContextMenu(item, zone);
+
+        FrameworkElement content;
+        if (isGrid)
+        {
+            card.Width = 80; card.Height = 80;
+            card.Margin = new Thickness(4);
+            var sv = new SubfolderItemView
+            {
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            sv.SetSource(item, _iconService);
+            content = sv;
+        }
+        else
+        {
+            card.Margin = new Thickness(0, 2, 0, 2);
+            card.Padding = new Thickness(8, 4, 8, 4);
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var box = BuildSubfolderPreview(item, 28, 12);
+            box.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(box, 0);
+            grid.Children.Add(box);
+
+            var nameTb = new TextBlock
+            {
+                Text = item.Name, FontSize = 12,
+                VerticalAlignment = VerticalAlignment.Center,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                Margin = new Thickness(8, 0, 6, 0)
+            };
+            if (bodyBrush != null) nameTb.Foreground = bodyBrush;
+            Grid.SetColumn(nameTb, 1);
+            grid.Children.Add(nameTb);
+
+            var countTb = new TextBlock
+            {
+                Text = item.SubItems.Count.ToString(),
+                FontSize = 10,
+                Foreground = new SolidColorBrush(Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF)),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            Grid.SetColumn(countTb, 2);
+            grid.Children.Add(countTb);
+
+            content = grid;
+        }
+
+        AttachSelectionOverlay(card, content, item, zone);
+        return card;
+    }
+
+    /// <summary>分区图片预览:图片文件显示内容缩略图(与分区 ZoneItemViewModel.Icon 同逻辑)。</summary>
+    ImageSource? ResolveItemIcon(ZoneItem item)
+    {
+        if (ShellIconService.IsImageFile(item.TargetPath) && ShellIconService.ImagePreviewEnabled)
+            return _iconService.GetImageThumbnail(item.TargetPath)
+                ?? _iconService.GetIcon(item.TargetPath, item.Type, item.IconPath);
+        return _iconService.GetIcon(item.TargetPath, item.Type, item.IconPath);
+    }
+
+    /// <summary>次级文件夹列表视图的小型 2×2 缩略图预览。</summary>
+    FrameworkElement BuildSubfolderPreview(ZoneItem sub, double boxSize, double thumbSize)
+    {
+        var box = new Border
+        {
+            Width = boxSize, Height = boxSize,
+            Background = Brushes.Transparent,
+            BorderBrush = new SolidColorBrush(Color.FromArgb(0x40, 0xFF, 0xFF, 0xFF)),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(5),
+            ClipToBounds = true
+        };
+        var grid = new UniformGrid { Rows = 2, Columns = 2, Margin = new Thickness(3) };
+        var inners = sub.SubItems.Take(4).ToList();
+        for (int i = 0; i < 4; i++)
+        {
+            var slot = new Border
+            {
+                Background = new SolidColorBrush(Color.FromArgb(0x14, 0xFF, 0xFF, 0xFF)),
+                CornerRadius = new CornerRadius(3),
+                Margin = new Thickness(1)
+            };
+            if (i < inners.Count)
+            {
+                var img = new Image
+                {
+                    Source = ResolveItemIcon(inners[i]),
+                    Width = thumbSize, Height = thumbSize,
+                    Stretch = Stretch.Uniform,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                RenderOptions.SetBitmapScalingMode(img, BitmapScalingMode.HighQuality);
+                slot.Child = img;
+            }
+            grid.Children.Add(slot);
+        }
+        box.Child = grid;
+        return box;
+    }
+
+    /// <summary>给卡片包一层 Grid 并叠加选中高亮框(与分区 SelBox 同款视觉)。</summary>
+    void AttachSelectionOverlay(Border card, FrameworkElement content, ZoneItem item, Zone zone)
+    {
+        var highlight = new Border
+        {
+            Visibility = Visibility.Collapsed,
+            IsHitTestVisible = false,
+            Background = new SolidColorBrush(Color.FromArgb(0x26, 0xFF, 0xFF, 0xFF)),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF)),
+            BorderThickness = new Thickness(1.2),
+            CornerRadius = new CornerRadius(4)
+        };
+        var wrapper = new Grid();
+        wrapper.Children.Add(content);
+        wrapper.Children.Add(highlight);
+        card.Child = wrapper;
+        _panelCards[item.Id] = (card, highlight, item, zone);
     }
 
     ContextMenu CreateItemContextMenu(ZoneItem item, Zone zone)
@@ -557,6 +721,12 @@ public partial class PanelWindow : Window
         var openItem = new MenuItem { Header = _loc["Item.Open"] };
         openItem.Click += (_, _) =>
         {
+            if (item.Type == ItemType.SubFolder)
+            {
+                if (_panelCards.TryGetValue(item.Id, out var entry))
+                    OpenSubfolderFlyout(item, zone, entry.Card);
+                return;
+            }
             try { ShellLocationResolver.Open(item.TargetPath, item.Type); }
             catch (Exception ex)
             {
@@ -565,23 +735,27 @@ public partial class PanelWindow : Window
         };
         menu.Items.Add(openItem);
 
-        var openLocation = new MenuItem { Header = _loc["Item.OpenLocation"] };
-        openLocation.Click += (_, _) =>
+        // 次级文件夹没有"打开所在位置"。
+        if (item.Type != ItemType.SubFolder)
         {
-            if (item.Type == ItemType.ShellLocation)
+            var openLocation = new MenuItem { Header = _loc["Item.OpenLocation"] };
+            openLocation.Click += (_, _) =>
             {
-                ShellLocationResolver.Open(item.TargetPath, item.Type);
-                return;
-            }
-            if (item.Type is ItemType.Shortcut or ItemType.Application)
-            {
-                var d = Path.GetDirectoryName(item.TargetPath);
-                if (!string.IsNullOrEmpty(d))
-                    System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{item.TargetPath}\"");
-            }
-            else System.Diagnostics.Process.Start("explorer.exe", item.TargetPath);
-        };
-        menu.Items.Add(openLocation);
+                if (item.Type == ItemType.ShellLocation)
+                {
+                    ShellLocationResolver.Open(item.TargetPath, item.Type);
+                    return;
+                }
+                if (item.Type is ItemType.Shortcut or ItemType.Application)
+                {
+                    var d = Path.GetDirectoryName(item.TargetPath);
+                    if (!string.IsNullOrEmpty(d))
+                        System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{item.TargetPath}\"");
+                }
+                else System.Diagnostics.Process.Start("explorer.exe", item.TargetPath);
+            };
+            menu.Items.Add(openLocation);
+        }
 
         // Recycle Bin item: offer "Empty Recycle Bin" right in the context menu.
         if (item.Type == ItemType.ShellLocation && ShellIconService.IsRecycleBin(item.TargetPath))
@@ -615,16 +789,18 @@ public partial class PanelWindow : Window
         };
         menu.Items.Add(renameItem);
 
+        // 次级文件夹支持"解散":图标移除,内部图标散入所属分区。
+        if (item.Type == ItemType.SubFolder)
+        {
+            var dissolveItem = new MenuItem { Header = _loc["Subfolder.Dissolve"] };
+            dissolveItem.Click += (_, _) => DissolvePanelSubfolder(item, zone);
+            menu.Items.Add(dissolveItem);
+        }
+
         menu.Items.Add(new Separator());
 
         var deleteItem = new MenuItem { Header = _loc["Item.Delete"], Foreground = new SolidColorBrush(Color.FromRgb(0xFF, 0x66, 0x66)) };
-        deleteItem.Click += (_, _) =>
-        {
-            zone.Items.Remove(item);
-            _zoneManager.SaveConfig();
-            _zoneManager.NotifyChanged();
-            // ZonesChanged fires → RebuildDisplay + ZoneWindow refreshes
-        };
+        deleteItem.Click += (_, _) => DeleteSelectedPanelItems();
         menu.Items.Add(deleteItem);
 
         return menu;
@@ -632,23 +808,50 @@ public partial class PanelWindow : Window
 
     void Item_Click(object s, MouseButtonEventArgs e)
     {
+        if (s is not Border b || b.Tag is not (ZoneItem item, Zone zone)) return;
+
+        // ponytail 2026-08-26: 与分区一致 — SubFolder 单击开 flyout(SubFolder 没有可启动
+        // 的 TargetPath,无双击语义),普通项仍双击打开。panel 内图标是静态布局,没有
+        // 拖拽歧义(分区有 Item_MouseUp 区分单击/拖拽),不需要消歧。
+        if (item.Type == ItemType.SubFolder)
+        {
+            OpenSubfolderFlyout(item, zone, b);
+            e.Handled = true;
+            return;
+        }
         if (e.ClickCount == 2)
         {
-            if (s is Border b && b.Tag is (ZoneItem item, _))
+            try { ShellLocationResolver.Open(item.TargetPath, item.Type); }
+            catch (Exception ex)
             {
-                try { ShellLocationResolver.Open(item.TargetPath, item.Type); }
-                catch (Exception ex)
-                {
-                    MessageBox.Show($"{_loc["Item.FailedToOpen"]}\n{ex.Message}", _loc["Item.FailedToOpen.Title"], MessageBoxButton.OK, MessageBoxImage.Warning);
-                }
-                e.Handled = true;
+                MessageBox.Show($"{_loc["Item.FailedToOpen"]}\n{ex.Message}", _loc["Item.FailedToOpen.Title"], MessageBoxButton.OK, MessageBoxImage.Warning);
             }
+            e.Handled = true;
+            return;
+        }
+
+        // Ctrl+点选切换多选;普通单击选中该项(已选中保持多选,资源管理器行为)。
+        if ((Keyboard.Modifiers & ModifierKeys.Control) != 0)
+        {
+            ToggleItemSelected(item);
+        }
+        else if (!_selectedItemIds.Contains(item.Id))
+        {
+            ClearSelection();
+            SelectItem(item);
         }
     }
 
     void Item_RightClick(object s, MouseButtonEventArgs e)
     {
-        if (s is Border b && b.ContextMenu != null)
+        if (s is not Border b || b.Tag is not (ZoneItem item, _)) return;
+        // 右键未选中项时先单独选中;已选中则保持多选,让右键菜单作用于整个选中集。
+        if (!_selectedItemIds.Contains(item.Id))
+        {
+            ClearSelection();
+            SelectItem(item);
+        }
+        if (b.ContextMenu != null)
         {
             b.ContextMenu.IsOpen = true;
             e.Handled = true;
@@ -667,6 +870,452 @@ public partial class PanelWindow : Window
             b.Background = Brushes.Transparent;
     }
 
+    // ── 拖动选中 / 批量操作(移植自分区) ──
+
+    void SelectItem(ZoneItem item)
+    {
+        if (_selectedItemIds.Add(item.Id))
+            SetItemHighlight(item.Id, true);
+    }
+
+    void ToggleItemSelected(ZoneItem item)
+    {
+        if (_selectedItemIds.Contains(item.Id))
+        {
+            _selectedItemIds.Remove(item.Id);
+            SetItemHighlight(item.Id, false);
+        }
+        else
+        {
+            SelectItem(item);
+        }
+    }
+
+    void ClearSelection()
+    {
+        foreach (var id in _selectedItemIds)
+            SetItemHighlight(id, false);
+        _selectedItemIds.Clear();
+    }
+
+    void SelectAllPanelItems()
+    {
+        foreach (var id in _panelCards.Keys)
+        {
+            _selectedItemIds.Add(id);
+            _panelCards[id].Highlight.Visibility = Visibility.Visible;
+        }
+    }
+
+    void SetItemHighlight(Guid id, bool selected)
+    {
+        if (_panelCards.TryGetValue(id, out var entry))
+            entry.Highlight.Visibility = selected ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    List<(ZoneItem Item, Zone Zone)> SelectedPanelItems()
+    {
+        var list = new List<(ZoneItem, Zone)>();
+        foreach (var id in _selectedItemIds)
+            if (_panelCards.TryGetValue(id, out var entry))
+                list.Add((entry.Item, entry.Zone));
+        return list;
+    }
+
+    void DeleteSelectedPanelItems()
+    {
+        var sel = SelectedPanelItems();
+        if (sel.Count == 0) return;
+        if (sel.Count > 1
+            && MessageBox.Show(string.Format(_loc["ZoneItem.DeleteMultiConfirm"], sel.Count),
+                _loc["Item.Delete"], MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+        foreach (var (item, zone) in sel)
+            zone.Items.Remove(item);
+        ClearSelection();
+        _zoneManager.SaveConfig();
+        _zoneManager.NotifyChanged();
+    }
+
+    /// <summary>解散次级文件夹:图标本身移除,内部图标自动排列回所属分区(与分区一致)。</summary>
+    void DissolvePanelSubfolder(ZoneItem sub, Zone zone)
+    {
+        if (sub.Type != ItemType.SubFolder) return;
+        zone.Items.Remove(sub);
+        foreach (var inner in sub.SubItems)
+        {
+            var (sx, sy) = FindFreeSpot(zone);
+            inner.X = sx;
+            inner.Y = sy;
+            zone.Items.Add(inner);
+        }
+        sub.SubItems.Clear();
+        ClearSelection();
+        _zoneManager.SaveConfig();
+        _zoneManager.NotifyChanged();
+    }
+
+    static bool IsOnPanelCard(object? source)
+    {
+        var d = source as DependencyObject;
+        while (d != null)
+        {
+            if (d is Border b && b.Tag is (ZoneItem, Zone)) return true;
+            d = VisualTreeHelper.GetParent(d);
+        }
+        return false;
+    }
+
+    // ── 窗口级事件:框选跟踪 + 浮层关闭 + 键盘 ──
+
+    void Panel_PreviewMouseLeftButtonDown(object s, MouseButtonEventArgs e)
+    {
+        // 点面板任意位置关闭次级文件夹浮层(点击浮层内部不会冒泡到主窗口)。
+        CloseSubfolderFlyout();
+    }
+
+    void ContentArea_PreviewMouseLeftButtonDown(object s, MouseButtonEventArgs e)
+    {
+        // 卡片按下交给 Item_Click / Item_RightClick 处理。
+        if (IsOnPanelCard(e.OriginalSource)) return;
+
+        _marqueeActive = true;
+        _marqueeMoved = false;
+        _marqueeStart = e.GetPosition(MarqueeLayer);
+        _marqueeStartSel = new HashSet<Guid>(_selectedItemIds);
+        try { Mouse.Capture(this); } catch { }
+        e.Handled = true;
+    }
+
+    void Panel_MouseMove(object s, MouseEventArgs e)
+    {
+        if (!_marqueeActive) return;
+        var p = e.GetPosition(MarqueeLayer);
+        if (!_marqueeMoved)
+        {
+            if (Math.Abs(p.X - _marqueeStart.X) < 4 && Math.Abs(p.Y - _marqueeStart.Y) < 4) return;
+            _marqueeMoved = true;
+        }
+        UpdatePanelMarquee(p);
+    }
+
+    void Panel_MouseLeftButtonUp(object s, MouseButtonEventArgs e)
+    {
+        if (!_marqueeActive) return;
+        try { Mouse.Capture(null); } catch { }
+        bool moved = _marqueeMoved;
+        _marqueeActive = false;
+        _marqueeMoved = false;
+        _marqueeStartSel = null;
+        HidePanelMarquee();
+        if (moved)
+        {
+            e.Handled = true;
+            return;
+        }
+        // 空白处普通点击 → 清空选择(资源管理器行为)。
+        ClearSelection();
+    }
+
+    void UpdatePanelMarquee(Point current)
+    {
+        double x1 = Math.Min(_marqueeStart.X, current.X);
+        double y1 = Math.Min(_marqueeStart.Y, current.Y);
+        double w = Math.Abs(current.X - _marqueeStart.X);
+        double h = Math.Abs(current.Y - _marqueeStart.Y);
+        var rect = EnsurePanelMarquee();
+        rect.Visibility = Visibility.Visible;
+        Canvas.SetLeft(rect, x1);
+        Canvas.SetTop(rect, y1);
+        rect.Width = w;
+        rect.Height = h;
+        var r = new Rect(x1, y1, w, h);
+        foreach (var (id, entry) in _panelCards)
+        {
+            var p0 = entry.Card.TranslatePoint(new Point(0, 0), MarqueeLayer);
+            bool inRect = r.IntersectsWith(new Rect(p0.X, p0.Y, Math.Max(1, entry.Card.ActualWidth), Math.Max(1, entry.Card.ActualHeight)));
+            bool sel = inRect || (_marqueeStartSel?.Contains(id) ?? false);
+            if (sel) _selectedItemIds.Add(id); else _selectedItemIds.Remove(id);
+            entry.Highlight.Visibility = sel ? Visibility.Visible : Visibility.Collapsed;
+        }
+    }
+
+    System.Windows.Shapes.Rectangle EnsurePanelMarquee()
+    {
+        if (_marqueeRect == null)
+        {
+            _marqueeRect = new System.Windows.Shapes.Rectangle
+            {
+                RadiusX = 3,
+                RadiusY = 3,
+                StrokeThickness = 1,
+                IsHitTestVisible = false,
+                Visibility = Visibility.Collapsed,
+                Stroke = new SolidColorBrush(Color.FromArgb(0xC0, 0x8A, 0xB4, 0xF8)),
+                Fill = new SolidColorBrush(Color.FromArgb(0x22, 0x8A, 0xB4, 0xF8))
+            };
+            MarqueeLayer.Children.Add(_marqueeRect);
+        }
+        return _marqueeRect;
+    }
+
+    void HidePanelMarquee()
+    {
+        if (_marqueeRect != null) _marqueeRect.Visibility = Visibility.Collapsed;
+    }
+
+    void Panel_PreviewKeyDown(object s, KeyEventArgs e)
+    {
+        if (e.OriginalSource is TextBox) return; // 搜索框保留自身按键
+        // 次级文件夹浮层打开时,面板快捷键让位(浮层内部自有一份 Ctrl+A/Delete)。
+        if (_subfolderPopup?.IsOpen == true) return;
+        if (e.Key == Key.A && (Keyboard.Modifiers & ModifierKeys.Control) != 0)
+        {
+            SelectAllPanelItems();
+            e.Handled = true;
+            return;
+        }
+        if (e.Key == Key.Delete)
+        {
+            DeleteSelectedPanelItems();
+            e.Handled = true;
+        }
+    }
+
+    // ── 次级文件夹浮层(ponytail 2026-08-26: 与分区 SubfolderFlyout 对齐 — 单击打开
+    // + flyout 自身的 ResetToClosed / SetAnchor / AnimateOpen / AnimateClose 路径,
+    // popup 用 AbsolutePoint + 手算 offset,锚点=图标中心,与分区同配方) ──
+
+    void OpenSubfolderFlyout(ZoneItem sub, Zone zone, Border card)
+    {
+        // 与分区同款:已开同一个 SubFolder 且不在关闭动画中 → 关闭之;同 SubFolder
+        // 关闭动画期间被再次点击 → 不重播打开动画(否则会卡一帧)。
+        if (_subfolderPopup?.IsOpen == true
+            && _subfolderFlyout?.ViewModel?.HostSubItem.Id == sub.Id
+            && !_flyoutClosing)
+        {
+            CloseSubfolderFlyout();
+            return;
+        }
+        var token = ++_flyoutOpenToken;
+        _flyoutClosing = false;
+
+        var flyout = new SubfolderFlyout
+        {
+            ViewModel = new SubfolderFlyoutViewModel(sub, _iconService, ResolvePanelSubfolderFill(zone, sub))
+        };
+        flyout.ItemOpenRequested += vm => OpenPanelItem(vm);
+        flyout.ItemOpenLocationRequested += vm => OpenPanelItemLocation(vm);
+        flyout.ItemRenameRequested += vm =>
+        {
+            var rn = new RenameDialog(vm.Name) { Owner = this };
+            if (rn.ShowDialog() == true && !string.IsNullOrWhiteSpace(rn.NewName))
+            {
+                vm.Name = rn.NewName;
+                _zoneManager.SaveConfig();
+                _zoneManager.NotifyChanged();
+            }
+        };
+        flyout.ItemDeleteRequested += vm => DeleteFlyoutItems(flyout, vm);
+        flyout.ItemsChanged += () =>
+        {
+            _zoneManager.SaveConfig();
+            _zoneManager.NotifyChanged();
+        };
+        flyout.EditStyleRequested += f =>
+        {
+            if (f.ViewModel?.HostSubItem is { } host)
+            {
+                (Application.Current as App)?.EnsureManagementWindow();
+                PropertyWindowService.OpenOrFocus(host, this);
+            }
+        };
+        flyout.PreviewKeyDown += (_, ke) =>
+        {
+            if (TryHandleFlyoutKeys(flyout, ke)) ke.Handled = true;
+        };
+        flyout.ClickOutsideRequested += _ => CloseSubfolderFlyout();
+
+        var popup = new Popup
+        {
+            AllowsTransparency = true,
+            StaysOpen = true,
+            Placement = PlacementMode.AbsolutePoint,
+            Child = flyout
+        };
+        popup.Opened += (_, _) =>
+        {
+            // 关闭动画进行中 token 已变 → 新的 SubFolder 已接管,这里别再给旧 flyout 装玻璃。
+            if (_flyoutOpenToken != token) return;
+            if (flyout.ViewModel?.Fill is { } fill && fill.HasGlass)
+                flyout.ViewModel.ShowGlassFallback = !flyout.TryApplyRealGlass(fill);
+        };
+        popup.Closed += (_, _) =>
+        {
+            flyout.DisableGlass();
+            flyout.UnhookClickOutside();
+            if (_flyoutOpenToken == token)
+            {
+                _subfolderPopup = null;
+                _subfolderFlyout = null;
+                _flyoutClosing = false;
+            }
+        };
+        _subfolderPopup = popup;
+        _subfolderFlyout = flyout;
+
+        // 先复位到关闭态(scale 0,opacity 0)再开 popup,避免上次关闭残留的中间态一闪而过。
+        flyout.ResetToClosed();
+        popup.IsOpen = true;
+
+        // 等布局完成(ActualWidth/Height 就绪)再算位置 + 设锚点 + 跑动画。
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (_flyoutOpenToken != token) return;
+            if (flyout.ActualWidth <= 0 || flyout.ActualHeight <= 0)
+            {
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (_flyoutOpenToken != token) return;
+                    OpenFlyoutAnimated(popup, flyout, card);
+                }), System.Windows.Threading.DispatcherPriority.ContextIdle);
+                return;
+            }
+            OpenFlyoutAnimated(popup, flyout, card);
+        }), System.Windows.Threading.DispatcherPriority.Loaded);
+        flyout.ViewModel.IsOpen = true;
+    }
+
+    void OpenFlyoutAnimated(Popup popup, SubfolderFlyout flyout, Border card)
+    {
+        var (pos, c) = SubfolderFlyout.ComputePosAndAnchor(card, new Size(flyout.ActualWidth, flyout.ActualHeight));
+        popup.HorizontalOffset = pos.X;
+        popup.VerticalOffset = pos.Y;
+        flyout.SetAnchor(c);
+        flyout.HookClickOutside();
+        flyout.AnimateOpen();
+    }
+
+    void CloseSubfolderFlyout()
+    {
+        if (_subfolderPopup == null || _flyoutClosing) return;
+        var popup = _subfolderPopup;
+        var flyout = _subfolderFlyout;
+        if (popup == null || flyout == null || !popup.IsOpen) return;
+        _flyoutClosing = true;
+        var token = _flyoutOpenToken;
+        flyout.AnimateClose(() =>
+        {
+            // 关闭动画期间又点开了另一个 SubFolder(token 已变)→ 不要误关新开的 Flyout。
+            if (_flyoutOpenToken != token) { _flyoutClosing = false; return; }
+            // popup.Closed 会清掉 _subfolderPopup / _flyoutClosing 等状态。
+            popup.IsOpen = false;
+        });
+    }
+
+    /// <summary>仅当浮层所属的次级文件夹已从所有分区消失时才关闭浮层;内部图标
+    /// 改名/删除等操作会触发 RebuildDisplay,浮层应保持打开(与分区行为一致)。</summary>
+    void CloseSubfolderFlyoutIfOrphaned()
+    {
+        var host = _subfolderFlyout?.ViewModel?.HostSubItem;
+        if (host == null) return;
+        if (!_zoneManager.Zones.Any(z => z.Items.Contains(host)))
+            CloseSubfolderFlyout();
+    }
+
+    /// <summary>ponytail 2026-08-26: 与分区端 ZoneWindow.ResolveSubfolderFill 对齐 —
+    /// "跟随主分区"取 SubFolder 所属 Zone 的主体填充(填充色/背景图/液态玻璃),不含边框;
+    /// 不跟随时取 SubFolder 自身 override 字段。面板自身的样式(背景色等)完全不参与 —
+    /// 这里 zone 必须是 SubFolder 所在分区(承载面板的分区或独立关联分区),而不是面板
+    /// 自身的属性。Panel 不渲染 merged-group 视觉态,所以直接读 zone 字段(不调用
+    /// ResolveStyle()),与 Zone 端 Shape 一致。</summary>
+    SubfolderFill ResolvePanelSubfolderFill(Zone zone, ZoneItem sub)
+    {
+        if (!sub.FillFollowsZone)
+            return SubfolderFill.FromOverride(sub);
+        return new SubfolderFill(
+            zone.FillColor, 100,
+            zone.BackgroundImagePath, zone.BackgroundImageOpacity,
+            zone.EnableAcrylic ? zone.GlassColorMode : null,
+            zone.GlassBlurAmount, zone.GlassTintOpacity, zone.GlassTintLuminosity);
+    }
+
+    void OpenPanelItem(ZoneItemViewModel vm)
+    {
+        try { ShellLocationResolver.Open(vm.TargetPath, vm.Type); }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"{_loc["Item.FailedToOpen"]}\n{ex.Message}", _loc["Item.FailedToOpen.Title"], MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    void OpenPanelItemLocation(ZoneItemViewModel v)
+    {
+        if (v.Type == ItemType.ShellLocation)
+        {
+            ShellLocationResolver.Open(v.TargetPath, v.Type);
+            return;
+        }
+        if (v.Type is ItemType.Shortcut or ItemType.Application)
+        {
+            var d = Path.GetDirectoryName(v.TargetPath);
+            if (!string.IsNullOrEmpty(d))
+                System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{v.TargetPath}\"");
+        }
+        else
+        {
+            System.Diagnostics.Process.Start("explorer.exe", v.TargetPath);
+        }
+    }
+
+    void DeleteFlyoutItems(SubfolderFlyout flyout, ZoneItemViewModel vm)
+    {
+        var fvm = flyout.ViewModel;
+        if (fvm == null) return;
+        var sel = fvm.ItemVms.Where(i => i.IsSelected).ToList();
+        if (sel.Count > 1 && sel.Contains(vm))
+        {
+            if (MessageBox.Show(string.Format(_loc["ZoneItem.DeleteMultiConfirm"], sel.Count),
+                    _loc["Item.Delete"], MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                return;
+            foreach (var it in sel) fvm.ItemVms.Remove(it);
+        }
+        else
+        {
+            fvm.ItemVms.Remove(vm);
+        }
+        _zoneManager.SaveConfig();
+        _zoneManager.NotifyChanged();
+    }
+
+    bool TryHandleFlyoutKeys(SubfolderFlyout flyout, KeyEventArgs e)
+    {
+        var fvm = flyout.ViewModel;
+        if (fvm == null) return false;
+        if (e.Key == Key.A && (Keyboard.Modifiers & ModifierKeys.Control) != 0)
+        {
+            foreach (var it in fvm.ItemVms) it.IsSelected = true;
+            return true;
+        }
+        if (e.Key == Key.Delete)
+        {
+            var sel = fvm.ItemVms.Where(i => i.IsSelected).ToList();
+            if (sel.Count > 0)
+            {
+                if (sel.Count == 1
+                    || MessageBox.Show(string.Format(_loc["ZoneItem.DeleteMultiConfirm"], sel.Count),
+                        _loc["Item.Delete"], MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
+                {
+                    foreach (var it in sel) fvm.ItemVms.Remove(it);
+                    _zoneManager.SaveConfig();
+                    _zoneManager.NotifyChanged();
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
     // ── New file/folder helpers ──
 
     void CreateNewFolder(Zone zone)
@@ -681,7 +1330,7 @@ public partial class PanelWindow : Window
             {
                 hwndOwner = h.Handle,
                 pszDisplayName = displayBuf,
-                lpszTitle = "Select Parent Folder",
+                lpszTitle = _loc["Dialog.SelectFolder"],
                 ulFlags = 0x40
             };
             pidl = NativeMethods.SHBrowseForFolderW(ref bi);
@@ -692,7 +1341,7 @@ public partial class PanelWindow : Window
                 {
                     string parentPath = sb.ToString();
                     string folderName = Microsoft.VisualBasic.Interaction.InputBox(
-                        "Folder Name:", "New Folder", "New Folder");
+                        _loc["Dialog.FolderName"], _loc["Dialog.NewFolder"], _loc["Dialog.NewFolder"]);
                     if (!string.IsNullOrWhiteSpace(folderName))
                     {
                         string fullPath = Path.Combine(parentPath, folderName);
@@ -702,7 +1351,7 @@ public partial class PanelWindow : Window
                 }
             }
         }
-        catch (Exception ex) { MessageBox.Show($"Failed: {ex.Message}"); }
+        catch (Exception ex) { MessageBox.Show(string.Format(_loc["Dialog.ImportFailed"], ex.Message)); }
         finally
         {
             if (displayBuf != IntPtr.Zero) Marshal.FreeHGlobal(displayBuf);
@@ -714,7 +1363,7 @@ public partial class PanelWindow : Window
     {
         var d = new SaveFileDialog
         {
-            Title = "Create New File",
+            Title = _loc["Dialog.CreateFile"],
             Filter = filter,
             DefaultExt = defaultExt,
             FileName = "NewDocument" + defaultExt
@@ -737,7 +1386,7 @@ public partial class PanelWindow : Window
                 };
                 AddItemToZone(zone, name, d.FileName, type);
             }
-            catch (Exception ex) { MessageBox.Show($"Failed: {ex.Message}"); }
+            catch (Exception ex) { MessageBox.Show(string.Format(_loc["Dialog.ImportFailed"], ex.Message)); }
         }
     }
 
@@ -775,6 +1424,11 @@ public partial class PanelWindow : Window
         var importShellItem = new MenuItem { Header = _loc["Panel.ImportShellItems"] };
         importShellItem.Click += ImportShellItems_Click;
         contextMenu.Items.Add(importShellItem);
+
+        // 新建次级文件夹(与分区右键菜单一致)
+        var newSubfolderItem = new MenuItem { Header = _loc["Subfolder.New"] };
+        newSubfolderItem.Click += NewSubfolder_Click;
+        contextMenu.Items.Add(newSubfolderItem);
 
         contextMenu.Items.Add(new Separator());
 
@@ -865,7 +1519,7 @@ public partial class PanelWindow : Window
         var d = new OpenFileDialog
         {
             Title = _loc["Zone.ImportTitle"],
-            Filter = "All|*.lnk;*.exe;*.*|Shortcuts|*.lnk|Apps|*.exe",
+            Filter = $"{_loc["Filter.All"]}|*.lnk;*.exe;*.*|{_loc["Filter.Lnk"]}|*.lnk|{_loc["Filter.Exe"]}|*.exe",
             Multiselect = true
         };
         if (d.ShowDialog() == true)
@@ -889,7 +1543,7 @@ public partial class PanelWindow : Window
             {
                 hwndOwner = h.Handle,
                 pszDisplayName = displayBuf,
-                lpszTitle = _loc.CurrentLanguage == "zh" ? "选择文件夹" : "Select Folder",
+                lpszTitle = _loc["Dialog.SelectFolder"],
                 ulFlags = 0x40
             };
             pidl = NativeMethods.SHBrowseForFolderW(ref bi);
@@ -902,7 +1556,7 @@ public partial class PanelWindow : Window
                 }
             }
         }
-        catch (Exception ex) { MessageBox.Show($"Import failed: {ex.Message}"); }
+        catch (Exception ex) { MessageBox.Show(string.Format(_loc["Dialog.ImportFailed"], ex.Message)); }
         finally
         {
             if (displayBuf != IntPtr.Zero) Marshal.FreeHGlobal(displayBuf);
@@ -929,6 +1583,20 @@ public partial class PanelWindow : Window
         }
     }
 
+    /// <summary>新建次级文件夹(与分区同款:命名弹窗 + ZoneManager.CreateSubfolder)。</summary>
+    void NewSubfolder_Click(object s, RoutedEventArgs e)
+    {
+        var targetZone = GetTargetZone();
+        if (targetZone == null) return;
+
+        var rn = new RenameDialog(_loc["Subfolder.NewDefault"], _loc["Subfolder.NewTitle"]) { Owner = this };
+        if (rn.ShowDialog() != true) return;
+        string name = rn.NewName.Trim();
+        if (string.IsNullOrWhiteSpace(name)) return;
+
+        _zoneManager.CreateSubfolder(targetZone, name);
+    }
+
     void NewFolder_Click(object s, RoutedEventArgs e)
     {
         var targetZone = GetTargetZone();
@@ -938,28 +1606,28 @@ public partial class PanelWindow : Window
     {
         var targetZone = GetTargetZone();
         if (targetZone == null) return;
-        CreateNewFile(".txt", "Text Files|*.txt", targetZone);
+        CreateNewFile(".txt", $"{_loc["Filter.Txt"]}|*.txt", targetZone);
     }
 
     void NewWordFile_Click(object s, RoutedEventArgs e)
     {
         var targetZone = GetTargetZone();
         if (targetZone == null) return;
-        CreateNewFile(".docx", "Word Files|*.docx", targetZone);
+        CreateNewFile(".docx", $"{_loc["Filter.Docx"]}|*.docx", targetZone);
     }
 
     void NewPptFile_Click(object s, RoutedEventArgs e)
     {
         var targetZone = GetTargetZone();
         if (targetZone == null) return;
-        CreateNewFile(".pptx", "PowerPoint Files|*.pptx", targetZone);
+        CreateNewFile(".pptx", $"{_loc["Filter.Pptx"]}|*.pptx", targetZone);
     }
 
     void NewExcelFile_Click(object s, RoutedEventArgs e)
     {
         var targetZone = GetTargetZone();
         if (targetZone == null) return;
-        CreateNewFile(".xlsx", "Excel Files|*.xlsx", targetZone);
+        CreateNewFile(".xlsx", $"{_loc["Filter.Xlsx"]}|*.xlsx", targetZone);
     }
 
     private Zone? GetTargetZone()
@@ -974,10 +1642,9 @@ public partial class PanelWindow : Window
         if (_zoneManager.Zones.Count > 1)
         {
             // Show zone selection dialog
-            var cn = _loc.CurrentLanguage == "zh";
             var dlg = new Window
             {
-                Title = cn ? "选择分区" : "Select Zone",
+                Title = _loc["Dialog.SelectZone"],
                 Width = 300, Height = 200,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
                 Owner = this,
@@ -1003,7 +1670,7 @@ public partial class PanelWindow : Window
             // Title
             var titleText = new TextBlock
             {
-                Text = cn ? "选择目标分区" : "Select Target Zone",
+                Text = _loc["Dialog.SelectTargetZone"],
                 FontSize = 14,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0)),
@@ -1040,7 +1707,7 @@ public partial class PanelWindow : Window
 
             var cancelButton = new Button
             {
-                Content = cn ? "取消" : "Cancel",
+                Content = _loc["Common.Cancel"],
                 Width = 60, Height = 28, FontSize = 11,
                 Background = new SolidColorBrush(Color.FromArgb(0x15, 0xFF, 0xFF, 0xFF)),
                 Foreground = new SolidColorBrush(Color.FromRgb(0xA0, 0xA0, 0xC0)),
@@ -1053,7 +1720,7 @@ public partial class PanelWindow : Window
 
             var selectButton = new Button
             {
-                Content = cn ? "选择" : "Select",
+                Content = _loc["Dialog.Select"],
                 Width = 60, Height = 28, FontSize = 11,
                 Background = new SolidColorBrush(Color.FromRgb(0x7C, 0x3A, 0xED)),
                 Foreground = Brushes.White,
@@ -1189,6 +1856,7 @@ public partial class PanelWindow : Window
     {
         _clockTimer?.Stop();
         _recycleTimer.Stop();
+        CloseSubfolderFlyout();
         if (_langChanged != null) { _loc.LanguageChanged -= _langChanged; _langChanged = null; }
         _zoneManager.ZonesChanged -= RebuildDisplay;
         SavePosition(null, EventArgs.Empty);

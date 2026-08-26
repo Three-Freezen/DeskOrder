@@ -724,14 +724,28 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
         if (_cropShape == "Circle" || _cropShape == "Ellipse") return;
         if (CropImage == null || CropImage.Source == null) return;
 
-        // 图片上边缘靠近分界线时自动吸附；拖过阈值即可自由摆放（占满整个分区）。
+        // 图片上边缘靠近任意一条分界线时自动吸附；拖过阈值即可自由摆放（占满整个分区）。
+        // 含内部标题栏分界（组合分区子标签栏 / 便签字体工具栏 / 文件夹映射头部行），
+        // 每条分界线都是吸附目标——不止标题栏/主体那条主线。
         double zoneTop = (PreviewBorder.ActualHeight - _zonePreviewHeight * _boxVisualScale) / 2;
-        double dividerY = zoneTop + _titleBarHeight * _previewScale;
         double imageTop = PreviewBorder.ActualHeight / 2 - CropImage.Height / 2
                         + _currentOffsetY * _previewScale;
-        double delta = dividerY - imageTop;
-        if (Math.Abs(delta) < TitleBarSnapThreshold)
-            _currentOffsetY += delta / _previewScale;
+
+        double bestDelta = double.MaxValue;
+        void SnapTo(double y)
+        {
+            double delta = y - imageTop;
+            if (Math.Abs(delta) < TitleBarSnapThreshold && Math.Abs(delta) < Math.Abs(bestDelta))
+                bestDelta = delta;
+        }
+
+        SnapTo(zoneTop + _titleBarHeight * _previewScale);
+        foreach (var inner in _titleBarInnerDividers)
+            if (inner > 0 && inner < _titleBarHeight)
+                SnapTo(zoneTop + inner * _previewScale);
+
+        if (bestDelta != double.MaxValue)
+            _currentOffsetY += bestDelta / _previewScale;
     }
     
     private void UpdateDisplays()
@@ -746,13 +760,12 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
     
     private void ApplyLoc()
     {
-        var cn = _loc.CurrentLanguage == "zh";
         DialogTitle.Text = _loc["CropPreview.Title"];
         ConfirmButton.Content = _loc["CropPreview.Confirm"];
         CancelButton.Content = _loc["CropPreview.Cancel"];
         ResetButton.Content = _loc["CropPreview.Reset"];
-        LabelZoom.Text = cn ? "缩放:" : "Zoom:";
-        LabelOpacity.Text = cn ? "透明度:" : "Opacity:";
+        LabelZoom.Text = _loc["CropPreview.Zoom"];
+        LabelOpacity.Text = _loc["CropPreview.Opacity"];
     }
     
     public event PropertyChangedEventHandler? PropertyChanged;

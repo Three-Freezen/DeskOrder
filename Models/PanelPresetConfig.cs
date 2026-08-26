@@ -17,9 +17,9 @@ public class PanelPresetConfig
     public string PanelBorderColor { get; set; } = "#40FFFFFF";
     public double PanelBorderThickness { get; set; } = 1.5;
     public int PanelCornerRadius { get; set; } = 10;
-    public bool PanelTextColorAdaptive { get; set; } = true;
-    public bool PanelTitleBarTextColorAdaptive { get; set; } = true;
     public bool PanelTitleBarFillIndependent { get; set; } = false;
+    public string PanelButtonColor { get; set; } = "#E8E8F0";
+    public string PanelTextColor { get; set; } = "#FFFFFF";
     public double PanelControlOpacity { get; set; } = 40;
     public string PanelBackgroundImagePath { get; set; } = "";
     public string PanelBgImageStretch { get; set; } = "UniformToFill";
@@ -51,8 +51,8 @@ public class PanelPresetConfig
         PanelBorderColor = PanelBorderColor,
         PanelBorderThickness = PanelBorderThickness,
         PanelCornerRadius = PanelCornerRadius,
-        PanelTextColorAdaptive = PanelTextColorAdaptive,
-        PanelTitleBarTextColorAdaptive = PanelTitleBarTextColorAdaptive,
+        PanelButtonColor = PanelButtonColor,
+        PanelTextColor = PanelTextColor,
         PanelTitleBarFillIndependent = PanelTitleBarFillIndependent,
         PanelControlOpacity = PanelControlOpacity,
         PanelBackgroundImagePath = PanelBackgroundImagePath,
@@ -82,8 +82,8 @@ public class PanelPresetConfig
         PanelBorderColor = cfg.Panel.PanelBorderColor,
         PanelBorderThickness = cfg.Panel.PanelBorderThickness,
         PanelCornerRadius = cfg.Panel.PanelCornerRadius,
-        PanelTextColorAdaptive = cfg.Panel.PanelTextColorAdaptive,
-        PanelTitleBarTextColorAdaptive = cfg.Panel.PanelTitleBarTextColorAdaptive,
+        PanelButtonColor = cfg.Panel.PanelButtonColor,
+        PanelTextColor = cfg.Panel.PanelTextColor,
         PanelTitleBarFillIndependent = cfg.Panel.PanelTitleBarFillIndependent,
         PanelControlOpacity = cfg.Panel.PanelControlOpacity,
         PanelBackgroundImagePath = cfg.Panel.PanelBackgroundImagePath,
@@ -113,8 +113,8 @@ public class PanelPresetConfig
         cfg.Panel.PanelBorderColor = PanelBorderColor;
         cfg.Panel.PanelBorderThickness = PanelBorderThickness;
         cfg.Panel.PanelCornerRadius = PanelCornerRadius;
-        cfg.Panel.PanelTextColorAdaptive = PanelTextColorAdaptive;
-        cfg.Panel.PanelTitleBarTextColorAdaptive = PanelTitleBarTextColorAdaptive;
+        cfg.Panel.PanelButtonColor = PanelButtonColor;
+        cfg.Panel.PanelTextColor = PanelTextColor;
         cfg.Panel.PanelTitleBarFillIndependent = PanelTitleBarFillIndependent;
         cfg.Panel.PanelControlOpacity = PanelControlOpacity;
         cfg.Panel.PanelBackgroundImagePath = PanelBackgroundImagePath;

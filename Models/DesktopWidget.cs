@@ -34,9 +34,8 @@ public class StickyNote : AppearanceModel
     public string TitleTextColor { get; set; } = "#E0E0E0";
     // ── Background image (Opacity stays per-model — StickyNote uses 30, Zone uses 40) ──
     public double BackgroundImageOpacity { get; set; } = 30;
-    // ── Title bar text color adaptive ──
-    /// <summary>Auto-pick sticky note title bar text color based on <see cref="TitleBarFillColor"/>.</summary>
-    public bool TitleBarTextColorAdaptive { get; set; } = true;
+    /// <summary>标题栏按钮颜色 — 替代原「标题栏文字颜色自适应」的固定色。</summary>
+    public string ButtonColor { get; set; } = "#80FFFFFF";
     /// <summary>标题栏填充单独设置 — 勾选后主体填充(FillColor)不再铺到标题栏下方。</summary>
     public bool TitleBarFillIndependent { get; set; } = false;
     // ── Save ──
@@ -61,7 +60,7 @@ public class StickyNote : AppearanceModel
             CornerRadius = CornerRadius,
             TitleBarFillColor = TitleBarFillColor, TitleBarOpacity = TitleBarOpacity,
             ControlOpacity = ControlOpacity, TitleTextColor = TitleTextColor,
-            TitleBarTextColorAdaptive = TitleBarTextColorAdaptive,
+            ButtonColor = ButtonColor,
             TitleBarFillIndependent = TitleBarFillIndependent,
             BackgroundImageOpacity = BackgroundImageOpacity,
             LastSavePath = LastSavePath,
@@ -108,6 +107,10 @@ public class DesktopClock : AppearanceModel
     /// <summary>Opacity of the title-bar control buttons (lock / hide), 5-100. Zone-style.</summary>
     public double ControlOpacity { get; set; } = 40;
     public string TextColor { get; set; } = "#EEFFFFFF";
+    /// <summary>按钮颜色（替代原主体自适应里的按钮分支）— 锁/隐藏/恢复按钮。</summary>
+    public string ButtonColor { get; set; } = "#60FFFFFF";
+    /// <summary>秒针颜色（独立于主体内容颜色；透明度走 alpha 通道）。</summary>
+    public string SecondHandColor { get; set; } = "#FFFF6666";
     public double FontSize { get; set; } = 48;
     public string FontFamily { get; set; } = "Segoe UI";
     public double Opacity { get; set; } = 1.0;
@@ -138,6 +141,7 @@ public class DesktopClock : AppearanceModel
             IsLocked = IsLocked,
             ShowSeconds = ShowSeconds, ShowDate = ShowDate,
             Use24Hour = Use24Hour, TextColor = TextColor,
+            ButtonColor = ButtonColor, SecondHandColor = SecondHandColor,
             TileMode = TileMode, ControlOpacity = ControlOpacity,
             FontSize = FontSize, FontFamily = FontFamily,
             Opacity = Opacity, Mode = Mode, AccentColor = AccentColor,
@@ -214,6 +218,8 @@ public class DesktopCalendar : AppearanceModel
     /// <summary>Opacity of the title-bar control buttons (lock / hide), 5-100. Zone-style.</summary>
     public double ControlOpacity { get; set; } = 40;
     public string TextColor { get; set; } = "#EEFFFFFF";
+    /// <summary>按钮颜色（替代原主体自适应里的按钮分支）— 锁/隐藏/月份导航/今天/添加/恢复按钮。</summary>
+    public string ButtonColor { get; set; } = "#AAFFFFFF";
     public string TodayColor { get; set; } = "#FF6C63FF";
     public double FontSize { get; set; } = 14;
     public double Opacity { get; set; } = 1.0;
@@ -244,7 +250,7 @@ public class DesktopCalendar : AppearanceModel
             IsLocked = IsLocked,
             ShowWeekNumbers = ShowWeekNumbers, StartOnMonday = StartOnMonday,
             TileMode = TileMode, ControlOpacity = ControlOpacity,
-            TextColor = TextColor, TodayColor = TodayColor,
+            TextColor = TextColor, ButtonColor = ButtonColor, TodayColor = TodayColor,
             FontSize = FontSize, Opacity = Opacity,
             BorderThickness = BorderThickness,
             CornerRadius = CornerRadius,

@@ -1,7 +1,8 @@
 <Window x:Class="DesktopZones.Views.RenameDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Rename" Width="360" Height="180"
+        xmlns:loc="clr-namespace:DesktopZones.Helpers"
+        Title="{loc:Loc Key=Rename.Title}" Width="360" Height="180"
         WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent">
     <Border Background="{DynamicResource Brush.Bg.Chrome}" CornerRadius="10"

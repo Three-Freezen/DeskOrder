@@ -4,9 +4,11 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Interop;
 using System.Windows.Media;
 using Microsoft.Win32;
+using DesktopZones.Services;
 
 namespace DesktopZones.Helpers;
 
@@ -68,11 +70,39 @@ public static class AcrylicHelper
     [DllImport("user32.dll")]
     private static extern int SetWindowCompositionAttribute(IntPtr hwnd, ref WindowCompositionAttributeData data);
 
+    // ── 右键菜单弹层圆角(窗口级裁剪 + 圆角模糊区域 + Win11 原生圆角偏好) ──
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT { public int Left, Top, Right, Bottom; }
+
+    [DllImport("user32.dll")]
+    private static extern int SetWindowRgn(IntPtr hwnd, IntPtr hRgn, bool bRedraw);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(IntPtr hwnd);
+
+    [DllImport("gdi32.dll")]
+    private static extern IntPtr CreateRoundRectRgn(int l, int t, int r, int b, int w, int h);
+
+    [DllImport("gdi32.dll")]
+    private static extern bool DeleteObject(IntPtr o);
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
+
+    private const uint DWM_BB_BLURREGION = 0x00000002;
+    private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+    private const int DWMWCP_ROUND = 2;
+
     // AccentState values
     private const int ACCENT_DISABLED = 0;
     private const int ACCENT_ENABLE_ACRYLICBLURBEHIND = 4;
 
     // ── Color presets ──
+
+    private static readonly LocalizationService _loc = LocalizationService.Instance;
 
     public static readonly IReadOnlyList<string> ColorPresetNames = new[]
     {
@@ -83,20 +113,20 @@ public static class AcrylicHelper
 
     public static readonly IReadOnlyDictionary<string, string> ColorPresetNamesCN = new Dictionary<string, string>
     {
-        ["Default"] = "默认",
-        ["Accent"] = "跟随系统",
-        ["GlassWhite"] = "玻璃白",
-        ["MistGrey"] = "薄雾灰",
-        ["DeepBlack"] = "深邃黑",
-        ["OceanBlue"] = "海洋蓝",
-        ["AuroraCyan"] = "极光青",
-        ["RosePink"] = "玫瑰粉",
-        ["BordeauxRed"] = "波尔多红",
-        ["ForestGreen"] = "森林绿",
-        ["RoyalPurple"] = "皇家紫",
-        ["SunsetOrange"] = "日落橙",
-        ["ChampagneGold"] = "香槟金",
-        ["MorandiSage"] = "莫兰迪灰绿"
+        ["Default"] = _loc["LiquidGlass.Default"],
+        ["Accent"] = _loc["LiquidGlass.FollowSystem"],
+        ["GlassWhite"] = _loc["LiquidGlass.GlassWhite"],
+        ["MistGrey"] = _loc["LiquidGlass.MistGray"],
+        ["DeepBlack"] = _loc["LiquidGlass.DeepBlack"],
+        ["OceanBlue"] = _loc["LiquidGlass.OceanBlue"],
+        ["AuroraCyan"] = _loc["LiquidGlass.AuroraCyan"],
+        ["RosePink"] = _loc["LiquidGlass.RosePink"],
+        ["BordeauxRed"] = _loc["LiquidGlass.BordeauxRed"],
+        ["ForestGreen"] = _loc["LiquidGlass.ForestGreen"],
+        ["RoyalPurple"] = _loc["LiquidGlass.RoyalPurple"],
+        ["SunsetOrange"] = _loc["LiquidGlass.SunsetOrange"],
+        ["ChampagneGold"] = _loc["LiquidGlass.ChampagneGold"],
+        ["MorandiSage"] = _loc["LiquidGlass.MorandiGrayGreen"]
     };
 
     /// <summary>
@@ -579,7 +609,7 @@ public static class AcrylicHelper
         // Title
         var titleTb = new TextBlock
         {
-            Text = isChinese ? "液态玻璃设置" : "Liquid Glass Settings",
+            Text = _loc["LiquidGlass.Title"],
             FontSize = 16, FontWeight = FontWeights.SemiBold,
             Foreground = t1, Margin = new Thickness(0, 0, 0, 16)
         };
@@ -588,21 +618,21 @@ public static class AcrylicHelper
 
         // Blur Amount slider (0-60)
         var blurSaved = localBlur;
-        var blurLabelRow = BuildSliderRow(isChinese ? "模糊半径" : "Blur Radius", 0, 60, localBlur,
+        var blurLabelRow = BuildSliderRow(_loc["LiquidGlass.BlurRadius"], 0, 60, localBlur,
             t1, t2, (v, lbl) => { localBlur = (int)v; lbl.Text = $"{(int)v}"; FirePreview(); });
         Grid.SetRow(blurLabelRow, row++);
         grid.Children.Add(blurLabelRow);
 
         // Tint Opacity slider (0-100%)
         var opacitySaved = localTintOpacity;
-        var opacityLabelRow = BuildSliderRow(isChinese ? "着色不透明度" : "Tint Opacity", 0, 100, localTintOpacity,
+        var opacityLabelRow = BuildSliderRow(_loc["LiquidGlass.TintOpacity"], 0, 100, localTintOpacity,
             t1, t2, (v, lbl) => { localTintOpacity = (int)v; lbl.Text = $"{localTintOpacity}%"; FirePreview(); });
         Grid.SetRow(opacityLabelRow, row++);
         grid.Children.Add(opacityLabelRow);
 
         // Tint Luminosity slider (0-150%)
         var luminositySaved = localTintLuminosity;
-        var luminosityLabelRow = BuildSliderRow(isChinese ? "着色亮度" : "Tint Luminosity", 0, 150, localTintLuminosity,
+        var luminosityLabelRow = BuildSliderRow(_loc["LiquidGlass.TintLuminosity"], 0, 150, localTintLuminosity,
             t1, t2, (v, lbl) => { localTintLuminosity = (int)v; lbl.Text = $"{localTintLuminosity}%"; FirePreview(); });
         Grid.SetRow(luminosityLabelRow, row++);
         grid.Children.Add(luminosityLabelRow);
@@ -615,7 +645,7 @@ public static class AcrylicHelper
         };
         colorRow.Children.Add(new TextBlock
         {
-            Text = isChinese ? "颜色预设:" : "Color Preset:",
+            Text = _loc["LiquidGlass.ColorPreset"],
             Foreground = t2, FontSize = 12,
             VerticalAlignment = VerticalAlignment.Center,
             Width = 100
@@ -628,8 +658,8 @@ public static class AcrylicHelper
         int selectedIdx = 0;
         for (int i = 0; i < ColorPresetNames.Count; i++)
         {
-            string displayName = isChinese && ColorPresetNamesCN.TryGetValue(ColorPresetNames[i], out var cnName)
-                ? $"{ColorPresetNames[i]} ({cnName})"
+            string displayName = ColorPresetNamesCN.TryGetValue(ColorPresetNames[i], out var name)
+                ? name
                 : ColorPresetNames[i];
             presetCombo.Items.Add(displayName);
             if (ColorPresetNames[i] == colorMode) selectedIdx = i;
@@ -643,9 +673,7 @@ public static class AcrylicHelper
         // Hint text
         var hintTb = new TextBlock
         {
-            Text = isChinese
-                ? "模糊半径=0 关闭效果 | 亮度100%=原始色彩 | 预设决定基础色调"
-                : "Blur=0 disables | Luminosity 100%=original | Preset selects base tint",
+            Text = _loc["LiquidGlass.Hint"],
             FontSize = 9,
             Margin = new Thickness(0, 4, 0, 0),
             TextWrapping = TextWrapping.Wrap
@@ -663,7 +691,7 @@ public static class AcrylicHelper
         };
         var cancelBtn = new Button
         {
-            Content = isChinese ? "取消" : "Cancel",
+            Content = _loc["LiquidGlass.Cancel"],
             Width = 80, Height = 32,
             Background = ibg, Foreground = t2,
             BorderBrush = ibd, BorderThickness = new Thickness(1),
@@ -672,7 +700,7 @@ public static class AcrylicHelper
         };
         var saveBtn = new Button
         {
-            Content = isChinese ? "保存" : "Save",
+            Content = _loc["LiquidGlass.Save"],
             Width = 80, Height = 32,
             Background = accent, Foreground = System.Windows.Media.Brushes.White,
             BorderThickness = new Thickness(0),
@@ -770,5 +798,275 @@ public static class AcrylicHelper
     public static void EnableAcrylicFromHex(Window window, string argbHex)
     {
         EnableBlur(window, 18, 50, 100, "Default");
+    }
+
+    // ── ContextMenu acrylic (Win11 视觉样式统一在 Resources/Controls/ContextMenu.xaml) ──
+    //  这里只做一件事:菜单 Popup 打开时给 HWND 开 DWM 毛玻璃,关闭时关闭。
+    //  不再在这里用代码构建 Style/Template —— 代码里 new DynamicResourceExtension()
+    //  不会经过 XAML 解析器,是无效值,会把整套菜单样式在运行期静默丢弃。
+    //  管理窗口(ManagementWindow)的菜单是自绘 Popup,不经过这里;IsManagementWindowMenu
+    //  是最后一道保险。
+
+    public static readonly DependencyProperty EnableContextMenuAcrylicProperty =
+        DependencyProperty.RegisterAttached(
+            "EnableContextMenuAcrylic",
+            typeof(bool),
+            typeof(AcrylicHelper),
+            new PropertyMetadata(false, OnEnableContextMenuAcrylicChanged));
+
+    public static void SetEnableContextMenuAcrylic(DependencyObject obj, bool value)
+        => obj.SetValue(EnableContextMenuAcrylicProperty, value);
+
+    public static bool GetEnableContextMenuAcrylic(DependencyObject obj)
+        => (bool)obj.GetValue(EnableContextMenuAcrylicProperty);
+
+    // ── 全局 ContextMenu 生命周期挂钩 ──
+    // 之前的实现靠隐式样式里的 attached property 去订阅 Opened —— 但代码 new 出来、
+    // 没有 PlacementTarget 的 ContextMenu(托盘菜单等)拿不到隐式样式,attached
+    // property 永远不会被设置,兜底逻辑永远不执行 → 托盘菜单一直是系统默认浅色。
+    // 改成全局 class handler:任何 ContextMenu 打开/关闭都会经过这里(先于实例
+    // 事件,且不设置 Handled,不影响现有菜单自己的 Opened 处理)。
+    // EnableContextMenuAcrylic 保留为样式标记,不再负责订阅。
+
+    static void OnEnableContextMenuAcrylicChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        // no-op: 全部工作由 EnsureGlobalContextMenuHook 的 class handler 完成。
+    }
+
+    static bool _globalContextMenuHookInstalled;
+
+    /// <summary>应用启动时调用一次;对所有 ContextMenu(含托盘/代码创建)生效。</summary>
+    public static void EnsureGlobalContextMenuHook()
+    {
+        if (_globalContextMenuHookInstalled) return;
+        _globalContextMenuHookInstalled = true;
+        EventManager.RegisterClassHandler(
+            typeof(ContextMenu),
+            ContextMenu.OpenedEvent,
+            new RoutedEventHandler(OnAnyContextMenuOpened));
+        EventManager.RegisterClassHandler(
+            typeof(ContextMenu),
+            ContextMenu.ClosedEvent,
+            new RoutedEventHandler(OnAnyContextMenuClosed));
+    }
+
+    static void OnAnyContextMenuOpened(object sender, RoutedEventArgs e)
+    {
+        if (sender is not ContextMenu menu) return;
+
+        // 管理界面菜单不动:其页面用自绘 Popup(PageHelpers.RowContextMenu /
+        // ManagementWindow.ShowMergedGroupContextMenuImpl),本就不走内置 ContextMenu;
+        // 此处兜底跳过,防止未来管理窗口内部出现内置菜单时被误开毛玻璃。
+        bool isManagement = IsManagementWindowMenu(menu);
+#if DEBUG
+        var firstItem = menu.Items.OfType<MenuItem>().FirstOrDefault();
+        var firstSep = menu.Items.OfType<Separator>().FirstOrDefault();
+        System.Diagnostics.Debug.WriteLine(
+            $"[ContextMenu] opened cmStyle={(menu.Style != null)} cmTemplate={(menu.Template != null)} " +
+            $"mgmt={isManagement} items={menu.Items.Count} " +
+            $"miStyle={(firstItem?.Style != null)} miTemplate={(firstItem?.Template != null)} " +
+            $"sepStyle={(firstSep?.Style != null)} sepTemplate={(firstSep?.Template != null)}");
+#endif
+        if (isManagement) return;
+
+        // 每次打开都把调色板对一遍注册表(幂等、极轻):系统主题在菜单打开前
+        // 恰好切换过也能保证这一屏就是正确主题。
+        MenuThemeService.Apply();
+
+        // 兜底:代码 new 出来、尚未挂到任何元素的 ContextMenu(如托盘菜单)可能错过
+        // 隐式样式解析。按类型键取回 ContextMenu.xaml 里定义的同一份 Win11 样式
+        // 显式应用一次(幂等;已有显式样式时 menu.Style != null,不会覆盖)。
+        if (menu.Style == null)
+            menu.Style = Application.Current.TryFindResource(typeof(ContextMenu)) as Style;
+
+        // 菜单项兜底:隐式样式在部分树形态下可能不命中 MenuItem/Separator。
+        // 直接取回同一份 XAML 样式,给没拿到样式的项显式补上;Separator 必须用
+        // SeparatorStyleKey 那份(MenuBase 会给菜单分隔线强设资源引用,主题样式
+        // 自带侧边距,换成我们定义的贯穿版)。
+        var miStyle = Application.Current.TryFindResource(typeof(MenuItem)) as Style;
+        var sepKeyStyle = Application.Current.TryFindResource(MenuItem.SeparatorStyleKey) as Style;
+        if (miStyle != null || sepKeyStyle != null)
+        {
+            foreach (var item in menu.Items)
+            {
+                if (item is MenuItem mi && mi.Style == null && miStyle != null)
+                    mi.Style = miStyle;
+                else if (item is Separator sep && sepKeyStyle != null &&
+                         !ReferenceEquals(sep.Style, sepKeyStyle))
+                    sep.Style = sepKeyStyle;
+            }
+        }
+
+        // 子菜单(新建 ▸ 等)的 PART_Popup 也要挂同样的圆角 + 毛玻璃。
+        HookSubmenuPopups(menu);
+
+        try
+        {
+            var src = PresentationSource.FromVisual(menu) as HwndSource;
+            if (src != null && src.Handle != IntPtr.Zero)
+            {
+                // 强制按新模板布局一遍,拿到 DesiredSize 再算圆角区域:框架内置的
+                // 编辑菜单(剪切/复制/粘贴)默认模板带阴影边距,Popup 窗口会比
+                // 我们模板的实际内容高一截;按 GetWindowRect 整窗开毛玻璃会在
+                // 菜单下方露出一条空白液态玻璃。DesiredSize 才是真实内容尺寸。
+                menu.UpdateLayout();
+                ApplyMenuPopupEffects(src.Handle, menu);
+            }
+        }
+        catch { }
+    }
+
+    static void OnAnyContextMenuClosed(object sender, RoutedEventArgs e)
+    {
+        if (sender is not ContextMenu menu) return;
+        try
+        {
+            var src = PresentationSource.FromVisual(menu) as HwndSource;
+            if (src != null && src.Handle != IntPtr.Zero)
+                DisableBlur(src.Handle);
+        }
+        catch { }
+    }
+
+    // ── 菜单弹层的圆角与毛玻璃(主菜单 + 子菜单共用) ──
+    // 之前「尖角裁剪不干净」的根因是:WCA_ACCENT_POLICY 的 acrylic 背板按整个
+    // Popup 窗口矩形生效,圆角菜单外面会露出方形的模糊/染色角;XAML 里的
+    // CornerRadius 只能裁 WPF 自己画的表面,裁不到 DWM 背板。这里三层保险:
+    //   1) SetWindowRgn 把 Popup 窗口本身裁成圆角矩形 → DWM 背板跟着被裁;
+    //   2) 模糊区域(DWM_BB_BLURREGION)用同样的圆角矩形;
+    //   3) DWMWA_WINDOW_CORNER_PREFERENCE=ROUND 让 Win11 原生把窗口角切圆
+    //      (旧系统该调用失败,自动忽略)。
+    static void ApplyMenuPopupEffects(IntPtr hwnd, FrameworkElement? sizeHint = null)
+    {
+        if (hwnd == IntPtr.Zero) return;
+        try
+        {
+            uint dpi = GetDpiForWindow(hwnd);
+            if (dpi < 96) dpi = 96;
+            double scale = dpi / 96.0;
+
+            // 优先用内容 DesiredSize(真实菜单尺寸);拿不到再用整窗矩形兜底。
+            int w = 0, h = 0;
+            if (sizeHint != null)
+            {
+                w = (int)Math.Round(sizeHint.DesiredSize.Width * scale);
+                h = (int)Math.Round(sizeHint.DesiredSize.Height * scale);
+            }
+            if (w <= 0 || h <= 0)
+            {
+                GetWindowRect(hwnd, out var r);
+                w = r.Right - r.Left;
+                h = r.Bottom - r.Top;
+            }
+            if (w <= 0 || h <= 0) return;
+            int rad = (int)Math.Round(8 * dpi / 96.0);
+
+            // 1) 窗口级圆角裁剪。SetWindowRgn 会接管 hRgn 的所有权,不能 DeleteObject。
+            SetWindowRgn(hwnd, CreateRoundRectRgn(0, 0, w, h, rad, rad), true);
+
+            // 2) 模糊背板用同样的圆角区域(调用返回后要自己 DeleteObject)。
+            var bb = new DWM_BLURBEHIND
+            {
+                dwFlags = DWM_BB_ENABLE | DWM_BB_BLURREGION,
+                fEnable = true,
+                hRgnBlur = CreateRoundRectRgn(0, 0, w, h, rad, rad)
+            };
+            DwmEnableBlurBehindWindow(hwnd, ref bb);
+            DeleteObject(bb.hRgnBlur);
+
+            // 3) Win11 原生圆角窗口偏好。
+            try
+            {
+                int pref = DWMWCP_ROUND;
+                DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref pref, sizeof(int));
+            }
+            catch { }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[AcrylicHelper] ApplyMenuPopupEffects: {ex}");
+        }
+
+        // 4) 保持原有的 acrylic accent(磨砂质感;tint 透明,只取模糊)。
+        TrySetAccent(hwnd, ACCENT_ENABLE_ACRYLICBLURBEHIND, (30 << 8) | 0x100, 0);
+    }
+
+    // ── 子菜单 PART_Popup 生命周期挂钩 ──
+    // MenuItem 的子菜单是模板里的 Popup(不是 ContextMenu),隐式样式管不到它的
+    // DWM 效果;这里在菜单打开时把每个带子项的 MenuItem 的 PART_Popup 找出来,
+    // 在 Popup 打开/关闭时套用与主菜单完全相同的圆角 + 毛玻璃配方。
+    static void HookSubmenuPopups(ContextMenu menu)
+    {
+        foreach (var item in menu.Items)
+            if (item is MenuItem mi && mi.HasItems)
+                HookMenuItemSubmenuPopup(mi);
+    }
+
+    static void HookMenuItemSubmenuPopup(MenuItem mi)
+    {
+        var popup = mi.Template?.FindName("PART_Popup", mi) as Popup;
+        if (popup == null) return;
+        popup.Opened -= OnSubmenuPopupOpened;
+        popup.Opened += OnSubmenuPopupOpened;
+        popup.Closed -= OnSubmenuPopupClosed;
+        popup.Closed += OnSubmenuPopupClosed;
+    }
+
+    static void OnSubmenuPopupOpened(object sender, EventArgs e)
+    {
+        if (sender is not Popup popup) return;
+        try
+        {
+            var src = PresentationSource.FromVisual(popup.Child) as HwndSource;
+            if (src != null && src.Handle != IntPtr.Zero)
+                ApplyMenuPopupEffects(src.Handle, popup.Child as FrameworkElement);
+            else
+                // Popup 刚打开时 HwndSource 偶尔还没就绪,下一帧补一次。
+                popup.Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    var src2 = PresentationSource.FromVisual(popup.Child) as HwndSource;
+                    if (src2 != null && src2.Handle != IntPtr.Zero)
+                        ApplyMenuPopupEffects(src2.Handle, popup.Child as FrameworkElement);
+                }), System.Windows.Threading.DispatcherPriority.Loaded);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[AcrylicHelper] OnSubmenuPopupOpened: {ex}");
+        }
+
+        // 更深层级的子菜单此时才实例化容器,递归再挂一层。
+        if (popup.TemplatedParent is MenuItem parent)
+            foreach (var item in parent.Items)
+                if (item is MenuItem nested && nested.HasItems)
+                    HookMenuItemSubmenuPopup(nested);
+    }
+
+    static void OnSubmenuPopupClosed(object sender, EventArgs e)
+    {
+        if (sender is not Popup popup) return;
+        try
+        {
+            var src = PresentationSource.FromVisual(popup.Child) as HwndSource;
+            if (src != null && src.Handle != IntPtr.Zero)
+                DisableBlur(src.Handle);
+        }
+        catch { }
+    }
+
+    /// <summary>判断菜单是否属于 ManagementWindow(含其内部页面/控件)。</summary>
+    static bool IsManagementWindowMenu(ContextMenu menu)
+    {
+        try
+        {
+            var src = menu.PlacementTarget ?? VisualTreeHelper.GetParent(menu) as Visual;
+            while (src != null)
+            {
+                if (src is Window w)
+                    return w is Views.ManagementWindow;
+                src = VisualTreeHelper.GetParent(src) as Visual;
+            }
+        }
+        catch { }
+        return false;
     }
 }

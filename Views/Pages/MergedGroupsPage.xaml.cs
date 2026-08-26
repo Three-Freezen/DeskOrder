@@ -26,6 +26,7 @@ public partial class MergedGroupsPage : UserControl
 {
     readonly ManagementWindow _main;
     readonly ZoneManager _zoneManager;
+    readonly LocalizationService _loc = LocalizationService.Instance;
     Zone? _selected;
     // ponytail: live row collection bound to ListHost — drag reorder moves rows
     // through this OC (mirroring PropertyTabStrip's Tabs OC) so the ItemsControl
@@ -54,7 +55,7 @@ public partial class MergedGroupsPage : UserControl
     public void RefreshList()
     {
         var masters = _zoneManager.Zones.Where(z => z.MergedGroupMembership.SubZoneIds.Count > 0).ToList();
-        CountLabel.Text = $"{masters.Count} 个分区 · {_zoneManager.Zones.Count} 项";
+        CountLabel.Text = _loc.Get("MergedGroupsPage.Subtitle", masters.Count, _zoneManager.Zones.Count);
         // 拖动排序即列表顺序：主分区按 Zones 集合中的持久化相对顺序展示。
         _rows.Clear();
         foreach (var m in masters) _rows.Add(BuildRow(m));
@@ -69,7 +70,7 @@ public partial class MergedGroupsPage : UserControl
         {
             Tag = master,
             Title = master.MergedGroupMembership.DisplayName,
-            Subtitle = $"{subCount} 个分区 · {master.Items.Count} 项",
+            Subtitle = _loc.Get("MergedGroupsPage.Subtitle", subCount, master.Items.Count),
             IconKey = "Icon.Merged",
             IconText = master.MergedGroupMembership.Icon ?? "",
             IsLocked = master.IsLocked,
@@ -118,11 +119,7 @@ public partial class MergedGroupsPage : UserControl
             }
             Select(master);
         };
-        row.PreviewMouseRightButtonUp += (_, e) =>
-        {
-            Select(master);
-            ShowGroupContextMenu(master, row);
-        };
+        // 右键菜单已取消：显示/锁定/分离单个/解散全部移到属性面板顶部状态区。
         return row;
     }
 
@@ -142,28 +139,6 @@ public partial class MergedGroupsPage : UserControl
         PropertyWindowManager.Instance.DockTarget(target, _main);
     }
 
-    void ShowGroupContextMenu(Zone master, EditableListRow row)
-    {
-        var items = new List<RowContextMenu.Item>
-        {
-            new(master.IsVisible ? "隐藏" : "显示", () =>
-            {
-                // ponytail 2026-08-26: SAME path as the zone's own hide button (see ZonesPage).
-                if (master.IsVisible) _zoneManager.HideZone(master.Id);
-                else _zoneManager.ShowZone(master);
-                RefreshList();
-            }),
-            new(master.IsLocked ? "解锁" : "锁定", () =>
-            {
-                master.IsLocked = !master.IsLocked; _zoneManager.UpdateZone(master); RefreshList();
-            }),
-        };
-        if (master.MergedGroupMembership.SubZoneIds.Count > 0)
-            items.Add(new("分离单个分区", () => _main.DisbandSingleZone(master)));
-        items.Add(new("解散组合分区", () => Delete(master), Danger: true));
-        RowContextMenu.Show(row, items);
-    }
-
     void NewGroup_Click(object sender, RoutedEventArgs e)
     {
         _main.NewZone();
@@ -174,7 +149,7 @@ public partial class MergedGroupsPage : UserControl
 
     void Delete(Zone master)
     {
-        if (MessageBox.Show($"解散组合「{master.MergedGroupMembership.DisplayName}」？", "解散组合",
+        if (MessageBox.Show(_loc.Get("MergePage.DisbandConfirm", master.MergedGroupMembership.DisplayName), _loc["MergePage.DisbandTitle"],
             MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
         _main.DisbandEntireGroup(master);
         if (ReferenceEquals(_selected, master)) _selected = null;

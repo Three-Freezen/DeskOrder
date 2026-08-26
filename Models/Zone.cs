@@ -64,9 +64,10 @@ public class Zone : AppearanceModel
             TileMode = old.GetBoolean();
     }
 
-    // ── Title bar text color adaptive ──
-    /// <summary>Auto-pick zone title bar text color based on <see cref="TitleBarFillColor"/>.</summary>
-    public bool TitleBarTextColorAdaptive { get; set; } = true;
+    /// <summary>标题栏按钮颜色 — 替代原「标题栏文字颜色自适应」的固定色。默认匹配 XAML 按钮默认 #80FFFFFF。</summary>
+    public string ButtonColor { get; set; } = "#80FFFFFF";
+    /// <summary>主体内容颜色 — 替代原「主体内容颜色自适应」的固定色（分区图标/应用名）。默认匹配 XAML 项名 #E0FFFFFF。</summary>
+    public string TextColor { get; set; } = "#E0FFFFFF";
     /// <summary>标题栏填充单独设置 — 勾选后主体填充(FillColor)不再铺到标题栏下方。</summary>
     public bool TitleBarFillIndependent { get; set; } = false;
 
@@ -89,7 +90,20 @@ public class Zone : AppearanceModel
     [JsonPropertyName("autoOrganizeWatchPath")]
     public string AutoOrganizeWatchPath { get; set; } = "";
 
-    /// <summary>派生属性：任一行启用即 true。仅用于 UI / watcher 判断，序列化忽略。</summary>
+    /// <summary>监听开关（用户显式控制）。勾选 = 启用 watcher，取消 = 暂停但保留规则。
+    /// 首次添加规则时自动勾选。序列化持久化，方便下次快速开启。</summary>
+    [JsonPropertyName("autoOrganizeWatching")]
+    public bool AutoOrganizeWatching { get; set; } = false;
+
+    /// <summary>扩展名规则子开关。取消 = 保留扩展名列表但不参与匹配。</summary>
+    [JsonPropertyName("autoOrganizeExtEnabled")]
+    public bool AutoOrganizeExtEnabled { get; set; } = true;
+
+    /// <summary>文件名要素规则子开关。取消 = 保留要素列表但不参与匹配。</summary>
+    [JsonPropertyName("autoOrganizeNameEnabled")]
+    public bool AutoOrganizeNameEnabled { get; set; } = true;
+
+    /// <summary>派生属性：是否已有规则（后缀或文件名要素非空）。序列化忽略。</summary>
     [JsonIgnore]
     public bool AutoOrganizeEnabled =>
         AutoOrganizeExtensions.Count > 0 || AutoOrganizeNameTokens.Count > 0;
@@ -130,6 +144,9 @@ public class Zone : AppearanceModel
             AutoOrganizeExtensions = new List<string>(AutoOrganizeExtensions),
             AutoOrganizeNameTokens = new List<string>(AutoOrganizeNameTokens),
             AutoOrganizeWatchPath = AutoOrganizeWatchPath,
+            AutoOrganizeWatching = AutoOrganizeWatching,
+            AutoOrganizeExtEnabled = AutoOrganizeExtEnabled,
+            AutoOrganizeNameEnabled = AutoOrganizeNameEnabled,
             MergedGroupMembership = new MergedGroupMembership
             {
                 GroupId = MergedGroupMembership.GroupId,
@@ -151,7 +168,8 @@ public class Zone : AppearanceModel
                 TitleBarOpacity = MergedGroupStyle.TitleBarOpacity,
                 UseUnifiedFill = MergedGroupStyle.UseUnifiedFill,
                 TileMode = MergedGroupStyle.TileMode,
-                TitleBarTextColorAdaptive = MergedGroupStyle.TitleBarTextColorAdaptive,
+                ButtonColor = MergedGroupStyle.ButtonColor,
+                TextColor = MergedGroupStyle.TextColor,
                 TitleBarFillIndependent = MergedGroupStyle.TitleBarFillIndependent,
                 BackgroundImagePath = MergedGroupStyle.BackgroundImagePath,
                 BgImageStretch = MergedGroupStyle.BgImageStretch,
@@ -162,7 +180,8 @@ public class Zone : AppearanceModel
                 FolderMappingEnabled = MergedGroupStyle.FolderMappingEnabled,
                 FolderMappingPath = MergedGroupStyle.FolderMappingPath,
             },
-            TitleBarTextColorAdaptive = TitleBarTextColorAdaptive,
+            ButtonColor = ButtonColor,
+            TextColor = TextColor,
             Items = new List<ZoneItem>(Items.ConvertAll(i => i.Clone()))
         };
         // Ponytail: 14 AppearanceModel fields auto-copied via reflection so

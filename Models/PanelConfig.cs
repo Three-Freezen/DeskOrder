@@ -16,8 +16,10 @@ public class PanelConfig
     public double PanelHeight { get; set; } = 500;
     public string PanelTitleBarFillColor { get; set; } = "#10FFFFFF";
     public string PanelFillColor { get; set; } = "#08000000";
-    public bool PanelTextColorAdaptive { get; set; } = true;
-    public bool PanelTitleBarTextColorAdaptive { get; set; } = true;
+    /// <summary>标题栏内容颜色（替代原 PanelTitleBarTextColorAdaptive）— 面板顶栏文本/时钟/日期/搜索。</summary>
+    public string PanelButtonColor { get; set; } = "#E8E8F0";
+    /// <summary>主体内容颜色（替代原 PanelTextColorAdaptive）— 面板分区卡片名称。</summary>
+    public string PanelTextColor { get; set; } = "#FFFFFF";
     public bool PanelTitleBarFillIndependent { get; set; } = false;
     public string PanelBorderColor { get; set; } = "#40FFFFFF";
     // ponytail 2026-08-25: per-panel border thickness. Previously hardcoded 1.5 in

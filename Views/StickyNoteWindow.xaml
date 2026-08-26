@@ -1,6 +1,7 @@
 <Window x:Class="DesktopZones.Views.StickyNoteWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:DesktopZones.Helpers"
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
@@ -35,9 +36,9 @@
                         BorderBrush="#40FFFFFF" BorderThickness="1">
             <Border.ContextMenu>
                 <ContextMenu>
-                    <MenuItem x:Name="CtxToggleRestore" Header="Disable Restore" Click="ToggleRestore_Click"/>
+                    <MenuItem x:Name="CtxToggleRestore" Header="{loc:Loc Key=Note.DisableRestore}" Click="ToggleRestore_Click"/>
                     <Separator/>
-                    <MenuItem x:Name="CtxDelete" Header="Delete Note" Click="Delete_Click" Foreground="#FF6666"/>
+                    <MenuItem x:Name="CtxDelete" Header="{loc:Loc Key=Item.Delete}" Click="Delete_Click" Foreground="#FF6666"/>
                 </ContextMenu>
             </Border.ContextMenu>
             <Grid>
@@ -101,7 +102,7 @@
                 </Border>
 
                 <!-- Formatting toolbar -->
-                <Border Grid.Row="1" Background="#10000000" Padding="4,2">
+                <Border x:Name="ToolbarBorder" Grid.Row="1" Background="#10000000" Padding="4,2">
                     <StackPanel Orientation="Horizontal">
                         <!-- Font Size — locked white regardless of adaptive: the number itself
                              (10/12/14/…) is a label, not an icon, and shouldn't compete with bg.
@@ -221,13 +222,13 @@
                                     BorderBrush="{StaticResource LockedDark.Border}" BorderThickness="1"
                                     Padding="8">
                                 <StackPanel>
-                                    <TextBlock Text="Text Color" FontSize="10"
+                                    <TextBlock Text="{loc:Loc Key=NoteProp.NameColor}" FontSize="10"
                                                Foreground="{StaticResource LockedDark.TextDim}" Margin="0,0,0,6"/>
                                     <WrapPanel x:Name="ColorPresetsPanel" Width="200">
                                         <Border x:Name="PresetTransparent" Width="24" Height="24" CornerRadius="12"
                                                 Margin="0,0,4,4" Cursor="Hand" Tag="#01000000"
                                                 BorderBrush="{StaticResource LockedDark.Border}" BorderThickness="1"
-                                                MouseLeftButtonDown="ColorPreset_Click" ToolTip="Transparent">
+                                                MouseLeftButtonDown="ColorPreset_Click" ToolTip="{loc:Loc Key=Common.Transparent}">
                                             <Border.Background>
                                                 <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
                                                     <GradientStop Color="#FFFFFF" Offset="0"/>

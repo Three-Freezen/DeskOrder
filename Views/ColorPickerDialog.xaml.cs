@@ -23,10 +23,9 @@ public partial class ColorPickerDialog : Window
 
     void ApplyLoc()
     {
-        var cn = _loc.CurrentLanguage == "zh";
-        TitleLabel.Text = cn ? "选择颜色" : "Pick Color";
-        OkBtn.Content = cn ? "确定" : "OK";
-        CancelBtn.Content = cn ? "取消" : "Cancel";
+        TitleLabel.Text = _loc["ColorPicker.Title"];
+        OkBtn.Content = _loc["ColorPicker.Ok"];
+        CancelBtn.Content = _loc["ColorPicker.Cancel"];
     }
 
     private void SetFromHex(string hex)

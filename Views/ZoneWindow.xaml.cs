@@ -34,10 +34,6 @@ public partial class ZoneWindow : Window
     private Zone _zone;
     private readonly ZoneManager _mgr;
 
-    /// <summary>XAML default foreground of the ControlPoint button labels (LockBtnText /
-    /// EditBtnText / ImportBtnText / HideBtnText). Used to restore them when title-bar
-    /// adaptive is turned back off.</summary>
-    private static readonly SolidColorBrush CtrlLabelDefaultBrush = new(Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF));
     // ponytail: frozen hover brushes — same color on every mouse-over, no need to
     // reallocate. Per-class so each Window can Freeze independently (freeze is thread-safe).
     private static readonly SolidColorBrush RestoreHoverBrush = Freeze(new(Color.FromArgb(0xFF, 0x2A, 0x2A, 0x4E)));
@@ -53,12 +49,6 @@ public partial class ZoneWindow : Window
     private HwndSource? _src;
     private Canvas? _itemCanvas;
     private Action<string>? _langChanged;
-    // Background-image placement transform, refreshed by ApplyBackgroundImage and
-    // consumed by the adaptive-color samplers to map window-space sample points
-    // back into source-image pixels.
-    private double _bgImageScale;
-    private double _bgImageOffsetX;
-    private double _bgImageOffsetY;
 
     private bool _dragging;
     private Point _ds, _is;
@@ -128,7 +118,6 @@ public partial class ZoneWindow : Window
     System.Windows.Threading.DispatcherTimer? _flyoutCloseTimer;
     FrameworkElement? _scaledSubfolderContainer;
     double _scaledSubfolderFrom = 1.0;
-    bool _flyoutClickOutsideHooked;
     bool _flyoutClosing;
     // 打开世代 token:关动画的 onComplete 只在 token 未变时才真正关 Popup,防止
     // "关闭动画还没放完就又点开了另一个 SubFolder" 时把新开的 Flyout 误关。
@@ -154,6 +143,7 @@ public partial class ZoneWindow : Window
         SubfolderFlyoutView.ItemRenameRequested += OnFlyoutItemRename;
         SubfolderFlyoutView.ItemDeleteRequested += OnFlyoutItemDelete;
         SubfolderFlyoutView.ItemsChanged += OnFlyoutItemsChanged;
+        SubfolderFlyoutView.ClickOutsideRequested += OnFlyoutClickOutside;
         // ponytail 2026-08-26: 键盘焦点可能落在 Popup 内(主窗口收不到 Ctrl+A/Delete),
         // flyout 侧再挂一份同样的快捷键处理。
         SubfolderFlyoutView.PreviewKeyDown += (_, e) =>
@@ -195,7 +185,7 @@ public partial class ZoneWindow : Window
         // ponytail: BP-A — container generation is lazy in WPF. ItemsControl doesn't
         // realize containers until layout pass runs, which is AFTER ApplyStyle in the
         // constructor and ShowZone's synchronous Visibility=Visible. Hook the generator's
-        // StatusChanged so ApplyItemTextColorAdaptive fires the moment containers exist,
+        // StatusChanged so ApplyItemTextColor fires the moment containers exist,
         // covering first-open, hide→show, and any subsequent item changes. Constructor
         // ApplyStyle still runs (it handles fill/border/title-bar which are XAML-static)
         // but its item walk is a no-op until this fires.
@@ -204,15 +194,14 @@ public partial class ZoneWindow : Window
             if (ItemsHost.ItemContainerGenerator.Status
                 == System.Windows.Controls.Primitives.GeneratorStatus.ContainersGenerated)
             {
-                ApplyItemTextColorAdaptive();
+                ApplyItemTextColor();
                 ReapplyTileItemVisuals();
             }
         };
         ItemsHost.ItemContainerGenerator.StatusChanged += _itemsHostStatusChangedHandler;
         if (!_zone.IsVisible) ApplyHidden();
-        // ponytail: ApplyStyle (line 74) now rebuilds sub-zone tabs internally with the
-        // resolved adaptive brush. No external RebuildSubZoneTabs or
-        // ApplySubZoneTabTextColorAdaptive call needed here.
+        // ponytail: ApplyStyle rebuilds sub-zone tabs internally with the resolved title
+        // text color. No external RebuildSubZoneTabs call needed here.
         if (_zone.MergedGroupMembership.SubZoneIds.Count > 0) _vm.SelectedSubZoneId = _zone.Id;
         UpdateMergedTitle();
         // ponytail: hover-expand (Task 14d). Wire after InitComponent; the behavior
@@ -255,29 +244,28 @@ public partial class ZoneWindow : Window
 
     void ApplyLoc()
     {
-        var cn = _loc.CurrentLanguage == "zh";
         CtxImport.Header = _loc["Zone.Import"];
-        CtxImportFolder.Header = cn ? "导入文件夹..." : "Import Folder...";
-        CtxImportFiles.Header = cn ? "导入文件..." : "Import Files...";
-        CtxImportFolder2.Header = cn ? "导入文件夹..." : "Import Folder...";
+        CtxImportFolder.Header = _loc["ZoneMenu.ImportFolder"];
+        CtxImportFiles.Header = _loc["ZoneMenu.ImportFiles"];
+        CtxImportFolder2.Header = _loc["ZoneMenu.ImportFolder"];
         CtxImportShell.Header = _loc["Zone.ImportShellItems"];
         CtxImportShell2.Header = _loc["Zone.ImportShellItems"];
         CtxNew.Header = _loc["Zone.New"];
         CtxNew2.Header = _loc["Zone.New"];
-        CtxNewFolder.Header = cn ? "新建文件夹... / New Folder..." : "New Folder...";
+        CtxNewFolder.Header = _loc["ZoneMenu.NewFolder"];
         // ponytail 2026-08-25 (Task 6): "New Subfolder" menu entry, mirrored in both
         // ContextMenus. Localization keys Subfolder.New* live in i18n/source.*.json.
         CtxNewSubfolder.Header = _loc["Subfolder.New"];
         CtxNewSubfolder2.Header = _loc["Subfolder.New"];
-        CtxNewTxt.Header = cn ? "文本文档 (.txt)" : "Text Document (.txt)";
-        CtxNewDocx.Header = cn ? "Word 文档 (.docx)" : "Word Document (.docx)";
-        CtxNewPptx.Header = cn ? "PowerPoint (.pptx)" : "PowerPoint (.pptx)";
-        CtxNewXlsx.Header = cn ? "Excel 工作表 (.xlsx)" : "Excel Workbook (.xlsx)";
-        CtxNewFolder2.Header = cn ? "新建文件夹... / New Folder..." : "New Folder...";
-        CtxNewTxt2.Header = cn ? "文本文档 (.txt)" : "Text Document (.txt)";
-        CtxNewDocx2.Header = cn ? "Word 文档 (.docx)" : "Word Document (.docx)";
-        CtxNewPptx2.Header = cn ? "PowerPoint (.pptx)" : "PowerPoint (.pptx)";
-        CtxNewXlsx2.Header = cn ? "Excel 工作表 (.xlsx)" : "Excel Workbook (.xlsx)";
+        CtxNewTxt.Header = _loc["ZoneMenu.NewTxt"];
+        CtxNewDocx.Header = _loc["ZoneMenu.NewDocx"];
+        CtxNewPptx.Header = _loc["ZoneMenu.NewPptx"];
+        CtxNewXlsx.Header = _loc["ZoneMenu.NewXlsx"];
+        CtxNewFolder2.Header = _loc["ZoneMenu.NewFolder"];
+        CtxNewTxt2.Header = _loc["ZoneMenu.NewTxt"];
+        CtxNewDocx2.Header = _loc["ZoneMenu.NewDocx"];
+        CtxNewPptx2.Header = _loc["ZoneMenu.NewPptx"];
+        CtxNewXlsx2.Header = _loc["ZoneMenu.NewXlsx"];
         CtxDisbandAll.Header = _loc["Merge.DisbandAll"];
         CtxEdit.Header = _loc["Zone.Edit"];
         CtxHide.Header = _loc["Zone.Hide"];
@@ -761,7 +749,7 @@ public partial class ZoneWindow : Window
         _flyoutOriginContainer = FindContainerFor(sub);
 
         // 先复位到关闭态(缩放 0 / 不透明 0),避免上次关闭残留的中间态一闪而过。
-        ResetFlyoutClosed();
+        SubfolderFlyoutView.ResetToClosed();
         SubfolderFlyoutPopup.IsOpen = true;
 
         // 等布局完成后:①按"图标屏幕中心"一次性定死 flyout 的屏幕位置(AbsolutePoint
@@ -771,7 +759,7 @@ public partial class ZoneWindow : Window
         Dispatcher.BeginInvoke(new Action(() =>
         {
             if (_flyoutOpenToken != token) return; // 已被新的 open/close 取代
-            HookFlyoutClickOutside();
+            SubfolderFlyoutView.HookClickOutside();
             TryOpenFlyoutAnimated(sub);
         }), System.Windows.Threading.DispatcherPriority.Loaded);
         vm.IsOpen = true;
@@ -789,93 +777,16 @@ public partial class ZoneWindow : Window
         //   pos = 图标右上 + 8px,越界翻侧并夹工作区 → AbsolutePoint 的屏幕 offset
         //   c   = 图标中心 - pos → TransformGroup 缩放锚点(以图标为原点)
         var container = _flyoutOriginContainer ?? FindContainerFor(sub);
-        var (pos, c) = ComputeFlyoutPosAndAnchor(container, new Size(SubfolderFlyoutView.ActualWidth, SubfolderFlyoutView.ActualHeight));
+        var (pos, c) = SubfolderFlyout.ComputePosAndAnchor(container, new Size(SubfolderFlyoutView.ActualWidth, SubfolderFlyoutView.ActualHeight));
         SubfolderFlyoutPopup.HorizontalOffset = pos.X;
         SubfolderFlyoutPopup.VerticalOffset = pos.Y;
-        SetFlyoutAnchor(c);
+        SubfolderFlyoutView.SetAnchor(c);
         // ponytail 2026-08-26: 真玻璃 — 与主分区同配方给 Popup HWND 开 DWM 模糊,
         // 视觉上与主分区玻璃一致;失败才显示渐变兜底(ShowGlassFallback)。
         var fill = SubfolderFlyoutView.ViewModel?.Fill;
         if (fill != null)
             SubfolderFlyoutView.ViewModel.ShowGlassFallback = !SubfolderFlyoutView.TryApplyRealGlass(fill);
-        AnimateSubfolderFlyoutOpen();
-    }
-
-    /// <summary>确定性展开定位 + 动画原点。返回 (屏幕位置 pos, 缩放锚点 c):
-    /// pos 以图标右上角 + 8px 向右下展开,横向放不下翻到图标左侧、纵向放不下翻到图标
-    /// 上方,并夹在屏幕工作区内;c = 图标中心 - pos(flyout 局部坐标,允许负值)。
-    /// 全程只用图标容器的 PointToScreen(容器在可见分区窗口里,必然连着 PresentationSource),
-    /// 不再读 flyout 自身的 PointToScreen — 那会因 popup 重排时序拿到错误位置,
-    /// 或在 visual 未连接时抛异常回落到 (0,0),造成"起点有时在左、有时在右"。
-    /// ponytail 2026-08-26: 全程统一到 DIP。PointToScreen / SystemParameters.WorkArea
-    /// 返回物理像素,而 Popup 的 AbsolutePoint offset 与 RenderTransform 平移都是 DIP —
-    /// 125%/150% 缩放下直接把物理像素塞给 offset 会被再放大一遍,flyout 离图标越来越远
-    /// ("离图标太远")。锚点 c 同样按 DIP 计算,展开原点仍是图标中心,不改变原有算法。</summary>
-    (Point pos, Point c) ComputeFlyoutPosAndAnchor(FrameworkElement? container, Size flyoutSize)
-    {
-        const double gap = 8;
-        // 物理像素 → DIP 的换算比例:取图标所在窗口(分区)的当前显示器 DPI。
-        double sx = 1, sy = 1;
-        try
-        {
-            var d = VisualTreeHelper.GetDpi((System.Windows.Media.Visual?)container ?? this);
-            sx = d.DpiScaleX; sy = d.DpiScaleY;
-        }
-        catch { }
-        var waPx = SystemParameters.WorkArea; // 物理像素
-        var wa = new Rect(waPx.Left / sx, waPx.Top / sy, waPx.Width / sx, waPx.Height / sy); // → DIP
-        Point iconTL = new(0, 0);
-        double iconW = 0, iconH = 0;
-        if (container != null)
-        {
-            try
-            {
-                var tl = container.PointToScreen(new Point(0, 0)); // 物理像素
-                iconTL = new Point(tl.X / sx, tl.Y / sy);          // → DIP
-                iconW = container.ActualWidth;                      // 已是 DIP
-                iconH = container.ActualHeight;                     // 已是 DIP
-            }
-            catch
-            {
-                // visual 未连接等罕见情况 → 回退到工作区中心,保证仍能弹出。
-                var center = new Point(wa.Left + (wa.Width - flyoutSize.Width) / 2,
-                                       wa.Top + (wa.Height - flyoutSize.Height) / 2);
-                return (center, new Point(flyoutSize.Width / 2, flyoutSize.Height / 2));
-            }
-        }
-        double x = iconTL.X + iconW + gap;
-        double y = iconTL.Y + gap;
-        if (x + flyoutSize.Width > wa.Right - 8)
-            x = Math.Max(wa.Left + 8, iconTL.X - flyoutSize.Width - gap); // 翻到图标左侧
-        if (y + flyoutSize.Height > wa.Bottom - 8)
-            y = Math.Max(wa.Top + 8, iconTL.Y - flyoutSize.Height - gap); // 翻到图标上方
-        var pos = new Point(x, y);
-        var iconCenter = new Point(iconTL.X + iconW / 2, iconTL.Y + iconH / 2);
-        var c = new Point(iconCenter.X - pos.X, iconCenter.Y - pos.Y);
-        return (pos, c);
-    }
-
-    /// <summary>把缩放锚点 c 写入 TransformGroup 的 [移至原点(-c), Scale, 移回(+c)] —
-    /// 与 HoverExpandBehavior.ApplyOrigin 同款组合,动画以 c(图标中心)为原点缩放。</summary>
-    void SetFlyoutAnchor(Point c)
-    {
-        SubfolderFlyoutView.FlyoutTranslateBack.X = c.X;
-        SubfolderFlyoutView.FlyoutTranslateBack.Y = c.Y;
-        SubfolderFlyoutView.FlyoutTranslateToOrigin.X = -c.X;
-        SubfolderFlyoutView.FlyoutTranslateToOrigin.Y = -c.Y;
-    }
-
-    /// <summary>把 Flyout 复位到关闭态(scale 0,不透明 0),供打开前调用,避免残留动画帧。
-    /// 不透明度取 0 而非 1:Fade 动效的打开要从 0 淡入(NormalizeFlyoutFor 里非 Fade
-    /// kind 会自行把 Opacity 抬回 1,只有 Fade 保留 0 作为 from)。</summary>
-    void ResetFlyoutClosed()
-    {
-        var st = SubfolderFlyoutView.FlyoutScale;
-        st.BeginAnimation(ScaleTransform.ScaleXProperty, null);
-        st.BeginAnimation(ScaleTransform.ScaleYProperty, null);
-        st.ScaleX = 0; st.ScaleY = 0;
-        SubfolderFlyoutView.BeginAnimation(OpacityProperty, null);
-        SubfolderFlyoutView.Opacity = 0;
+        SubfolderFlyoutView.AnimateOpen();
     }
 
     void CloseSubfolderFlyout()
@@ -885,7 +796,7 @@ public partial class ZoneWindow : Window
         _flyoutCloseTimer?.Stop();
         _flyoutCloseTimer = null;
         var token = _flyoutOpenToken;
-        AnimateSubfolderFlyoutClose(onComplete: () =>
+        SubfolderFlyoutView.AnimateClose(onComplete: () =>
         {
             // 关闭动画期间又点开了另一个 SubFolder(token 已变)→ 不要误关新开的 Flyout。
             if (_flyoutOpenToken != token) { _flyoutClosing = false; return; }
@@ -896,28 +807,9 @@ public partial class ZoneWindow : Window
     }
 
     // ── click-outside 关闭(分区空白 / 桌面空白)──
-    // 打开时把鼠标捕获到 Flyout 上,再挂 PreviewMouseDownOutsideCapturedElement:
-    // 任意一次发生在 Flyout 子树之外的按下(包括桌面)都会先到这里,触发关闭。
-    void HookFlyoutClickOutside()
-    {
-        if (_flyoutClickOutsideHooked) return;
-        _flyoutClickOutsideHooked = true;
-        try { System.Windows.Input.Mouse.Capture(SubfolderFlyoutView, System.Windows.Input.CaptureMode.SubTree); } catch { }
-        System.Windows.Input.Mouse.AddPreviewMouseDownOutsideCapturedElementHandler(SubfolderFlyoutView, OnFlyoutClickOutside);
-    }
-
-    void UnhookFlyoutClickOutside()
-    {
-        if (!_flyoutClickOutsideHooked) return;
-        _flyoutClickOutsideHooked = false;
-        System.Windows.Input.Mouse.RemovePreviewMouseDownOutsideCapturedElementHandler(SubfolderFlyoutView, OnFlyoutClickOutside);
-        if (System.Windows.Input.Mouse.Captured == SubfolderFlyoutView)
-        {
-            try { SubfolderFlyoutView.ReleaseMouseCapture(); } catch { }
-        }
-    }
-
-    void OnFlyoutClickOutside(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    // 捕获/卸载与 WPF handler 注册已下沉到 SubfolderFlyout.HookClickOutside / UnhookClickOutside;
+    // 这里只订阅 SubfolderFlyoutView.ClickOutsideRequested 拿到事件做 popup 状态判定。
+    void OnFlyoutClickOutside(System.Windows.Input.MouseButtonEventArgs e)
     {
         if (!SubfolderFlyoutPopup.IsOpen) return;
         // ponytail 2026-08-27: 右键菜单打开期间,任何按下一律不关闭 — 菜单 Popup 的
@@ -1177,200 +1069,7 @@ public partial class ZoneWindow : Window
         _subItemsChangedHandler = null;
         _subItemsHost = null;
         _flyoutOriginContainer = null;
-        UnhookFlyoutClickOutside();
-    }
-
-    // ── Subfolder flyout animation ──
-    // ponytail 2026-08-26: faithful port of HoverExpandBehavior.StartAnimation —
-    // per-kind open/close symmetry, from-values read from the CURRENT state,
-    // duration 200ms/HoverExpandSpeed, onComplete driven by Completed events
-    // (with from==to short-circuits). scale-around-point via the TransformGroup
-    // [TranslateToOrigin, Scale, TranslateBack] anchored at the SubFolder icon's
-    // screen center (SetFlyoutOriginFromIcon). Close is the frame-exact reverse
-    // of open (CubicEase EaseIn vs EaseOut), so the flyout shrinks back into the
-    // icon it grew from.
-    void AnimateSubfolderFlyoutOpen()
-    {
-        var vm = SubfolderFlyoutView.ViewModel;
-        if (vm == null) return;
-        var kind = vm.HostSubItem.HoverAnimation;
-        NormalizeFlyoutFor(isExpanded: true, kind);
-        var dur = new Duration(TimeSpan.FromMilliseconds(200.0 / Math.Max(0.1, vm.HostSubItem.HoverExpandSpeed)));
-        switch (kind)
-        {
-            case HoverExpandAnimationKind.None:
-                ApplyFlyoutFinal(isExpanded: true, kind);
-                return;
-            case HoverExpandAnimationKind.Fade:
-                AnimateFlyoutOpacity(SubfolderFlyoutView.Opacity, 1, dur, EasingMode.EaseOut, null);
-                return;
-            case HoverExpandAnimationKind.VerticalExpand:
-                AnimateFlyoutScaleY(SubfolderFlyoutView.FlyoutScale.ScaleY, 1, dur, EasingMode.EaseOut, null);
-                return;
-            case HoverExpandAnimationKind.DirectionalExpand:
-                AnimateFlyoutScaleX(SubfolderFlyoutView.FlyoutScale.ScaleX, 1, dur, EasingMode.EaseOut, null);
-                return;
-            case HoverExpandAnimationKind.BounceExpand:
-                AnimateFlyoutBounce(isExpand: true, dur, null);
-                return;
-            default: // ScaleExpand
-                AnimateFlyoutScaleXY(SubfolderFlyoutView.FlyoutScale.ScaleX, 1, dur, EasingMode.EaseOut, null);
-                return;
-        }
-    }
-
-    void AnimateSubfolderFlyoutClose(Action onComplete)
-    {
-        var vm = SubfolderFlyoutView.ViewModel;
-        var kind = vm != null ? vm.HostSubItem.HoverAnimation : HoverExpandAnimationKind.ScaleExpand;
-        double speed = vm != null ? Math.Max(0.1, vm.HostSubItem.HoverExpandSpeed) : 1.0;
-        NormalizeFlyoutFor(isExpanded: false, kind);
-        var dur = new Duration(TimeSpan.FromMilliseconds(200.0 / speed));
-        switch (kind)
-        {
-            case HoverExpandAnimationKind.None:
-                ApplyFlyoutFinal(isExpanded: false, kind);
-                onComplete();
-                return;
-            case HoverExpandAnimationKind.Fade:
-                AnimateFlyoutOpacity(SubfolderFlyoutView.Opacity, 0, dur, EasingMode.EaseIn, onComplete);
-                return;
-            case HoverExpandAnimationKind.VerticalExpand:
-                AnimateFlyoutScaleY(SubfolderFlyoutView.FlyoutScale.ScaleY, 0, dur, EasingMode.EaseIn, onComplete);
-                return;
-            case HoverExpandAnimationKind.DirectionalExpand:
-                AnimateFlyoutScaleX(SubfolderFlyoutView.FlyoutScale.ScaleX, 0, dur, EasingMode.EaseIn, onComplete);
-                return;
-            case HoverExpandAnimationKind.BounceExpand:
-                AnimateFlyoutBounce(isExpand: false, dur, onComplete);
-                return;
-            default: // ScaleExpand
-                AnimateFlyoutScaleXY(SubfolderFlyoutView.FlyoutScale.ScaleX, 0, dur, EasingMode.EaseIn, onComplete);
-                return;
-        }
-    }
-
-    /// <summary>Port of HoverExpandBehavior.NormalizeFor: capture the current animated
-    /// values as the new base (stale-base fix), then snap the kind's STABLE axes.
-    /// Animated axes keep their current value so the following animation starts from
-    /// the real visual state.</summary>
-    void NormalizeFlyoutFor(bool isExpanded, HoverExpandAnimationKind kind)
-    {
-        var st = SubfolderFlyoutView.FlyoutScale;
-        double sx = st.ScaleX, sy = st.ScaleY, op = SubfolderFlyoutView.Opacity;
-        st.BeginAnimation(ScaleTransform.ScaleXProperty, null);
-        st.BeginAnimation(ScaleTransform.ScaleYProperty, null);
-        SubfolderFlyoutView.BeginAnimation(UIElement.OpacityProperty, null);
-        st.ScaleX = sx; st.ScaleY = sy;
-        SubfolderFlyoutView.Opacity = op;
-
-        switch (kind)
-        {
-            case HoverExpandAnimationKind.VerticalExpand:
-                st.ScaleX = 1; // stable axis — ScaleY is animated
-                break;
-            case HoverExpandAnimationKind.DirectionalExpand:
-                st.ScaleY = 1; // stable axis — ScaleX is animated
-                break;
-            case HoverExpandAnimationKind.Fade:
-                st.ScaleX = 1; st.ScaleY = 1; // stable — Opacity is animated
-                break;
-            case HoverExpandAnimationKind.None:
-                if (isExpanded) { st.ScaleX = 1; st.ScaleY = 1; SubfolderFlyoutView.Opacity = 1; }
-                else { st.ScaleX = 0; st.ScaleY = 0; SubfolderFlyoutView.Opacity = 0; }
-                break;
-        }
-        // ghost-content rule: Opacity is only animated by Fade; other kinds keep 1.
-        if (kind != HoverExpandAnimationKind.Fade && kind != HoverExpandAnimationKind.None)
-            SubfolderFlyoutView.Opacity = 1;
-    }
-
-    /// <summary>Port of HoverExpandBehavior.ApplyFinal for the None kind.</summary>
-    void ApplyFlyoutFinal(bool isExpanded, HoverExpandAnimationKind kind)
-    {
-        var st = SubfolderFlyoutView.FlyoutScale;
-        double target = isExpanded ? 1 : 0;
-        switch (kind)
-        {
-            case HoverExpandAnimationKind.VerticalExpand: st.ScaleX = 1; st.ScaleY = target; break;
-            case HoverExpandAnimationKind.DirectionalExpand: st.ScaleX = target; st.ScaleY = 1; break;
-            default: st.ScaleX = target; st.ScaleY = target; break;
-        }
-        SubfolderFlyoutView.Opacity = isExpanded ? 1
-            : (kind == HoverExpandAnimationKind.Fade ? 0 : 1);
-    }
-
-    void AnimateFlyoutScaleXY(double from, double to, Duration dur, EasingMode ease, Action? onComplete)
-    {
-        var st = SubfolderFlyoutView.FlyoutScale;
-        if (Math.Abs(from - to) < 1e-9) { st.ScaleX = to; st.ScaleY = to; onComplete?.Invoke(); return; }
-        var ax = new DoubleAnimation(from, to, dur) { EasingFunction = new CubicEase { EasingMode = ease } };
-        var ay = new DoubleAnimation(from, to, dur) { EasingFunction = new CubicEase { EasingMode = ease } };
-        bool done = false;
-        Action fireOnce = () => { if (done) return; done = true; onComplete?.Invoke(); };
-        ax.Completed += (_, _) => { st.ScaleX = to; fireOnce(); };
-        ay.Completed += (_, _) => { st.ScaleY = to; fireOnce(); };
-        st.BeginAnimation(ScaleTransform.ScaleXProperty, ax);
-        st.BeginAnimation(ScaleTransform.ScaleYProperty, ay);
-    }
-
-    void AnimateFlyoutScaleX(double from, double to, Duration dur, EasingMode ease, Action? onComplete)
-    {
-        var st = SubfolderFlyoutView.FlyoutScale;
-        if (Math.Abs(from - to) < 1e-9) { st.ScaleX = to; onComplete?.Invoke(); return; }
-        var ax = new DoubleAnimation(from, to, dur) { EasingFunction = new CubicEase { EasingMode = ease } };
-        ax.Completed += (_, _) => { st.ScaleX = to; onComplete?.Invoke(); };
-        st.BeginAnimation(ScaleTransform.ScaleXProperty, ax);
-    }
-
-    void AnimateFlyoutScaleY(double from, double to, Duration dur, EasingMode ease, Action? onComplete)
-    {
-        var st = SubfolderFlyoutView.FlyoutScale;
-        if (Math.Abs(from - to) < 1e-9) { st.ScaleY = to; onComplete?.Invoke(); return; }
-        var ay = new DoubleAnimation(from, to, dur) { EasingFunction = new CubicEase { EasingMode = ease } };
-        ay.Completed += (_, _) => { st.ScaleY = to; onComplete?.Invoke(); };
-        st.BeginAnimation(ScaleTransform.ScaleYProperty, ay);
-    }
-
-    void AnimateFlyoutOpacity(double from, double to, Duration dur, EasingMode ease, Action? onComplete)
-    {
-        if (Math.Abs(from - to) < 1e-9) { SubfolderFlyoutView.Opacity = to; onComplete?.Invoke(); return; }
-        var anim = new DoubleAnimation(from, to, dur) { EasingFunction = new CubicEase { EasingMode = ease } };
-        anim.Completed += (_, _) => { SubfolderFlyoutView.Opacity = to; onComplete?.Invoke(); };
-        SubfolderFlyoutView.BeginAnimation(UIElement.OpacityProperty, anim);
-    }
-
-    void AnimateFlyoutBounce(bool isExpand, Duration dur, Action? onComplete)
-    {
-        var st = SubfolderFlyoutView.FlyoutScale;
-        // degenerate collapse (already at 0) — nothing to bounce, fire synchronously.
-        if (!isExpand && Math.Abs(st.ScaleX) < 1e-9)
-        {
-            st.ScaleX = 0; st.ScaleY = 0; onComplete?.Invoke(); return;
-        }
-        var bounce = new DoubleAnimationUsingKeyFrames();
-        var ease = new BounceEase { Bounces = 2, Bounciness = 2, EasingMode = EasingMode.EaseOut };
-        if (isExpand)
-        {
-            bounce.KeyFrames.Add(new EasingDoubleKeyFrame(st.ScaleX, KeyTime.FromTimeSpan(TimeSpan.Zero)));
-            bounce.KeyFrames.Add(new EasingDoubleKeyFrame(1.08, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(dur.TimeSpan.TotalMilliseconds * 0.6)), ease));
-            bounce.KeyFrames.Add(new EasingDoubleKeyFrame(1, KeyTime.FromTimeSpan(dur.TimeSpan)));
-        }
-        else
-        {
-            // 弹性收起:开头快速 squash 1→0.85,再 0.85→0 消失(镜像 HoverExpandBehavior)。
-            var squashTime = TimeSpan.FromMilliseconds(dur.TimeSpan.TotalMilliseconds * 0.45);
-            bounce.KeyFrames.Add(new EasingDoubleKeyFrame(st.ScaleX, KeyTime.FromTimeSpan(TimeSpan.Zero)));
-            bounce.KeyFrames.Add(new EasingDoubleKeyFrame(0.85, KeyTime.FromTimeSpan(squashTime), ease));
-            bounce.KeyFrames.Add(new EasingDoubleKeyFrame(0, KeyTime.FromTimeSpan(dur.TimeSpan),
-                new CubicEase { EasingMode = EasingMode.EaseOut }));
-        }
-        double final = isExpand ? 1 : 0;
-        bool done = false;
-        Action fireOnce = () => { if (done) return; done = true; onComplete?.Invoke(); };
-        bounce.Completed += (_, _) => { st.ScaleX = final; st.ScaleY = final; fireOnce(); };
-        st.BeginAnimation(ScaleTransform.ScaleXProperty, bounce);
-        st.BeginAnimation(ScaleTransform.ScaleYProperty, bounce);
+        SubfolderFlyoutView.UnhookClickOutside();
     }
 
     /// <summary>Re-size the SubfolderFlyout's inner UniformGrid when SubItems grows
@@ -1655,7 +1354,7 @@ public partial class ZoneWindow : Window
         {
             _vm.RefreshItems();
             UpdateCanvasSize();
-            // ponytail: Fix C — re-apply adaptive text color after RefreshItems wipes the
+            // ponytail: Fix C — re-apply body content color after RefreshItems wipes the
             // brush via the XAML default `#E0FFFFFF` foreground on freshly-generated item
             // containers. Without this, any OnZonesChanged trigger (rename, delete, etc.)
             // would silently revert the previously-applied brush on all items.
@@ -1810,7 +1509,7 @@ public partial class ZoneWindow : Window
     // ── Import ──
 
     void ImportFiles_Click(object s, RoutedEventArgs e)
-    { var d = new OpenFileDialog { Title = _loc["Zone.ImportTitle"], Filter = "All|*.lnk;*.exe;*.*|Shortcuts|*.lnk|Apps|*.exe", Multiselect = true }; if (d.ShowDialog() == true) ImportArranged(d.FileNames); }
+    { var d = new OpenFileDialog { Title = _loc["Zone.ImportTitle"], Filter = $"{_loc["Filter.All"]}|*.lnk;*.exe;*.*|{_loc["Filter.Lnk"]}|*.lnk|{_loc["Filter.Exe"]}|*.exe", Multiselect = true }; if (d.ShowDialog() == true) ImportArranged(d.FileNames); }
 
     void ImportFolder_Click(object s, RoutedEventArgs e)
     {
@@ -1824,7 +1523,7 @@ public partial class ZoneWindow : Window
             {
                 hwndOwner = h.Handle,
                 pszDisplayName = displayBuf,
-                lpszTitle = "Select Folder",
+                lpszTitle = _loc["Dialog.SelectFolder"],
                 ulFlags = 0x40
             };
             pidl = NativeMethods.SHBrowseForFolderW(ref bi);
@@ -1835,7 +1534,7 @@ public partial class ZoneWindow : Window
                     ImportArranged(new[] { sb.ToString() });
             }
         }
-        catch (Exception ex) { MessageBox.Show($"Import failed: {ex.Message}"); }
+        catch (Exception ex) { MessageBox.Show(string.Format(_loc["Dialog.ImportFailed"], ex.Message)); }
         finally
         {
             if (displayBuf != IntPtr.Zero) Marshal.FreeHGlobal(displayBuf);
@@ -2639,10 +2338,8 @@ public partial class ZoneWindow : Window
         // If this zone is a sub-zone (not master), remove it from the group
         if (_zone.MergedGroupMembership.SubZoneIds.Count == 0)
         {
-            var cn = _loc.CurrentLanguage == "zh";
             if (MessageBox.Show(
-                cn ? $"确定要将分区「{_zone.Name}」从组合中分离吗？"
-                   : $"Remove zone \"{_zone.Name}\" from the merged group?",
+                string.Format(_loc["Merge.DisbandSingleConfirm"], _zone.Name),
                 _loc["Merge.DisbandThis"], MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
             {
                 _mgr.RemoveFromMergedGroup(_zone.Id);
@@ -2669,7 +2366,7 @@ public partial class ZoneWindow : Window
             {
                 hwndOwner = h.Handle,
                 pszDisplayName = displayBuf,
-                lpszTitle = "Select Parent Folder",
+                lpszTitle = _loc["Dialog.SelectFolder"],
                 ulFlags = 0x40
             };
             pidl = NativeMethods.SHBrowseForFolderW(ref bi);
@@ -2681,7 +2378,7 @@ public partial class ZoneWindow : Window
                     // Prompt for folder name
                     string parentPath = sb.ToString();
                     string folderName = Microsoft.VisualBasic.Interaction.InputBox(
-                        "Folder Name:", "New Folder", "New Folder");
+                        _loc["Dialog.FolderName"], _loc["Dialog.NewFolder"], _loc["Dialog.NewFolder"]);
                     if (!string.IsNullOrWhiteSpace(folderName))
                     {
                         string fullPath = Path.Combine(parentPath, folderName);
@@ -2690,7 +2387,7 @@ public partial class ZoneWindow : Window
                 }
             }
         }
-        catch (Exception ex) { MessageBox.Show($"Failed: {ex.Message}"); }
+        catch (Exception ex) { MessageBox.Show(string.Format(_loc["Dialog.ImportFailed"], ex.Message)); }
         finally
         {
             if (displayBuf != IntPtr.Zero) Marshal.FreeHGlobal(displayBuf);
@@ -2702,7 +2399,7 @@ public partial class ZoneWindow : Window
     {
         var d = new SaveFileDialog
         {
-            Title = "Create New File",
+            Title = _loc["Dialog.CreateFile"],
             Filter = filter,
             DefaultExt = defaultExt,
             FileName = "NewDocument" + defaultExt
@@ -2710,7 +2407,7 @@ public partial class ZoneWindow : Window
         if (d.ShowDialog() == true)
         {
             try { System.IO.File.Create(d.FileName).Dispose(); }
-            catch (Exception ex) { MessageBox.Show($"Failed: {ex.Message}"); }
+            catch (Exception ex) { MessageBox.Show(string.Format(_loc["Dialog.ImportFailed"], ex.Message)); }
             Add(d.FileName, 10, 10);
             UpdateCanvasSize();
             _mgr.SaveConfig();
@@ -2719,22 +2416,22 @@ public partial class ZoneWindow : Window
 
     void NewTxt_Click(object s, RoutedEventArgs e)
     {
-        CreateNewFile(".txt", "Text Document|*.txt|All Files|*.*");
+        CreateNewFile(".txt", $"{_loc["Filter.Txt"]}|*.txt|{_loc["Filter.All"]}|*.*");
     }
 
     void NewDocx_Click(object s, RoutedEventArgs e)
     {
-        CreateNewFile(".docx", "Word Document|*.docx|All Files|*.*");
+        CreateNewFile(".docx", $"{_loc["Filter.Docx"]}|*.docx|{_loc["Filter.All"]}|*.*");
     }
 
     void NewPptx_Click(object s, RoutedEventArgs e)
     {
-        CreateNewFile(".pptx", "PowerPoint|*.pptx|All Files|*.*");
+        CreateNewFile(".pptx", $"{_loc["Filter.Pptx"]}|*.pptx|{_loc["Filter.All"]}|*.*");
     }
 
     void NewXlsx_Click(object s, RoutedEventArgs e)
     {
-        CreateNewFile(".xlsx", "Excel Worksheet|*.xlsx|All Files|*.*");
+        CreateNewFile(".xlsx", $"{_loc["Filter.Xlsx"]}|*.xlsx|{_loc["Filter.All"]}|*.*");
     }
 
     // Minimized state drag — uses SnapDrag (manual drag loop) like title bar
@@ -3611,10 +3308,11 @@ public partial class ZoneWindow : Window
         string TitleBarFillColor,
         string TitleTextColor,
         string IconColor,
+        string ButtonColor,
+        string TextColor,
         double ControlOpacity,
         int CornerRadius,
         bool TileMode,
-        bool TitleBarAdaptive,
         string BgImagePath,
         string BgImageStretch,
         double BgImageOffsetX,
@@ -3633,8 +3331,9 @@ public partial class ZoneWindow : Window
     ///        icons / control opacity / bg image) from _zone.MergedGroup*; ONLY the body
     ///        FillColor keeps the displayed zone's own fill (selected sub-zone's, or the
     ///        master's own when no sub-zone is selected).
-    /// TitleBarAdaptive MUST follow the same source as the colors it adapts to; otherwise
-    /// adaptive would compute a contrasting color for a different background.
+    /// ButtonColor stays unified from MergedGroupStyle in both merged modes; TextColor follows
+    /// the same source as FillColor (group fill in unified mode, displayed sub-zone's own
+    /// in Keep Original) so body content color stays coherent with its background.
     /// </summary>
     ResolvedZoneStyle ResolveStyle()
     {
@@ -3646,10 +3345,11 @@ public partial class ZoneWindow : Window
             TitleBarFillColor: _zone.TitleBarFillColor,
             TitleTextColor:   _zone.TitleTextColor,
             IconColor:        _zone.IconColor,
+            ButtonColor:      _zone.ButtonColor,
+            TextColor:        _zone.TextColor,
             ControlOpacity:   _zone.ControlOpacity,
             CornerRadius:     _zone.CornerRadius,
             TileMode:     _zone.TileMode,
-            TitleBarAdaptive: _zone.TitleBarTextColorAdaptive,
             BgImagePath:      _zone.BackgroundImagePath,
             BgImageStretch:   _zone.BgImageStretch,
             BgImageOffsetX:   _zone.BgImageOffsetX,
@@ -3673,10 +3373,11 @@ public partial class ZoneWindow : Window
                 TitleBarFillColor = _zone.MergedGroupStyle.TitleBarFillColor,
                 TitleTextColor =   _zone.MergedGroupStyle.TitleTextColor,
                 IconColor =        _zone.MergedGroupStyle.IconColor,
+                ButtonColor =      _zone.MergedGroupStyle.ButtonColor,
+                TextColor =        _zone.MergedGroupStyle.TextColor,
                 ControlOpacity =   _zone.MergedGroupStyle.ControlOpacity,
                 CornerRadius =     _zone.MergedGroupStyle.CornerRadius,
                 TileMode =     _zone.MergedGroupStyle.TileMode,
-                TitleBarAdaptive = _zone.MergedGroupStyle.TitleBarTextColorAdaptive,
                 BgImagePath =      _zone.MergedGroupStyle.BackgroundImagePath,
                 BgImageStretch =   _zone.MergedGroupStyle.BgImageStretch,
                 BgImageOffsetX =   _zone.MergedGroupStyle.BgImageOffsetX,
@@ -3693,11 +3394,16 @@ public partial class ZoneWindow : Window
         // is active, otherwise the master's own). The unified background image is
         // disabled in this mode (背景图片随保留原有填充一起禁掉).
         string keepFill = _zone.FillColor;
+        string keepTextColor = _zone.TextColor;
         if (_zone.MergedGroupMembership.SubZoneIds.Count > 0
             && _vm?.SelectedSubZoneId is Guid selId && selId != _zone.Id)
         {
             var sub = _mgr.Zones.FirstOrDefault(z => z.Id == selId);
-            if (sub != null) keepFill = sub.FillColor;
+            if (sub != null)
+            {
+                keepFill = sub.FillColor;
+                keepTextColor = sub.TextColor;
+            }
         }
 
         return regular with
@@ -3708,10 +3414,11 @@ public partial class ZoneWindow : Window
             TitleBarFillColor = _zone.MergedGroupStyle.TitleBarFillColor,
             TitleTextColor =   _zone.MergedGroupStyle.TitleTextColor,
             IconColor =        _zone.MergedGroupStyle.IconColor,
+            ButtonColor =      _zone.MergedGroupStyle.ButtonColor,
+            TextColor =        keepTextColor,
             ControlOpacity =   _zone.MergedGroupStyle.ControlOpacity,
             CornerRadius =     _zone.MergedGroupStyle.CornerRadius,
             TileMode =         _zone.MergedGroupStyle.TileMode,
-            TitleBarAdaptive = _zone.MergedGroupStyle.TitleBarTextColorAdaptive,
             BgImagePath =      "",
             BgImageStretch =   _zone.MergedGroupStyle.BgImageStretch,
             BgImageOffsetX =   _zone.MergedGroupStyle.BgImageOffsetX,
@@ -3720,6 +3427,24 @@ public partial class ZoneWindow : Window
             BgImageOpacity =   _zone.MergedGroupStyle.BackgroundImageOpacity,
             TitleBarFillIndependent = _zone.MergedGroupStyle.TitleBarFillIndependent,
         };
+    }
+
+    /// <summary>
+    /// 多段标题栏的自带透明度区分：主标题栏保持解析后的填充色，副标题栏
+    /// （组合分区子标签栏）取 50% 透明度，文件夹映射头部行取 2× 透明度——
+    /// 还原最初 XAML 默认值 #10 / #08 / #22 的相对关系。开启「标题栏独立填充」
+    /// 也不会取消这一区分（该开关只影响主体填充与背景图的顶部裁剪）。
+    /// </summary>
+    void ApplyTitleBarBandFill(string titleBarFillColor)
+    {
+        SolidColorBrush main;
+        try { main = new SolidColorBrush((Color)ColorConverter.ConvertFromString(titleBarFillColor)!); }
+        catch { main = new SolidColorBrush(Color.FromArgb(0x10, 0xFF, 0xFF, 0xFF)); }
+
+        var c = main.Color;
+        TitleBarBg.Background = main;
+        SubZoneTabsRow.Background = new SolidColorBrush(Color.FromArgb((byte)(c.A / 2), c.R, c.G, c.B));
+        FolderMapHeaderBg.Background = new SolidColorBrush(Color.FromArgb((byte)Math.Min(255, c.A * 2), c.R, c.G, c.B));
     }
 
     /// <summary>
@@ -3763,65 +3488,39 @@ public partial class ZoneWindow : Window
         // both (48px), not just below the top bar.
         FillRect.Margin = fillIndependent ? new Thickness(0, TitleBarLayerHeight(), 0, 0) : new Thickness(0);
 
-        // Title bar fill — all title-bar layers share the resolved fill (top bar,
-        // merged sub-zone tab row, and the folder-mapping header row).
-        try { TitleBarBg.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.TitleBarFillColor)!); } catch { }
-        try { SubZoneTabsRow.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.TitleBarFillColor)!); } catch { }
-        try { FolderMapHeaderBg.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.TitleBarFillColor)!); } catch { }
+        // Title bar fill — 3-band built-in transparency distinction (top bar / merged
+        // sub-zone tab row / folder-mapping header), preserved regardless of the
+        // title-bar independent-fill toggle.
+        ApplyTitleBarBandFill(s.TitleBarFillColor);
 
-        // Background image — computed before the adaptive brushes below so the
-        // sampling transform is fresh for both the title-bar and body regions.
+        // Background image.
         ApplyBackgroundImage(s);
 
-        // Title text — adaptive on → sample the title-bar strip; off → resolved TitleTextColor.
-        SolidColorBrush? titleAdaptiveBrush = null;
-        if (s.TitleBarAdaptive)
+        // Title text — always the resolved TitleTextColor.
+        try { ZoneTitleText.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.TitleTextColor)!); } catch { }
+
+        // Title icon — resolved IconColor (falling back to the resolved title text color).
+        var iconColor = !string.IsNullOrEmpty(s.IconColor) ? s.IconColor : s.TitleTextColor;
+        try
         {
-            titleAdaptiveBrush = ResolveTitleBarAdaptiveBrush(s);
-            ZoneTitleText.Foreground = titleAdaptiveBrush;
+            var ic = new SolidColorBrush((Color)ColorConverter.ConvertFromString(iconColor)!);
+            TitleIconChar.Foreground = ic;
+            RestoreIconChar.Foreground = ic;
         }
-        else
+        catch
         {
-            try { ZoneTitleText.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.TitleTextColor)!); } catch { }
+            TitleIconChar.Foreground = Brushes.Transparent;
+            RestoreIconChar.Foreground = Brushes.Transparent;
         }
 
-        // Icon + ControlPoint button labels — adaptive on → same brush as title; off → icons use
-        // the resolved IconColor (falling back to the resolved title text color, always set by
-        // ResolveStyle) and the button labels return to their XAML default #80FFFFFF.
-        if (s.TitleBarAdaptive)
-        {
-            var iBrush = titleAdaptiveBrush!;
-            TitleIconChar.Foreground = iBrush;
-            RestoreIconChar.Foreground = iBrush;
-            // ponytail: Border has no Foreground property — only the inner TextBlocks can carry
-            // the adaptive brush. Border.Background stays at its hardcoded #30FFFFFF.
-            LockBtnText.Foreground = iBrush;
-            EditBtnText.Foreground = iBrush;
-            ImportBtnText.Foreground = iBrush;
-            HideBtnText.Foreground = iBrush;
-        }
-        else
-        {
-            var iconColor = !string.IsNullOrEmpty(s.IconColor) ? s.IconColor : s.TitleTextColor;
-            try
-            {
-                var ic = new SolidColorBrush((Color)ColorConverter.ConvertFromString(iconColor)!);
-                TitleIconChar.Foreground = ic;
-                RestoreIconChar.Foreground = ic;
-            }
-            catch
-            {
-                TitleIconChar.Foreground = Brushes.Transparent;
-                RestoreIconChar.Foreground = Brushes.Transparent;
-            }
-            // ponytail: the adaptive branch above already overwrote these once, so the XAML
-            // default can't come back on its own when the toggle flips off (live preview calls
-            // ApplyStyle again) — restore the hardcoded #80FFFFFF explicitly.
-            LockBtnText.Foreground = CtrlLabelDefaultBrush;
-            EditBtnText.Foreground = CtrlLabelDefaultBrush;
-            ImportBtnText.Foreground = CtrlLabelDefaultBrush;
-            HideBtnText.Foreground = CtrlLabelDefaultBrush;
-        }
+        // ControlPoint button labels — fixed 按钮颜色 (replaces the old title-bar adaptive).
+        SolidColorBrush btnBrush;
+        try { btnBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.ButtonColor)!); }
+        catch { btnBrush = Brushes.White; }
+        LockBtnText.Foreground = btnBrush;
+        EditBtnText.Foreground = btnBrush;
+        ImportBtnText.Foreground = btnBrush;
+        HideBtnText.Foreground = btnBrush;
 
         // Control-point opacity + TileMode visibility
         ControlPoint.Opacity = Math.Max(0.05, s.ControlOpacity / 100.0);
@@ -3840,11 +3539,10 @@ public partial class ZoneWindow : Window
         // 隐藏 ItemsHost，双击整个分区打开唯一图标。
         ApplyCustomIcon(s.TileMode && _zone.CustomIcon && _zone.Items.Count == 1);
 
-        // Sub-zone tabs + items — the tab row sits inside the same title-bar band, so its text
-        // reuses the top title bar's adaptive brush (merged groups don't get a separate tab-bar
-        // sample; the difference is negligible).
-        RebuildSubZoneTabs(titleAdaptiveBrush, s.TitleTextColor);
-        ApplyItemTextColorAdaptive(s.FillColor);
+        // Sub-zone tabs reuse the resolved title text color (merged groups share one
+        // title-bar band); items use the resolved body content color.
+        RebuildSubZoneTabs(s.TitleTextColor);
+        ApplyItemTextColor(s.TextColor);
     }
 
     /// <summary>遍历 ItemsHost 内的 ContentPresenter，根据 hide 切换名称 TextBlock
@@ -3916,77 +3614,6 @@ public partial class ZoneWindow : Window
         24 + (_zone.MergedGroupMembership.SubZoneIds.Count > 0 ? 24 : 0)
            + (ResolveFolderMapping().Enabled ? 26 : 0);
 
-    /// <summary>Effective window size used by the background-image transform — mirrors
-    /// <see cref="ApplyBackgroundImage"/>, which falls back to the model size before the
-    /// first layout pass has run (e.g. inside the constructor's ApplyStyle).</summary>
-    double EffectiveWidth => ActualWidth > 0 ? ActualWidth : _zone.Width;
-    double EffectiveHeight => ActualHeight > 0 ? ActualHeight : _zone.Height;
-
-    /// <summary>Parse a hex color string, falling back to white on malformed input.</summary>
-    static Color ParseColor(string hex)
-    {
-        try { return (Color)ColorConverter.ConvertFromString(hex)!; }
-        catch { return Colors.White; }
-    }
-
-    /// <summary>The adaptive title-bar strip is always the 24px <see cref="TitleBarBg"/>;
-    /// merged groups sample only this top layer, never the sub-zone tab row.</summary>
-    const double TitleBarSampleHeight = 24;
-
-    /// <summary>Top edge of the body region in window space (below title bar + tab row).</summary>
-    double BodyRegionTop(ResolvedZoneStyle s) =>
-        s.TileMode
-            ? (_zone.MergedGroupMembership.SubZoneIds.Count > 0 ? TitleBarSampleHeight : 0)
-            : TitleBarLayerHeight();
-
-    /// <summary>Title-bar samples: left endpoint, middle, right endpoint.</summary>
-    static (double, double)[] TitleBarSamplePoints(double width) => new[]
-    {
-        (4.0, TitleBarSampleHeight / 2.0),
-        (width / 2.0, TitleBarSampleHeight / 2.0),
-        (Math.Max(4.0, width - 4.0), TitleBarSampleHeight / 2.0),
-    };
-
-    /// <summary>Body samples: the body region's four corners + its center (5 points).</summary>
-    static (double, double)[] BodySamplePoints(double top, double bottom, double width)
-    {
-        double left = 4.0, right = Math.Max(4.0, width - 4.0);
-        return new[]
-        {
-            (left, top),
-            (right, top),
-            (width / 2.0, (top + bottom) / 2.0),
-            (left, bottom),
-            (right, bottom),
-        };
-    }
-
-    /// <summary>Resolve the title-bar adaptive brush. When a background image is present
-    /// (and not clipped away by an independent title bar), sample the title-bar strip;
-    /// otherwise fall back to the translucent-title-over-fill composite.</summary>
-    SolidColorBrush ResolveTitleBarAdaptiveBrush(ResolvedZoneStyle s)
-    {
-        var titleFill = ParseColor(s.TitleBarFillColor);
-
-        // Independent title bar: its fill is the only layer we own (the desktop behind it
-        // is unknowable), so contrast against the fill color itself.
-        if (s.TitleBarFillIndependent && !s.TileMode)
-            return AdaptiveTextColor.ResolveBrush(titleFill);
-
-        if (BgImage?.Source is BitmapSource bmp && _bgImageScale > 0 && EffectiveWidth > 0)
-        {
-            var backdrop = ParseColor(s.FillColor);
-            var avg = AdaptiveTextColor.AverageImageOver(
-                bmp, _bgImageScale, _bgImageOffsetX, _bgImageOffsetY,
-                TitleBarSamplePoints(EffectiveWidth), backdrop);
-            if (avg is Color c)
-                return AdaptiveTextColor.ResolveBrush(AdaptiveTextColor.CompositeOver(titleFill, c));
-        }
-
-        // No image under the title bar: translucent title fill over the body fill.
-        return AdaptiveTextColor.ResolveBrushOver(s.TitleBarFillColor, s.FillColor);
-    }
-
     void ApplyBackgroundImage(ResolvedZoneStyle s)
     {
         // 标题栏独立填充：背景图与 FillRect 一样不铺到标题栏下方（顶部裁剪）。
@@ -4031,83 +3658,37 @@ public partial class ZoneWindow : Window
                 BgImage.HorizontalAlignment = HorizontalAlignment.Left;
                 BgImage.VerticalAlignment = VerticalAlignment.Top;
                 BgImage.Opacity = Math.Max(0.01, s.BgImageOpacity / 100.0);
-
-                // Store the placement transform for the adaptive-color samplers:
-                // window → source pixel = ((wx - offsetX) / scale, (wy - offsetY) / scale).
-                _bgImageScale = utfScale;
-                _bgImageOffsetX = zoneCenterX - imgCenterX + zox;
-                _bgImageOffsetY = zoneCenterY - imgCenterY + zoy;
             }
-            catch { _bgImageScale = 0; BgImage.Opacity = 0; }
+            catch { BgImage.Opacity = 0; }
         }
-        else { _bgImageScale = 0; BgImage.Source = null; BgImage.Opacity = 0; }
+        else { BgImage.Source = null; BgImage.Opacity = 0; }
     }
 
-    /// <summary>Walk the item template subtree under <see cref="MainContent"/> and apply the
-    /// adaptive text brush. Uses the same <see cref="AdaptiveTextColor.ApplyBrushToTree"/>
-    /// helper PanelWindow does, so behavior is identical across widgets — no special-case
-    /// ItemContainerGenerator timing races. The title bar is brushed separately by
-    /// <see cref="ApplyStyle"/> before this call, so we scope the walk to the ScrollViewer
-    /// subtree that hosts the items to avoid clobbering title bar brushes.
-    /// No-op when <see cref="Zone.TextColorAdaptive"/> is false.
-    /// When the zone has a background image, samples 5 points from it instead of using FillColor.
-    /// Pass <paramref name="effectiveFill"/> when the caller has already resolved it (e.g. merged-group
-    /// unified fill); otherwise we resolve from <see cref="Zone.FillColor"/> or global.</summary>
-    public void ApplyItemTextColorAdaptive(string? effectiveFill = null)
+    /// <summary>Walk the item template subtree under <see cref="ItemsHost"/> and apply the
+    /// fixed 主体内容颜色 (replaces the old body adaptive walk). Scoped to ItemsHost so it
+    /// never clobbers the title-bar brushes applied by <see cref="ApplyStyle"/>.</summary>
+    public void ApplyItemTextColor(string? effectiveColor = null)
     {
-#if DEBUG
-        System.Diagnostics.Debug.WriteLine(
-            $"[adaptive] ZoneWindow ({_zone.Name}): bg={effectiveFill ?? ResolveEffectiveBodyFill()} adaptive={_zone.TextColorAdaptive}");
-#endif
-        if (!_zone.TextColorAdaptive) return;
-        string fillColor = effectiveFill ?? ResolveEffectiveBodyFill();
-        var backdrop = ParseColor(fillColor);
-        Color? sampled = null;
-        if (BgImage?.Source is BitmapSource bmp && _bgImageScale > 0 && EffectiveWidth > 0 && EffectiveHeight > 0)
+        string color = effectiveColor ?? ResolveStyle().TextColor;
+        SolidColorBrush brush;
+        try { brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(color)!); }
+        catch { brush = Brushes.White; }
+        if (ItemsHost == null) return;
+        AdaptiveTextColor.ApplyBrushToTree(ItemsHost, brush);
+        // Defer a second pass until item containers are realized. RefreshItems
+        // (OnZonesChanged) wipes + re-adds items asynchronously, so the immediate walk
+        // above can hit an empty visual tree and leave the XAML default #E0FFFFFF;
+        // re-applying at Loaded priority makes the body content color survive that
+        // regeneration instead of silently reverting to default.
+        Dispatcher.BeginInvoke(new Action(() =>
         {
-            var s = ResolveStyle();
-            double top = BodyRegionTop(s) + 4.0;
-            double bottom = Math.Max(top, EffectiveHeight - 8.0 - 4.0);
-            sampled = AdaptiveTextColor.AverageImageOver(
-                bmp, _bgImageScale, _bgImageOffsetX, _bgImageOffsetY,
-                BodySamplePoints(top, bottom, EffectiveWidth), backdrop);
-        }
-        var brush = AdaptiveTextColor.ResolveBrush(sampled ?? backdrop);
-        // ponytail: walk ItemsHost subtree directly via visual tree, mirroring PanelWindow's
-        // pattern over ContentStack.Children. The previous ContainerFromIndex approach raced
-        // with ItemContainerGenerator status — containers would be null right after RefreshItems
-        // wiped and re-added items, silently dropping every brush assignment. Visual tree walk
-        // picks up whatever containers WPF has realized so far, and ItemsHost never collapses
-        // in zone/MG modes, so no MainContent-visibility guard is needed.
-        if (ItemsHost != null)
-            AdaptiveTextColor.ApplyBrushToTree(ItemsHost, brush);
+            if (ItemsHost != null)
+                AdaptiveTextColor.ApplyBrushToTree(ItemsHost, brush);
+        }), System.Windows.Threading.DispatcherPriority.Loaded);
     }
 
-    /// <summary>Resolve the effective body fill, mirroring ApplyStyle's merged-group branch:
-    /// Unified mode → MergedGroupStyle.FillColor; Keep Original + sub-zone selected → that
-    /// sub-zone's FillColor; otherwise zone.FillColor or global.</summary>
-    string ResolveEffectiveBodyFill()
-    {
-        if (_zone.MergedGroupMembership.SubZoneIds.Count > 0 || _zone.MergedGroupMembership.GroupId.HasValue)
-        {
-            if (_zone.MergedGroupStyle.UseUnifiedFill)
-                return _zone.MergedGroupStyle.FillColor;
-            // ponytail: Keep Original + sub-zone selected — the visible body fill is the
-            // sub-zone's FillColor (ApplyStyle sets FillRect.Fill from it), not the master's.
-            // Returning master here made the StatusChanged hook brush items against the
-            // wrong color after any path that re-fires the generator.
-            if (_vm.SelectedSubZoneId.HasValue && _vm.SelectedSubZoneId.Value != _zone.Id)
-            {
-                var subZone = _mgr.Zones.FirstOrDefault(z => z.Id == _vm.SelectedSubZoneId.Value);
-                if (subZone != null)
-                    return subZone.FillColor;
-            }
-        }
-        return _zone.FillColor;
-    }
-
-    /// <summary>Re-apply both body and title bar adaptive text colors. Called from
-    /// settings dialog live preview when toggles change.</summary>
+    /// <summary>Re-apply the full style (fixed title/body content colors included). Called
+    /// from live preview when a color setting changes.</summary>
     public void RefreshTextColorAdaptive()
     {
         ApplyStyle();
@@ -4181,18 +3762,7 @@ public partial class ZoneWindow : Window
                 FillRect.Fill = new SolidColorBrush(tint);
                 FillRect.Opacity = 1.0; // Brush alpha from FillColor controls transparency
                 if (TitleBarBg != null && !string.IsNullOrEmpty(titleBarFillColor))
-                {
-                    try
-                    {
-                        TitleBarBg.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(titleBarFillColor)!);
-                        SubZoneTabsRow.Background = TitleBarBg.Background;
-                    }
-                    catch
-                    {
-                        TitleBarBg.Background = new SolidColorBrush(Color.FromArgb(0x10, 0xFF, 0xFF, 0xFF));
-                        SubZoneTabsRow.Background = TitleBarBg.Background;
-                    }
-                }
+                    ApplyTitleBarBandFill(titleBarFillColor);
             }
             catch
             {
@@ -4206,8 +3776,7 @@ public partial class ZoneWindow : Window
             {
                 FillRect.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(fillColor)!);
                 FillRect.Opacity = 1.0;
-                TitleBarBg.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(titleBarFillColor)!);
-                SubZoneTabsRow.Background = TitleBarBg.Background;
+                ApplyTitleBarBandFill(titleBarFillColor);
             }
             catch { }
         }
@@ -4253,8 +3822,8 @@ public partial class ZoneWindow : Window
         _vm.Zone = zone;
         ZoneTitleText.Text = zone.Name;
         SetRestoreIcon();
-        // ponytail: ApplyStyle rebuilds sub-zone tabs internally with the resolved adaptive
-        // brush — no separate RebuildSubZoneTabs call needed here.
+        // ponytail: ApplyStyle rebuilds sub-zone tabs internally with the resolved title
+        // text color — no separate RebuildSubZoneTabs call needed here.
         ApplyStyle();
         UpdateMergedTitle();
         RefreshFolderMapping();
@@ -4332,7 +3901,7 @@ public partial class ZoneWindow : Window
         }
     }
 
-    void RebuildSubZoneTabs(SolidColorBrush? adaptiveBrush = null, string? titleTextColor = null)
+    void RebuildSubZoneTabs(string? titleTextColor = null)
     {
         SubZoneTabs.Children.Clear();
         if (_zone.MergedGroupMembership.SubZoneIds.Count == 0)
@@ -4368,25 +3937,19 @@ public partial class ZoneWindow : Window
         {
             var z = id == _zone.Id ? _zone : _mgr.Zones.FirstOrDefault(x => x.Id == id);
             if (z != null)
-                AddSubZoneTab(z.Id, z.Name, z.IconChar, adaptiveBrush, titleTextColor);
+                AddSubZoneTab(z.Id, z.Name, z.IconChar, titleTextColor);
         }
     }
 
-    void AddSubZoneTab(Guid zoneId, string name, string iconChar, SolidColorBrush? adaptiveBrush, string? titleTextColorOverride)
+    void AddSubZoneTab(Guid zoneId, string name, string iconChar, string? titleTextColorOverride)
     {
-        var cn = _loc.CurrentLanguage == "zh";
         bool isSelected = _vm.SelectedSubZoneId == zoneId;
 
-        // ponytail: mirror ZoneTitleText resolution exactly — adaptive on → adaptive brush,
-        // adaptive off → resolved titleTextColor (master's MergedGroupStyle.TitleTextColor in merged
-        // mode). No hardcoded hex fallback; if override is empty/malformed, fall through to
-        // Transparent so WPF inherits instead of snapping to white.
+        // Sub-zone tabs reuse the resolved title text color (master's MergedGroupStyle.
+        // TitleTextColor in merged mode). No hardcoded hex fallback; if the override is
+        // empty/malformed, fall through to Transparent so WPF inherits instead of snapping white.
         Brush textBrush;
-        if (adaptiveBrush != null)
-        {
-            textBrush = adaptiveBrush;
-        }
-        else if (!string.IsNullOrEmpty(titleTextColorOverride))
+        if (!string.IsNullOrEmpty(titleTextColorOverride))
         {
             try { textBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(titleTextColorOverride)!); }
             catch { textBrush = Brushes.Transparent; }
@@ -4405,7 +3968,7 @@ public partial class ZoneWindow : Window
             Tag = zoneId,
             RenderTransform = new TranslateTransform(),
             // All tabs are identical — click to switch, drag to reorder, drag out to detach.
-            ToolTip = cn ? "点击切换到此分区；拖拽可调序，拖出标签条可分离" : "Click to switch; drag to reorder, drag out to detach"
+            ToolTip = _loc["ZoneMenu.TabTooltip"]
         };
 
         var sp = new StackPanel { Orientation = Orientation.Horizontal };
@@ -4505,8 +4068,8 @@ public partial class ZoneWindow : Window
     void ApplySubZoneSwitch(Guid zoneId)
     {
         _vm.SelectedSubZoneId = zoneId;
-        // ponytail: ApplyStyle rebuilds sub-zone tabs internally with the resolved adaptive
-        // brush — no separate RebuildSubZoneTabs / ApplySubZoneTabTextColorAdaptive needed.
+        // ponytail: ApplyStyle rebuilds sub-zone tabs internally with the resolved title
+        // text color — no separate RebuildSubZoneTabs call needed.
         ApplyStyle(); // Apply style based on selected sub-zone (also rebuilds tabs)
         // The selected tab owns the visible folder mapping (sub-zone keeps its own
         // mapping after joining the group) — re-resolve + reload for the new tab.

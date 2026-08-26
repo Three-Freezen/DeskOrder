@@ -132,29 +132,29 @@
                         Background="Transparent">
                     <Border.ContextMenu>
                         <ContextMenu Opened="ZoneMenu_Opened">
-                            <MenuItem x:Name="CtxImport" Header="Import Files..." Click="ImportFiles_Click"/>
-                            <MenuItem x:Name="CtxImportFolder" Header="Import Folder..." Click="ImportFolder_Click"/>
-                            <MenuItem x:Name="CtxImportShell" Header="Import System Items..." Click="ImportShellItems_Click"/>
-                            <MenuItem x:Name="CtxPaste" Header="Paste" Click="PasteClipboard_Click" Visibility="Collapsed"/>
+                            <MenuItem x:Name="CtxImport" Header="{loc:Loc Key=ZoneMenu.ImportFiles}" Click="ImportFiles_Click"/>
+                            <MenuItem x:Name="CtxImportFolder" Header="{loc:Loc Key=ZoneMenu.ImportFolder}" Click="ImportFolder_Click"/>
+                            <MenuItem x:Name="CtxImportShell" Header="{loc:Loc Key=Zone.ImportShellItems}" Click="ImportShellItems_Click"/>
+                            <MenuItem x:Name="CtxPaste" Header="{loc:Loc Key=FolderMap.Paste}" Click="PasteClipboard_Click" Visibility="Collapsed"/>
                             <Separator/>
-                            <MenuItem x:Name="CtxNewSubfolder" Header="New Subfolder..." Click="NewSubfolder_Click"/>
+                            <MenuItem x:Name="CtxNewSubfolder" Header="{loc:Loc Key=Subfolder.New}" Click="NewSubfolder_Click"/>
                             <Separator/>
-                            <MenuItem x:Name="CtxNew" Header="New">
-                                <MenuItem x:Name="CtxNewFolder" Header="New Folder..." Click="NewFolder_Click"/>
+                            <MenuItem x:Name="CtxNew" Header="{loc:Loc Key=Panel.New}">
+                                <MenuItem x:Name="CtxNewFolder" Header="{loc:Loc Key=ZoneMenu.NewFolder}" Click="NewFolder_Click"/>
                                 <Separator/>
-                                <MenuItem x:Name="CtxNewTxt" Header="Text Document (.txt)" Click="NewTxt_Click"/>
-                                <MenuItem x:Name="CtxNewDocx" Header="Word Document (.docx)" Click="NewDocx_Click"/>
-                                <MenuItem x:Name="CtxNewPptx" Header="PowerPoint (.pptx)" Click="NewPptx_Click"/>
-                                <MenuItem x:Name="CtxNewXlsx" Header="Excel Workbook (.xlsx)" Click="NewXlsx_Click"/>
+                                <MenuItem x:Name="CtxNewTxt" Header="{loc:Loc Key=ZoneMenu.NewTxt}" Click="NewTxt_Click"/>
+                                <MenuItem x:Name="CtxNewDocx" Header="{loc:Loc Key=ZoneMenu.NewDocx}" Click="NewDocx_Click"/>
+                                <MenuItem x:Name="CtxNewPptx" Header="{loc:Loc Key=ZoneMenu.NewPptx}" Click="NewPptx_Click"/>
+                                <MenuItem x:Name="CtxNewXlsx" Header="{loc:Loc Key=ZoneMenu.NewXlsx}" Click="NewXlsx_Click"/>
                             </MenuItem>
                             <Separator/>
-                            <MenuItem x:Name="CtxDisbandAll" Header="Disband All" Click="DisbandAll_Click" Visibility="Collapsed"/>
-                            <MenuItem x:Name="CtxDisbandThis" Header="Disband This" Click="DisbandThis_Click" Visibility="Collapsed"/>
+                            <MenuItem x:Name="CtxDisbandAll" Header="{loc:Loc Key=Merge.DisbandAll}" Click="DisbandAll_Click" Visibility="Collapsed"/>
+                            <MenuItem x:Name="CtxDisbandThis" Header="{loc:Loc Key=Merge.DisbandSingle}" Click="DisbandThis_Click" Visibility="Collapsed"/>
                             <Separator x:Name="CtxMergeSep" Visibility="Collapsed"/>
-                            <MenuItem x:Name="CtxEdit" Header="Edit Zone" Click="EditZone_Click"/>
-                            <MenuItem x:Name="CtxHide" Header="Hide Zone" Click="HideZone_Click"/>
+                            <MenuItem x:Name="CtxEdit" Header="{loc:Loc Key=Zone.Edit}" Click="EditZone_Click"/>
+                            <MenuItem x:Name="CtxHide" Header="{loc:Loc Key=Zone.Hide}" Click="HideZone_Click"/>
                             <Separator/>
-                            <MenuItem x:Name="CtxDelete" Header="Delete Zone" Foreground="#FF6666" Click="DeleteZone_Click"/>
+                            <MenuItem x:Name="CtxDelete" Header="{loc:Loc Key=Zone.Delete}" Foreground="#FF6666" Click="DeleteZone_Click"/>
                         </ContextMenu>
                     </Border.ContextMenu>
 
@@ -210,25 +210,25 @@
                                             Cursor="Hand" Margin="0,0,3,0"
                                             MouseLeftButtonDown="ImportBtn_Click"
                                             MouseEnter="Ctrl_Enter" MouseLeave="Ctrl_Leave"
-                                            ToolTip="Import or New Subfolder...">
+                                            ToolTip="{loc:Loc Key=Subfolder.New}">
                                     <Border.ContextMenu>
                                         <ContextMenu>
-                                            <MenuItem x:Name="CtxImportFiles" Header="Import Files..." Click="ImportFiles_Click"/>
-                                            <MenuItem x:Name="CtxImportFolder2" Header="Import Folder..." Click="ImportFolder_Click"/>
-                                            <MenuItem x:Name="CtxImportShell2" Header="Import System Items..." Click="ImportShellItems_Click"/>
+                                            <MenuItem x:Name="CtxImportFiles" Header="{loc:Loc Key=ZoneMenu.ImportFiles}" Click="ImportFiles_Click"/>
+                                            <MenuItem x:Name="CtxImportFolder2" Header="{loc:Loc Key=ZoneMenu.ImportFolder}" Click="ImportFolder_Click"/>
+                                            <MenuItem x:Name="CtxImportShell2" Header="{loc:Loc Key=Zone.ImportShellItems}" Click="ImportShellItems_Click"/>
                                             <Separator/>
-                                            <MenuItem x:Name="CtxNewSubfolder2" Header="New Subfolder..." Click="NewSubfolder_Click"/>
+                                            <MenuItem x:Name="CtxNewSubfolder2" Header="{loc:Loc Key=Subfolder.New}" Click="NewSubfolder_Click"/>
                                             <Separator/>
-                                            <MenuItem x:Name="CtxNew2" Header="New">
-                                                <MenuItem x:Name="CtxNewFolder2" Header="New Folder..." Click="NewFolder_Click"/>
+                                            <MenuItem x:Name="CtxNew2" Header="{loc:Loc Key=Panel.New}">
+                                                <MenuItem x:Name="CtxNewFolder2" Header="{loc:Loc Key=ZoneMenu.NewFolder}" Click="NewFolder_Click"/>
                                                 <Separator/>
-                                                <MenuItem x:Name="CtxNewTxt2" Header="Text Document (.txt)" Click="NewTxt_Click"/>
-                                                <MenuItem x:Name="CtxNewDocx2" Header="Word Document (.docx)" Click="NewDocx_Click"/>
-                                                <MenuItem x:Name="CtxNewPptx2" Header="PowerPoint (.pptx)" Click="NewPptx_Click"/>
-                                                <MenuItem x:Name="CtxNewXlsx2" Header="Excel Workbook (.xlsx)" Click="NewXlsx_Click"/>
+                                                <MenuItem x:Name="CtxNewTxt2" Header="{loc:Loc Key=ZoneMenu.NewTxt}" Click="NewTxt_Click"/>
+                                                <MenuItem x:Name="CtxNewDocx2" Header="{loc:Loc Key=ZoneMenu.NewDocx}" Click="NewDocx_Click"/>
+                                                <MenuItem x:Name="CtxNewPptx2" Header="{loc:Loc Key=ZoneMenu.NewPptx}" Click="NewPptx_Click"/>
+                                                <MenuItem x:Name="CtxNewXlsx2" Header="{loc:Loc Key=ZoneMenu.NewXlsx}" Click="NewXlsx_Click"/>
                                             </MenuItem>
                                             <Separator/>
-                                            <MenuItem x:Name="CtxMapFolder" Header="Map Folder..." Click="FolderMapChoose_Click"/>
+                                            <MenuItem x:Name="CtxMapFolder" Header="{loc:Loc Key=FolderMap.MenuMap}" Click="FolderMapChoose_Click"/>
                                         </ContextMenu>
                                     </Border.ContextMenu>
                                         <TextBlock x:Name="ImportBtnText" Text="+" FontSize="11" FontWeight="Bold"

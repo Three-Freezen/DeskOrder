@@ -18,7 +18,8 @@ namespace DesktopZones.Views.Pages;
 /// (MakeWidgetCard, MakeWidgetIcon, MakeToggleDot, MakeSmallButton, MakeIconButton,
 /// MakeSectionHead, MakeWidgetGridContainer) and MakeWidgetToolbar were removed
 /// in Task 15 — Pages now use the EditableListRow primitive instead.
-/// ponytail: SetSelection + RowContextMenu here so each page stays one-liner-thin.
+/// ponytail: RowContextMenu was removed when list-row right-click menus were
+/// cancelled (operations moved into the PropertyPanel status area).
 /// </summary>
 public static class PageHelpers
 {
@@ -62,86 +63,5 @@ public static class PageHelpers
         if (targetIndex < 0) targetIndex = 0;
         if (targetIndex > rows.Count - 1) targetIndex = rows.Count - 1;
         rows.Move(cur, targetIndex);
-    }
-}
-
-/// <summary>
-/// Minimal dark-mode context menu used by EditableListRow right-click handlers.
-/// Each page builds an <see cref="RowContextMenu"/> config (label + callback + optional
-/// danger flag) and calls <see cref="Show"/> from a row's <c>PreviewMouseRightButtonUp</c>.
-/// ponytail: Popup-based to avoid the built-in ContextMenu style (would inherit white chrome);
-/// auto-closes on outside click via window-level PreviewMouseDown that unsubscribes on close.
-/// </summary>
-public sealed class RowContextMenu
-{
-    public record Item(string Label, Action OnClick, bool Danger = false);
-
-    public static void Show(FrameworkElement placement, IList<Item> items)
-    {
-        if (items.Count == 0) return;
-
-        var popup = new Popup
-        {
-            AllowsTransparency = true,
-            PopupAnimation = PopupAnimation.Fade,
-            StaysOpen = false,
-            PlacementTarget = placement,
-            Placement = PlacementMode.Bottom,
-        };
-
-        // ponytail: pull from modern Brush.* keys (not legacy BgSurface/Line/HoverOverlay)
-        // so the menu follows BOTH theme swaps AND live system accent. Legacy keys only
-        // get updated by RepaintBrushes on Light/Dark/HC swap — ApplySystemAccentIfApplicable
-        // overrides modern keys with accent color but leaves legacy ones at last OS theme,
-        // which is why the right-click menu stayed dark when the rest of the management
-        // shell turned sage-green / etc. in System mode.
-        var hoverBrush = ThemeBrushes.BgHoverModern;
-        var menuBorder = new Border
-        {
-            Background = ThemeBrushes.BgSurfaceModern,
-            BorderBrush = ThemeBrushes.BorderDefaultModern,
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(6),
-            Padding = new Thickness(4),
-            MinWidth = 180,
-        };
-
-        var stack = new StackPanel();
-        foreach (var it in items)
-        {
-            var captured = it;
-            var fg = captured.Danger ? ThemeBrushes.DangerBrush : ThemeBrushes.TextPrimaryModern;
-
-            var itemBorder = new Border
-            {
-                Background = Brushes.Transparent,
-                CornerRadius = new CornerRadius(3),
-                Padding = new Thickness(10, 6, 10, 6),
-                Margin = new Thickness(2, 1, 2, 1),
-                Cursor = Cursors.Hand,
-            };
-            itemBorder.Child = new TextBlock
-            {
-                Text = captured.Label,
-                Foreground = fg,
-                FontSize = 12,
-                VerticalAlignment = VerticalAlignment.Center,
-            };
-            itemBorder.MouseEnter += (_, _) => itemBorder.Background = hoverBrush;
-            itemBorder.MouseLeave += (_, _) => itemBorder.Background = Brushes.Transparent;
-            itemBorder.MouseLeftButtonDown += (_, _) =>
-            {
-                popup.IsOpen = false;
-                captured.OnClick();
-            };
-            stack.Children.Add(itemBorder);
-        }
-
-        menuBorder.Child = stack;
-        popup.Child = menuBorder;
-
-        // ponytail: Popup.StaysOpen = false already auto-closes on outside click.
-        // No manual handler needed; item click sets IsOpen = false itself.
-        popup.IsOpen = true;
     }
 }

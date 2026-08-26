@@ -85,12 +85,15 @@
       </Grid>
     </Border>
 
-    <Border Grid.Row="1" Margin="16,12,16,12" Height="120" CornerRadius="6"
+    <!-- 状态区 — 原「边框+横杠」占位。改为实时状态条：显示/锁定滑动开关、
+         删除分区按钮、状态 chips（文件夹映射/监听中/组合分区中）、面板与便签的
+         快捷键设置。内容由 code-behind 按当前 Target 动态构建（BuildStatusArea），
+         随 ZonesChanged / NotesChanged / ClocksChanged / CalendarsChanged 实时刷新。 -->
+    <Border x:Name="StatusArea" Grid.Row="1" Margin="16,12,16,12" CornerRadius="6"
             Background="{DynamicResource Brush.Bg.Base}"
-            BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1">
-      <TextBlock Text="—" FontSize="18" FontFamily="Cascadia Code, Consolas, monospace"
-                 FontWeight="SemiBold" Foreground="{DynamicResource Brush.Accent}"
-                 HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1"
+            Visibility="Collapsed">
+      <StackPanel x:Name="StatusHost" Margin="12,12"/>
     </Border>
 
     <ScrollViewer x:Name="FieldScroller" Grid.Row="2" VerticalScrollBarVisibility="Auto" Padding="0">

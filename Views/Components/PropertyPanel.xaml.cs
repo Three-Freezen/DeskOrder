@@ -69,6 +69,26 @@ public partial class PropertyPanel : UserControl
     /// </summary>
     public Action<object>? Persist { get; set; }
 
+    // ── 状态区操作回调（由宿主 ManagementWindow 在 WirePropertyPanelPersist 时注入）──
+    // PropertyPanel 不持有任何服务，所有窗口级/破坏性操作经回调回到宿主执行：
+    // 显示/隐藏（ShowZone/HideZone/ToggleClockWindow/…）、删除/解散（带确认）、
+    // 加入组合分区、分离单个分区、便签/面板快捷键预设菜单。
+
+    /// <summary>切换目标的显示/隐藏（或面板启用）。宿主按目标类型路由到对应服务。</summary>
+    public Action<object>? ToggleVisibility { get; set; }
+    /// <summary>删除目标（宿主负责确认对话框 + 服务删除）。</summary>
+    public Action<object>? DeleteTarget { get; set; }
+    /// <summary>分区目标：「加入组合分区」按钮（仅当存在其它组合时显示）。</summary>
+    public Action<Zone>? AddZoneToMerge { get; set; }
+    /// <summary>组合分区目标：「分离单个分区」按钮。</summary>
+    public Action<Zone>? DisbandSingleFromGroup { get; set; }
+    /// <summary>便签目标：打开快捷键预设菜单（placement = 触发按钮）。</summary>
+    public Action<StickyNote, FrameworkElement>? ShowNoteHotkeyMenu { get; set; }
+    /// <summary>面板目标：打开快捷键预设菜单。</summary>
+    public Action<PanelConfig, FrameworkElement>? ShowPanelHotkeyMenu { get; set; }
+    /// <summary>面板目标：返回当前快捷键显示文本（PanelHotkey 在 AppConfig 上，面板拿不到）。</summary>
+    public Func<string>? GetPanelHotkeyLabel { get; set; }
+
     public event EventHandler? UndockRequested;
     public event EventHandler? DockRequested;
     public event EventHandler? CollapseRequested;
@@ -102,6 +122,10 @@ public partial class PropertyPanel : UserControl
     // Cleared to null when Target is null.
     object? _snapshot;
 
+    /// <summary>预设卡点击实时预览时抑制 OnTargetChanged 尾部的切换动画 —
+    /// 每次点预设卡只重建字段树，不重放淡入+滑动。</summary>
+    bool _suppressSwitchAnimation;
+
     /// <summary>Cached host Window resolved once on Loaded. Dialogs read this before
     /// ShowDialog — falls back to a fresh Window.GetWindow lookup, then refuses to open
     /// if still null (avoids the InvalidOperationException that ShowDialog(owner:null)
@@ -117,17 +141,51 @@ public partial class PropertyPanel : UserControl
             _loc.LanguageChanged -= OnLanguageChanged;
             ThemeService.Changed -= OnThemeChanged;
             if (_zoneChangedHandler != null && Application.Current is App app2 && app2.ZoneManager is ZoneManager zm2)
+            {
                 zm2.ZonesChanged -= _zoneChangedHandler;
+                zm2.ZoneVisibilityChanged -= _zoneVisibilityChangedHandler;
+                zm2.LockChanged -= _zoneLockChangedHandler;
+            }
+            if (_notesChangedHandler != null && Application.Current is App app3 && app3.NotesService is NotesService ns)
+                ns.NotesChanged -= _notesChangedHandler;
+            if (_clocksChangedHandler != null && Application.Current is App app4 && app4.WidgetService is WidgetService ws)
+            {
+                ws.ClocksChanged -= _clocksChangedHandler;
+                ws.CalendarsChanged -= _clocksChangedHandler;
+            }
         };
         _loc.LanguageChanged += OnLanguageChanged;
         ThemeService.Changed += OnThemeChanged;
         // ponytail: folder-mapping sync — the zone window can toggle the mapping
         // (✕ button / + menu / navigation), and the panel's checkbox + path row
         // rebuild when the manager reports a change to the current target's state.
+        // 状态区同时挂在 ZonesChanged / NotesChanged / ClocksChanged / CalendarsChanged
+        // 上做轻量实时刷新（只重建状态区控件，不碰字段树）。
+        // 分区窗口自身的隐藏/锁定按钮只触发 ZoneVisibilityChanged / LockChanged
+        // （不走 ZonesChanged），必须额外订阅才能让状态区开关实时跟随。
         if (Application.Current is App app && app.ZoneManager is ZoneManager zm)
         {
-            _zoneChangedHandler = SyncFolderMappingStateFromManager;
+            _zoneChangedHandler = () =>
+            {
+                SyncFolderMappingStateFromManager();
+                RefreshStatusArea();
+            };
+            _zoneVisibilityChangedHandler = (_, _) => RefreshStatusArea();
+            _zoneLockChangedHandler = (_, _) => RefreshStatusArea();
             zm.ZonesChanged += _zoneChangedHandler;
+            zm.ZoneVisibilityChanged += _zoneVisibilityChangedHandler;
+            zm.LockChanged += _zoneLockChangedHandler;
+        }
+        if (Application.Current is App appN && appN.NotesService is NotesService notesService)
+        {
+            _notesChangedHandler = RefreshStatusArea;
+            notesService.NotesChanged += _notesChangedHandler;
+        }
+        if (Application.Current is App appW && appW.WidgetService is WidgetService widgetService)
+        {
+            _clocksChangedHandler = RefreshStatusArea;
+            widgetService.ClocksChanged += _clocksChangedHandler;
+            widgetService.CalendarsChanged += _clocksChangedHandler;
         }
     }
 
@@ -139,13 +197,17 @@ public partial class PropertyPanel : UserControl
     // ── Folder-mapping state sync (zone window ↔ style panel) ──
 
     Action? _zoneChangedHandler;
+    Action<Guid, bool>? _zoneVisibilityChangedHandler;
+    Action<string, bool>? _zoneLockChangedHandler;
+    Action? _notesChangedHandler;
+    Action? _clocksChangedHandler;
     (bool Enabled, string Path)? _lastFolderMappingState;
 
+    // 组合分区编辑器已移除文件夹映射 section（组级映射只保留在分区窗口层），
+    // 同步只关注普通分区，避免组级映射变化无谓地全量重建组合分区字段树。
     (bool Enabled, string Path)? FolderMappingStateOf(object? target) => target switch
     {
         Zone z => (z.FolderMappingEnabled, z.FolderMappingPath ?? ""),
-        MergedGroupTarget g => (g.Master.MergedGroupStyle.FolderMappingEnabled,
-                                g.Master.MergedGroupStyle.FolderMappingPath ?? ""),
         _ => null,
     };
 
@@ -327,7 +389,9 @@ public partial class PropertyPanel : UserControl
                 CopySubfolderFields(sp.Subfolder, sub);
                 break;
         }
-        OnTargetChanged();  // resync UI to the new model state
+        _suppressSwitchAnimation = true;
+        try { OnTargetChanged(); }
+        finally { _suppressSwitchAnimation = false; }  // resync UI to the new model state
     }
 
     void ToggleBtn_Click(object sender, RoutedEventArgs e)
@@ -442,22 +506,22 @@ public partial class PropertyPanel : UserControl
             // Header = icon + window name, matching the management list rows
             // and the tab strip titles (no "某某设置" labels).
             case DesktopClock c:
-                InstanceName = $"Clock ({(c.Mode == ClockDisplayMode.Digital ? "数字" : "钟表")})";
+                InstanceName = $"{_loc["Breadcrumb.Clock"]} ({(c.Mode == ClockDisplayMode.Digital ? _loc["ClockProp.Digital"] : _loc["ClockProp.Analog"])})";
                 SetInstanceIcon("Icon.Clock");
                 BuildClockFields(c);
                 break;
             case DesktopCalendar cal:
-                InstanceName = $"Calendar {cal.DisplayYear}-{cal.DisplayMonth:D2}";
+                InstanceName = $"{_loc["Breadcrumb.Calendar"]} {cal.DisplayYear}-{cal.DisplayMonth:D2}";
                 SetInstanceIcon("Icon.Calendar");
                 BuildCalendarFields(cal);
                 break;
             case StickyNote note:
-                InstanceName = string.IsNullOrEmpty(note.Title) ? "便签" : note.Title;
+                InstanceName = string.IsNullOrEmpty(note.Title) ? _loc["StickyNotePage.FallbackTitle"] : note.Title;
                 SetInstanceIcon("Icon.Sticky");
                 BuildNoteFields(note);
                 break;
             case PanelConfig p:
-                InstanceName = "控制面板";
+                InstanceName = _loc["PanelPage.PanelTitle"];
                 SetInstanceIcon("Icon.Panel");
                 BuildPanelFields(p);
                 break;
@@ -491,6 +555,9 @@ public partial class PropertyPanel : UserControl
         }
         // Folder-mapping sync baseline: captured after the field tree is built.
         _lastFolderMappingState = FolderMappingStateOf(Target);
+        // 状态区 + 磁贴门控：字段树建完后按当前状态渲染。
+        BuildStatusArea(Target);
+        ApplyTileGating(CurrentTileMode());
         AnimateSwitch();
     }
 
@@ -514,6 +581,13 @@ public partial class PropertyPanel : UserControl
     void AnimateSwitch()
     {
         if (RootGrid == null) return;
+        if (_suppressSwitchAnimation)
+        {
+            // 预设卡点击实时预览：跳过淡入+滑动，直接落到最终可见态。
+            RootGrid.Opacity = 1;
+            RootTranslate.X = 0;
+            return;
+        }
         RootGrid.Opacity = 0;
         RootTranslate.X = 12;
         var fade = new System.Windows.Media.Animation.DoubleAnimation
@@ -541,6 +615,425 @@ public partial class PropertyPanel : UserControl
     /// <summary>重新渲染字段树以反映 TileMode / HideAppName / CustomIcon 的依赖更新。</summary>
     void Rebuild(Zone z) => BuildZoneFields(z);
 
+    // ── 状态区（顶部实时状态条）──
+    //
+    // 替代原「边框+横杠」占位。内容跟随目标真实状态实时变化：
+    // 显示/锁定滑动开关（SwitchStyle）、删除分区按钮（Apply 同款填充）、
+    // 状态 chips（文件夹映射 / 监听中 / 组合分区中 — 激活亮起、未激活变暗）、
+    // 面板与便签的快捷键设置行。破坏性/窗口级操作经宿主回调执行。
+
+    /// <summary>按当前 Target 全量构建状态区。SubFolder 等无适用内容的目标折叠整个区域。</summary>
+    void BuildStatusArea(object? target)
+    {
+        if (StatusHost == null) return; // pre-InitializeComponent guard
+        StatusHost.Children.Clear();
+        // 清空增量刷新引用，由各构建器重新登记。
+        _statusVisibleCb = null;
+        _statusLockCb = null;
+        _statusChips.Clear();
+        _statusHotkeyText = null;
+        _statusHotkeyGetter = null;
+        switch (target)
+        {
+            case Zone z: BuildZoneStatus(z); break;
+            case MergedGroupTarget g: BuildMergedGroupStatus(g); break;
+            case DesktopClock c: BuildClockStatus(c); break;
+            case DesktopCalendar cal: BuildCalendarStatus(cal); break;
+            case StickyNote n: BuildNoteStatus(n); break;
+            case PanelConfig p: BuildPanelStatus(p); break;
+            default:
+                StatusArea.Visibility = Visibility.Collapsed;
+                _statusBuiltFor = null;
+                return;
+        }
+        StatusArea.Visibility = Visibility.Visible;
+        _statusBuiltFor = target;
+    }
+
+    /// <summary>轻量实时刷新 — 增量更新已有开关/词条状态，不重建控件、不碰字段树。
+    /// 开关值真正变化时才触发 SwitchStyle 的滑动动画；无关事件（如便签打字保存）
+    /// 赋值同值不产生动画，不会闪。</summary>
+    public void RefreshStatusArea()
+    {
+        if (Target == null) { StatusArea.Visibility = Visibility.Collapsed; return; }
+        if (!ReferenceEquals(_statusBuiltFor, Target)) { BuildStatusArea(Target); return; }
+        switch (Target)
+        {
+            case Zone z:
+                if (_statusVisibleCb != null) _statusVisibleCb.IsChecked = z.IsVisible;
+                if (_statusLockCb != null) _statusLockCb.IsChecked = z.IsLocked;
+                break;
+            case MergedGroupTarget g:
+                if (_statusVisibleCb != null) _statusVisibleCb.IsChecked = g.Master.IsVisible;
+                if (_statusLockCb != null) _statusLockCb.IsChecked = g.Master.IsLocked;
+                break;
+            case DesktopClock c:
+                if (_statusVisibleCb != null) _statusVisibleCb.IsChecked = c.IsVisible;
+                break;
+            case DesktopCalendar cal:
+                if (_statusVisibleCb != null) _statusVisibleCb.IsChecked = cal.IsVisible;
+                break;
+            case StickyNote n:
+                if (_statusVisibleCb != null) _statusVisibleCb.IsChecked = n.IsVisible;
+                break;
+            case PanelConfig p:
+                if (_statusVisibleCb != null) _statusVisibleCb.IsChecked = p.PanelEnabled;
+                break;
+        }
+        foreach (var (chip, isActive) in _statusChips)
+            ApplyChipState(chip, isActive());
+        if (_statusHotkeyText != null && _statusHotkeyGetter != null)
+            _statusHotkeyText.Text = _statusHotkeyGetter();
+    }
+
+    CheckBox? _statusVisibleCb;
+    CheckBox? _statusLockCb;
+    object? _statusBuiltFor;
+    readonly List<(Border Chip, Func<bool> IsActive)> _statusChips = new();
+    TextBlock? _statusHotkeyText;
+    Func<string>? _statusHotkeyGetter;
+
+    void ApplyChipState(Border chip, bool active)
+    {
+        chip.Opacity = active ? 1.0 : 0.75;
+        chip.Background = active
+            ? new SolidColorBrush(Color.FromArgb(0x40, 0x4A, 0xC0, 0x4A))
+            : (Brush)FindResource("Brush.Bg.Input");
+        if (chip.Child is TextBlock tb)
+            tb.Foreground = active
+                ? (Brush)FindResource("Brush.Text.Primary")
+                : (Brush)FindResource("Brush.Text.Tertiary");
+    }
+
+    /// <summary>分区锁定 — 与窗口标题栏锁按钮走同一条路径：SetLocked 触发
+    /// ZoneManager.LockChanged → ZoneWindow.OnServiceLockChanged → ApplyLockState
+    /// 切换窗口锁按钮图标；再 NotifyChanged + SaveConfig 持久化并刷新列表/状态区。
+    /// 不能只走 Save()（UpdateZone 不触发 LockChanged，窗口按钮图标不会变）。</summary>
+    void ApplyZoneLock(Zone z, bool locked)
+    {
+        z.IsLocked = locked;
+        var zm = (Application.Current as App)?.ZoneManager;
+        if (zm == null) return;
+        zm.SetLocked(z.Id.ToString(), locked); // LockChanged → 窗口锁按钮图标切换
+        zm.NotifyChanged();                    // ZonesChanged → 列表行 / 状态区刷新
+        zm.SaveConfig();                       // 持久化（窗口 LockBtn_Click 同款）
+    }
+
+    // ── 分区 ──
+
+    void BuildZoneStatus(Zone z)
+    {
+        // 行1：显示/锁定开关
+        var row1 = new DockPanel { LastChildFill = false };
+        _statusVisibleCb = AddStatusSwitch(row1, _loc["PropertyPanel.Status.Visible"], z.IsVisible,
+            _ => ToggleVisibility?.Invoke(z)); // host: ShowZone/HideZone（无恢复按钮时自动彻底隐藏）
+        _statusLockCb = AddStatusSwitch(row1, _loc["PropertyPanel.Status.Locked"], z.IsLocked,
+            on => ApplyZoneLock(z, on));
+        StatusHost.Children.Add(row1);
+
+        // 行2：操作按钮（加入组合分区 / 删除分区）
+        var row2 = new DockPanel { LastChildFill = false, Margin = new Thickness(0, 10, 0, 0) };
+        var delete = MakeStatusDangerButton(_loc["PropertyPanel.Status.DeleteZone"]);
+        delete.Click += (_, _) => DeleteTarget?.Invoke(z);
+        DockPanel.SetDock(delete, Dock.Right);
+        row2.Children.Add(delete);
+        var zm = (Application.Current as App)?.ZoneManager;
+        bool otherGroups = zm != null && zm.Zones.Any(o =>
+            o.MergedGroupMembership.SubZoneIds.Count > 0 && o.Id != z.Id);
+        if (otherGroups)
+        {
+            var add = MakeStatusOutlineButton(_loc["Manage.Zone.AddToMerge"]);
+            add.Click += (_, _) => AddZoneToMerge?.Invoke(z);
+            row2.Children.Add(add);
+        }
+        StatusHost.Children.Add(row2);
+
+        // 行3：状态词条单独一行（底部），不再与开关挤同一行
+        StatusHost.Children.Add(MakeZoneStatusChips(z, topMargin: 10));
+    }
+
+    FrameworkElement MakeZoneStatusChips(Zone z, double topMargin = 0)
+    {
+        var sp = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, topMargin, 0, 0),
+        };
+        // 与列表行徽章同款绿底；未激活则暗下去（灰底 + 三级文字）。
+        // 登记 (chip, getter) 供增量刷新按真实状态更新亮/暗。
+        var folderChip = MakeStatusChip(_loc["Manage.Status.FolderMapping"],
+            z.FolderMappingEnabled || z.MergedGroupStyle.FolderMappingEnabled);
+        _statusChips.Add((folderChip, () => z.FolderMappingEnabled || z.MergedGroupStyle.FolderMappingEnabled));
+        sp.Children.Add(folderChip);
+
+        var listeningChip = MakeStatusChip(_loc["PropertyPanel.Status.Listening"], z.AutoOrganizeWatching);
+        _statusChips.Add((listeningChip, () => z.AutoOrganizeWatching));
+        sp.Children.Add(listeningChip);
+
+        var mergedChip = MakeStatusChip(_loc["PropertyPanel.Status.InMergedGroup"],
+            z.MergedGroupMembership.GroupId.HasValue || z.MergedGroupMembership.SubZoneIds.Count > 0);
+        _statusChips.Add((mergedChip, () =>
+            z.MergedGroupMembership.GroupId.HasValue || z.MergedGroupMembership.SubZoneIds.Count > 0));
+        sp.Children.Add(mergedChip);
+        return sp;
+    }
+
+    // ── 组合分区 ──
+
+    void BuildMergedGroupStatus(MergedGroupTarget g)
+    {
+        var z = g.Master;
+        // 行1：显示/锁定开关（组合分区自身无需「组合分区中」状态词条）
+        var row1 = new DockPanel { LastChildFill = false };
+        _statusVisibleCb = AddStatusSwitch(row1, _loc["PropertyPanel.Status.Visible"], z.IsVisible,
+            _ => ToggleVisibility?.Invoke(g));
+        _statusLockCb = AddStatusSwitch(row1, _loc["PropertyPanel.Status.Locked"], z.IsLocked,
+            on => ApplyZoneLock(z, on));
+        StatusHost.Children.Add(row1);
+
+        // 行2：分离单个分区 / 解散组合分区
+        var row2 = new DockPanel { LastChildFill = false, Margin = new Thickness(0, 10, 0, 0) };
+        var disband = MakeStatusDangerButton(_loc["Merge.DisbandAll"]);
+        disband.Click += (_, _) => DeleteTarget?.Invoke(g);
+        DockPanel.SetDock(disband, Dock.Right);
+        row2.Children.Add(disband);
+        if (z.MergedGroupMembership.SubZoneIds.Count > 0)
+        {
+            var single = MakeStatusOutlineButton(_loc["MergePage.DisbandSingle"]);
+            single.Click += (_, _) => DisbandSingleFromGroup?.Invoke(z);
+            row2.Children.Add(single);
+        }
+        StatusHost.Children.Add(row2);
+    }
+
+    // ── 时钟 / 日历 ──
+
+    void BuildClockStatus(DesktopClock c)
+    {
+        var row1 = new DockPanel { LastChildFill = false };
+        _statusVisibleCb = AddStatusSwitch(row1, _loc["PropertyPanel.Status.Visible"], c.IsVisible,
+            _ => ToggleVisibility?.Invoke(c));
+        StatusHost.Children.Add(row1);
+        AddDeleteRow(_loc["ClockPage.Delete"], c);
+    }
+
+    void BuildCalendarStatus(DesktopCalendar cal)
+    {
+        var row1 = new DockPanel { LastChildFill = false };
+        _statusVisibleCb = AddStatusSwitch(row1, _loc["PropertyPanel.Status.Visible"], cal.IsVisible,
+            _ => ToggleVisibility?.Invoke(cal));
+        StatusHost.Children.Add(row1);
+        AddDeleteRow(_loc["CalendarPage.Delete"], cal);
+    }
+
+    void AddDeleteRow(string label, object target)
+    {
+        var row = new DockPanel { LastChildFill = false, Margin = new Thickness(0, 10, 0, 0) };
+        var delete = MakeStatusDangerButton(label);
+        delete.Click += (_, _) => DeleteTarget?.Invoke(target);
+        DockPanel.SetDock(delete, Dock.Right);
+        row.Children.Add(delete);
+        StatusHost.Children.Add(row);
+    }
+
+    // ── 便签（删除按钮下方放快捷键设置）──
+
+    void BuildNoteStatus(StickyNote n)
+    {
+        var row1 = new DockPanel { LastChildFill = false };
+        _statusVisibleCb = AddStatusSwitch(row1, _loc["PropertyPanel.Status.Visible"], n.IsVisible,
+            _ => ToggleVisibility?.Invoke(n));
+        StatusHost.Children.Add(row1);
+        AddDeleteRow(_loc["StickyNotePage.Delete"], n);
+        StatusHost.Children.Add(MakeHotkeyStatusRow(
+            () => n.HotkeyEnabled ? ManagementWindow.GetHotkeyLabel(n.HotkeyModifiers, n.HotkeyKey) : _loc["Hotkey.None"],
+            btn => ShowNoteHotkeyMenu?.Invoke(n, btn)));
+    }
+
+    // ── 面板（无删除概念：启用开关 + 快捷键设置）──
+
+    void BuildPanelStatus(PanelConfig p)
+    {
+        var row1 = new DockPanel { LastChildFill = false };
+        _statusVisibleCb = AddStatusSwitch(row1, _loc["PropertyPanel.Status.Enabled"], p.PanelEnabled,
+            _ => ToggleVisibility?.Invoke(p));
+        StatusHost.Children.Add(row1);
+        StatusHost.Children.Add(MakeHotkeyStatusRow(
+            () => GetPanelHotkeyLabel?.Invoke() ?? _loc["Hotkey.None"],
+            btn => ShowPanelHotkeyMenu?.Invoke(p, btn)));
+    }
+
+    // ── 状态区控件构建器 ──
+
+    /// <summary>滑动开关行：固定标签 + SwitchStyle（圆角轨道+圆点，开=主题色填充）。
+    /// 返回 CheckBox 供增量刷新引用。</summary>
+    CheckBox AddStatusSwitch(Panel panel, string label, bool isOn, Action<bool> onToggle)
+    {
+        var cb = new CheckBox
+        {
+            IsChecked = isOn,
+            Style = (Style)FindResource("SwitchStyle"),
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(6, 0, 0, 0),
+        };
+        // Click 只在用户点击时触发（程序改 IsChecked 不触发）→ 增量刷新不会回声。
+        cb.Click += (_, _) => onToggle(cb.IsChecked == true);
+        var stack = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Margin = new Thickness(0, 0, 16, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        stack.Children.Add(new TextBlock
+        {
+            Text = label,
+            FontSize = 11,
+            Foreground = (Brush)FindResource("Brush.Text.Secondary"),
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        stack.Children.Add(cb);
+        panel.Children.Add(stack);
+        return cb;
+    }
+
+    /// <summary>状态 chip — 激活亮起（列表徽章同款绿底），未激活和禁用一样暗下去。</summary>
+    Border MakeStatusChip(string text, bool active)
+    {
+        return new Border
+        {
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(8, 2, 8, 2),
+            Margin = new Thickness(4, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            Opacity = active ? 1.0 : 0.75,
+            Background = active
+                ? new SolidColorBrush(Color.FromArgb(0x40, 0x4A, 0xC0, 0x4A))
+                : (Brush)FindResource("Brush.Bg.Input"),
+            Child = new TextBlock
+            {
+                Text = text,
+                FontSize = 10,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = active
+                    ? (Brush)FindResource("Brush.Text.Primary")
+                    : (Brush)FindResource("Brush.Text.Tertiary"),
+            },
+        };
+    }
+
+    /// <summary>删除/解散按钮 — Apply 同款填充按钮（主题色实底 + 圆角 4）。</summary>
+    Button MakeStatusDangerButton(string text)
+    {
+        var btn = new Button
+        {
+            Content = text,
+            Cursor = Cursors.Hand,
+            Background = (Brush)FindResource("Brush.Accent.Solid"),
+            Foreground = (Brush)FindResource("Brush.Accent.On"),
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(12, 5, 12, 5),
+            FontSize = 11,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        var borderStyle = new Style(typeof(Border));
+        borderStyle.Setters.Add(new Setter(Border.CornerRadiusProperty, new CornerRadius(4)));
+        btn.Resources.Add(typeof(Border), borderStyle);
+        return btn;
+    }
+
+    /// <summary>次要操作按钮 — 底部 Load/Save 同款描边按钮。</summary>
+    Button MakeStatusOutlineButton(string text)
+    {
+        var btn = new Button
+        {
+            Content = text,
+            Cursor = Cursors.Hand,
+            Background = Brushes.Transparent,
+            BorderBrush = (Brush)FindResource("Brush.Border.Default"),
+            BorderThickness = new Thickness(1),
+            Foreground = (Brush)FindResource("Brush.Text.Secondary"),
+            Padding = new Thickness(12, 5, 12, 5),
+            FontSize = 11,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 6, 0),
+        };
+        var borderStyle = new Style(typeof(Border));
+        borderStyle.Setters.Add(new Setter(Border.CornerRadiusProperty, new CornerRadius(4)));
+        btn.Resources.Add(typeof(Border), borderStyle);
+        return btn;
+    }
+
+    /// <summary>快捷键设置行：标签 + 当前值（等宽字体）+ 右侧「设置快捷键」按钮。
+    /// getLabel 用于增量刷新当前值文本。</summary>
+    FrameworkElement MakeHotkeyStatusRow(Func<string> getLabel, Action<FrameworkElement> onOpen)
+    {
+        var dock = new DockPanel { LastChildFill = true, Margin = new Thickness(0, 10, 0, 0) };
+        var btn = new Button
+        {
+            Content = _loc["StickyNotePage.SetHotkey"],
+            Cursor = Cursors.Hand,
+            Padding = new Thickness(10, 4, 10, 4),
+            FontSize = 11,
+            Background = (Brush)FindResource("Brush.Bg.Input"),
+            Foreground = (Brush)FindResource("Brush.Text.Secondary"),
+            BorderBrush = (Brush)FindResource("Brush.Border.Subtle"),
+            BorderThickness = new Thickness(1),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        btn.Click += (_, _) => onOpen(btn);
+        DockPanel.SetDock(btn, Dock.Right);
+        dock.Children.Add(btn);
+        var label = new TextBlock
+        {
+            Text = _loc["PropertyPanel.Status.Hotkey"] + ":",
+            Foreground = (Brush)FindResource("Brush.Text.Secondary"),
+            FontSize = 11,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 8, 0),
+        };
+        DockPanel.SetDock(label, Dock.Left);
+        dock.Children.Add(label);
+        var current = new TextBlock
+        {
+            Text = getLabel(),
+            FontSize = 11,
+            FontFamily = new FontFamily("Cascadia Code, Consolas, monospace"),
+            Foreground = (Brush)FindResource("Brush.Text.Primary"),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        dock.Children.Add(current);
+        _statusHotkeyText = current;
+        _statusHotkeyGetter = getLabel;
+        return dock;
+    }
+
+    // ── 磁贴模式门控 ──
+    //
+    // 磁贴模式开启 = 标题栏消失 → 标题栏分类整组灰显 0.4 并不可交互。
+    // 各字段构建器把标题栏 section 注册进 _tileGated；磁贴开关切换时实时应用。
+
+    readonly List<FrameworkElement> _tileGated = new();
+
+    bool CurrentTileMode() => Target switch
+    {
+        Zone z => z.TileMode,
+        MergedGroupTarget g => g.Master.MergedGroupStyle.TileMode,
+        DesktopClock c => c.TileMode,
+        DesktopCalendar cal => cal.TileMode,
+        _ => false,
+    };
+
+    void ApplyTileGating(bool tileMode)
+    {
+        foreach (var el in _tileGated)
+        {
+            el.IsEnabled = !tileMode;
+            el.Opacity = tileMode ? 0.4 : 1.0;
+            el.ToolTip = tileMode ? _loc["PropertyPanel.Status.TileDisabledHint"] : null;
+        }
+    }
+
     // ── 自定义图标实时门控 ──
     CheckBox? _customIconCb;
     int? _lastZoneItemCount;
@@ -559,6 +1052,7 @@ public partial class PropertyPanel : UserControl
 
     void BuildZoneFields(Zone z)
     {
+        _tileGated.Clear();
         var root = new StackPanel { Margin = new Thickness(16, 12, 16, 12) };
 
         // 开关区
@@ -596,10 +1090,6 @@ public partial class PropertyPanel : UserControl
         // can flip it ahead of time without anything bad happening.
         switches.Children.Add(MakeCheckRow(_loc["Motion.HoverAutoExpand"], z.HoverAutoExpand,
             v => { z.HoverAutoExpand = v; Save(z); }));
-        switches.Children.Add(MakeCheckRow(_loc["ZoneProp.TitleBarTextAdaptive"], z.TitleBarTextColorAdaptive,
-            v => { z.TitleBarTextColorAdaptive = v; Save(z); }));
-        switches.Children.Add(MakeCheckRow(_loc["ZoneProp.BodyTextAdaptive"], z.TextColorAdaptive,
-            v => { z.TextColorAdaptive = v; Save(z); }));
         switches.Children.Add(MakeCornerStyleRow(z.CornerRadius > 0, rounded =>
         {
             z.CornerRadius = rounded ? (z.CornerRadius > 0 ? z.CornerRadius : 8) : 0;
@@ -673,10 +1163,13 @@ public partial class PropertyPanel : UserControl
         tb.Children.Add(MakeSliderRow(_loc["ZoneProp.TitleBarOpacity"], 0, 100, 5,
             ParsePercent(z.TitleBarFillColor, 6),
             p => { z.TitleBarFillColor = SetPercent(z.TitleBarFillColor, p, "FFFFFF"); Save(z); }));
+        tb.Children.Add(MakeColorRow(_loc["ZoneProp.ButtonColor"], z.ButtonColor,
+            v => { z.ButtonColor = v; Save(z); }));
         tb.Children.Add(MakeSliderRow(_loc["ZoneProp.ButtonOpacity"], 5, 100, 5,
             z.ControlOpacity,
             v => { z.ControlOpacity = v; Save(z); }));
         root.Children.Add(tb);
+        _tileGated.Add(tb); // 磁贴模式 = 无标题栏 → 整组禁用
 
         // 边框与填充
         var bf = MakeSection(_loc["ZoneProp.Section.BorderFill"]);
@@ -725,6 +1218,10 @@ public partial class PropertyPanel : UserControl
         }));
         root.Children.Add(bg);
 
+        // 主体内容 — 替代原「主体内容颜色自适应」的固定色 + 透明度。
+        root.Children.Add(BuildBodyContentSection(
+            () => z.TextColor, v => z.TextColor = v, () => Save(z)));
+
         // 文件夹映射 — 样式设置界面的最后一项。
         var fm = MakeSection(_loc["ZoneProp.Section.FolderMapping"]);
         AddFolderMappingSection(fm,
@@ -737,6 +1234,7 @@ public partial class PropertyPanel : UserControl
         root.Children.Add(BuildAutoOrganizeSection(z));
 
         FieldScroller.Content = root;
+        ApplyTileGating(z.TileMode);
     }
 
     // ── Auto-organize section（仅 Zone 类型）──
@@ -746,47 +1244,46 @@ public partial class PropertyPanel : UserControl
     {
         var sec = MakeSection(_loc["ZoneProp.Section.AutoOrganize"]);
 
+        // 外层总开关：勾选 = 启用监听，取消 = 暂停监听但保留规则，方便下次快速开启
         sec.Children.Add(MakeCheckRow(
-            _loc["ZoneProp.AutoOrganize.ExtensionEnabled"],
-            z.AutoOrganizeExtensions.Count > 0,
+            _loc["ZoneProp.AutoOrganize.WatchingEnabled"],
+            z.AutoOrganizeWatching,
             v =>
             {
-                ToggleExtension(z, v);
+                z.AutoOrganizeWatching = v;
                 AutoOrganizeService.Instance.AttachZone(z);
-                Rebuild(z);
+                Save(z);
+            }));
+
+        // 扩展名子开关：取消 = 保留扩展名列表但不参与匹配
+        sec.Children.Add(MakeCheckRow(
+            _loc["ZoneProp.AutoOrganize.ExtensionEnabled"],
+            z.AutoOrganizeExtEnabled,
+            v =>
+            {
+                z.AutoOrganizeExtEnabled = v;
+                AutoOrganizeService.Instance.AttachZone(z);
                 Save(z);
             }));
 
         sec.Children.Add(MakeAutoOrganizeExtChipRow(z));
 
+        // 文件名要素子开关：取消 = 保留要素列表但不参与匹配
         sec.Children.Add(MakeCheckRow(
             _loc["ZoneProp.AutoOrganize.NameEnabled"],
-            z.AutoOrganizeNameTokens.Count > 0,
+            z.AutoOrganizeNameEnabled,
             v =>
             {
-                ToggleName(z, v);
+                z.AutoOrganizeNameEnabled = v;
                 AutoOrganizeService.Instance.AttachZone(z);
-                Rebuild(z);
                 Save(z);
             }));
 
         sec.Children.Add(MakeNameTokenChipRow(z));
-
         sec.Children.Add(MakeAutoOrganizePathRow(z));
-
         sec.Children.Add(MakeScanExistingButton(z));
 
         return sec;
-    }
-
-    static void ToggleExtension(Zone z, bool on)
-    {
-        if (!on) z.AutoOrganizeExtensions.Clear();
-    }
-
-    static void ToggleName(Zone z, bool on)
-    {
-        if (!on) z.AutoOrganizeNameTokens.Clear();
     }
 
     FrameworkElement MakeAutoOrganizeExtChipRow(Zone z)
@@ -830,6 +1327,19 @@ public partial class PropertyPanel : UserControl
         var w = new AutoOrganizePickerWindow(z, kind) { Owner = owner };
         if (w.ShowDialog() == true)
         {
+            // 添加了规则后自动勾选对应子开关 + 总开关
+            if (kind == AutoOrganizePickerKind.Extension)
+            {
+                if (z.AutoOrganizeExtensions.Count > 0 && !z.AutoOrganizeExtEnabled)
+                    z.AutoOrganizeExtEnabled = true;
+            }
+            else
+            {
+                if (z.AutoOrganizeNameTokens.Count > 0 && !z.AutoOrganizeNameEnabled)
+                    z.AutoOrganizeNameEnabled = true;
+            }
+            if (z.AutoOrganizeEnabled && !z.AutoOrganizeWatching)
+                z.AutoOrganizeWatching = true;
             AutoOrganizeService.Instance.AttachZone(z);
             Rebuild(z);
             Save(z);
@@ -907,6 +1417,9 @@ public partial class PropertyPanel : UserControl
             var raw = (pathBox.Text ?? "").Trim();
             if (raw == z.AutoOrganizeWatchPath) return;
             z.AutoOrganizeWatchPath = raw;
+            // 手动输入路径且已有规则时，自动勾选监听开关
+            if (z.AutoOrganizeEnabled && !z.AutoOrganizeWatching)
+                z.AutoOrganizeWatching = true;
             AutoOrganizeService.Instance.AttachZone(z);
             Save(z);
         };
@@ -932,6 +1445,9 @@ public partial class PropertyPanel : UserControl
         if (ok == true && !string.IsNullOrEmpty(dlg.FolderName))
         {
             z.AutoOrganizeWatchPath = dlg.FolderName;
+            // 选好路径且已有规则时，自动勾选监听开关
+            if (z.AutoOrganizeEnabled && !z.AutoOrganizeWatching)
+                z.AutoOrganizeWatching = true;
             AutoOrganizeService.Instance.AttachZone(z);
             Rebuild(z);
             Save(z);
@@ -954,7 +1470,7 @@ public partial class PropertyPanel : UserControl
             var msg = string.Format(System.Globalization.CultureInfo.InvariantCulture,
                 _loc["ZoneProp.AutoOrganize.ScanDone"], n);
             if (App.Notify != null)
-                App.Notify("Auto-organize", msg);
+                App.Notify(_loc["ZoneProp.Section.AutoOrganize"], msg);
             else
                 MessageBox.Show(msg, "Auto-organize", MessageBoxButton.OK, MessageBoxImage.Information);
             Rebuild(z);
@@ -1025,22 +1541,25 @@ public partial class PropertyPanel : UserControl
         void SaveGroup() => Save(Target!);
 
         _unifiedGated.Clear();
+        _tileGated.Clear();
         CheckBox? titleBarIndependentCb = null;
         var root = new StackPanel { Margin = new Thickness(16, 12, 16, 12) };
 
         // 开关区
         var switches = MakeSection(_loc["ZoneProp.Section.Switches"]);
         switches.Children.Add(MakeCheckRow(_loc["ZoneProp.TileMode"], gs.TileMode,
-            v => { gs.TileMode = v; z.TileMode = v; SaveGroup(); }));
+            v =>
+            {
+                gs.TileMode = v;
+                z.TileMode = v;
+                SaveGroup();
+                ApplyTileGating(v); // 磁贴模式 = 无标题栏 → 标题栏分类实时禁用
+            }));
         switches.Children.Add(MakeCheckRow(_loc["ZoneProp.RestoreButton"], z.EnableRestoreButton,
             v => { z.EnableRestoreButton = v; SaveGroup(); }));
         switches.Children.Add(MakeCheckRowWithSideBtn(_loc["Motion.HoverAutoExpand"], z.HoverAutoExpand,
             v => { z.HoverAutoExpand = v; SaveGroup(); },
             _loc["Motion.SettingsEllipsis"], _ => OpenMotionDialog(z, () => BuildMergedGroupFields(z))));
-        switches.Children.Add(MakeCheckRow(_loc["ZoneProp.TitleBarTextAdaptive"], gs.TitleBarTextColorAdaptive,
-            v => { gs.TitleBarTextColorAdaptive = v; z.TitleBarTextColorAdaptive = v; SaveGroup(); }));
-        switches.Children.Add(MakeCheckRow(_loc["ZoneProp.BodyTextAdaptive"], z.TextColorAdaptive,
-            v => { z.TextColorAdaptive = v; SaveGroup(); }));
         switches.Children.Add(MakeUnifiedFillRow(gs.UseUnifiedFill, v =>
         {
             gs.UseUnifiedFill = v;
@@ -1117,10 +1636,13 @@ public partial class PropertyPanel : UserControl
         tb.Children.Add(MakeSliderRow(_loc["ZoneProp.TitleBarOpacity"], 0, 100, 5,
             ParsePercent(gs.TitleBarFillColor, 6),
             p => { gs.TitleBarFillColor = SetPercent(gs.TitleBarFillColor, p, "FFFFFF"); SaveGroup(); }));
+        tb.Children.Add(MakeColorRow(_loc["ZoneProp.ButtonColor"], gs.ButtonColor,
+            v => { gs.ButtonColor = v; SaveGroup(); }));
         tb.Children.Add(MakeSliderRow(_loc["ZoneProp.ButtonOpacity"], 5, 100, 5,
             gs.ControlOpacity,
             v => { gs.ControlOpacity = v; SaveGroup(); }));
         root.Children.Add(tb);
+        _tileGated.Add(tb); // 磁贴模式 = 无标题栏 → 整组禁用
 
         // 边框与填充 — 边框统一(两种模式都生效)；只有「填充」行在保留原有填充时
         // 失效(主体填充改回各子分区自己的填充)。
@@ -1180,16 +1702,16 @@ public partial class PropertyPanel : UserControl
         _unifiedGated.Add(bgRow);
         root.Children.Add(bg);
 
-        // 文件夹映射 — 组合分区内容区的映射（两种填充模式都生效，不受统一填充门控）。
-        var fm = MakeSection(_loc["ZoneProp.Section.FolderMapping"]);
-        AddFolderMappingSection(fm,
-            () => gs.FolderMappingEnabled, v => { gs.FolderMappingEnabled = v; z.FolderMappingEnabled = v; },
-            () => gs.FolderMappingPath, v => { gs.FolderMappingPath = v ?? ""; z.FolderMappingPath = v ?? ""; },
-            () => { CaptureFolderMappingState(); SaveGroup(); });
-        root.Children.Add(fm);
+        // 主体内容 — 保留原有填充时禁用（主体填充回到各子分区自己的填充，统一内容色无意义）。
+        root.Children.Add(BuildBodyContentSection(
+            () => gs.TextColor, v => { gs.TextColor = v; SaveGroup(); }, SaveGroup, _unifiedGated));
+
+        // 组合分区编辑器不再提供文件夹映射（用户 2026-08-2x：功能与选项一并移除）。
+        // 组级映射仍保留在分区窗口层（MergedGroupStyle 字段不动，窗口头部行照常工作）。
 
         FieldScroller.Content = root;
         SetUnifiedGating(gs.UseUnifiedFill, animate: false);
+        ApplyTileGating(gs.TileMode);
     }
 
     // ── Field tree for SubFolder zone items ──
@@ -1210,11 +1732,12 @@ public partial class PropertyPanel : UserControl
     void BuildSubfolderFields(ZoneItem sub)
     {
         _fillGated.Clear();
+        _tileGated.Clear(); // SubFolder 无磁贴模式 — 清掉上一目标的标题栏引用
         var root = new StackPanel { Margin = new Thickness(16, 12, 16, 12) };
 
         // A: 基础
-        var basic = MakeSection("基础");
-        basic.Children.Add(MakeTextRow("名称", sub.Name,
+        var basic = MakeSection(_loc["SubfolderProp.Section.Basic"]);
+        basic.Children.Add(MakeTextRow(_loc["SubfolderProp.Name"], sub.Name,
             v => { sub.Name = v ?? ""; Save(sub); }));
         // ponytail: 图标锁死 1×1(用户取消尺寸自适应),不再暴露 IconSizeAutoGrow 开关。
         basic.Children.Add(MakeCornerStyleRow(sub.CornerRounded, rounded =>
@@ -1226,26 +1749,26 @@ public partial class PropertyPanel : UserControl
 
         // B: 动效 — 参考分区的做法:动效类型/速度收敛到二级窗口 MotionSettingsDialog,
         // 行内只留"鼠标悬停自动展开"开关 + 右侧"…"按钮打开二级窗口。
-        var motion = MakeSection("动效");
-        motion.Children.Add(MakeCheckRowWithSideBtn("鼠标悬停自动展开", sub.HoverAutoExpand,
+        var motion = MakeSection(_loc["SubfolderProp.Section.Motion"]);
+        motion.Children.Add(MakeCheckRowWithSideBtn(_loc["Motion.HoverAutoExpand"], sub.HoverAutoExpand,
             v => { sub.HoverAutoExpand = v; Save(sub); },
             _loc["Motion.SettingsEllipsis"], _ => OpenSubfolderMotionDialog(sub)));
         root.Children.Add(motion);
 
         // C: 布局 — 镜像 BuildZoneFields 的 GridSize + SnapToGrid/AutoArrange 二列布局。
-        var layout = MakeSection("布局");
+        var layout = MakeSection(_loc["SubfolderProp.Section.Layout"]);
         var layoutGrid = new Grid { Margin = new Thickness(0, 6, 0, 0) };
         layoutGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         layoutGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(10) });
         layoutGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        var gridBlock = MakeNumberSubBlock("网格大小", sub.GridSize,
+        var gridBlock = MakeNumberSubBlock(_loc["SubfolderProp.GridSize"], sub.GridSize,
             v => { sub.GridSize = (int)v; Save(sub); }, asInt: true);
         Grid.SetColumn(gridBlock, 0);
         layoutGrid.Children.Add(gridBlock);
         var snapStack = new StackPanel { VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 18, 0, 4) };
-        snapStack.Children.Add(MakeCheckRow("吸附到网格", sub.SnapToGrid,
+        snapStack.Children.Add(MakeCheckRow(_loc["SubfolderProp.SnapToGrid"], sub.SnapToGrid,
             v => { sub.SnapToGrid = v; Save(sub); }));
-        snapStack.Children.Add(MakeCheckRow("尺寸变化时自动重排", sub.AutoArrange,
+        snapStack.Children.Add(MakeCheckRow(_loc["SubfolderProp.AutoArrange"], sub.AutoArrange,
             v => { sub.AutoArrange = v; Save(sub); }));
         Grid.SetColumn(snapStack, 2);
         layoutGrid.Children.Add(snapStack);
@@ -1253,8 +1776,8 @@ public partial class PropertyPanel : UserControl
         root.Children.Add(layout);
 
         // D: 外观 — FillFollowsZone 控制 FillColor/FillOpacityOverride 行门控。
-        var appearance = MakeSection("外观");
-        appearance.Children.Add(MakeCheckRow("填充跟随主分区", sub.FillFollowsZone,
+        var appearance = MakeSection(_loc["SubfolderProp.Section.Appearance"]);
+        appearance.Children.Add(MakeCheckRow(_loc["SubfolderProp.FillFollowsZone"], sub.FillFollowsZone,
             v =>
             {
                 sub.FillFollowsZone = v;
@@ -1264,12 +1787,12 @@ public partial class PropertyPanel : UserControl
                 Save(sub);
                 SetFillGating(v, animate: true);
             }));
-        var fillColorRow = MakeColorRow("填充颜色",
+        var fillColorRow = MakeColorRow(_loc["SubfolderProp.FillColor"],
             string.IsNullOrEmpty(sub.FillColorOverride) ? "#08000000" : sub.FillColorOverride,
             v => { sub.FillColorOverride = v; Save(sub); });
         appearance.Children.Add(fillColorRow);
         _fillGated.Add(fillColorRow);
-        var fillOpacityRow = MakeSliderRow("填充透明度", 0, 100, 5,
+        var fillOpacityRow = MakeSliderRow(_loc["SubfolderProp.FillOpacity"], 0, 100, 5,
             sub.FillOpacityOverride < 0 ? 100 : sub.FillOpacityOverride,
             p => { sub.FillOpacityOverride = p; Save(sub); });
         appearance.Children.Add(fillOpacityRow);
@@ -1277,7 +1800,7 @@ public partial class PropertyPanel : UserControl
         // 液态玻璃 — 与主分区同款:开关 + 右侧"…"按钮打开玻璃设置二级对话框。
         // ponytail 2026-08-26: 开启"填充跟随主分区"后本行与图片行一起禁用
         // (跟随 = 玻璃/图片完全取自主分区)。
-        var glassRow = MakeCheckRowWithSideBtn("液态玻璃", sub.EnableLiquidGlass,
+        var glassRow = MakeCheckRowWithSideBtn(_loc["SubfolderProp.LiquidGlass"], sub.EnableLiquidGlass,
             v => { sub.EnableLiquidGlass = v; Save(sub); },
             _loc["ZoneProp.LiquidGlassSettingsEllipsis"], _ => OpenSubfolderGlassDialog(sub));
         appearance.Children.Add(glassRow);
@@ -1510,22 +2033,26 @@ public partial class PropertyPanel : UserControl
     // 开关区 / 基本 / 标题栏 / 边框与填充 / 液态玻璃 / 背景图片.
     void BuildClockFields(DesktopClock c)
     {
+        _tileGated.Clear();
         var root = new StackPanel { Margin = new Thickness(16, 12, 16, 12) };
 
         // 开关区
         var switches = MakeSection(_loc["ZoneProp.Section.Switches"]);
         switches.Children.Add(MakeCheckRow(_loc["ZoneProp.TileMode"], c.TileMode,
-            v => { c.TileMode = v; Save(c); }));
+            v =>
+            {
+                c.TileMode = v;
+                Save(c);
+                ApplyTileGating(v);
+            }));
         switches.Children.Add(MakeCheckRowWithSideBtn(_loc["ZoneProp.RestoreButton"], c.EnableRestoreButton,
             v => { c.EnableRestoreButton = v; Save(c); },
             _loc["Motion.SettingsEllipsis"], _ => OpenMotionDialog(c, () => BuildClockFields(c))));
         switches.Children.Add(MakeCheckRow(_loc["Motion.HoverAutoExpand"], c.HoverAutoExpand,
             v => { c.HoverAutoExpand = v; Save(c); }));
-        switches.Children.Add(MakeCheckRow(_loc["ZoneProp.BodyTextAdaptive"], c.TextColorAdaptive,
-            v => { c.TextColorAdaptive = v; Save(c); }));
-        switches.Children.Add(MakeCheckRow("24 小时制", c.Use24Hour,
+        switches.Children.Add(MakeCheckRow(_loc["ClockProp.Use24Hour"], c.Use24Hour,
             v => { c.Use24Hour = v; Save(c); }));
-        switches.Children.Add(MakeCheckRow("显示秒", c.ShowSeconds,
+        switches.Children.Add(MakeCheckRow(_loc["ClockProp.ShowSeconds"], c.ShowSeconds,
             v => { c.ShowSeconds = v; Save(c); }));
         switches.Children.Add(MakeCornerStyleRow(c.CornerRadius > 0, rounded =>
         {
@@ -1543,10 +2070,13 @@ public partial class PropertyPanel : UserControl
 
         // 标题栏
         var tb = MakeSection(_loc["ZoneProp.Section.TitleBar"]);
+        tb.Children.Add(MakeColorRow(_loc["ZoneProp.ButtonColor"], c.ButtonColor,
+            v => { c.ButtonColor = v; Save(c); }));
         tb.Children.Add(MakeSliderRow(_loc["ZoneProp.ButtonOpacity"], 5, 100, 5,
             c.ControlOpacity,
             v => { c.ControlOpacity = v; Save(c); }));
         root.Children.Add(tb);
+        _tileGated.Add(tb); // 磁贴模式 = 无标题栏 → 整组禁用
 
         // 边框与填充
         var bf = MakeSection(_loc["ZoneProp.Section.BorderFill"]);
@@ -1557,14 +2087,14 @@ public partial class PropertyPanel : UserControl
         bf.Children.Add(MakeSliderRow(_loc["ZoneProp.BorderOpacity"], 0, 100, 5,
             ParsePercent(c.BorderColor, 25),
             p => { c.BorderColor = SetPercent(c.BorderColor, p, "FFFFFF"); Save(c); }));
-        bf.Children.Add(MakeColorRow("数字模式填充", c.DigitalFillColor,
+        bf.Children.Add(MakeColorRow(_loc["ClockProp.DigitalFill"], c.DigitalFillColor,
             v => { c.DigitalFillColor = v; Save(c); }));
-        bf.Children.Add(MakeSliderRow("数字模式填充透明度", 0, 100, 5,
+        bf.Children.Add(MakeSliderRow(_loc["ClockProp.DigitalFillOpacity"], 0, 100, 5,
             ParsePercent(c.DigitalFillColor, 8),
             p => { c.DigitalFillColor = SetPercent(c.DigitalFillColor, p, "000000"); Save(c); }));
-        bf.Children.Add(MakeColorRow("钟表模式填充", c.AnalogFillColor,
+        bf.Children.Add(MakeColorRow(_loc["ClockProp.AnalogFill"], c.AnalogFillColor,
             v => { c.AnalogFillColor = v; Save(c); }));
-        bf.Children.Add(MakeSliderRow("钟表模式填充透明度", 0, 100, 5,
+        bf.Children.Add(MakeSliderRow(_loc["ClockProp.AnalogFillOpacity"], 0, 100, 5,
             ParsePercent(c.AnalogFillColor, 8),
             p => { c.AnalogFillColor = SetPercent(c.AnalogFillColor, p, "000000"); Save(c); }));
         root.Children.Add(bf);
@@ -1578,7 +2108,7 @@ public partial class PropertyPanel : UserControl
 
         // 背景图片 — 数字 / 钟表 two independent images
         var bg = MakeSection(_loc["ZoneProp.Section.BgImage"]);
-        bg.Children.Add(MakeBgImageRow("数字模式背景图片", new BgImageBinding
+        bg.Children.Add(MakeBgImageRow(_loc["ClockProp.DigitalBgImage"], new BgImageBinding
         {
             GetPath = () => c.DigitalBackgroundImagePath,
             SetPath = v => c.DigitalBackgroundImagePath = v ?? "",
@@ -1594,7 +2124,7 @@ public partial class PropertyPanel : UserControl
             CropShape = "Rectangle",
             OnSave = () => Save(c),
         }));
-        bg.Children.Add(MakeBgImageRow("钟表模式背景图片", new BgImageBinding
+        bg.Children.Add(MakeBgImageRow(_loc["ClockProp.AnalogBgImage"], new BgImageBinding
         {
             GetPath = () => c.BackgroundImagePath,
             SetPath = v => c.BackgroundImagePath = v ?? "",
@@ -1612,7 +2142,22 @@ public partial class PropertyPanel : UserControl
         }));
         root.Children.Add(bg);
 
+        // 主体内容 — 固定色 + 透明度；秒针单独设置（秒针不随主体内容颜色）。
+        var bodyContent = MakeSection(_loc["ZoneProp.Section.BodyContent"]);
+        bodyContent.Children.Add(MakeColorRow(_loc["ZoneProp.BodyContentColor"], c.TextColor,
+            v => { c.TextColor = v; Save(c); }));
+        bodyContent.Children.Add(MakeSliderRow(_loc["ZoneProp.BodyContentOpacity"], 0, 100, 5,
+            ParsePercent(c.TextColor, 100),
+            p => { c.TextColor = SetPercent(c.TextColor, p, "FFFFFF"); Save(c); }));
+        bodyContent.Children.Add(MakeColorRow(_loc["ZoneProp.SecondHandColor"], c.SecondHandColor,
+            v => { c.SecondHandColor = v; Save(c); }));
+        bodyContent.Children.Add(MakeSliderRow(_loc["ZoneProp.SecondHandOpacity"], 0, 100, 5,
+            ParsePercent(c.SecondHandColor, 100),
+            p => { c.SecondHandColor = SetPercent(c.SecondHandColor, p, "FF6666"); Save(c); }));
+        root.Children.Add(bodyContent);
+
         FieldScroller.Content = root;
+        ApplyTileGating(c.TileMode);
     }
 
     // ── Field tree for DesktopCalendar ──
@@ -1621,20 +2166,24 @@ public partial class PropertyPanel : UserControl
     // Same section structure as the Zone editor.
     void BuildCalendarFields(DesktopCalendar cal)
     {
+        _tileGated.Clear();
         var root = new StackPanel { Margin = new Thickness(16, 12, 16, 12) };
 
         // 开关区
         var switches = MakeSection(_loc["ZoneProp.Section.Switches"]);
         switches.Children.Add(MakeCheckRow(_loc["ZoneProp.TileMode"], cal.TileMode,
-            v => { cal.TileMode = v; Save(cal); }));
+            v =>
+            {
+                cal.TileMode = v;
+                Save(cal);
+                ApplyTileGating(v);
+            }));
         switches.Children.Add(MakeCheckRowWithSideBtn(_loc["ZoneProp.RestoreButton"], cal.EnableRestoreButton,
             v => { cal.EnableRestoreButton = v; Save(cal); },
             _loc["Motion.SettingsEllipsis"], _ => OpenMotionDialog(cal, () => BuildCalendarFields(cal))));
         switches.Children.Add(MakeCheckRow(_loc["Motion.HoverAutoExpand"], cal.HoverAutoExpand,
             v => { cal.HoverAutoExpand = v; Save(cal); }));
-        switches.Children.Add(MakeCheckRow(_loc["ZoneProp.BodyTextAdaptive"], cal.TextColorAdaptive,
-            v => { cal.TextColorAdaptive = v; Save(cal); }));
-        switches.Children.Add(MakeCheckRow("周一开头", cal.StartOnMonday,
+        switches.Children.Add(MakeCheckRow(_loc["CalendarProp.StartOnMonday"], cal.StartOnMonday,
             v => { cal.StartOnMonday = v; Save(cal); }));
         switches.Children.Add(MakeCornerStyleRow(cal.CornerRadius > 0, rounded =>
         {
@@ -1652,10 +2201,13 @@ public partial class PropertyPanel : UserControl
 
         // 标题栏
         var tb = MakeSection(_loc["ZoneProp.Section.TitleBar"]);
+        tb.Children.Add(MakeColorRow(_loc["ZoneProp.ButtonColor"], cal.ButtonColor,
+            v => { cal.ButtonColor = v; Save(cal); }));
         tb.Children.Add(MakeSliderRow(_loc["ZoneProp.ButtonOpacity"], 5, 100, 5,
             cal.ControlOpacity,
             v => { cal.ControlOpacity = v; Save(cal); }));
         root.Children.Add(tb);
+        _tileGated.Add(tb); // 磁贴模式 = 无标题栏 → 整组禁用
 
         // 边框与填充
         var bf = MakeSection(_loc["ZoneProp.Section.BorderFill"]);
@@ -1700,7 +2252,12 @@ public partial class PropertyPanel : UserControl
         }));
         root.Children.Add(bg);
 
+        // 主体内容 — 替代原「主体内容颜色自适应」的固定色 + 透明度。
+        root.Children.Add(BuildBodyContentSection(
+            () => cal.TextColor, v => cal.TextColor = v, () => Save(cal)));
+
         FieldScroller.Content = root;
+        ApplyTileGating(cal.TileMode);
     }
 
     // ── Field tree for StickyNote ──
@@ -1709,21 +2266,18 @@ public partial class PropertyPanel : UserControl
     // Same section structure as the Zone editor.
     void BuildNoteFields(StickyNote note)
     {
+        _tileGated.Clear(); // 便签无磁贴模式 — 清掉上一目标的标题栏引用
         var root = new StackPanel { Margin = new Thickness(16, 12, 16, 12) };
 
         // 开关区（行为）
         var switches = MakeSection(_loc["ZoneProp.Section.Switches"]);
-        switches.Children.Add(MakeCheckRow("置顶", note.PinnedTop,
+        switches.Children.Add(MakeCheckRow(_loc["NoteProp.Pinned"], note.PinnedTop,
             v => { note.PinnedTop = v; Save(note); }));
         switches.Children.Add(MakeCheckRowWithSideBtn(_loc["ZoneProp.RestoreButton"], note.EnableRestoreButton,
             v => { note.EnableRestoreButton = v; Save(note); },
             _loc["Motion.SettingsEllipsis"], _ => OpenMotionDialog(note, () => BuildNoteFields(note))));
         switches.Children.Add(MakeCheckRow(_loc["Motion.HoverAutoExpand"], note.HoverAutoExpand,
             v => { note.HoverAutoExpand = v; Save(note); }));
-        switches.Children.Add(MakeCheckRow(_loc["ZoneProp.TitleBarTextAdaptive"], note.TitleBarTextColorAdaptive,
-            v => { note.TitleBarTextColorAdaptive = v; Save(note); }));
-        switches.Children.Add(MakeCheckRow(_loc["ZoneProp.BodyTextAdaptive"], note.TextColorAdaptive,
-            v => { note.TextColorAdaptive = v; Save(note); }));
         switches.Children.Add(MakeCornerStyleRow(note.CornerRadius > 0, rounded =>
         {
             note.CornerRadius = rounded ? (note.CornerRadius > 0 ? note.CornerRadius : 10) : 0;
@@ -1733,9 +2287,9 @@ public partial class PropertyPanel : UserControl
 
         // 基本
         var basic = MakeSection(_loc["ZoneProp.Section.Basic"]);
-        basic.Children.Add(MakeTextRow("便签名称", note.Title,
+        basic.Children.Add(MakeTextRow(_loc["NoteProp.Name"], note.Title,
             v => { note.Title = v ?? ""; Save(note); }));
-        basic.Children.Add(MakeColorRow("便签名称颜色", note.TitleTextColor,
+        basic.Children.Add(MakeColorRow(_loc["NoteProp.NameColor"], note.TitleTextColor,
             v => { note.TitleTextColor = v; Save(note); }));
         basic.Children.Add(MakeSizeGrid(
             note.Width, v => { note.Width = v; Save(note); },
@@ -1751,6 +2305,8 @@ public partial class PropertyPanel : UserControl
         tb.Children.Add(MakeSliderRow(_loc["ZoneProp.TitleBarOpacity"], 0, 100, 5,
             ParsePercent(note.TitleBarFillColor, 6),
             p => { note.TitleBarFillColor = SetPercent(note.TitleBarFillColor, p, "FFFFFF"); Save(note); }));
+        tb.Children.Add(MakeColorRow(_loc["ZoneProp.ButtonColor"], note.ButtonColor,
+            v => { note.ButtonColor = v; Save(note); }));
         tb.Children.Add(MakeSliderRow(_loc["ZoneProp.ButtonOpacity"], 5, 100, 5,
             note.ControlOpacity,
             v => { note.ControlOpacity = v; Save(note); }));
@@ -1795,7 +2351,9 @@ public partial class PropertyPanel : UserControl
             SetOffsetY = v => note.BgImageOffsetY = v,
             Width = note.Width, Height = note.Height,
             CropShape = "Rectangle",
-            TitleBarHeight = 28,
+            // 便签两行标题栏(28 标题行 + 28 字体工具栏)：内部 28px 分界，共 56px。
+            TitleBarHeight = 56,
+            TitleBarInnerDividerHeights = new[] { 28.0 },
             OnSave = () => Save(note),
         }));
         root.Children.Add(bg);
@@ -1809,14 +2367,11 @@ public partial class PropertyPanel : UserControl
     // Same section structure as the Zone editor.
     void BuildPanelFields(PanelConfig p)
     {
+        _tileGated.Clear(); // 面板无磁贴模式 — 清掉上一目标的标题栏引用
         var root = new StackPanel { Margin = new Thickness(16, 12, 16, 12) };
 
         // 开关区
         var switches = MakeSection(_loc["ZoneProp.Section.Switches"]);
-        switches.Children.Add(MakeCheckRow(_loc["ZoneProp.TitleBarTextAdaptive"], p.PanelTitleBarTextColorAdaptive,
-            v => { p.PanelTitleBarTextColorAdaptive = v; Save(p); }));
-        switches.Children.Add(MakeCheckRow(_loc["ZoneProp.BodyTextAdaptive"], p.PanelTextColorAdaptive,
-            v => { p.PanelTextColorAdaptive = v; Save(p); }));
         switches.Children.Add(MakeCornerStyleRow(p.PanelCornerRadius > 0, rounded =>
         {
             p.PanelCornerRadius = rounded ? (p.PanelCornerRadius > 0 ? p.PanelCornerRadius : 10) : 0;
@@ -1840,6 +2395,8 @@ public partial class PropertyPanel : UserControl
         tb.Children.Add(MakeSliderRow(_loc["ZoneProp.TitleBarOpacity"], 0, 100, 5,
             ParsePercent(p.PanelTitleBarFillColor, 6),
             pct => { p.PanelTitleBarFillColor = SetPercent(p.PanelTitleBarFillColor, pct, "FFFFFF"); Save(p); }));
+        tb.Children.Add(MakeColorRow(_loc["ZoneProp.ButtonColor"], p.PanelButtonColor,
+            v => { p.PanelButtonColor = v; Save(p); }));
         tb.Children.Add(MakeSliderRow(_loc["ZoneProp.ButtonOpacity"], 5, 100, 5,
             p.PanelControlOpacity,
             v => { p.PanelControlOpacity = v; Save(p); }));
@@ -1888,6 +2445,10 @@ public partial class PropertyPanel : UserControl
             OnSave = () => Save(p),
         }));
         root.Children.Add(bg);
+
+        // 主体内容 — 替代原「主体内容颜色自适应」的固定色 + 透明度。
+        root.Children.Add(BuildBodyContentSection(
+            () => p.PanelTextColor, v => p.PanelTextColor = v, () => Save(p)));
 
         FieldScroller.Content = root;
     }
@@ -2104,6 +2665,24 @@ public partial class PropertyPanel : UserControl
         return grid;
     }
 
+    /// <summary>主体内容板块：主体内容颜色（色板）+ 主体内容透明度（滑块）。透明度参考现有
+    /// 透明度行（ParsePercent/SetPercent），直接操作颜色 alpha 通道。gated 非空时把两行加进去，
+    /// 供组合分区「保留原有填充」灰显禁用。</summary>
+    StackPanel BuildBodyContentSection(Func<string> getColor, Action<string> setColor, Action save,
+        List<FrameworkElement>? gated = null)
+    {
+        var sec = MakeSection(_loc["ZoneProp.Section.BodyContent"]);
+        var colorRow = MakeColorRow(_loc["ZoneProp.BodyContentColor"], getColor(),
+            v => { setColor(v); save(); });
+        sec.Children.Add(colorRow);
+        var opacityRow = MakeSliderRow(_loc["ZoneProp.BodyContentOpacity"], 0, 100, 5,
+            ParsePercent(getColor(), 100),
+            p => { setColor(SetPercent(getColor(), p, "FFFFFF")); save(); });
+        sec.Children.Add(opacityRow);
+        if (gated != null) { gated.Add(colorRow); gated.Add(opacityRow); }
+        return sec;
+    }
+
     /// <summary>
     /// Model-agnostic background-image field binding. Get/set delegates let one
     /// row builder serve Zone / Clock (digital + analog) / Calendar / Note /
@@ -2184,7 +2763,7 @@ public partial class PropertyPanel : UserControl
             Background = Brushes.Transparent,
             BorderThickness = new Thickness(0),
             Cursor = System.Windows.Input.Cursors.Hand,
-            ToolTip = "裁剪",
+            ToolTip = _loc["BgImage.Crop"],
         };
         var cropIcon = new System.Windows.Shapes.Path
         {
@@ -2211,7 +2790,7 @@ public partial class PropertyPanel : UserControl
         grid.Children.Add(crop);
         var browse = new Button
         {
-            Content = "选图",
+            Content = _loc["BgImage.Browse"],
             Margin = new Thickness(6, 0, 0, 0),
             Padding = new Thickness(10, 4, 10, 4),
             Background = (Brush)FindResource("Brush.Bg.Input"),
@@ -2230,7 +2809,7 @@ public partial class PropertyPanel : UserControl
         grid.Children.Add(browse);
         var clear = new Button
         {
-            Content = "清除",
+            Content = _loc["BgImage.Clear"],
             Margin = new Thickness(6, 0, 0, 0),
             Padding = new Thickness(10, 4, 10, 4),
             Background = Brushes.Transparent,
@@ -2266,14 +2845,14 @@ public partial class PropertyPanel : UserControl
         dst.CustomIcon = src.CustomIcon;
         dst.HoverAutoExpand = src.HoverAutoExpand;
         dst.EnableRestoreButton = src.EnableRestoreButton;
-        dst.TitleBarTextColorAdaptive = src.TitleBarTextColorAdaptive;
+        dst.ButtonColor = src.ButtonColor;
+        dst.TextColor = src.TextColor;
         dst.TitleBarFillIndependent = src.TitleBarFillIndependent;
         dst.MergedGroupStyle.TitleBarFillIndependent = src.MergedGroupStyle.TitleBarFillIndependent;
         dst.FolderMappingEnabled = src.FolderMappingEnabled;
         dst.FolderMappingPath = src.FolderMappingPath;
         dst.MergedGroupStyle.FolderMappingEnabled = src.MergedGroupStyle.FolderMappingEnabled;
         dst.MergedGroupStyle.FolderMappingPath = src.MergedGroupStyle.FolderMappingPath;
-        dst.TextColorAdaptive = src.TextColorAdaptive;
     }
 
     // ponytail 2026-08-26: SubFolder 取消还原 — 镜像 spec §4.5 SubFolder 专属 14 字段 + Name。
@@ -2310,7 +2889,8 @@ public partial class PropertyPanel : UserControl
     {
         CloneHelper.CopyBaseProperties<AppearanceModel>(src, dst);
         dst.TileMode = src.TileMode;
-        dst.TitleBarTextColorAdaptive = src.TitleBarTextColorAdaptive;
+        dst.ButtonColor = src.ButtonColor;
+        dst.TextColor = src.TextColor;
         dst.TitleBarFillIndependent = src.TitleBarFillIndependent;
         dst.TitleBarFillColor = src.TitleBarFillColor;
         dst.TitleTextColor = src.TitleTextColor;
@@ -2331,8 +2911,8 @@ public partial class PropertyPanel : UserControl
     void CopyClockFields(DesktopClock src, DesktopClock dst)
     {
         // Pure styling — never copy user-state (Id/X/Y/Width/Height/IsVisible/
-        // Mode/ShowSeconds/ShowDate/Use24Hour/TextColor/FontSize/FontFamily/
-        // Opacity/AccentColor).
+        // Mode/ShowSeconds/ShowDate/Use24Hour/FontSize/FontFamily/Opacity/AccentColor).
+        // TextColor is now a style field (主体内容颜色), so it IS copied.
         dst.BorderColor = src.BorderColor;
         dst.FillColor = src.FillColor;
         dst.BorderThickness = src.BorderThickness;
@@ -2358,9 +2938,9 @@ public partial class PropertyPanel : UserControl
         dst.DigitalBgImageOffsetX = src.DigitalBgImageOffsetX;
         dst.DigitalBgImageOffsetY = src.DigitalBgImageOffsetY;
         dst.DigitalBackgroundImageOpacity = src.DigitalBackgroundImageOpacity;
-        dst.TextColorAdaptive = src.TextColorAdaptive;
-        // ponytail: DesktopClock has no TitleBarTextColorAdaptive field — only
-        // Zone and StickyNote do. Body TextColorAdaptive (AppearanceModel) is enough.
+        dst.TextColor = src.TextColor;
+        dst.ButtonColor = src.ButtonColor;
+        dst.SecondHandColor = src.SecondHandColor;
     }
 
     void CopyCalendarFields(DesktopCalendar src, DesktopCalendar dst)
@@ -2385,9 +2965,9 @@ public partial class PropertyPanel : UserControl
         dst.BackgroundImageOpacity = src.BackgroundImageOpacity;
         dst.EnableRestoreButton = src.EnableRestoreButton;
         dst.TextColor = src.TextColor;
+        dst.ButtonColor = src.ButtonColor;
         dst.TodayColor = src.TodayColor;
         dst.FontSize = src.FontSize;
-        dst.TextColorAdaptive = src.TextColorAdaptive;
     }
 
     // ponytail: StickyNote has too many fields for an explicit whitelist.
@@ -2520,7 +3100,7 @@ public partial class PropertyPanel : UserControl
     void OpenMotionDialog(AppearanceModel m, Action rebuildFields)
     {
         var owner = CachedOwner ?? Window.GetWindow(this);
-        if (owner == null) { MessageBox.Show("未找到宿主窗口"); return; }
+        if (owner == null) { MessageBox.Show(_loc["Dialog.NoOwnerWindow"]); return; }
         var dlg = new MotionSettingsDialog(m.HoverExpandAnimation, m.HoverExpandOrigin, m.HoverExpandSpeed)
         {
             Owner = owner
@@ -2621,11 +3201,11 @@ public partial class PropertyPanel : UserControl
     void OpenImagePicker(BgImageBinding b, TextBox pathBox)
     {
         var owner = CachedOwner ?? Window.GetWindow(this);
-        if (owner == null) { MessageBox.Show("未找到宿主窗口"); return; }
+        if (owner == null) { MessageBox.Show(_loc["Dialog.NoOwnerWindow"]); return; }
         var dlg = new Microsoft.Win32.OpenFileDialog
         {
-            Title = "选择背景图片",
-            Filter = "图片|*.png;*.jpg;*.jpeg;*.bmp;*.gif|所有文件|*.*",
+            Title = _loc["BgImage.ChooseTitle"],
+            Filter = _loc["BgImage.Filter"],
             CheckFileExists = true,
         };
         if (dlg.ShowDialog(owner) != true) return;
@@ -2640,7 +3220,7 @@ public partial class PropertyPanel : UserControl
     void OpenCropDialog(BgImageBinding b)
     {
         var owner = CachedOwner ?? Window.GetWindow(this);
-        if (owner == null) { MessageBox.Show("未找到宿主窗口"); return; }
+        if (owner == null) { MessageBox.Show(_loc["Dialog.NoOwnerWindow"]); return; }
         var path = b.GetPath();
         if (string.IsNullOrEmpty(path) || !System.IO.File.Exists(path)) return;
 

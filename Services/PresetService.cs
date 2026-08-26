@@ -168,7 +168,6 @@ public class PresetService
         MoveDouble("MergedGroupTitleBarOpacity",            v => s.TitleBarOpacity = v);
         MoveBool  ("MergedGroupUseUnifiedFill",             v => s.UseUnifiedFill = v);
         MoveBool  ("MergedGroupQuickBarMode",               v => s.TileMode = v);
-        MoveBool  ("MergedGroupTitleBarTextColorAdaptive",  v => s.TitleBarTextColorAdaptive = v);
         MoveString("MergedGroupBackgroundImagePath",        v => s.BackgroundImagePath = v);
         MoveString("MergedGroupBgImageStretch",             v => s.BgImageStretch = v);
         MoveDouble("MergedGroupBgImageOffsetX",             v => s.BgImageOffsetX = v);

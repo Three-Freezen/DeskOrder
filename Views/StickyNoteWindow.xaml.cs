@@ -34,10 +34,9 @@ public partial class StickyNoteWindow : Window
     private bool _pendingUnderline;
     private Point _restoreDown;
     public Action? OnStateChanged { get; set; }
-    // ponytail: cached adaptive brush for title bar buttons. Set by ApplyTitleBar when
-    // TitleBarTextColorAdaptive=true; null in non-adaptive mode. Hover/click handlers read
-    // this instead of hardcoded #80FFFFFF so they don't clobber the adaptive color.
-    private SolidColorBrush? _titleBarAdaptiveBrush;
+    // ponytail: cached button-color brush for title bar buttons. Set by ApplyTitleBar from
+    // _note.ButtonColor; hover/click handlers read it so the hover→leave cycle doesn't clobber it.
+    private SolidColorBrush? _buttonBrush;
     private HoverExpandBehavior? _hover;
     private SnapDrag? _snapDrag;
     private SnapResize? _snapResize;
@@ -182,14 +181,14 @@ public partial class StickyNoteWindow : Window
     void SaveBtn_Click(object s, RoutedEventArgs e)
     {
         var menu = new ContextMenu();
-        var saveItem = new MenuItem { Header = "保存" };
+        var saveItem = new MenuItem { Header = _loc["Note.Save"] };
         saveItem.Click += (_, _) => SaveToFile();
-        var saveAsItem = new MenuItem { Header = "另存为" };
+        var saveAsItem = new MenuItem { Header = _loc["Note.SaveAs"] };
         saveAsItem.Click += (_, _) => SaveAsToFile();
         menu.Items.Add(saveItem);
         menu.Items.Add(saveAsItem);
         menu.Items.Add(new Separator());
-        var openItem = new MenuItem { Header = "打开文件" };
+        var openItem = new MenuItem { Header = _loc["Note.OpenFile"] };
         openItem.Click += (_, _) => OpenFile();
         menu.Items.Add(openItem);
         SaveBtn.ContextMenu = menu;
@@ -222,8 +221,8 @@ public partial class StickyNoteWindow : Window
     {
         var dlg = new Microsoft.Win32.SaveFileDialog
         {
-            Title = "保存便签",
-            Filter = "Text Files|*.txt|All Files|*.*",
+            Title = _loc["Note.SaveNote"],
+            Filter = $"{_loc["Filter.Txt"]}|*.txt|{_loc["Filter.All"]}|*.*",
             DefaultExt = ".txt",
             FileName = string.IsNullOrEmpty(_note.LastSavePath)
                 ? (_note.Title ?? "Note") + ".txt"
@@ -253,8 +252,8 @@ public partial class StickyNoteWindow : Window
     {
         var dlg = new Microsoft.Win32.OpenFileDialog
         {
-            Title = "打开便签文件",
-            Filter = "Text Files|*.txt|All Files|*.*",
+            Title = _loc["Note.OpenNote"],
+            Filter = $"{_loc["Filter.Txt"]}|*.txt|{_loc["Filter.All"]}|*.*",
             DefaultExt = ".txt",
             InitialDirectory = string.IsNullOrEmpty(_note.LastSavePath)
                 ? Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)
@@ -696,8 +695,9 @@ public partial class StickyNoteWindow : Window
         if (BodyFillRect == null) return;
         if (_note.TitleBarFillIndependent)
         {
-            Grid.SetRow(BodyFillRect, 1);
-            Grid.SetRowSpan(BodyFillRect, 2);
+            // Two-row title bar (title + formatting toolbar) — body fill starts below both.
+            Grid.SetRow(BodyFillRect, 2);
+            Grid.SetRowSpan(BodyFillRect, 1);
         }
         else
         {
@@ -705,6 +705,9 @@ public partial class StickyNoteWindow : Window
             Grid.SetRowSpan(BodyFillRect, 3);
         }
     }
+
+    /// <summary>Two-row title bar height: 28px title row + the formatting toolbar row.</summary>
+    double TitleBarLayerHeight() => 28 + (ToolbarBorder?.ActualHeight > 0 ? ToolbarBorder.ActualHeight : 28);
 
     void ApplyStyle()
     {
@@ -731,12 +734,14 @@ public partial class StickyNoteWindow : Window
     {
         try
         {
-            // Apply title bar fill with ARGB alpha controlling background transparency
+            // Two-row title bar: title row keeps the fill, the formatting toolbar row is a
+            // built-in 50%-alpha variant (the original #20/#10 XAML distinction, restored).
             var tbColor = (Color)ColorConverter.ConvertFromString(_note.TitleBarFillColor);
             TitleBarBorder.Background = new SolidColorBrush(tbColor);
-            // ponytail: TitleBox 始终用用户设置的 TitleTextColor,不受 TitleBarTextColorAdaptive 开关影响。
-            // 自适应只控制标题栏按钮(SaveBtn/PinBtn/HideBtn/LockBtn)——它们没有"用户设置的颜色"概念,
-            // 必须根据背景自动算对比色。标题文字本身是用户主动选的颜色,直接生效即可。
+            if (ToolbarBorder != null)
+                ToolbarBorder.Background = new SolidColorBrush(Color.FromArgb((byte)(tbColor.A / 2), tbColor.R, tbColor.G, tbColor.B));
+
+            // TitleBox 始终用用户设置的 TitleTextColor。
             if (!string.IsNullOrEmpty(_note.TitleTextColor))
             {
                 var tc = (Color)ColorConverter.ConvertFromString(_note.TitleTextColor);
@@ -744,89 +749,45 @@ public partial class StickyNoteWindow : Window
                 TitleBox.Foreground = titleBrush;
                 TitleBox.CaretBrush = titleBrush;
             }
-            // Adaptive mode only drives button colors
-            if (_note.TitleBarTextColorAdaptive)
-            {
-                // ponytail: TitleBarFillColor is a translucent layer over the body fill, so
-                // pick the bottom layer (FillColor) and composite before running the adaptive
-                // HSL flip — otherwise the algorithm sees a near-transparent color and
-                // produces a contrasting brush against the wrong background.
-                string bottom = _note.FillColor;
-                var brush = AdaptiveTextColor.ResolveBrushOver(_note.TitleBarFillColor, bottom);
-                _titleBarAdaptiveBrush = brush; // cache for Leave/Click handlers
-                // Title bar buttons (SaveBtn/PinBtn/HideBtn live inside TitleBarBorder)
-                if (SaveBtn != null) SaveBtn.Foreground = brush;
-                if (HideBtn != null) HideBtn.Foreground = brush;
-                // PinBtn: pinned color wins when pinned, otherwise adaptive
-                if (PinBtn != null) PinBtn.Foreground = _vm.PinnedTop
-                    ? new SolidColorBrush(Color.FromRgb(0x7C, 0x3A, 0xED))
-                    : brush;
-                // ponytail: LockBtn rides the adaptive brush (same path as SaveBtn/HideBtn).
-                // Leave handler reads _titleBarAdaptiveBrush so hover→leave cycle doesn't clobber it.
-                if (LockBtn != null) LockBtn.Foreground = brush;
-            }
-            else
-            {
-                _titleBarAdaptiveBrush = null;
-                // ponytail: when adaptive is off, reset LockBtn to its XAML default
-                // (#80FFFFFF) — Leave handler will pick this up via the cache=null fallback.
-                if (LockBtn != null)
-                    LockBtn.Foreground = new SolidColorBrush(Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF));
-            }
-            // ponytail 2026-08-25: 按钮透明度 (便签设置 spec) — title-bar buttons
-            // ride ControlOpacity, Zone-style.
+
+            // Buttons — 按钮颜色 (title bar + formatting toolbar + restore).
+            // FontColorBtn keeps its own selection-color logic and is NOT touched here.
+            SolidColorBrush buttonBrush;
+            try { buttonBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(_note.ButtonColor)!); }
+            catch { buttonBrush = new SolidColorBrush(Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF)); }
+            _buttonBrush = buttonBrush; // cache for Leave/Click handlers
+            if (SaveBtn != null) SaveBtn.Foreground = buttonBrush;
+            if (HideBtn != null) HideBtn.Foreground = buttonBrush;
+            // PinBtn: pinned color wins when pinned, otherwise button color
+            if (PinBtn != null) PinBtn.Foreground = _vm.PinnedTop
+                ? new SolidColorBrush(Color.FromRgb(0x7C, 0x3A, 0xED))
+                : buttonBrush;
+            if (LockBtn != null) LockBtn.Foreground = buttonBrush;
+            if (BoldBtn != null) BoldBtn.Foreground = buttonBrush;
+            if (ItalicBtn != null) ItalicBtn.Foreground = buttonBrush;
+            if (UnderlineBtn != null) UnderlineBtn.Foreground = buttonBrush;
+            if (RestoreIconChar != null) RestoreIconChar.Foreground = buttonBrush;
+            // 字号数字锁定白色。
+            if (FontSizeCombo != null)
+                FontSizeCombo.Foreground = new SolidColorBrush(Color.FromRgb(0xFF, 0xFF, 0xFF));
+
+            // 按钮透明度 — 所有按钮 chrome 统一走 ControlOpacity。
             var ctl = Math.Max(0.05, _note.ControlOpacity / 100.0);
             if (SaveBtn != null) SaveBtn.Opacity = ctl;
             if (PinBtn != null) PinBtn.Opacity = ctl;
             if (HideBtn != null) HideBtn.Opacity = ctl;
             if (LockBtn != null) LockBtn.Opacity = ctl;
+            if (BoldBtn != null) BoldBtn.Opacity = ctl;
+            if (ItalicBtn != null) ItalicBtn.Opacity = ctl;
+            if (UnderlineBtn != null) UnderlineBtn.Opacity = ctl;
+            if (RestoreIconChar != null) RestoreIconChar.Opacity = ctl;
         }
         catch { }
     }
 
-    /// <summary>Refresh adaptive text colors (called when toggles change).</summary>
+    /// <summary>Re-apply the fixed title-bar (2-row) + button colors.</summary>
     public void RefreshTextColorAdaptive()
     {
-#if DEBUG
-        System.Diagnostics.Debug.WriteLine(
-            $"[adaptive] StickyNote: bg={_note.FillColor} bodyAdaptive={_note.TextColorAdaptive} titleAdaptive={_note.TitleBarTextColorAdaptive}");
-#endif
-        // Body adaptive (toolbar buttons, formatting toolbar). Sample bg image when set.
-        SolidColorBrush bg;
-        if (NoteBgImage?.Source is BitmapSource bmp && !string.IsNullOrEmpty(_note.BackgroundImagePath))
-        {
-            bg = AdaptiveTextColor.ResolveBrush(AdaptiveTextColor.ResolveTextColorForImage(bmp));
-        }
-        else
-        {
-            bg = AdaptiveTextColor.ResolveBrush(_note.FillColor);
-        }
-        if (_note.TextColorAdaptive)
-        {
-            if (BoldBtn != null) BoldBtn.Foreground = bg;
-            if (ItalicBtn != null) ItalicBtn.Foreground = bg;
-            if (UnderlineBtn != null) UnderlineBtn.Foreground = bg;
-            if (FontColorBtn != null) FontColorBtn.Foreground = bg;
-            // ponytail: FontSizeCombo 显示的是当前字号数字（如 "14"），用户明确要求锁定白色，
-            // 不参与自适应——自适应可能把数字推到接近背景色导致看不清。
-            // if (FontSizeCombo != null) FontSizeCombo.Foreground = bg;
-            if (RestoreIconChar != null) RestoreIconChar.Foreground = bg;
-        }
-        else
-        {
-            var def = new SolidColorBrush(Color.FromRgb(0xE0, 0xE0, 0xE0));
-            if (BoldBtn != null) BoldBtn.Foreground = def;
-            if (ItalicBtn != null) ItalicBtn.Foreground = def;
-            if (UnderlineBtn != null) UnderlineBtn.Foreground = def;
-            if (FontColorBtn != null) FontColorBtn.Foreground = def;
-            // ponytail: 同上——字号数字锁定白色，与自适应开关无关。
-            // if (FontSizeCombo != null) FontSizeCombo.Foreground = def;
-            if (RestoreIconChar != null) RestoreIconChar.Foreground = new SolidColorBrush(Color.FromArgb(0xC0, 0xFF, 0xFF, 0xFF));
-        }
-        // 锁定字号数字为纯白，不随 bg/adaptive 变化
-        if (FontSizeCombo != null)
-            FontSizeCombo.Foreground = new SolidColorBrush(Color.FromRgb(0xFF, 0xFF, 0xFF));
-        // Title bar adaptive (its own toggle)
         ApplyTitleBar();
     }
 
@@ -834,13 +795,13 @@ public partial class StickyNoteWindow : Window
 
     void ApplyBackgroundImage()
     {
-        // 标题栏独立填充：背景图与 BodyFillRect 一样不铺到标题栏行（顶部裁剪）。
+        // 标题栏独立填充：背景图与 BodyFillRect 一样不铺到两行标题栏下方（顶部裁剪）。
         if (NoteBgBorder != null)
         {
             if (_note.TitleBarFillIndependent)
             {
-                Grid.SetRow(NoteBgBorder, 1);
-                Grid.SetRowSpan(NoteBgBorder, 2);
+                Grid.SetRow(NoteBgBorder, 2);
+                Grid.SetRowSpan(NoteBgBorder, 1);
             }
             else
             {
@@ -848,7 +809,7 @@ public partial class StickyNoteWindow : Window
                 Grid.SetRowSpan(NoteBgBorder, 3);
             }
         }
-        double clipTop = _note.TitleBarFillIndependent ? 28 : 0;
+        double clipTop = _note.TitleBarFillIndependent ? TitleBarLayerHeight() : 0;
         try
         {
             if (!string.IsNullOrEmpty(_note.BackgroundImagePath) && System.IO.File.Exists(_note.BackgroundImagePath))
@@ -909,7 +870,7 @@ public partial class StickyNoteWindow : Window
         ApplyBackgroundImage();
         ApplyStyle();
         ApplyTitleBar();
-        // ponytail: BP-A fix — RefreshAppearance was missing the body adaptive text refresh.
+        // ponytail: BP-A fix — RefreshAppearance was missing the body content color refresh.
         // Without this, FillColor changes update the background but the toolbar buttons (Bold,
         // Italic, Underline, FontColor, FontSizeCombo, RestoreIconChar) keep their old colors.
         RefreshTextColorAdaptive();
@@ -950,7 +911,16 @@ public partial class StickyNoteWindow : Window
                 || (src is FrameworkElement fe && fe.Tag is string tag
                     && (tag == "TL" || tag == "TR" || tag == "BL" || tag == "BR")))
                 return;
-            src = System.Windows.Media.VisualTreeHelper.GetParent(src);
+            // 正文是 RichTextBox:点击内容时 OriginalSource 可能是 Paragraph/Run
+            // (FrameworkContentElement,不是 Visual),VisualTreeHelper.GetParent
+            // 会抛 InvalidOperationException —— 内容元素改走逻辑树,一样能爬到
+            // TextBoxBase(TextBoxBase 检查在循环顶部,先命中再向上)。
+            if (src is System.Windows.FrameworkContentElement fce)
+                src = LogicalTreeHelper.GetParent(fce);
+            else if (src is System.Windows.Media.Visual)
+                src = System.Windows.Media.VisualTreeHelper.GetParent(src);
+            else
+                break;
         }
         _snapDrag?.Start(e, () =>
         {
@@ -980,11 +950,11 @@ public partial class StickyNoteWindow : Window
     void PinBtn_Leave(object s, MouseEventArgs e)
     {
         PinBtn.Background = Brushes.Transparent;
-        // ponytail: prefer cached adaptive brush; pinned color wins when pinned
+        // ponytail: prefer cached button-color brush; pinned color wins when pinned
         if (_vm.PinnedTop)
             PinBtn.Foreground = new SolidColorBrush(Color.FromRgb(0x7C, 0x3A, 0xED));
         else
-            PinBtn.Foreground = _titleBarAdaptiveBrush
+            PinBtn.Foreground = _buttonBrush
                 ?? new SolidColorBrush(Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF));
     }
 
@@ -997,8 +967,8 @@ public partial class StickyNoteWindow : Window
     void SaveBtn_Leave(object s, MouseEventArgs e)
     {
         SaveBtn.Background = Brushes.Transparent;
-        // ponytail: prefer cached adaptive brush so hover→leave cycle doesn't clobber it
-        SaveBtn.Foreground = _titleBarAdaptiveBrush
+        // ponytail: prefer cached button-color brush so hover→leave cycle doesn't clobber it
+        SaveBtn.Foreground = _buttonBrush
             ?? new SolidColorBrush(Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF));
     }
 
@@ -1007,11 +977,11 @@ public partial class StickyNoteWindow : Window
         _vm.PinnedTop = !_vm.PinnedTop;
         Topmost = _vm.PinnedTop;
         if (!_vm.PinnedTop && _vm.IsLocked != true) NativeMethods.PinToDesktop(this);
-        // ponytail: same logic as PinBtn_Leave — pinned color wins when pinned, else adaptive/hardcoded
+        // ponytail: same logic as PinBtn_Leave — pinned color wins when pinned, else button color
         if (_vm.PinnedTop)
             PinBtn.Foreground = new SolidColorBrush(Color.FromRgb(0x7C, 0x3A, 0xED));
         else
-            PinBtn.Foreground = _titleBarAdaptiveBrush
+            PinBtn.Foreground = _buttonBrush
                 ?? new SolidColorBrush(Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF));
         Save();
     }
@@ -1048,11 +1018,11 @@ public partial class StickyNoteWindow : Window
         LockBtn.Foreground = Brushes.White;
     }
 
-    // ponytail: same adaptive-cache pattern as SaveBtn_Leave / PinBtn_Leave — don't clobber adaptive brush
+    // ponytail: same button-color-cache pattern as SaveBtn_Leave / PinBtn_Leave — don't clobber button color
     void LockBtn_Leave(object s, MouseEventArgs e)
     {
         LockBtn.Background = Brushes.Transparent;
-        LockBtn.Foreground = _titleBarAdaptiveBrush
+        LockBtn.Foreground = _buttonBrush
             ?? new SolidColorBrush(Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF));
     }
 
@@ -1076,11 +1046,10 @@ public partial class StickyNoteWindow : Window
     void ToggleRestore_Click(object s, RoutedEventArgs e)
     {
         _note.EnableRestoreButton = !_note.EnableRestoreButton;
-        var cn = _loc.CurrentLanguage == "zh";
         if (s is MenuItem mi)
             mi.Header = _note.EnableRestoreButton
-                ? (cn ? "关闭恢复按钮" : "Disable Restore")
-                : (cn ? "启用恢复按钮" : "Enable Restore");
+                ? _loc["Note.DisableRestore"]
+                : _loc["Note.EnableRestore"];
     }
 
     void Delete_Click(object s, RoutedEventArgs e)

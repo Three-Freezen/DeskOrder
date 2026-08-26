@@ -25,6 +25,7 @@ public partial class StickyNotePage : UserControl
 {
     readonly ManagementWindow _main;
     readonly NotesService? _notesService;
+    readonly LocalizationService _loc = LocalizationService.Instance;
     StickyNote? _selected;
     // ponytail: live row collection bound to ListHost — drag reorder moves rows
     // through this OC (mirroring PropertyTabStrip's Tabs OC) so the ItemsControl
@@ -59,7 +60,7 @@ public partial class StickyNotePage : UserControl
     {
         if (_notesService == null) return;
         var notes = _notesService.Notes;
-        CountLabel.Text = $"{notes.Count} 项";
+        CountLabel.Text = _loc.Get("StickyNotePage.ItemCount", notes.Count);
         // 拖动排序即列表顺序：不再重排，Rows 直接镜像 Notes 的持久化顺序。
         _rows.Clear();
         foreach (var n in notes) _rows.Add(BuildRow(n));
@@ -69,14 +70,15 @@ public partial class StickyNotePage : UserControl
 
     EditableListRow BuildRow(StickyNote note)
     {
-        var title = string.IsNullOrEmpty(note.Title) ? "便签" : note.Title;
+        var title = string.IsNullOrEmpty(note.Title) ? _loc["StickyNotePage.FallbackTitle"] : note.Title;
         var chars = string.IsNullOrEmpty(note.Content) ? 0 : note.Content.Length;
-        var updated = note.ModifiedAt.ToString("MM-dd 更新");
+        var updated = string.Format(_loc["StickyNotePage.Updated"],
+            note.ModifiedAt.ToString("MM-dd"));
         var row = new EditableListRow
         {
             Tag = note,
             Title = title,
-            Subtitle = $"{chars} 字 · {updated}",
+            Subtitle = string.Format(_loc["StickyNotePage.Subtitle"], chars, updated),
             IconKey = "Icon.Sticky",
             IsLocked = note.IsLocked,
             IsVisible = note.IsVisible,
@@ -126,11 +128,7 @@ public partial class StickyNotePage : UserControl
             // floating editor while the docked panel already showed this note.
             Select(note);
         };
-        row.PreviewMouseRightButtonUp += (_, e) =>
-        {
-            Select(note);
-            ShowNoteContextMenu(note, row);
-        };
+        // 右键菜单已取消：显示/隐藏、删除、快捷键设置全部移到属性面板顶部状态区。
         return row;
     }
 
@@ -146,17 +144,6 @@ public partial class StickyNotePage : UserControl
         }
     }
 
-    void ShowNoteContextMenu(StickyNote note, EditableListRow row)
-    {
-        var items = new List<RowContextMenu.Item>
-        {
-            new(note.IsVisible ? "隐藏便签" : "显示便签", () => _main.ToggleNoteWindow(note)),
-            new("设置快捷键", () => _main.ShowNoteHotkeyRecorderDialog(note)),
-        };
-        items.Add(new("删除便签", () => Delete(note), Danger: true));
-        RowContextMenu.Show(row, items);
-    }
-
     void NewNote_Click(object sender, RoutedEventArgs e)
     {
         _main.NewNote();
@@ -165,7 +152,7 @@ public partial class StickyNotePage : UserControl
 
     void Delete(StickyNote note)
     {
-        if (MessageBox.Show($"删除便签「{note.Title}」？", "删除便签",
+        if (MessageBox.Show(_loc.Get("StickyNotePage.DeleteConfirm", note.Title), _loc["StickyNotePage.DeleteTitle"],
             MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
         _main.DeleteNote(note);
         if (ReferenceEquals(_selected, note)) _selected = null;

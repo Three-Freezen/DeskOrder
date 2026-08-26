@@ -1,6 +1,7 @@
 <Window x:Class="DesktopZones.Views.ClockWidget"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:DesktopZones.Helpers"
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
@@ -17,12 +18,12 @@
                 <!-- Context menu on root Grid for full-area right-click -->
         <Grid.ContextMenu>
             <ContextMenu>
-                <MenuItem x:Name="CtxSwitchMode" Header="Analog Mode" Click="SwitchMode_Click"/>
-                <MenuItem x:Name="CtxToggleSeconds" Header="Hide Seconds" Click="ToggleSeconds_Click"/>
-                <MenuItem x:Name="CtxToggle24h" Header="12-Hour" Click="Toggle24h_Click"/>
+                <MenuItem x:Name="CtxSwitchMode" Header="{loc:Loc Key=Clock.AnalogMode}" Click="SwitchMode_Click"/>
+                <MenuItem x:Name="CtxToggleSeconds" Header="{loc:Loc Key=Clock.HideSeconds}" Click="ToggleSeconds_Click"/>
+                <MenuItem x:Name="CtxToggle24h" Header="{loc:Loc Key=Clock.Format12h}" Click="Toggle24h_Click"/>
                 <Separator/>
-                <MenuItem x:Name="CtxToggleRestore" Header="Disable Restore" Click="ToggleRestore_Click"/>
-                <MenuItem x:Name="CtxDelete" Header="Delete Clock" Click="Delete_Click" Foreground="#FF6666"/>
+                <MenuItem x:Name="CtxToggleRestore" Header="{loc:Loc Key=Clock.DisableRestore}" Click="ToggleRestore_Click"/>
+                <MenuItem x:Name="CtxDelete" Header="{loc:Loc Key=Clock.Delete}" Click="Delete_Click" Foreground="#FF6666"/>
             </ContextMenu>
         </Grid.ContextMenu>
 

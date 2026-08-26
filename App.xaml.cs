@@ -117,7 +117,7 @@ public partial class App : System.Windows.Application
             }
             sb.AppendLine("--- Stack ---");
             sb.AppendLine(args.Exception.StackTrace);
-            MessageBox.Show(sb.ToString(), "DeskOrder Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(sb.ToString(), LocalizationService.Instance["App.ErrorTitle"], MessageBoxButton.OK, MessageBoxImage.Error);
             args.Handled = true;
         };
 
@@ -127,6 +127,10 @@ public partial class App : System.Windows.Application
         _configService = new ConfigService();
         ThemeService.Apply(ParseThemeMode(_configService.Load().ThemeMode));
         ThemeService.StartListeningToSystem();
+        // 右键菜单调色板:跟随 Windows 系统主题(与应用主题无关,管理界面不受影响)。
+        MenuThemeService.Start();
+        // 全局菜单钩子:托盘菜单等代码创建的 ContextMenu 也套同一套 Win11 外观 + 毛玻璃。
+        AcrylicHelper.EnsureGlobalContextMenuHook();
         _zoneManager = new ZoneManager(_configService);
         _notesService = new NotesService(_configService);
         _widgetService = new WidgetService(_configService);
@@ -262,6 +266,13 @@ public partial class App : System.Windows.Application
                     "--test-dialogs", MessageBoxButton.OK, MessageBoxImage.Information);
             }), DispatcherPriority.Background);
             return;
+        }
+
+        // ── Debug: --diag-menu opens a synthetic ContextMenu offscreen and logs
+        //    style/template resolution for ContextMenu / MenuItem / Separator. ──
+        if (e.Args.Any(a => a == "--diag-menu"))
+        {
+            Dispatcher.BeginInvoke(new Action(RunContextMenuDiagnostic), DispatcherPriority.ApplicationIdle);
         }
 
         // ── Debug: --spawn-widget=KIND auto-creates one widget for reference screenshots ──
@@ -534,6 +545,62 @@ public partial class App : System.Windows.Application
         return null;
     }
 
+#if DEBUG
+    void RunContextMenuDiagnostic()
+    {
+        try
+        {
+            var cmStyle = TryFindResource(typeof(System.Windows.Controls.ContextMenu)) as System.Windows.Style;
+            var miStyle = TryFindResource(typeof(System.Windows.Controls.MenuItem)) as System.Windows.Style;
+            var sepStyle = TryFindResource(typeof(System.Windows.Controls.Separator)) as System.Windows.Style;
+            System.Diagnostics.Debug.WriteLine(
+                $"[MenuDiag] resources cm={(cmStyle != null)} mi={(miStyle != null)} sep={(sepStyle != null)}");
+
+            var w = new Window
+            {
+                Width = 120, Height = 60,
+                WindowStyle = WindowStyle.None,
+                AllowsTransparency = true,
+                Background = System.Windows.Media.Brushes.Transparent,
+                ShowInTaskbar = false,
+                Left = -32000, Top = -32000,
+                Topmost = true
+            };
+            var host = new System.Windows.Controls.Border { Width = 80, Height = 24 };
+            w.Content = host;
+            w.Show();
+
+            var cm = new System.Windows.Controls.ContextMenu();
+            var mi = new System.Windows.Controls.MenuItem { Header = "DiagItem" };
+            var sep = new System.Windows.Controls.Separator();
+            cm.Items.Add(mi);
+            cm.Items.Add(sep);
+            host.ContextMenu = cm;
+            cm.PlacementTarget = host;
+            cm.Opened += (_, _) =>
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"[MenuDiag] opened cmStyle={(cm.Style != null)} cmTemplate={(cm.Template != null)} " +
+                    $"miStyle={(mi.Style != null)} miTemplate={(mi.Template != null)} miH={(int)mi.ActualHeight} " +
+                    $"cmBg={((cm.Background as System.Windows.Media.SolidColorBrush)?.Color.ToString() ?? "null")} " +
+                    $"miBg={((mi.Background as System.Windows.Media.SolidColorBrush)?.Color.ToString() ?? "null")} " +
+                    $"sepStyle={(sep.Style != null)} sepTemplate={(sep.Template != null)}");
+            };
+            cm.IsOpen = true;
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                try { cm.IsOpen = false; } catch { }
+                try { w.Close(); } catch { }
+                System.Diagnostics.Debug.WriteLine("[MenuDiag] done");
+            }), DispatcherPriority.Background);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[MenuDiag] ERROR {ex}");
+        }
+    }
+#endif
+
     // ── Tray ──
 
     private void CreateTrayIcon()
@@ -642,7 +709,7 @@ public partial class App : System.Windows.Application
         }
         catch (Exception ex)
         {
-            System.Windows.MessageBox.Show($"Failed to create note:\n{ex.Message}", "DeskOrder");
+            System.Windows.MessageBox.Show(string.Format(LocalizationService.Instance["App.ErrorCreateNote"], ex.Message), "DeskOrder");
         }
     }
 
@@ -657,7 +724,7 @@ public partial class App : System.Windows.Application
         }
         catch (Exception ex)
         {
-            System.Windows.MessageBox.Show($"Failed to create clock:\n{ex.Message}", "DeskOrder");
+            System.Windows.MessageBox.Show(string.Format(LocalizationService.Instance["App.ErrorCreateClock"], ex.Message), "DeskOrder");
         }
     }
 
@@ -672,7 +739,7 @@ public partial class App : System.Windows.Application
         }
         catch (Exception ex)
         {
-            System.Windows.MessageBox.Show($"Failed to create calendar:\n{ex.Message}", "DeskOrder");
+            System.Windows.MessageBox.Show(string.Format(LocalizationService.Instance["App.ErrorCreateCalendar"], ex.Message), "DeskOrder");
         }
     }
 

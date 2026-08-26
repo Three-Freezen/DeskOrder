@@ -43,13 +43,8 @@ public partial class SettingsPage : UserControl
     void BuildHotkeys()
     {
         var loc = LocalizationService.Instance;
-        HotkeyStack.Children.Add(MakeHotkeyRow(loc["Settings.Hotkey.Panel"], () =>
-        {
-            var c = _configService.Load();
-            return c.PanelHotkey.PanelHotkeyEnabled
-                ? ManagementWindow.GetHotkeyLabel(c.PanelHotkey.PanelHotkeyModifiers, c.PanelHotkey.PanelHotkeyKey)
-                : loc["Settings.Hotkey.NotSet"];
-        }));
+        // 面板快捷键设置已移入属性面板顶部状态区（面板目标的状态区快捷键行）。
+        // 此处只保留全局快捷键（只读显示）。
         HotkeyStack.Children.Add(MakeHotkeyRow(loc["Settings.Hotkey.ShowAll"], () => "Ctrl+Shift+A"));
         HotkeyStack.Children.Add(MakeHotkeyRow(loc["Settings.Hotkey.HideAll"], () => "Ctrl+Shift+H"));
     }
