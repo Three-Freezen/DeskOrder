@@ -46,6 +46,62 @@ public static class ShortcutResolver
     }
 
     /// <summary>
+    /// Read the .lnk's WshShortcut.Arguments property (used to detect Microsoft Store /
+    /// Steam pseudo-shortcuts), or null when unavailable.
+    /// </summary>
+    public static string? ResolveArguments(string lnkPath)
+    {
+        object? shell = null;
+        object? sc = null;
+        try
+        {
+            if (_wshShellType == null || !File.Exists(lnkPath)) return null;
+            shell = Activator.CreateInstance(_wshShellType);
+            if (shell == null) return null;
+            sc = _wshShellType.InvokeMember("CreateShortcut",
+                BindingFlags.InvokeMethod, null, shell, new object[] { lnkPath });
+            if (sc == null) return null;
+            object? args = sc.GetType().InvokeMember("Arguments",
+                BindingFlags.GetProperty, null, sc, null);
+            return (args as string)?.Trim();
+        }
+        catch { return null; }
+        finally
+        {
+            if (sc != null && Marshal.IsComObject(sc)) Marshal.FinalReleaseComObject(sc);
+            if (shell != null && Marshal.IsComObject(shell)) Marshal.FinalReleaseComObject(shell);
+        }
+    }
+
+    /// <summary>
+    /// True when a .lnk is a Microsoft Store / Steam style pseudo-shortcut: the target is
+    /// a shell activation string (explorer.exe shell:AppsFolder\…) or a protocol URI
+    /// (steam://…), or the resolved target lives under the ACL-protected WindowsApps
+    /// folder. For these the real icon file is buried deep and "open file location" does
+    /// not work, so the item should keep the .lnk itself and read the icon directly from
+    /// the desktop shortcut.
+    /// </summary>
+    static bool IsPseudoShortcut(string lnkPath, string resolved)
+    {
+        // Protocol URI targets (steam://, microsoft-store://, …) are not file-system paths.
+        // Use "://" rather than Uri.TryCreate — the latter treats a Windows "C:\..." path
+        // as a scheme named "c" and would misclassify every normal shortcut target.
+        if (resolved.Contains("://", StringComparison.Ordinal))
+            return true;
+
+        // Buried / ACL-protected WindowsApps exe — the desktop .lnk is the safe icon source.
+        if (resolved.Contains(@"\WindowsApps\", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        string? args = ResolveArguments(lnkPath);
+        if (string.IsNullOrWhiteSpace(args)) return false;
+        return args.Contains("shell:AppsFolder", StringComparison.OrdinalIgnoreCase)
+            || args.Contains("shell:appsfolder", StringComparison.OrdinalIgnoreCase)
+            || args.Contains("-applaunch", StringComparison.OrdinalIgnoreCase)
+            || args.Contains("steam://", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
     /// The shortcut's custom icon location ("file,index") when it points at a real file
     /// other than the shortcut's own target; null when the shortcut uses its target's
     /// default icon. Environment variables are expanded.
@@ -96,6 +152,12 @@ public static class ShortcutResolver
         var resolved = ResolveTarget(path);
         if (resolved == null || (!File.Exists(resolved) && !Directory.Exists(resolved)))
             return (path, type, null);
+
+        // Microsoft Store / Steam pseudo-shortcuts: keep the .lnk itself so the shell
+        // reads the icon directly from the desktop shortcut instead of chasing a buried /
+        // ACL-protected original icon file (and "open file location" wouldn't work anyway).
+        if (IsPseudoShortcut(path, resolved))
+            return (path, ItemType.Shortcut, null);
 
         string? iconLoc = ResolveIconLocation(path);
         if (iconLoc != null)

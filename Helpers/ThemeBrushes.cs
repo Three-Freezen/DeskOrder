@@ -67,6 +67,9 @@ public static class ThemeBrushes
     public static SolidColorBrush AccentWashModern => Get<SolidColorBrush>("Brush.Accent.Wash");
     public static SolidColorBrush AccentSolidModern => Get<SolidColorBrush>("Brush.Accent.Solid");
     public static SolidColorBrush AccentModern => Get<SolidColorBrush>("Brush.Accent");
+    // ponytail 2026-08-28: 固定蓝色按钮系（不跟随系统强调色）— 代码构建的填充/镂空按钮统一用这套。
+    public static SolidColorBrush BtnSolidModern => Get<SolidColorBrush>("Brush.Btn.Solid");
+    public static SolidColorBrush BtnOnModern => Get<SolidColorBrush>("Brush.Btn.On");
     public static SolidColorBrush DangerModern => Get<SolidColorBrush>("Brush.Danger");
     public static SolidColorBrush SuccessModern => Get<SolidColorBrush>("Brush.Success");
     public static SolidColorBrush WarningModern => Get<SolidColorBrush>("Brush.Warning");

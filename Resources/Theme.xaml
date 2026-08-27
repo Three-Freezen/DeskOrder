@@ -262,4 +262,91 @@
         </Setter>
     </Style>
 
+    <!-- ponytail 2026-08-28: 固定蓝色按钮（不跟随系统强调色，蓝色+白色内容）。
+         FillBtn = 深蓝实底 + 白字；OutlineBtn = 亮蓝底 + 亮蓝边框 + 白字。
+         悬停 = 边框变亮 + 内部白色半透明高光（内部透明高亮）；按下高光加深；
+         禁用 = 整体 50% 透明度。 -->
+    <Style x:Key="FillBtn" TargetType="Button">
+        <Setter Property="Background" Value="{DynamicResource Brush.Btn.Solid}"/>
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Btn.On}"/>
+        <Setter Property="BorderBrush" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="12,6"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Grid>
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="4"
+                                Padding="{TemplateBinding Padding}"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <Border x:Name="Overlay" CornerRadius="4" Background="Transparent" IsHitTestVisible="False"/>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Brush.Btn.Border.Hover}"/>
+                            <Setter TargetName="Overlay" Property="Background" Value="#26FFFFFF"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Btn.Solid.Press}"/>
+                            <Setter TargetName="Overlay" Property="Background" Value="#33FFFFFF"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.5"/>
+                            <Setter Property="Cursor" Value="Arrow"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="OutlineBtn" TargetType="Button">
+        <Setter Property="Background" Value="{DynamicResource Brush.Btn.Outline}"/>
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Btn.On}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Btn.Border}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="12,6"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Grid>
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="4"
+                                Padding="{TemplateBinding Padding}"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <Border x:Name="Overlay" CornerRadius="4" Background="Transparent" IsHitTestVisible="False"/>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Brush.Btn.Border.Hover}"/>
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Btn.Outline.Hover}"/>
+                            <Setter TargetName="Overlay" Property="Background" Value="#26FFFFFF"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Btn.Outline.Press}"/>
+                            <Setter TargetName="Overlay" Property="Background" Value="#33FFFFFF"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.5"/>
+                            <Setter Property="Cursor" Value="Arrow"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
 </ResourceDictionary>

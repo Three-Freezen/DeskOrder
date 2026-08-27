@@ -28,6 +28,10 @@
   <SolidColorBrush x:Key="Menu.Text.Tertiary"     Color="#9A9A9A"/>
   <SolidColorBrush x:Key="Menu.Text.Disabled"     Color="#ABABAB"/>
   <SolidColorBrush x:Key="Menu.Separator"         Color="#E4E7EC"/>
+  <!-- ponytail 2026-08-28: 系统强调色(不随应用主题模式,由 MenuThemeService 读 Windows
+       注册表写入) — 供 Import System Items 等跟随系统主题的弹窗勾选框填充使用。 -->
+  <SolidColorBrush x:Key="Menu.Accent.Solid"      Color="#0078D4"/>
+  <SolidColorBrush x:Key="Menu.Accent.On"         Color="#FFFFFF"/>
 
   <!-- ── ContextMenu ─────────────────────────────────────────── -->
   <!-- DropShadowEffect 不能放在 Popup 根元素上(AllowsTransparency=True 时被 WPF

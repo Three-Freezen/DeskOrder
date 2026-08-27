@@ -5,52 +5,40 @@
         Title="{loc:Loc Key=Rename.Title}" Width="360" Height="180"
         WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent">
-    <Border Background="{DynamicResource Brush.Bg.Chrome}" CornerRadius="10"
-            BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1">
+    <!-- 背景填充/文字跟随电脑深浅色(与分区右键菜单同一套 Menu.* 调色板,不跟随管理界面主题) -->
+    <Border Background="{DynamicResource Menu.Bg.Surface}" CornerRadius="10"
+            BorderBrush="{DynamicResource Menu.Border.Subtle}" BorderThickness="1">
         <Grid Margin="16">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
             <TextBlock x:Name="TitleLabel" Text="Rename" FontSize="13" FontWeight="SemiBold"
-                       Foreground="{DynamicResource Brush.Text.Primary}" Margin="0,4,0,10"/>
+                       Foreground="{DynamicResource Menu.Text.Primary}" Margin="0,4,0,10"/>
+            <!-- Title/content divider (贯穿;跟随电脑深浅色,同分区右键菜单分割线) -->
+            <Border Grid.Row="1" Height="1" Margin="0,0,0,10"
+                    Background="{DynamicResource Menu.Separator}"/>
             <!-- Optional prompt line (batch rename): hidden unless the caller passes one. -->
-            <TextBlock x:Name="PromptText" Grid.Row="1" Text="" FontSize="11"
-                       Foreground="{DynamicResource Brush.Text.Secondary}" TextWrapping="Wrap"
+            <TextBlock x:Name="PromptText" Grid.Row="2" Text="" FontSize="11"
+                       Foreground="{DynamicResource Menu.Text.Secondary}" TextWrapping="Wrap"
                        Margin="0,0,0,8" Visibility="Collapsed"/>
-            <TextBox x:Name="NameInput" Grid.Row="2"
-                     Background="{DynamicResource Brush.Bg.Input}" Foreground="{DynamicResource Brush.Text.Primary}"
-                     BorderBrush="{DynamicResource Brush.Border.Default}" BorderThickness="1"
+            <TextBox x:Name="NameInput" Grid.Row="3"
+                     Background="{DynamicResource Menu.Bg.Hover}" Foreground="{DynamicResource Menu.Text.Primary}"
+                     BorderBrush="{DynamicResource Menu.Border.Subtle}" BorderThickness="1"
                      Padding="8,6" FontSize="13"
                      KeyDown="NameInput_KeyDown"/>
-            <StackPanel Grid.Row="3" Orientation="Horizontal"
+            <StackPanel Grid.Row="4" Orientation="Horizontal"
                         HorizontalAlignment="Right" Margin="0,12,0,0">
                 <Button x:Name="CancelBtn" Content="Cancel"
-                        Background="Transparent" Foreground="{DynamicResource Brush.Text.Secondary}"
-                        BorderBrush="{DynamicResource Brush.Border.Default}" BorderThickness="1"
-                        Padding="14,6" Cursor="Hand" Click="Cancel_Click">
-                    <Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="4"/></Style></Button.Resources>
-                </Button>
+                        Padding="14,6" Cursor="Hand" Click="Cancel_Click"
+                        Style="{DynamicResource OutlineBtn}"/>
                 <Button x:Name="OkBtn" Content="OK"
-                        Background="{DynamicResource Brush.Accent.Solid}" Foreground="{DynamicResource Brush.Accent.On}"
-                        BorderThickness="0" Padding="14,6" Margin="8,0,0,0"
-                        Cursor="Hand" Click="Ok_Click">
-                    <Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="4"/></Style></Button.Resources>
-                    <Button.Style>
-                      <!-- ponytail 2026-08-25: 镂空 + 禁用态淡化 -->
-                      <Style TargetType="Button">
-                        <Style.Triggers>
-                          <Trigger Property="IsEnabled" Value="False">
-                            <Setter Property="Background" Value="{DynamicResource Brush.Accent.Solid.Disabled}"/>
-                            <Setter Property="Foreground" Value="{DynamicResource Brush.Accent.On.Disabled}"/>
-                            <Setter Property="Cursor" Value="Arrow"/>
-                          </Trigger>
-                        </Style.Triggers>
-                      </Style>
-                    </Button.Style>
-                </Button>
+                        Padding="14,6" Margin="8,0,0,0"
+                        Cursor="Hand" Click="Ok_Click"
+                        Style="{DynamicResource FillBtn}"/>
             </StackPanel>
         </Grid>
     </Border>

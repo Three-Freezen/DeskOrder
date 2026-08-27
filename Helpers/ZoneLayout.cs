@@ -7,25 +7,27 @@ namespace DesktopZones.Helpers;
 
 /// <summary>
 /// Collision-aware free-cell placement for imported zone items. The item footprint is
-/// one grid cell — GridSize wide × (GridSize + <see cref="LabelArea"/>) tall for the
-/// Windows-native "icon on top, name below" layout. Horizontal pitch is
-/// GridSize + <see cref="CellGap"/>, vertical pitch adds the name area, so icons keep
-/// a small constant gap between them (the insertion caret sits in that gap).
+/// one square grid cell — GridSize × GridSize — matching the panel's 80×80 card
+/// (icon on top, name below, both inside the cell). Horizontal and vertical pitch are
+/// both GridSize + <see cref="CellGap"/> so icons keep a constant gap between them
+/// (the insertion caret sits in that gap).
 /// </summary>
 public static class ZoneLayout
 {
     public const double Pad = 10;
 
-    /// <summary>Extra spacing between two adjacent grid cells (on top of the 4px inset each icon already has).</summary>
-    public const double CellGap = 12;
+    /// <summary>Extra spacing between two adjacent grid cells (panel-aligned: 80 cell + 8 gap = 88 pitch).</summary>
+    public const double CellGap = 8;
 
-    /// <summary>Height of the name area below the icon (Windows-native icon style: icon on top, name below).</summary>
+    /// <summary>Name area below the sub-folder 2×2 box (the box is a fixed 56×56; the
+    /// name hangs below it inside the 80×80 cell). Main-zone item names live inside
+    /// the square cell now, so this no longer contributes to the main grid pitch.</summary>
     public const double LabelArea = 16;
 
     public static double Pitch(int gridSize) => gridSize + CellGap;
 
-    /// <summary>Vertical pitch: one cell plus the name area below the icon, plus the gap.</summary>
-    public static double VPitch(int gridSize) => gridSize + LabelArea + CellGap;
+    /// <summary>Vertical pitch: one square cell plus the gap (same as horizontal pitch).</summary>
+    public static double VPitch(int gridSize) => gridSize + CellGap;
 
     /// <summary>Snap a horizontal coordinate to the grid (origin Pad, pitch GridSize + CellGap).</summary>
     public static double Snap(double value, int gridSize)
@@ -84,7 +86,11 @@ public static class ZoneLayout
         double zw = double.IsNaN(zone.Width) ? pitch + Pad : Math.Max(pitch + Pad, zone.Width);
         // 按窗口宽度计算列数并把整块水平居中 — 左右留白相等（与 ZoneWindow.RearrangeAll 一致）。
         double avail = Math.Max(0, zw - 2 * Pad);
-        int cols = Math.Max(1, (int)Math.Floor((avail - zone.GridSize) / pitch) + 1);
+        int fitCols = Math.Max(1, (int)Math.Floor((avail - zone.GridSize) / pitch) + 1);
+        // 只按实际用到的列数居中：若窗口能容纳 7 列但只有 2 个图标，按 7 列居中会把
+        // 图标挤到左侧、右侧留一大片空白（"左侧小右侧大"）。改为 min(可容纳列数, 图标数)
+        // 后整块真正居中，左右留白相等。
+        int cols = Math.Min(fitCols, zone.Items.Count);
         double blockWidth = (cols - 1) * pitch + zone.GridSize;
         double offsetX = Math.Max(Pad, (zw - blockWidth) / 2);
         bool changed = false;

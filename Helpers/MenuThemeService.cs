@@ -30,6 +30,7 @@ public static class MenuThemeService
     public enum MenuPalette { Light, Dark, HighContrast }
 
     static MenuPalette _current = MenuPalette.Light;
+    static Color _lastAccent;
     static System.Windows.Threading.DispatcherTimer? _pollTimer;
 
     /// <summary>启动时调用一次;之后监听系统主题变化自动刷新。</summary>
@@ -88,11 +89,27 @@ public static class MenuThemeService
         }
     }
 
+    /// <summary>ponytail 2026-08-28: 读取 Windows 系统强调色(不随应用主题模式)。
+    /// 用于 Menu.Accent.* 画刷,让跟随系统主题的弹窗勾选框等用上真·系统强调色。</summary>
+    static Color ReadWindowsAccent()
+    {
+        try
+        {
+            var c = AcrylicHelper.GetSystemAccentColor();
+            // 高对比下强调色不适用(黑底白字),给默认蓝即可。
+            return SystemParameters.HighContrast ? Color.FromRgb(0x00, 0x78, 0xD4) : c;
+        }
+        catch { return Color.FromRgb(0x00, 0x78, 0xD4); }
+    }
+
     public static void Apply()
     {
         var palette = ReadWindowsPalette();
-        if (palette == _current && AlreadyApplied()) return;
+        var accent = ReadWindowsAccent();
+        // 主题深浅色未变 且 强调色未变 且 字典已填充 → 无需重复写。
+        if (palette == _current && accent == _lastAccent && AlreadyApplied()) return;
         _current = palette;
+        _lastAccent = accent;
 
         var dict = FindContextMenuDictionary();
         if (dict == null) return;
@@ -132,16 +149,42 @@ public static class MenuThemeService
                     Color.FromArgb(0xFF, 0xE4, 0xE7, 0xEC)),   // 分割线 = 样式设置界面同款 Color.Border.Subtle
             };
 
-        dict["Menu.Bg.Surface"]     = new SolidColorBrush(surface);
-        dict["Menu.Bg.Hover"]       = new SolidColorBrush(hover);
-        dict["Menu.Border.Subtle"]  = new SolidColorBrush(border);
-        dict["Menu.Text.Primary"]   = new SolidColorBrush(textPrimary);
-        dict["Menu.Text.Secondary"] = new SolidColorBrush(textSecondary);
-        dict["Menu.Text.Tertiary"]  = new SolidColorBrush(textTertiary);
-        dict["Menu.Text.Disabled"]  = new SolidColorBrush(textDisabled);
-        dict["Menu.Separator"]      = new SolidColorBrush(separator);
+        // ponytail 2026-08-28: 之前直接「替换 brush 实例」——已实现过(曾打开过)的
+        // ContextMenu 其 Popup 内容在关闭后处于断开状态,替换实例会让它持有的旧
+        // 实例引用永远停在旧色(断开期间收不到 DynamicResource 重解析通知),这就是
+        // 「切深浅色后总有一个分区的右键菜单还停在旧色」的根因:只有最近打开过的
+        // 那一个菜单被实现,其余未打开过、下次打开时按新字典解析,反而正常。
+        // 改成「原地写 Color」:SolidColorBrush 是 Freezable,写它的 Color 触发
+        // Freezable.Changed,所有引用者(无论是否连接在可视树上)都会自动重绘,
+        // 断开状态的菜单再打开时也读的是同一个已更新实例 → 不再滞后。
+        // Menu.* 只被 DynamicResource 引用、不会被冻结,原地写是安全的;
+        // 万一遇到被冻结的实例则退化为替换。
+        SetMenuBrush(dict, "Menu.Bg.Surface",     surface);
+        SetMenuBrush(dict, "Menu.Bg.Hover",       hover);
+        SetMenuBrush(dict, "Menu.Border.Subtle",  border);
+        SetMenuBrush(dict, "Menu.Text.Primary",   textPrimary);
+        SetMenuBrush(dict, "Menu.Text.Secondary", textSecondary);
+        SetMenuBrush(dict, "Menu.Text.Tertiary",  textTertiary);
+        SetMenuBrush(dict, "Menu.Text.Disabled",  textDisabled);
+        SetMenuBrush(dict, "Menu.Separator",      separator);
+        // ponytail 2026-08-28: 系统强调色 — Menu.Accent.Solid = Windows 强调色,
+        // Menu.Accent.On = 在该色上按 WCAG 对比选黑/白(跟随系统强调色变化)。
+        var accentOn = AdaptiveTextColor.ResolveTextColor(accent);
+        SetMenuBrush(dict, "Menu.Accent.Solid", accent);
+        SetMenuBrush(dict, "Menu.Accent.On",    accentOn);
 
-        System.Diagnostics.Debug.WriteLine($"[MenuTheme] palette={palette}");
+        System.Diagnostics.Debug.WriteLine($"[MenuTheme] palette={palette} accent={accent}");
+    }
+
+    /// <summary>原地更新 Menu.* 画刷颜色;画刷被冻结时退化为替换实例。</summary>
+    static void SetMenuBrush(ResourceDictionary dict, string key, Color color)
+    {
+        if (dict[key] is SolidColorBrush brush)
+        {
+            try { brush.Color = color; return; }
+            catch (InvalidOperationException) { /* frozen — replace below */ }
+        }
+        dict[key] = new SolidColorBrush(color);
     }
 
     static bool AlreadyApplied()

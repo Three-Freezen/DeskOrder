@@ -51,9 +51,20 @@ public partial class App : System.Windows.Application
     private const int WM_SETTINGCHANGE = 0x001A;
     private const int HOTKEY_ID_BASE = 0x4000;
     private const int HOTKEY_ID_PANEL = 0x3FFF;
+    // ponytail 2026-08-27: 全部显示/隐藏/最小化 全局热键 ID。
+    private const int HOTKEY_ID_SHOW_ALL = 0x3FFD;
+    private const int HOTKEY_ID_HIDE_ALL = 0x3FFC;
+    private const int HOTKEY_ID_MIN_ALL = 0x3FFB;
     private readonly Dictionary<int, Guid> _hotkeyToNoteId = new();
     private readonly Dictionary<Guid, int> _noteIdToHotkeyId = new();
     private IntPtr _mainHwnd;
+
+    // ponytail 2026-08-27: 桌面双击切换 — LowLevel 鼠标钩子 + 上次点击时间/位置。
+    private IntPtr _mouseHook = IntPtr.Zero;
+    private DesktopHook.LowLevelMouseProc? _mouseProc;
+    private DateTime _lastLeftDownUtc = DateTime.MinValue;
+    private NativeMethods.POINT _lastLeftDownPoint;
+    private bool _doubleClickEnabled;
 
     private void Application_Startup(object sender, StartupEventArgs e)
     {
@@ -197,6 +208,11 @@ public partial class App : System.Windows.Application
         // Register hotkeys for notes that have them enabled
         RefreshNoteHotkeys();
 
+        // ponytail: 启动时恢复可见的小组件窗口（位置 + 显示状态持久化，与分区一致）。
+        // 只打开模型 IsVisible=true 的组件；隐藏组件保持隐藏。
+        EnsureManagementWindow();
+        _managementWindow?.RestoreVisibleWidgets();
+
         // Register panel hotkey
         if (config.PanelHotkey.PanelHotkeyEnabled && _mainHwnd != IntPtr.Zero)
         {
@@ -208,6 +224,23 @@ public partial class App : System.Windows.Application
                 _trayIcon?.ShowBalloonTip(_loc["Toast.HotkeyFailed.Title"], _loc.Get("Toast.HotkeyFailed.Body", config.PanelHotkey.PanelHotkeyModifiers, config.PanelHotkey.PanelHotkeyKey));
             }
         }
+
+        // ponytail 2026-08-27: 注册全部显示/隐藏/最小化 全局热键。
+        TryRegisterHotkey(HOTKEY_ID_SHOW_ALL, config.ShowAllHotkey.Modifiers, config.ShowAllHotkey.Key);
+        TryRegisterHotkey(HOTKEY_ID_HIDE_ALL, config.HideAllHotkey.Modifiers, config.HideAllHotkey.Key);
+        TryRegisterHotkey(HOTKEY_ID_MIN_ALL, config.MinimizeAllHotkey.Modifiers, config.MinimizeAllHotkey.Key);
+
+        // ponytail 2026-08-27: 启动 LowLevel 双击桌面监听(若开启)。
+        // 当前若有任意 zone/widget/note 处于隐藏态 → 全部显示;否则 → 全部隐藏(完全隐藏)。
+        AppDesktopDoubleClick.Install(config.DoubleClickToggleShowHide, () =>
+        {
+            bool anyHidden = AnyWidgetHidden();
+            Dispatcher.Invoke(() =>
+            {
+                if (anyHidden) TrayShowAll();
+                else TrayFullHideAll();
+            });
+        });
 
         // Initialize reminder service
         if (_trayIcon != null)
@@ -257,6 +290,7 @@ public partial class App : System.Windows.Application
                 }
                 TryDialog("ColorPickerDialog", () => new ColorPickerDialog("FF8800").ShowDialog());
                 TryDialog("EmojiPickerDialog", () => new EmojiPickerDialog().ShowDialog());
+                TryDialog("IconPickerDialog",  () => new IconPickerDialog().ShowDialog());
                 TryDialog("RenameDialog",      () => new RenameDialog("test").ShowDialog());
                 TryDialog("SavePresetDialog",  () => new SavePresetDialog(
                     PresetService.For(PresetKind.Zone), new Zone { Name = "test" }) { Owner = null }.ShowDialog());
@@ -386,6 +420,12 @@ public partial class App : System.Windows.Application
                 handled = true;
                 return IntPtr.Zero;
             }
+            // ponytail 2026-08-27: 全部显示/隐藏/最小化 分发。
+            // 与左侧边栏同名按钮保持一致：全部最小化 = 折叠(HideAll)，
+            // 全部隐藏 = 完全隐藏(FullHideAll)。此前两者反了。
+            if (id == HOTKEY_ID_SHOW_ALL) { TrayShowAll(); handled = true; return IntPtr.Zero; }
+            if (id == HOTKEY_ID_MIN_ALL) { TrayHideAll(); handled = true; return IntPtr.Zero; }
+            if (id == HOTKEY_ID_HIDE_ALL) { TrayFullHideAll(); handled = true; return IntPtr.Zero; }
             handled = true;
         }
         // ponytail: WM_SETTINGCHANGE with lParam pointing to a setting name is the
@@ -698,6 +738,62 @@ public partial class App : System.Windows.Application
         }
     }
     private void TrayNewZone() { _zoneManager?.CreateZone(); ShowManagementWindow(); }
+
+    // ponytail 2026-08-27: 双击桌面逻辑依据 — 用模型 IsVisible 判断。
+    // 全隐藏(FullHideAll)会把窗口全部关闭，不能再靠窗口可见性判断；
+    // 模型 IsVisible 与 FullHideAll/ShowAll 的持久化一致。
+    bool AnyWidgetHidden()
+    {
+        try
+        {
+            if (_zoneManager != null)
+            {
+                foreach (var z in _zoneManager.Zones)
+                {
+                    // 合并分区里的子分区随主分区一起显示/隐藏，跳过，避免误判。
+                    if (z.MergedGroupMembership.GroupId.HasValue
+                        && z.MergedGroupMembership.SubZoneIds.Count == 0)
+                        continue;
+                    if (!z.IsVisible) return true;
+                }
+            }
+            if (_widgetService != null)
+            {
+                foreach (var c in _widgetService.Clocks)
+                    if (!c.IsVisible) return true;
+                foreach (var cal in _widgetService.Calendars)
+                    if (!cal.IsVisible) return true;
+            }
+            if (_notesService != null)
+            {
+                foreach (var n in _notesService.Notes)
+                    if (!n.IsVisible) return true;
+            }
+        }
+        catch { }
+        return false;
+    }
+
+    // ponytail 2026-08-27: 全部隐藏 — 与左侧边栏「全部隐藏」按钮一致(FullHideAll：
+    // 关闭所有组件窗口并持久化 IsVisible=false)。分区用 FullHideAll。
+    private void TrayFullHideAll()
+    {
+        if (_managementWindow == null) EnsureManagementWindow();
+        _managementWindow?.FullHideAll();
+    }
+
+    // ponytail 2026-08-27: 全局热键注册失败兜底(冲突 / hwnd 未就绪)→ 静默 + debug。
+    void TryRegisterHotkey(int id, int modifiers, int vk)
+    {
+        if (_mainHwnd == IntPtr.Zero) return;
+        // 先无条件注销：切到「无」(modifiers==0 或 vk==0) 时必须释放旧热键，
+        // 否则旧的 Ctrl+Shift+X 会继续拦截。
+        NativeMethods.UnregisterHotKey(_mainHwnd, id);
+        if (vk == 0 || modifiers == 0) return;
+        if (!NativeMethods.RegisterHotKey(_mainHwnd, id, (uint)modifiers, (uint)vk))
+            System.Diagnostics.Debug.WriteLine($"[DeskOrder] Hotkey id=0x{id:X} (mods=0x{modifiers:X}, key=0x{vk:X}) register failed");
+    }
+
     private void TrayNewNote()
     {
         try
@@ -855,6 +951,29 @@ public partial class App : System.Windows.Application
             NativeMethods.UnregisterHotKey(_mainHwnd, HOTKEY_ID_PANEL);
     }
 
+    // ponytail 2026-08-27: 设置页改键后调用 — 重注册 3 个全局热键。
+    public void ReRegisterGlobalHotkeys()
+    {
+        // 用运行中的 live config(设置页刚改的就是它)，不要从磁盘 Load()——
+        // 否则「先注册后保存」的顺序会拿到旧值，改完要重启才生效。
+        var cfg = _zoneManager?.GetConfig();
+        if (cfg == null) return;
+        TryRegisterHotkey(HOTKEY_ID_SHOW_ALL, cfg.ShowAllHotkey.Modifiers, cfg.ShowAllHotkey.Key);
+        TryRegisterHotkey(HOTKEY_ID_HIDE_ALL, cfg.HideAllHotkey.Modifiers, cfg.HideAllHotkey.Key);
+        TryRegisterHotkey(HOTKEY_ID_MIN_ALL, cfg.MinimizeAllHotkey.Modifiers, cfg.MinimizeAllHotkey.Key);
+    }
+
+    // ponytail 2026-08-27: 设置页改勾后调用 — 开关桌面双击监听。
+    public void SetDesktopDoubleClickEnabled(bool enabled)
+    {
+        if (enabled) AppDesktopDoubleClick.Install(true, () =>
+        {
+            bool anyHidden = AnyWidgetHidden();
+            Dispatcher.Invoke(() => { if (anyHidden) TrayShowAll(); else TrayFullHideAll(); });
+        });
+        else AppDesktopDoubleClick.Uninstall();
+    }
+
     private void ShutdownApplication()
     {
         // Unregister all hotkeys
@@ -863,12 +982,17 @@ public partial class App : System.Windows.Application
             foreach (var id in _noteIdToHotkeyId.Values)
                 NativeMethods.UnregisterHotKey(_mainHwnd, id);
             NativeMethods.UnregisterHotKey(_mainHwnd, HOTKEY_ID_PANEL);
+            NativeMethods.UnregisterHotKey(_mainHwnd, HOTKEY_ID_SHOW_ALL);
+            NativeMethods.UnregisterHotKey(_mainHwnd, HOTKEY_ID_HIDE_ALL);
+            NativeMethods.UnregisterHotKey(_mainHwnd, HOTKEY_ID_MIN_ALL);
         }
         _reminderService?.Dispose();
         AutoOrganizeService.Instance.Dispose();
         FileSyncService.Instance.Dispose();
         _zoneManager?.Shutdown();
         _trayIcon?.Dispose();
+        // ponytail 2026-08-27: 拆卸桌面双击钩子,避免 DLL 注入残留。
+        AppDesktopDoubleClick.Uninstall();
         DisposeSingleInstance();
         Current.Shutdown();
     }
@@ -880,12 +1004,17 @@ public partial class App : System.Windows.Application
             foreach (var id in _noteIdToHotkeyId.Values)
                 NativeMethods.UnregisterHotKey(_mainHwnd, id);
             NativeMethods.UnregisterHotKey(_mainHwnd, HOTKEY_ID_PANEL);
+            NativeMethods.UnregisterHotKey(_mainHwnd, HOTKEY_ID_SHOW_ALL);
+            NativeMethods.UnregisterHotKey(_mainHwnd, HOTKEY_ID_HIDE_ALL);
+            NativeMethods.UnregisterHotKey(_mainHwnd, HOTKEY_ID_MIN_ALL);
         }
         _reminderService?.Dispose();
         AutoOrganizeService.Instance.Dispose();
         FileSyncService.Instance.Dispose();
         _zoneManager?.Shutdown();
         _trayIcon?.Dispose();
+        // ponytail 2026-08-27: 拆卸桌面双击钩子,避免 DLL 注入残留。
+        AppDesktopDoubleClick.Uninstall();
         DisposeSingleInstance();
     }
 
@@ -908,4 +1037,72 @@ public partial class App : System.Windows.Application
         "Dark"  => AppThemeMode.Dark,
         _       => AppThemeMode.System,
     };
+}
+
+// ponytail 2026-08-27: 桌面双击切换 全部显示/隐藏 — 装配 / 拆解 LowLevel 鼠标钩子。
+static class AppDesktopDoubleClick
+{
+    // 双击阈值 — 沿用 Windows 默认 500ms / 10px (GetSystemMetrics SM_CXDOUBLECLK/SM_CYDOUBLECLK)。
+    const int DoubleClickMs = 500;
+    const int DoubleClickPx = 10;
+
+    static IntPtr _hook;
+    static DesktopHook.LowLevelMouseProc? _proc;
+    static DateTime _lastDownUtc = DateTime.MinValue;
+    static NativeMethods.POINT _lastDownPoint;
+    static Action? _onDesktopDoubleClick;
+
+    public static void Install(bool enabled, Action onDesktopDoubleClick)
+    {
+        Uninstall();
+        if (!enabled) return;
+        _onDesktopDoubleClick = onDesktopDoubleClick;
+        _proc = HookProc;
+        // ponytail: LL hook hMod=IntPtr.Zero 表示用调用线程所在模块(本进程 EXE/DLL),
+        // 适用于 .NET 托管进程,无需 GetModuleHandle。
+        _hook = DesktopHook.SetWindowsHookEx(DesktopHook.WH_MOUSE_LL, _proc, IntPtr.Zero, 0);
+        if (_hook == IntPtr.Zero)
+            System.Diagnostics.Debug.WriteLine("[DeskOrder] Desktop double-click hook install failed");
+    }
+
+    public static void Uninstall()
+    {
+        if (_hook != IntPtr.Zero)
+        {
+            DesktopHook.UnhookWindowsHookEx(_hook);
+            _hook = IntPtr.Zero;
+        }
+        _proc = null;
+        _onDesktopDoubleClick = null;
+    }
+
+    static IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam)
+    {
+        if (nCode >= 0 && wParam == (IntPtr)DesktopHook.WM_LBUTTONDOWN)
+        {
+            var info = System.Runtime.InteropServices.Marshal.PtrToStructure<DesktopHook.MSLLHOOKSTRUCT>(lParam);
+            // 仅「空白桌面」有效：按桌面自身窗口句柄判定（资源管理器里也有同名
+            // SHELLDLL_DefView，按类名会误判），并用 LVM_HITTEST 排除桌面图标。
+            IntPtr hwndAtPoint = DesktopHook.WindowFromPoint(info.pt);
+            if (DesktopHook.IsDesktopBackground(hwndAtPoint, info.pt))
+            {
+                var now = DateTime.UtcNow;
+                bool isDouble = (now - _lastDownUtc).TotalMilliseconds <= DoubleClickMs
+                    && Math.Abs(info.pt.x - _lastDownPoint.x) <= DoubleClickPx
+                    && Math.Abs(info.pt.y - _lastDownPoint.y) <= DoubleClickPx;
+                _lastDownUtc = now;
+                _lastDownPoint = info.pt;
+                if (isDouble)
+                {
+                    _onDesktopDoubleClick?.Invoke();
+                    _lastDownUtc = DateTime.MinValue; // 防连击
+                }
+            }
+            else
+            {
+                _lastDownUtc = DateTime.MinValue;
+            }
+        }
+        return DesktopHook.CallNextHookEx(_hook, nCode, wParam, lParam);
+    }
 }

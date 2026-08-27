@@ -93,6 +93,9 @@ public class ZoneViewModel : INotifyPropertyChanged
         }
     }
 
+    /// <summary>图标固定 40px(与面板一致),磁贴模式不再放大;80 格子里居中、左右各 20px。</summary>
+    double CurrentIconSize() => Math.Min(40, Math.Max(24, _zone.GridSize - 4));
+
     public void RefreshItems()
     {
         // ponytail 2026-08-26: merged masters must reload the SELECTED tab's
@@ -105,10 +108,10 @@ public class ZoneViewModel : INotifyPropertyChanged
             return;
         }
         Items.Clear();
-        double isize = Math.Max(24, _zone.GridSize - 4);
+        double isize = CurrentIconSize();
         foreach (var item in _zone.Items)
         {
-            var vm = new ZoneItemViewModel(item, _iconService) { IconSize = isize, ItemSize = _zone.GridSize, ItemHeight = _zone.GridSize + ZoneLayout.LabelArea, SourceZoneId = _zone.Id };
+            var vm = new ZoneItemViewModel(item, _iconService) { IconSize = isize, ItemSize = _zone.GridSize, ItemHeight = _zone.GridSize, SourceZoneId = _zone.Id };
             Items.Add(vm);
         }
     }
@@ -117,7 +120,7 @@ public class ZoneViewModel : INotifyPropertyChanged
     public void RefreshMergedItems()
     {
         Items.Clear();
-        double isize = Math.Max(24, _zone.GridSize - 4);
+        double isize = CurrentIconSize();
 
         // Determine which zone's items to show
         Guid targetId = _selectedSubZoneId ?? _zone.Id;
@@ -125,7 +128,7 @@ public class ZoneViewModel : INotifyPropertyChanged
         if (targetId == _zone.Id)
         {
             foreach (var item in _zone.Items)
-                Items.Add(new ZoneItemViewModel(item, _iconService) { IconSize = isize, ItemSize = _zone.GridSize, ItemHeight = _zone.GridSize + ZoneLayout.LabelArea, SourceZoneId = _zone.Id });
+                Items.Add(new ZoneItemViewModel(item, _iconService) { IconSize = isize, ItemSize = _zone.GridSize, ItemHeight = _zone.GridSize, SourceZoneId = _zone.Id });
         }
         else
         {
@@ -133,7 +136,7 @@ public class ZoneViewModel : INotifyPropertyChanged
             if (subZone != null)
             {
                 foreach (var item in subZone.Items)
-                    Items.Add(new ZoneItemViewModel(item, _iconService) { IconSize = isize, ItemSize = _zone.GridSize, ItemHeight = _zone.GridSize + ZoneLayout.LabelArea, SourceZoneId = targetId });
+                    Items.Add(new ZoneItemViewModel(item, _iconService) { IconSize = isize, ItemSize = _zone.GridSize, ItemHeight = _zone.GridSize, SourceZoneId = targetId });
             }
         }
 
@@ -157,7 +160,7 @@ public class ZoneViewModel : INotifyPropertyChanged
         }
 
         _zone.Items.Add(item);
-        var vm = new ZoneItemViewModel(item, _iconService) { IconSize = Math.Max(24, _zone.GridSize - 4), ItemSize = _zone.GridSize, ItemHeight = _zone.GridSize + ZoneLayout.LabelArea, SourceZoneId = _zone.Id };
+        var vm = new ZoneItemViewModel(item, _iconService) { IconSize = CurrentIconSize(), ItemSize = _zone.GridSize, ItemHeight = _zone.GridSize, SourceZoneId = _zone.Id };
         Items.Add(vm);
         _zoneManager.SaveConfig();
         _zoneManager.NotifyChanged();
@@ -299,7 +302,7 @@ public class ZoneItemViewModel : INotifyPropertyChanged
         set { _item.Y = value; OnPropertyChanged(); }
     }
 
-    private double _iconSize = 52;
+    private double _iconSize = 40;
     public double IconSize
     {
         get => _iconSize;
@@ -313,8 +316,12 @@ public class ZoneItemViewModel : INotifyPropertyChanged
         set { _itemSize = value; OnPropertyChanged(); }
     }
 
-    private double _itemHeight = 72;
-    /// <summary>Cell height = grid size + the name area below the icon (Windows-native icon style).</summary>
+    /// <summary>Name label max width — mirrors the panel card ratio (panel name is
+    /// 72px in an 80px card = 90% of the cell width).</summary>
+    public double NameMaxWidth => Math.Max(32, ItemSize * 0.9);
+
+    private double _itemHeight = 80;
+    /// <summary>Cell height = grid size (square 80×80 cell; name sits inside, like the panel card).</summary>
     public double ItemHeight
     {
         get => _itemHeight;

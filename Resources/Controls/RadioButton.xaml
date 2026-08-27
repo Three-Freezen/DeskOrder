@@ -32,7 +32,7 @@
                        StrokeThickness="1"/>
               <Ellipse x:Name="Dot"
                        Width="8" Height="8"
-                       Fill="{DynamicResource Brush.Accent}"
+                       Fill="{DynamicResource Brush.Btn.On}"
                        Visibility="Collapsed"/>
             </Grid>
 
@@ -46,7 +46,7 @@
 
           <ControlTemplate.Triggers>
             <Trigger Property="IsChecked" Value="True">
-              <Setter TargetName="Ring" Property="Stroke" Value="{DynamicResource Brush.Accent}"/>
+              <Setter TargetName="Ring" Property="Stroke" Value="{DynamicResource Brush.Btn.Outline}"/>
               <Setter TargetName="Dot" Property="Visibility" Value="Visible"/>
             </Trigger>
             <Trigger Property="IsMouseOver" Value="True">
@@ -57,7 +57,7 @@
                 <Condition Property="IsChecked" Value="True"/>
                 <Condition Property="IsMouseOver" Value="True"/>
               </MultiTrigger.Conditions>
-              <Setter TargetName="Ring" Property="Stroke" Value="{DynamicResource Brush.Accent}"/>
+              <Setter TargetName="Ring" Property="Stroke" Value="{DynamicResource Brush.Btn.Outline}"/>
             </MultiTrigger>
             <Trigger Property="IsEnabled" Value="False">
               <Setter TargetName="Ring" Property="Fill" Value="{DynamicResource Brush.Bg.Base}"/>

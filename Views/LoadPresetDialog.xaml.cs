@@ -537,9 +537,9 @@ public class LiquidGlassBrushConverter : IValueConverter
     public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
     {
         string mode = (value as string) ?? "Default";
-        if (!BaseColors.TryGetValue(mode, out var baseColor))
-            mode = "Default";
-        baseColor = BaseColors[mode];
+        if (!BaseColors.TryGetValue(mode, out var baseColor) &&
+            !DesktopZones.Helpers.AcrylicHelper.TryParseGlassColor(mode, out baseColor))
+            baseColor = BaseColors["Default"];
 
         const byte stopAlpha = 0xC0;
         baseColor = Color.FromArgb(stopAlpha, baseColor.R, baseColor.G, baseColor.B);

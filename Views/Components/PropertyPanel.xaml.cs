@@ -7,6 +7,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Shapes;
 using DesktopZones.Helpers;
 using DesktopZones.Models;
 using DesktopZones.Services;
@@ -68,6 +69,12 @@ public partial class PropertyPanel : UserControl
     /// preview, persistence just won't happen.
     /// </summary>
     public Action<object>? Persist { get; set; }
+
+    /// <summary>Live-preview sink (wired alongside <see cref="Persist"/> by the
+    /// host). Field edits route through <c>Save()</c> → this callback to repaint
+    /// the live desktop window without writing to disk; disk persistence happens
+    /// only on Apply via <see cref="Persist"/>.</summary>
+    public Action<object>? Preview { get; set; }
 
     // ── 状态区操作回调（由宿主 ManagementWindow 在 WirePropertyPanelPersist 时注入）──
     // PropertyPanel 不持有任何服务，所有窗口级/破坏性操作经回调回到宿主执行：
@@ -153,6 +160,8 @@ public partial class PropertyPanel : UserControl
                 ws.ClocksChanged -= _clocksChangedHandler;
                 ws.CalendarsChanged -= _clocksChangedHandler;
             }
+            if (_panelChangedHandler != null && Application.Current is App appP2 && appP2.PanelService is PanelService ps2)
+                ps2.PanelEnabledChanged -= _panelChangedHandler;
         };
         _loc.LanguageChanged += OnLanguageChanged;
         ThemeService.Changed += OnThemeChanged;
@@ -187,6 +196,14 @@ public partial class PropertyPanel : UserControl
             widgetService.ClocksChanged += _clocksChangedHandler;
             widgetService.CalendarsChanged += _clocksChangedHandler;
         }
+        // 面板启用开关实时同步 — 面板经热键/托盘/自身"─"按钮开关时,PanelService
+        // 发 PanelEnabledChanged,状态区的启用开关立即跟随(参考分区/便签等组件的
+        // Changed 事件订阅模式)。
+        if (Application.Current is App appP && appP.PanelService is PanelService panelService)
+        {
+            _panelChangedHandler = RefreshStatusArea;
+            panelService.PanelEnabledChanged += _panelChangedHandler;
+        }
     }
 
     void OnLanguageChanged(string _) => OnTargetChanged();
@@ -201,6 +218,7 @@ public partial class PropertyPanel : UserControl
     Action<string, bool>? _zoneLockChangedHandler;
     Action? _notesChangedHandler;
     Action? _clocksChangedHandler;
+    Action? _panelChangedHandler;
     (bool Enabled, string Path)? _lastFolderMappingState;
 
     // 组合分区编辑器已移除文件夹映射 section（组级映射只保留在分区窗口层），
@@ -259,20 +277,20 @@ public partial class PropertyPanel : UserControl
 
     void ApplyBtn_Click(object sender, RoutedEventArgs e)
     {
-        // ponytail: real-time persistence is already wired via Save() lambda in
-        // every field row — clicking Apply is a no-op persistence-wise but gives
-        // the user an explicit "commit now" affordance. Re-runs Save() so any
-        // field change made via direct binding still lands on disk.
-        if (Target != null) Save(Target);
+        // ponytail: preview mode — field edits only live-preview until Apply.
+        // Apply commits the current preview state to disk, then closes the
+        // floating style window (the docked panel stays open for editing).
+        if (Target == null) return;
+        if (Commit(Target) && IsFloating)
+            CloseWindowRequested?.Invoke(this, EventArgs.Empty);
     }
 
     void CancelBtn_Click(object sender, RoutedEventArgs e)
     {
-        // ponytail: restore model from OnTargetChanged snapshot, then push the
-        // restored state to disk so the next app start sees it. We can't just
-        // discard in-memory changes because the field rows already pushed them
-        // via Persist — the disk has the new values; reverting memory only
-        // would leave the app in a memory/disk split state.
+        // ponytail: preview mode — field edits were never persisted, so Cancel
+        // only needs to restore the in-memory model from the OnTargetChanged
+        // snapshot and repaint the live window back to that state. No disk
+        // write here (the disk still holds the pre-edit values).
         if (Target == null || _snapshot == null) return;
         switch (Target)
         {
@@ -285,25 +303,52 @@ public partial class PropertyPanel : UserControl
             // ponytail 2026-08-26: SubFolder 取消 — 还原到 snapshot 时的字段值。
             case ZoneItem sub when _snapshot is ZoneItem ssub && sub.Type == ItemType.SubFolder: CopySubfolderFields(ssub, sub); break;
         }
-        Save(Target);  // persist the restored state
+        Save(Target);  // live-preview refresh back to snapshot (no disk write)
         OnTargetChanged();  // rebuild UI from restored model + refresh snapshot
     }
 
     void LoadPresetBtn_Click(object sender, RoutedEventArgs e)
     {
-        // ponytail: mirrors old WidgetSettingsDialog.LoadPreset_Click — open
-        // LoadPresetDialog, real-time preview per card click. Snapshot is
-        // re-captured on OK so a later outer Cancel reverts to the preset
-        // state (not pre-pick). On Cancel of inner dialog, model is restored
-        // to pre-pick, UI resyncs, snapshot stays at original (pre-pick).
+        // ponytail: mirrors old WidgetSettingsDialog.LoadPreset_Click with two
+        // independent cancel layers. The pre-picker payload snapshot restores
+        // the live model + window when the inner dialog is cancelled; OK
+        // re-baselines the outer snapshot so a later outer Cancel reverts to
+        // the post-preset state (preserving the preset), not the pre-pick state.
         var (kind, payload) = BuildCurrentPayload();
         if (kind == null || payload == null || CachedOwner == null) return;
 
-        PresetButtonsHelper.OpenLoad(CachedOwner, kind.Value, payload,
+        var applied = PresetButtonsHelper.OpenLoad(CachedOwner, kind.Value, payload,
             onPicked: picked => ApplyPayload(picked),
             onCardPicked: record => ApplyCardPicked(record));
 
-        OnTargetChanged();  // re-capture snapshot to post-pick state
+        if (applied == true)
+        {
+            OnTargetChanged();  // OK: re-capture snapshot to post-preset baseline
+        }
+        else
+        {
+            // Inner Cancel (or dialog dismissed) — revert to pre-picker state.
+            RestoreFromPayload(payload);
+            OnTargetChanged();
+        }
+    }
+
+    /// <summary>Restore the live model + window to the state captured before the
+    /// LoadPresetDialog opened (inner-cancel layer). Mirrors the historical
+    /// WidgetSettingsDialog._loadDialogSnapshot restore.</summary>
+    void RestoreFromPayload(object snapshot)
+    {
+        switch (Target)
+        {
+            case Zone z when snapshot is Zone sz: CopyZoneFields(sz, z); break;
+            case MergedGroupTarget g when snapshot is Zone sz: CopyMergedGroupFields(sz, g.Master); break;
+            case DesktopClock c when snapshot is DesktopClock sc: CopyClockFields(sc, c); break;
+            case DesktopCalendar cal when snapshot is DesktopCalendar scal: CopyCalendarFields(scal, cal); break;
+            case StickyNote n when snapshot is StickyNote sn: CopyNoteFields(sn, n); break;
+            case PanelConfig p when snapshot is PanelPresetConfig sp: CopyPanelConfigFields(sp, p); break;
+            case ZoneItem sub when sub.Type == ItemType.SubFolder && snapshot is ZoneItem ssub: CopySubfolderFields(ssub, sub); break;
+        }
+        if (Target != null) Save(Target);  // live-preview refresh back to pre-picker state
     }
 
     void SavePresetBtn_Click(object sender, RoutedEventArgs e)
@@ -354,15 +399,16 @@ public partial class PropertyPanel : UserControl
         {
             case Zone z when record is ZonePreset zp:
                 CopyZoneFields(zp.Zone, z);
-                // ponytail: Zone has no live window — preview path is the management
-                // list row's preview, which the host page rebuilds via the Target DP
-                // change triggered by OnTargetChanged() at the end of this handler.
+                // ponytail: real-time preset preview — repaint the live desktop
+                // zone window (no disk write; Apply commits later).
+                app?.ZoneManager?.GetZoneWindow(z.Id)?.RefreshZone(z);
                 break;
             case MergedGroupTarget g when record is ZonePreset zp:
                 CopyZoneFields(zp.Zone, g.Master);
                 // ponytail: preset zone's group style rides along; the group's
                 // identity (name/icon/membership) is never overwritten.
                 CloneHelper.CopyBaseProperties<MergedGroupStyle>(zp.Zone.MergedGroupStyle, g.Master.MergedGroupStyle);
+                app?.ZoneManager?.GetZoneWindow(g.Master.Id)?.RefreshZone(g.Master);
                 break;
             case DesktopClock c when record is ClockPreset cp:
                 CopyClockFields(cp.Clock, c);
@@ -379,14 +425,19 @@ public partial class PropertyPanel : UserControl
                 break;
             case PanelConfig p when record is PanelPreset pp:
                 CopyPanelConfigFields(pp.Config, p);
-                // PanelWindow doesn't have RefreshAppearance; live update path is
-                // via the host page reload — leave it; Save() will trigger persist
-                // and the panel window subscribes to config changes elsewhere.
+                // ponytail: repaint the live panel window from the mutated live
+                // config (no disk write; Apply commits later).
+                app?.PanelService?.RefreshAppearance();
                 break;
             // ponytail 2026-08-26: SubFolder preset — 镜像 preset.Subfolder 的字段到当前 ZoneItem,
             // SubItems 内容不动 (SubfolderPreset.Clone 不含 SubItems,符合 spec §4.5)。
             case ZoneItem sub when sub.Type == ItemType.SubFolder && record is SubfolderPreset sp:
                 CopySubfolderFields(sp.Subfolder, sub);
+                // ponytail: repaint the parent zone window so the subfolder's
+                // icon/fill/glass change shows on the desktop (no disk write).
+                var parentZone = app?.ZoneManager?.Zones.FirstOrDefault(z => z.Items.Contains(sub));
+                if (parentZone != null)
+                    app?.ZoneManager?.GetZoneWindow(parentZone.Id)?.RefreshZone(parentZone);
                 break;
         }
         _suppressSwitchAnimation = true;
@@ -608,9 +659,9 @@ public partial class PropertyPanel : UserControl
     //
     // Sections: 开关区 / 基本 / 标题栏 / 边框与填充 / 液态玻璃 / 背景图片
     // Each control wires back via the Save() closure — mutating the Zone
-    // instance and then asking the host (Persist) to push it back to the
-    // ZoneManager. Persist is set by the host page; if not wired, updates
-    // are in-memory only.
+    // instance and repainting the live window via Preview (preview mode).
+    // Persist (disk write) is deferred to Apply/Commit; both callbacks are
+    // wired by the host page. If not wired, updates stay in-memory only.
 
     /// <summary>重新渲染字段树以反映 TileMode / HideAppName / CustomIcon 的依赖更新。</summary>
     void Rebuild(Zone z) => BuildZoneFields(z);
@@ -705,6 +756,18 @@ public partial class PropertyPanel : UserControl
                 : (Brush)FindResource("Brush.Text.Tertiary");
     }
 
+    /// <summary>分区显示/隐藏 — 与窗口标题栏隐藏按钮、恢复按钮走同一条路径：
+    /// ZoneManager.HideZone/ShowZone 内部会调用 ZoneWindow.HideZone/ShowZone，
+    /// 从而正确播放窗口折叠/展开动画、切换恢复按钮并触发 ZonesChanged /
+    /// ZoneVisibilityChanged 同步刷新状态区开关。</summary>
+    void ApplyZoneVisibility(Zone z)
+    {
+        var zm = (Application.Current as App)?.ZoneManager;
+        if (zm == null) return;
+        if (z.IsVisible) zm.HideZone(z.Id); // → window.HideZone（窗口隐藏按钮同款；无恢复按钮则彻底隐藏）
+        else zm.ShowZone(z);                // → window.ShowZone（恢复按钮/重新打开同款）
+    }
+
     /// <summary>分区锁定 — 与窗口标题栏锁按钮走同一条路径：SetLocked 触发
     /// ZoneManager.LockChanged → ZoneWindow.OnServiceLockChanged → ApplyLockState
     /// 切换窗口锁按钮图标；再 NotifyChanged + SaveConfig 持久化并刷新列表/状态区。
@@ -726,7 +789,7 @@ public partial class PropertyPanel : UserControl
         // 行1：显示/锁定开关
         var row1 = new DockPanel { LastChildFill = false };
         _statusVisibleCb = AddStatusSwitch(row1, _loc["PropertyPanel.Status.Visible"], z.IsVisible,
-            _ => ToggleVisibility?.Invoke(z)); // host: ShowZone/HideZone（无恢复按钮时自动彻底隐藏）
+            _ => ApplyZoneVisibility(z)); // 与窗口显示/隐藏按钮同路径
         _statusLockCb = AddStatusSwitch(row1, _loc["PropertyPanel.Status.Locked"], z.IsLocked,
             on => ApplyZoneLock(z, on));
         StatusHost.Children.Add(row1);
@@ -787,7 +850,7 @@ public partial class PropertyPanel : UserControl
         // 行1：显示/锁定开关（组合分区自身无需「组合分区中」状态词条）
         var row1 = new DockPanel { LastChildFill = false };
         _statusVisibleCb = AddStatusSwitch(row1, _loc["PropertyPanel.Status.Visible"], z.IsVisible,
-            _ => ToggleVisibility?.Invoke(g));
+            _ => ApplyZoneVisibility(z)); // 与组合分区窗口显示/隐藏按钮同路径
         _statusLockCb = AddStatusSwitch(row1, _loc["PropertyPanel.Status.Locked"], z.IsLocked,
             on => ApplyZoneLock(z, on));
         StatusHost.Children.Add(row1);
@@ -922,45 +985,34 @@ public partial class PropertyPanel : UserControl
         };
     }
 
-    /// <summary>删除/解散按钮 — Apply 同款填充按钮（主题色实底 + 圆角 4）。</summary>
+    /// <summary>删除/解散按钮 — 固定蓝填充按钮（FillBtn：深蓝底白字，悬停内部高光）。</summary>
     Button MakeStatusDangerButton(string text)
     {
         var btn = new Button
         {
             Content = text,
             Cursor = Cursors.Hand,
-            Background = (Brush)FindResource("Brush.Accent.Solid"),
-            Foreground = (Brush)FindResource("Brush.Accent.On"),
-            BorderThickness = new Thickness(0),
+            Style = (Style)FindResource("FillBtn"),
             Padding = new Thickness(12, 5, 12, 5),
             FontSize = 11,
             VerticalAlignment = VerticalAlignment.Center,
         };
-        var borderStyle = new Style(typeof(Border));
-        borderStyle.Setters.Add(new Setter(Border.CornerRadiusProperty, new CornerRadius(4)));
-        btn.Resources.Add(typeof(Border), borderStyle);
         return btn;
     }
 
-    /// <summary>次要操作按钮 — 底部 Load/Save 同款描边按钮。</summary>
+    /// <summary>次要操作按钮 — 固定蓝描边按钮（OutlineBtn：亮蓝底 + 蓝边框 + 白字）。</summary>
     Button MakeStatusOutlineButton(string text)
     {
         var btn = new Button
         {
             Content = text,
             Cursor = Cursors.Hand,
-            Background = Brushes.Transparent,
-            BorderBrush = (Brush)FindResource("Brush.Border.Default"),
-            BorderThickness = new Thickness(1),
-            Foreground = (Brush)FindResource("Brush.Text.Secondary"),
+            Style = (Style)FindResource("OutlineBtn"),
             Padding = new Thickness(12, 5, 12, 5),
             FontSize = 11,
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(0, 0, 6, 0),
         };
-        var borderStyle = new Style(typeof(Border));
-        borderStyle.Setters.Add(new Setter(Border.CornerRadiusProperty, new CornerRadius(4)));
-        btn.Resources.Add(typeof(Border), borderStyle);
         return btn;
     }
 
@@ -1021,6 +1073,7 @@ public partial class PropertyPanel : UserControl
         MergedGroupTarget g => g.Master.MergedGroupStyle.TileMode,
         DesktopClock c => c.TileMode,
         DesktopCalendar cal => cal.TileMode,
+        StickyNote n => n.TileMode,
         _ => false,
     };
 
@@ -1057,12 +1110,13 @@ public partial class PropertyPanel : UserControl
 
         // 开关区
         var switches = MakeSection(_loc["ZoneProp.Section.Switches"]);
-        // 磁贴模式开关：开启时若 HideAppName 仍为默认值 false，自动勾选。
+        // 磁贴模式开关：开启时若 HideAppName 仍为默认值 false，自动勾选；取消时默认同步关掉。
         var tileModeCb = MakeCheckRow(_loc["ZoneProp.TileMode"], z.TileMode,
             v =>
             {
                 z.TileMode = v;
                 if (v && !z.HideAppName) z.HideAppName = true;
+                else if (!v && z.HideAppName) z.HideAppName = false;
                 Rebuild(z);
                 Save(z);
             });
@@ -1072,9 +1126,10 @@ public partial class PropertyPanel : UserControl
             v => { z.HideAppName = v; Save(z); });
         switches.Children.Add(hideNameCb);
         // 自定义图标 — TileMode=false 或 Items.Count>1 时锁定（灰显 0.4 + 禁用）。
+        // 行内右侧小字说明启用条件（Brush.Text.Tertiary 主题自适应，随字段树重建刷新）。
         var customIconCb = MakeCheckRow(_loc["ZoneProp.CustomIcon"], z.CustomIcon,
             v => { z.CustomIcon = v; Save(z); });
-        switches.Children.Add(customIconCb);
+        switches.Children.Add(MakeRowWithHint(customIconCb, _loc["ZoneProp.CustomIconInlineHint"]));
         // 保存引用 + 记录图标数，供 ZonesChanged 实时同步门控（增删图标时联动）。
         _customIconCb = customIconCb;
         _lastZoneItemCount = z.Items.Count;
@@ -1103,8 +1158,8 @@ public partial class PropertyPanel : UserControl
             v => { z.Name = v ?? ""; Save(z); }));
         basic.Children.Add(MakeColorRow(_loc["ZoneProp.NameColor"], z.TitleTextColor,
             v => { z.TitleTextColor = v; Save(z); }));
-        basic.Children.Add(MakeTextRow(_loc["ZoneProp.Icon"], z.IconChar,
-            v => { z.IconChar = v ?? ""; Save(z); }, maxLen: 2));
+        basic.Children.Add(MakeIconRow(_loc["ZoneProp.Icon"], z.IconChar,
+            v => { z.IconChar = v; Save(z); }, Helpers.IconGlyph.Zones));
         basic.Children.Add(MakeColorRow(_loc["ZoneProp.IconColor"],
             string.IsNullOrEmpty(z.IconColor) ? "#FFFFFF" : z.IconColor,
             v => { z.IconColor = v; Save(z); }));
@@ -1126,7 +1181,7 @@ public partial class PropertyPanel : UserControl
         gridGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(10) });
         gridGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         var gridBlock = MakeNumberSubBlock(_loc["ZoneProp.GridSize"], z.GridSize,
-            v => { z.GridSize = (int)v; Save(z); }, asInt: true);
+            v => { z.GridSize = (int)v; Save(z); }, asInt: true, hint: _loc["ZoneProp.GridSizeHint"]);
         Grid.SetColumn(gridBlock, 0);
         gridGrid.Children.Add(gridBlock);
         var snapStack = new StackPanel { VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 18, 0, 4) };
@@ -1282,6 +1337,16 @@ public partial class PropertyPanel : UserControl
         sec.Children.Add(MakeNameTokenChipRow(z));
         sec.Children.Add(MakeAutoOrganizePathRow(z));
         sec.Children.Add(MakeScanExistingButton(z));
+
+        // 底部说明：解释「启用监听」后的自动加入行为（Brush.Text.Tertiary 主题自适应小字）。
+        sec.Children.Add(new TextBlock
+        {
+            Text = _loc["ZoneProp.AutoOrganize.WatchHint"],
+            FontSize = 10,
+            Foreground = (Brush)FindResource("Brush.Text.Tertiary"),
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 8, 0, 0),
+        });
 
         return sec;
     }
@@ -1590,8 +1655,8 @@ public partial class PropertyPanel : UserControl
             v => { gm.DisplayName = v ?? ""; SaveGroup(); }));
         basic.Children.Add(MakeColorRow(_loc["MergedGroupProp.NameColor"], gs.TitleTextColor,
             v => { gs.TitleTextColor = v; SaveGroup(); }));
-        basic.Children.Add(MakeTextRow(_loc["MergedGroupProp.Icon"], gm.Icon,
-            v => { gm.Icon = v ?? ""; SaveGroup(); }, maxLen: 2));
+        basic.Children.Add(MakeIconRow(_loc["MergedGroupProp.Icon"], gm.Icon,
+            v => { gm.Icon = v; SaveGroup(); }, Helpers.IconGlyph.Merged));
         basic.Children.Add(MakeColorRow(_loc["MergedGroupProp.IconColor"],
             string.IsNullOrEmpty(gs.IconColor) ? "#FFFFFF" : gs.IconColor,
             v => { gs.IconColor = v; SaveGroup(); }));
@@ -1613,7 +1678,7 @@ public partial class PropertyPanel : UserControl
         gridGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(10) });
         gridGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         var gridBlock = MakeNumberSubBlock(_loc["ZoneProp.GridSize"], z.GridSize,
-            v => { z.GridSize = (int)v; SaveGroup(); }, asInt: true);
+            v => { z.GridSize = (int)v; SaveGroup(); }, asInt: true, hint: _loc["ZoneProp.GridSizeHint"]);
         Grid.SetColumn(gridBlock, 0);
         gridGrid.Children.Add(gridBlock);
         var snapStack = new StackPanel { VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 18, 0, 4) };
@@ -1726,8 +1791,8 @@ public partial class PropertyPanel : UserControl
     //          + EnableLiquidGlass + BackgroundImagePath
     //   预设:入口统一走底部按钮栏的"加载预设/保存预设"(预设卡在 LoadPresetDialog
     //         二级界面里,参考分区卡片含名称/日期信息栏)。
-    // 持久化走 Save(sub) → Persist?.Invoke(sub) (同 Zone 路径);host dispatcher 已有
-    // ZoneItem 分支(_zoneManager.UpdateZone(parent))。
+    // 预览走 Save(sub) → Preview?.Invoke(sub);Apply 时才 Commit → Persist 落盘,
+    // host dispatcher 已有 ZoneItem 分支(_zoneManager.UpdateZone(parent))。
 
     void BuildSubfolderFields(ZoneItem sub)
     {
@@ -1762,7 +1827,7 @@ public partial class PropertyPanel : UserControl
         layoutGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(10) });
         layoutGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         var gridBlock = MakeNumberSubBlock(_loc["SubfolderProp.GridSize"], sub.GridSize,
-            v => { sub.GridSize = (int)v; Save(sub); }, asInt: true);
+            v => { sub.GridSize = (int)v; Save(sub); }, asInt: true, hint: _loc["ZoneProp.GridSizeHint"]);
         Grid.SetColumn(gridBlock, 0);
         layoutGrid.Children.Add(gridBlock);
         var snapStack = new StackPanel { VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 18, 0, 4) };
@@ -2063,6 +2128,11 @@ public partial class PropertyPanel : UserControl
 
         // 基本
         var basic = MakeSection(_loc["ZoneProp.Section.Basic"]);
+        basic.Children.Add(MakeIconRow(_loc["ZoneProp.Icon"], c.IconChar,
+            v => { c.IconChar = v; Save(c); }, Helpers.IconGlyph.Clock));
+        basic.Children.Add(MakeColorRow(_loc["ZoneProp.IconColor"],
+            string.IsNullOrEmpty(c.IconColor) ? "#FFFFFF" : c.IconColor,
+            v => { c.IconColor = v; Save(c); }));
         basic.Children.Add(MakeSizeGrid(
             c.Width, v => { c.Width = v; Save(c); },
             c.Height, v => { c.Height = v; Save(c); }));
@@ -2120,7 +2190,7 @@ public partial class PropertyPanel : UserControl
             SetOffsetX = v => c.DigitalBgImageOffsetX = v,
             GetOffsetY = () => c.DigitalBgImageOffsetY,
             SetOffsetY = v => c.DigitalBgImageOffsetY = v,
-            Width = 320, Height = 140,
+            Width = c.Width, Height = c.Height,
             CropShape = "Rectangle",
             OnSave = () => Save(c),
         }));
@@ -2194,6 +2264,11 @@ public partial class PropertyPanel : UserControl
 
         // 基本
         var basic = MakeSection(_loc["ZoneProp.Section.Basic"]);
+        basic.Children.Add(MakeIconRow(_loc["ZoneProp.Icon"], cal.IconChar,
+            v => { cal.IconChar = v; Save(cal); }, Helpers.IconGlyph.Calendar));
+        basic.Children.Add(MakeColorRow(_loc["ZoneProp.IconColor"],
+            string.IsNullOrEmpty(cal.IconColor) ? "#FFFFFF" : cal.IconColor,
+            v => { cal.IconColor = v; Save(cal); }));
         basic.Children.Add(MakeSizeGrid(
             cal.Width, v => { cal.Width = v; Save(cal); },
             cal.Height, v => { cal.Height = v; Save(cal); }));
@@ -2266,13 +2341,15 @@ public partial class PropertyPanel : UserControl
     // Same section structure as the Zone editor.
     void BuildNoteFields(StickyNote note)
     {
-        _tileGated.Clear(); // 便签无磁贴模式 — 清掉上一目标的标题栏引用
+        _tileGated.Clear(); // 便签磁贴模式会砍掉标题栏 — 标题栏 section 注册进 _tileGated 门控
         var root = new StackPanel { Margin = new Thickness(16, 12, 16, 12) };
 
         // 开关区（行为）
         var switches = MakeSection(_loc["ZoneProp.Section.Switches"]);
         switches.Children.Add(MakeCheckRow(_loc["NoteProp.Pinned"], note.PinnedTop,
             v => { note.PinnedTop = v; Save(note); }));
+        switches.Children.Add(MakeCheckRow(_loc["ZoneProp.TileMode"], note.TileMode,
+            v => { note.TileMode = v; Save(note); }));
         switches.Children.Add(MakeCheckRowWithSideBtn(_loc["ZoneProp.RestoreButton"], note.EnableRestoreButton,
             v => { note.EnableRestoreButton = v; Save(note); },
             _loc["Motion.SettingsEllipsis"], _ => OpenMotionDialog(note, () => BuildNoteFields(note))));
@@ -2291,6 +2368,11 @@ public partial class PropertyPanel : UserControl
             v => { note.Title = v ?? ""; Save(note); }));
         basic.Children.Add(MakeColorRow(_loc["NoteProp.NameColor"], note.TitleTextColor,
             v => { note.TitleTextColor = v; Save(note); }));
+        basic.Children.Add(MakeIconRow(_loc["ZoneProp.Icon"], note.IconChar,
+            v => { note.IconChar = v; Save(note); }, Helpers.IconGlyph.Sticky));
+        basic.Children.Add(MakeColorRow(_loc["ZoneProp.IconColor"],
+            string.IsNullOrEmpty(note.IconColor) ? "#FFFFFF" : note.IconColor,
+            v => { note.IconColor = v; Save(note); }));
         basic.Children.Add(MakeSizeGrid(
             note.Width, v => { note.Width = v; Save(note); },
             note.Height, v => { note.Height = v; Save(note); }));
@@ -2311,6 +2393,7 @@ public partial class PropertyPanel : UserControl
             note.ControlOpacity,
             v => { note.ControlOpacity = v; Save(note); }));
         root.Children.Add(tb);
+        _tileGated.Add(tb); // 磁贴模式 = 砍掉标题栏 → 标题栏 section 整组禁用
 
         // 边框与填充
         var bf = MakeSection(_loc["ZoneProp.Section.BorderFill"]);
@@ -2370,13 +2453,23 @@ public partial class PropertyPanel : UserControl
         _tileGated.Clear(); // 面板无磁贴模式 — 清掉上一目标的标题栏引用
         var root = new StackPanel { Margin = new Thickness(16, 12, 16, 12) };
 
-        // 开关区
+        // 开关区 — 左 = 圆角/尖角,右(中部) = 面板弹出动效设置按钮。
         var switches = MakeSection(_loc["ZoneProp.Section.Switches"]);
-        switches.Children.Add(MakeCornerStyleRow(p.PanelCornerRadius > 0, rounded =>
+        var cornerRow = MakeCornerStyleRow(p.PanelCornerRadius > 0, rounded =>
         {
             p.PanelCornerRadius = rounded ? (p.PanelCornerRadius > 0 ? p.PanelCornerRadius : 10) : 0;
             Save(p);
-        }));
+        });
+        var motionBtn = MakeSideButton(_loc["Motion.SettingsEllipsis"], _ => OpenPanelPopupMotionDialog(p));
+        var switchRow = new Grid { Margin = new Thickness(0, 2, 0, 2) };
+        switchRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        switchRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(cornerRow, 0);
+        Grid.SetColumn(motionBtn, 1);
+        motionBtn.VerticalAlignment = VerticalAlignment.Center;
+        switchRow.Children.Add(cornerRow);
+        switchRow.Children.Add(motionBtn);
+        switches.Children.Add(switchRow);
         root.Children.Add(switches);
 
         // 基本
@@ -2506,9 +2599,42 @@ public partial class PropertyPanel : UserControl
         cb.Unchecked += (_, _) => onChange(false);
         Grid.SetColumn(cb, 0);
         grid.Children.Add(cb);
+        var btn = MakeSideButton(btnText, onBtnClick);
+        Grid.SetColumn(btn, 1);
+        grid.Children.Add(btn);
+        return grid;
+    }
+
+    /// <summary>行内右侧小字说明 — 把已有控件包成「控件 + 说明文字」的行。
+    /// 文字用 Brush.Text.Tertiary（主题自适应），随字段树重建刷新。</summary>
+    FrameworkElement MakeRowWithHint(FrameworkElement row, string hint)
+    {
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(row, 0);
+        grid.Children.Add(row);
+        var hintText = new TextBlock
+        {
+            Text = hint,
+            FontSize = 10,
+            Foreground = (Brush)FindResource("Brush.Text.Tertiary"),
+            TextWrapping = TextWrapping.Wrap,
+            MaxWidth = 220,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(8, 0, 0, 0),
+        };
+        Grid.SetColumn(hintText, 1);
+        grid.Children.Add(hintText);
+        return grid;
+    }
+
+    /// <summary>行内右侧的「…」按钮,与 MakeCheckRowWithSideBtn 同款视觉。</summary>
+    Button MakeSideButton(string text, Action<RoutedEventArgs> onClick)
+    {
         var btn = new Button
         {
-            Content = btnText,
+            Content = text,
             Margin = new Thickness(0, 2, 0, 2),
             Padding = new Thickness(10, 4, 10, 4),
             Background = (Brush)FindResource("Brush.Bg.Input"),
@@ -2518,10 +2644,8 @@ public partial class PropertyPanel : UserControl
             Cursor = System.Windows.Input.Cursors.Hand,
             FontSize = 11,
         };
-        btn.Click += (_, e) => onBtnClick(e);
-        Grid.SetColumn(btn, 1);
-        grid.Children.Add(btn);
-        return grid;
+        btn.Click += (_, e) => onClick(e);
+        return btn;
     }
 
     Grid MakeSizeGrid(double width, Action<double> onWidth, double height, Action<double> onHeight)
@@ -2536,6 +2660,120 @@ public partial class PropertyPanel : UserControl
         var hBlock = MakeNumberSubBlock(_loc["ZoneProp.Height"], height, onHeight);
         Grid.SetColumn(hBlock, 2);
         grid.Children.Add(hBlock);
+        return grid;
+    }
+
+    /// <summary>
+    /// 图标行 — 左半是「预览 + 半宽输入框」，右半是「预设按钮 + 最多 2 字符提示」。
+    /// 输入框只承载 emoji（用户手输，MaxLength=2）；原生图标（"@zones" 等）通过预设按钮
+    /// 选中后存进模型，输入框显示为空、预览区显示矢量图形。
+    /// </summary>
+    Grid MakeIconRow(string label, string value, Action<string> onChange, string defaultIcon)
+    {
+        var grid = new Grid { Margin = new Thickness(0, 4, 0, 0) };
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        grid.Children.Add(new TextBlock
+        {
+            Text = label,
+            FontSize = 11,
+            Foreground = (Brush)FindResource("Brush.Text.Secondary"),
+            Margin = new Thickness(0, 0, 0, 4),
+        });
+
+        var row = new Grid();
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        Grid.SetRow(row, 1);
+        grid.Children.Add(row);
+
+        // 左半：预览 + 半宽输入框（原输入框砍一半）。
+        var left = new StackPanel { Orientation = Orientation.Horizontal };
+        var previewBorder = new Border
+        {
+            Width = 28, Height = 28,
+            CornerRadius = new CornerRadius(6),
+            Background = (Brush)FindResource("Brush.Accent.Wash"),
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 6, 0),
+        };
+        var previewHost = new Grid();
+        var previewText = new TextBlock
+        {
+            FontSize = 14,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = (Brush)FindResource("Brush.Text.Primary"),
+        };
+        var previewPath = new System.Windows.Shapes.Path
+        {
+            Width = 16, Height = 16,
+            Stretch = Stretch.Uniform,
+            Stroke = (Brush)FindResource("Brush.Accent"),
+            StrokeThickness = 1.5,
+            StrokeLineJoin = PenLineJoin.Round,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Visibility = Visibility.Collapsed,
+        };
+        previewHost.Children.Add(previewText);
+        previewHost.Children.Add(previewPath);
+        previewBorder.Child = previewHost;
+
+        var tb = new TextBox
+        {
+            Text = IconGlyph.IsNative(value) ? "" : value ?? "",
+            MaxLength = 2,
+            Background = (Brush)FindResource("Brush.Bg.Input"),
+            Foreground = (Brush)FindResource("Brush.Text.Primary"),
+            BorderBrush = (Brush)FindResource("Brush.Border.Subtle"),
+            BorderThickness = new Thickness(1),
+            Padding = new Thickness(6, 4, 6, 4),
+            FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        left.Children.Add(previewBorder);
+        left.Children.Add(tb);
+
+        // 右半：预设按钮 + 小字提示。
+        var right = new StackPanel { Margin = new Thickness(12, 0, 0, 0), VerticalAlignment = VerticalAlignment.Top };
+        var presetBtn = MakeSideButton(_loc["ZoneProp.IconPreset"], _ =>
+        {
+            var owner = CachedOwner ?? Window.GetWindow(this);
+            var dlg = new IconPickerDialog { Owner = owner };
+            if (dlg.ShowDialog() == true && dlg.SelectedIcon != null)
+            {
+                var icon = dlg.SelectedIcon;
+                tb.Text = IconGlyph.IsNative(icon) ? "" : icon;
+                Commit(icon);
+            }
+        });
+        right.Children.Add(presetBtn);
+        right.Children.Add(new TextBlock
+        {
+            Text = _loc["ZoneProp.IconMaxChars"],
+            FontSize = 10,
+            Foreground = (Brush)FindResource("Brush.Text.Tertiary"),
+            Margin = new Thickness(0, 4, 0, 0),
+        });
+
+        Grid.SetColumn(left, 0);
+        Grid.SetColumn(right, 1);
+        row.Children.Add(left);
+        row.Children.Add(right);
+
+        void RefreshPreview(string icon)
+            => IconGlyph.Apply(previewText, previewPath, string.IsNullOrEmpty(icon) ? defaultIcon : icon, (Brush)FindResource("Brush.Accent"), 16);
+
+        void Commit(string icon)
+        {
+            onChange(icon);
+            RefreshPreview(icon);
+        }
+
+        RefreshPreview(value);
+        tb.LostFocus += (_, _) => Commit(tb.Text);
+        tb.KeyDown += (_, e) => { if (e.Key == Key.Enter) { Commit(tb.Text); Keyboard.ClearFocus(); } };
         return grid;
     }
 
@@ -2601,7 +2839,9 @@ public partial class PropertyPanel : UserControl
         return grid;
     }
 
-    Grid MakeNumberSubBlock(string label, double value, Action<double> onChange, bool asInt = false)
+    /// <summary>数字输入块。hint 非空时在输入框下方追加一行小字说明
+    /// （Brush.Text.Tertiary 主题自适应，随字段树重建刷新）。</summary>
+    Grid MakeNumberSubBlock(string label, double value, Action<double> onChange, bool asInt = false, string? hint = null)
     {
         var grid = new Grid();
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -2629,6 +2869,20 @@ public partial class PropertyPanel : UserControl
         tb.KeyDown += (_, e) => { if (e.Key == Key.Enter) { TryParse(tb.Text); Keyboard.ClearFocus(); } };
         Grid.SetRow(tb, 1);
         grid.Children.Add(tb);
+        if (hint != null)
+        {
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            var hintText = new TextBlock
+            {
+                Text = hint,
+                FontSize = 10,
+                Foreground = (Brush)FindResource("Brush.Text.Tertiary"),
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 4, 0, 0),
+            };
+            Grid.SetRow(hintText, 2);
+            grid.Children.Add(hintText);
+        }
         return grid;
 
         void TryParse(string s)
@@ -2826,33 +3080,42 @@ public partial class PropertyPanel : UserControl
         return outer;
     }
 
-    // ponytail: per-type style field copy helpers, ported from historical
-    // WidgetSettingsDialog (commit 89c7bb5). UseGlobalAppearance / Global*
-    // fields removed in commit e4bd2cf (delete global appearance) so the
-    // whitelists are shorter than the original. User-data fields (Id, Title,
-    // Content, position) are intentionally excluded — only style is restored.
+    // ponytail: per-type copy helpers used by Cancel / inner preset-cancel /
+    // preset apply. Ported from historical WidgetSettingsDialog (commit 89c7bb5)
+    // and expanded to cover the CURRENT field trees so Cancel reverts every
+    // field the editor can touch. UseGlobalAppearance / Global* fields were
+    // removed in commit e4bd2cf (delete global appearance). Identity fields
+    // (Id) and position (X/Y) are never copied; size IS reverted because the
+    // editors expose Width/Height.
 
     void CopyZoneFields(Zone src, Zone dst)
     {
+        // Full style restore: every field the Zone editor touches. Identity /
+        // position / content / membership are never copied.
+        CloneHelper.CopyBaseProperties<AppearanceModel>(src, dst);
         dst.Name = src.Name;
-        dst.FillColor = src.FillColor;
-        dst.BorderColor = src.BorderColor;
+        dst.Width = src.Width;
+        dst.Height = src.Height;
         dst.BorderThickness = src.BorderThickness;
-        dst.TitleBarFillColor = src.TitleBarFillColor;
         dst.CornerRadius = src.CornerRadius;
+        dst.GridSize = src.GridSize;
+        dst.SnapToGrid = src.SnapToGrid;
+        dst.IconChar = src.IconChar;
+        dst.TitleBarFillColor = src.TitleBarFillColor;
+        dst.ControlOpacity = src.ControlOpacity;
+        dst.BackgroundImageOpacity = src.BackgroundImageOpacity;
+        dst.AutoArrange = src.AutoArrange;
+        dst.IconColor = src.IconColor;
+        dst.TitleTextColor = src.TitleTextColor;
         dst.TileMode = src.TileMode;
         dst.HideAppName = src.HideAppName;
         dst.CustomIcon = src.CustomIcon;
-        dst.HoverAutoExpand = src.HoverAutoExpand;
-        dst.EnableRestoreButton = src.EnableRestoreButton;
         dst.ButtonColor = src.ButtonColor;
         dst.TextColor = src.TextColor;
         dst.TitleBarFillIndependent = src.TitleBarFillIndependent;
-        dst.MergedGroupStyle.TitleBarFillIndependent = src.MergedGroupStyle.TitleBarFillIndependent;
         dst.FolderMappingEnabled = src.FolderMappingEnabled;
         dst.FolderMappingPath = src.FolderMappingPath;
-        dst.MergedGroupStyle.FolderMappingEnabled = src.MergedGroupStyle.FolderMappingEnabled;
-        dst.MergedGroupStyle.FolderMappingPath = src.MergedGroupStyle.FolderMappingPath;
+        CloneHelper.CopyBaseProperties<MergedGroupStyle>(src.MergedGroupStyle, dst.MergedGroupStyle);
     }
 
     // ponytail 2026-08-26: SubFolder 取消还原 — 镜像 spec §4.5 SubFolder 专属 14 字段 + Name。
@@ -2910,26 +3173,13 @@ public partial class PropertyPanel : UserControl
 
     void CopyClockFields(DesktopClock src, DesktopClock dst)
     {
-        // Pure styling — never copy user-state (Id/X/Y/Width/Height/IsVisible/
-        // Mode/ShowSeconds/ShowDate/Use24Hour/FontSize/FontFamily/Opacity/AccentColor).
-        // TextColor is now a style field (主体内容颜色), so it IS copied.
-        dst.BorderColor = src.BorderColor;
-        dst.FillColor = src.FillColor;
+        // Full restore for every field the Clock editor touches. Identity /
+        // position (Id/X/Y) stay untouched; size/behavior ARE reverted because
+        // the editor exposes Width/Height/Use24Hour/ShowSeconds/TileMode.
+        CloneHelper.CopyBaseProperties<AppearanceModel>(src, dst);
         dst.BorderThickness = src.BorderThickness;
         dst.CornerRadius = src.CornerRadius;
-        dst.EnableLiquidGlass = src.EnableLiquidGlass;
-        dst.EnableAcrylic = src.EnableAcrylic;
-        dst.GlassBlurAmount = src.GlassBlurAmount;
-        dst.GlassTintOpacity = src.GlassTintOpacity;
-        dst.GlassTintLuminosity = src.GlassTintLuminosity;
-        dst.GlassColorMode = src.GlassColorMode;
-        dst.BackgroundImagePath = src.BackgroundImagePath;
-        dst.BgImageStretch = src.BgImageStretch;
-        dst.BgImageZoom = src.BgImageZoom;
-        dst.BgImageOffsetX = src.BgImageOffsetX;
-        dst.BgImageOffsetY = src.BgImageOffsetY;
         dst.BackgroundImageOpacity = src.BackgroundImageOpacity;
-        dst.EnableRestoreButton = src.EnableRestoreButton;
         dst.AnalogFillColor = src.AnalogFillColor;
         dst.DigitalFillColor = src.DigitalFillColor;
         dst.DigitalBackgroundImagePath = src.DigitalBackgroundImagePath;
@@ -2941,33 +3191,35 @@ public partial class PropertyPanel : UserControl
         dst.TextColor = src.TextColor;
         dst.ButtonColor = src.ButtonColor;
         dst.SecondHandColor = src.SecondHandColor;
+        dst.TileMode = src.TileMode;
+        dst.ControlOpacity = src.ControlOpacity;
+        dst.Use24Hour = src.Use24Hour;
+        dst.ShowSeconds = src.ShowSeconds;
+        dst.Width = src.Width;
+        dst.Height = src.Height;
+        dst.DigitalWidth = src.DigitalWidth;
+        dst.DigitalHeight = src.DigitalHeight;
+        dst.AnalogWidth = src.AnalogWidth;
+        dst.AnalogHeight = src.AnalogHeight;
     }
 
     void CopyCalendarFields(DesktopCalendar src, DesktopCalendar dst)
     {
-        // Pure styling — never copy Id/X/Y/Width/Height/IsVisible/ShowWeekNumbers/
-        // StartOnMonday/Notes/Opacity.
-        dst.BorderColor = src.BorderColor;
-        dst.FillColor = src.FillColor;
+        // Full restore for every field the Calendar editor touches. Identity /
+        // position (Id/X/Y) stay untouched; size/behavior ARE reverted.
+        CloneHelper.CopyBaseProperties<AppearanceModel>(src, dst);
         dst.BorderThickness = src.BorderThickness;
         dst.CornerRadius = src.CornerRadius;
-        dst.EnableLiquidGlass = src.EnableLiquidGlass;
-        dst.EnableAcrylic = src.EnableAcrylic;
-        dst.GlassBlurAmount = src.GlassBlurAmount;
-        dst.GlassTintOpacity = src.GlassTintOpacity;
-        dst.GlassTintLuminosity = src.GlassTintLuminosity;
-        dst.GlassColorMode = src.GlassColorMode;
-        dst.BackgroundImagePath = src.BackgroundImagePath;
-        dst.BgImageStretch = src.BgImageStretch;
-        dst.BgImageZoom = src.BgImageZoom;
-        dst.BgImageOffsetX = src.BgImageOffsetX;
-        dst.BgImageOffsetY = src.BgImageOffsetY;
         dst.BackgroundImageOpacity = src.BackgroundImageOpacity;
-        dst.EnableRestoreButton = src.EnableRestoreButton;
         dst.TextColor = src.TextColor;
         dst.ButtonColor = src.ButtonColor;
         dst.TodayColor = src.TodayColor;
         dst.FontSize = src.FontSize;
+        dst.TileMode = src.TileMode;
+        dst.ControlOpacity = src.ControlOpacity;
+        dst.StartOnMonday = src.StartOnMonday;
+        dst.Width = src.Width;
+        dst.Height = src.Height;
     }
 
     // ponytail: StickyNote has too many fields for an explicit whitelist.
@@ -2980,7 +3232,6 @@ public partial class PropertyPanel : UserControl
         {
             nameof(StickyNote.Id),
             nameof(StickyNote.X), nameof(StickyNote.Y),
-            nameof(StickyNote.Width), nameof(StickyNote.Height),
             nameof(StickyNote.IsVisible),
             nameof(StickyNote.Title), nameof(StickyNote.Content),
             nameof(StickyNote.NoteColor),
@@ -3010,18 +3261,22 @@ public partial class PropertyPanel : UserControl
     void CopyPanelConfigFields(PanelPresetConfig src, PanelConfig dst)
     {
         // ponytail: Target is PanelConfig (extracted from AppConfig in the
-        // Panel POCO refactor). src is PanelPresetConfig. Pure styling —
-        // PanelX/PanelY/PanelWidth/PanelHeight intentionally NOT copied: user
-        // wants panel position/size preserved across cancel/preset-apply.
-        // Field naming differs between the two: PanelConfig uses PanelGlass*
-        // prefix (e.g. PanelGlassBlurAmount); PanelPresetConfig uses bare
-        // Glass* (e.g. GlassBlurAmount). Map them explicitly.
+        // Panel POCO refactor). src is PanelPresetConfig. Position (PanelX /
+        // PanelY) is never copied — it isn't edited in the panel; size IS
+        // reverted/applied because the editor exposes Width/Height. Field
+        // naming differs between the two: PanelConfig uses PanelGlass* prefix
+        // (e.g. PanelGlassBlurAmount); PanelPresetConfig uses bare Glass*
+        // (e.g. GlassBlurAmount). Map them explicitly.
+        dst.PanelWidth = src.PanelWidth;
+        dst.PanelHeight = src.PanelHeight;
         dst.PanelFillColor = src.PanelFillColor;
         dst.PanelBorderColor = src.PanelBorderColor;
         dst.PanelBorderThickness = src.PanelBorderThickness;
         dst.PanelCornerRadius = src.PanelCornerRadius;
         dst.PanelTitleBarFillColor = src.PanelTitleBarFillColor;
         dst.PanelTitleBarFillIndependent = src.PanelTitleBarFillIndependent;
+        dst.PanelButtonColor = src.PanelButtonColor;
+        dst.PanelTextColor = src.PanelTextColor;
         dst.PanelControlOpacity = src.PanelControlOpacity;
         dst.PanelBackgroundImagePath = src.PanelBackgroundImagePath;
         dst.PanelBgImageStretch = src.PanelBgImageStretch;
@@ -3034,16 +3289,41 @@ public partial class PropertyPanel : UserControl
         dst.PanelGlassTintOpacity = src.GlassTintOpacity;
         dst.PanelGlassTintLuminosity = src.GlassTintLuminosity;
         dst.PanelGlassColorMode = src.GlassColorMode;
+        dst.PanelPopupMotion = src.PanelPopupMotion;
+        dst.PanelPopupOrigin = src.PanelPopupOrigin;
+        dst.PanelPopupSpeed = src.PanelPopupSpeed;
     }
 
+    /// <summary>
+    /// Preview-mode edit sink. Field rows mutate the in-memory model and call
+    /// this to repaint the live desktop window WITHOUT writing to disk. Disk
+    /// persistence is deferred to Apply (<see cref="Commit"/>). The method name
+    /// is kept as "Save" so the ~140 field-row call sites don't churn; its
+    /// contract is now the historical PushToWidget / PushToZone (live preview),
+    /// not persistence.
+    /// </summary>
     void Save(object target)
     {
-        try { Persist?.Invoke(target); }
+        try { Preview?.Invoke(target); }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[PropertyPanel] Preview failed: {ex}");
+        }
+    }
+
+    /// <summary>Commit the current preview state to disk via the host's Persist
+    /// dispatcher (UpdateZone / UpdateClock / UpdateCalendar / UpdateNote /
+    /// SaveConfig / UpdateZone for merged &amp; subfolder). Called by Apply only.
+    /// Returns false (and keeps the window open) when persistence throws.</summary>
+    bool Commit(object target)
+    {
+        try { Persist?.Invoke(target); return true; }
         catch (Exception ex)
         {
             // ponytail: surface to debug + show inline error dot in panel header (not a popup)
             System.Diagnostics.Debug.WriteLine($"[PropertyPanel] Persist failed: {ex}");
             ShowPersistError(true);
+            return false;
         }
     }
 
@@ -3137,6 +3417,24 @@ public partial class PropertyPanel : UserControl
         Save(sub);
         // ponytail: flyout 每次打开都从 live ZoneItem 读 kind/speed,无需像
         // AppearanceModel 那样广播 RaiseHoverExpandSettingsChanged。
+    }
+
+    /// <summary>面板弹出动效二级窗口。展开原点 = 桌面四角之一(焦点显示器工作区),
+    /// 动画类型与其他窗口同款;回写原点 + 动画类型 + 速度。</summary>
+    void OpenPanelPopupMotionDialog(PanelConfig p)
+    {
+        var owner = CachedOwner ?? Window.GetWindow(this);
+        if (owner == null) { MessageBox.Show(_loc["PropertyPanel.NoOwnerWindow"]); return; }
+        var dlg = new PanelPopupMotionDialog(p.PanelPopupOrigin, p.PanelPopupMotion, p.PanelPopupSpeed)
+        {
+            Owner = owner
+        };
+        if (dlg.ShowDialog() != true) return;
+        p.PanelPopupOrigin = dlg.ResultOrigin;
+        p.PanelPopupMotion = dlg.ResultAnimation;
+        p.PanelPopupSpeed = dlg.ResultSpeed;
+        Save(p);
+        // 面板每次打开/关闭都从 live PanelConfig 读动效配置,无需额外广播。
     }
 
     void OpenLiquidGlassDialog(AppearanceModel m)

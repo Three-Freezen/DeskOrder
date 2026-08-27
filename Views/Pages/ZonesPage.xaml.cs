@@ -74,11 +74,10 @@ public partial class ZonesPage : UserControl
             Tag = z,
             Title = z.Name,
             Subtitle = $"{(int)z.Width}×{(int)z.Height} · {z.Items.Count} {loc["Manage.Count.Unit"]}",
-            IconKey = "Icon.Zones",
-            IconText = z.IconChar ?? "",
             IsLocked = z.IsLocked,
             IsVisible = z.IsVisible,
         };
+        ApplyIcon(row, z.IconChar, "Icon.Zones");
         // ponytail 2026-08-25: long-press drag reorder — model Move persists the
         // collection order; MoveRow shifts the bound row OC so the ItemsControl
         // reorders live mid-drag (same live-shift shape as PropertyTabStrip).

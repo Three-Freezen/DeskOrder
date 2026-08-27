@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Linq;
+using System.Text.Json;
 using DesktopZones.Models;
 using DesktopZones.Views;
 
@@ -67,6 +69,7 @@ public class NotesService
         var note = Notes.FirstOrDefault(n => n.Id == id);
         if (note != null) Notes.Remove(note);
         Save();
+        DeleteNoteFile(id);
         NotesChanged?.Invoke();
     }
 
@@ -92,6 +95,62 @@ public class NotesService
         {
             cfg.Notes = Notes.ToList();
         });
+    }
+
+    // ── 便签富文本独立 JSON 文件 ──
+
+    private static readonly string NotesDir = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "DesktopZones", "Notes");
+
+    private static readonly JsonSerializerOptions NoteFileJsonOptions = new()
+    {
+        WriteIndented = true,
+        PropertyNameCaseInsensitive = true
+    };
+
+    public string NoteFilePath(Guid id) => Path.Combine(NotesDir, $"{id:N}.json");
+
+    public NoteFileData? LoadNoteFile(Guid id)
+    {
+        try
+        {
+            var path = NoteFilePath(id);
+            if (!File.Exists(path)) return null;
+            var json = File.ReadAllText(path);
+            return JsonSerializer.Deserialize<NoteFileData>(json, NoteFileJsonOptions);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public void SaveNoteFile(Guid id, NoteFileData data)
+    {
+        try
+        {
+            Directory.CreateDirectory(NotesDir);
+            var json = JsonSerializer.Serialize(data, NoteFileJsonOptions);
+            File.WriteAllText(NoteFilePath(id), json);
+        }
+        catch
+        {
+            // 独立文件写失败不应影响主配置保存。
+        }
+    }
+
+    public void DeleteNoteFile(Guid id)
+    {
+        try
+        {
+            var path = NoteFilePath(id);
+            if (File.Exists(path)) File.Delete(path);
+        }
+        catch
+        {
+            // 文件可能被占用/已不存在,忽略。
+        }
     }
 
     /// <summary>Set locked state for a note by string id. Mirrors WidgetService.SetLocked — no event,

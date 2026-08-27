@@ -56,6 +56,25 @@ public partial class ManagementWindow : Window
         ("Alt+Shift+P",    0x0005,      0x50, true ),
     };
 
+    // ponytail 2026-08-27: 全部显示/隐藏/最小化 各自独立的预设菜单(字母 A/H/M)，
+    // 不再复用便签的 N 预设。
+    private static readonly (string Label, int Modifiers, int Key, bool Enabled)[] ShowAllHotkeyPresets = BuildGlobalHotkeyPresets('A');
+    private static readonly (string Label, int Modifiers, int Key, bool Enabled)[] HideAllHotkeyPresets = BuildGlobalHotkeyPresets('H');
+    private static readonly (string Label, int Modifiers, int Key, bool Enabled)[] MinimizeAllHotkeyPresets = BuildGlobalHotkeyPresets('M');
+
+    static (string Label, int Modifiers, int Key, bool Enabled)[] BuildGlobalHotkeyPresets(char key)
+    {
+        int vk = key;
+        return new[]
+        {
+            ("None",           0,      0,    false),
+            ($"Alt+{key}",     0x0001, vk,   true ),
+            ($"Ctrl+{key}",    0x0002, vk,   true ),
+            ($"Win+{key}",     0x0008, vk,   true ),
+            ($"Alt+Shift+{key}",0x0005, vk,  true ),
+        };
+    }
+
     public NotesService? NotesService => _notesService;
     public WidgetService? WidgetService => _widgetService;
     public System.Collections.ObjectModel.ObservableCollection<Zone> Zones => _zoneManager.Zones;
@@ -358,12 +377,13 @@ public partial class ManagementWindow : Window
         titleRow.Children.Add(closeBtn);
         titleBar.Child = titleRow;
 
+        // ponytail 2026-08-28: 分隔线改接管理界面同款文字自适应色（与液态玻璃二级窗口一致）。
         var separator = new Border
         {
             Height = 1,
-            Background = ThemeBrushes.BorderSubtleModern,
-            Margin = new Thickness(12, 0, 12, 0)
+            Margin = new Thickness(0, 0, 0, 0)
         };
+        separator.SetResourceReference(System.Windows.Controls.Border.BackgroundProperty, "Menu.Separator");
 
         contentBorder.CornerRadius = new CornerRadius(0);
         contentBorder.Padding = new Thickness(0);
@@ -513,6 +533,46 @@ public partial class ManagementWindow : Window
                 DockedTabs.PinTab(Components.PropertyWindowManager.TargetKey(obj));
         };
 
+        // ── 预览回调（Apply 前实时刷新桌面窗口，不落盘）──
+        // 字段编辑现在走 PropertyPanel.Save → Preview，只把内存里的改动画到
+        // 对应桌面窗口上；只有 Apply 才走上面的 Persist 写盘。这样「应用之前
+        // 都是预览模式，取消即回退」的两段式语义才能成立。
+        panel.Preview = obj =>
+        {
+            switch (obj)
+            {
+                case Zone z:
+                    _zoneManager.GetZoneWindow(z.Id)?.RefreshZone(z);
+                    break;
+                case MergedGroupTarget g:
+                    _zoneManager.GetZoneWindow(g.Master.Id)?.RefreshZone(g.Master);
+                    break;
+                case DesktopClock c:
+                    _widgetService?.GetClockWindow(c.Id)?.RefreshAppearance(c);
+                    break;
+                case DesktopCalendar cal:
+                    _widgetService?.GetCalendarWindow(cal.Id)?.RefreshAppearance(cal);
+                    break;
+                case StickyNote n:
+                    if (_notesService?.Windows.TryGetValue(n.Id, out var nw) == true)
+                        nw.RefreshAppearance(n);
+                    break;
+                case PanelConfig p:
+                    // Panel POCO 在 live AppConfig 上原地改动 — RefreshAppearance
+                    // 读 _zoneManager.GetConfig().Panel,即被预览改动的同一实例。
+                    _panelService?.RefreshAppearance();
+                    break;
+                case ZoneItem sub when sub.Type == ItemType.SubFolder:
+                    var parent = _zoneManager.Zones.FirstOrDefault(z => z.Items.Contains(sub));
+                    if (parent != null)
+                        _zoneManager.GetZoneWindow(parent.Id)?.RefreshZone(parent);
+                    break;
+            }
+            // 预览编辑同样视为「想保留这个 docked tab」。
+            if (panel == DockedPanel && DockedTabs != null)
+                DockedTabs.PinTab(Components.PropertyWindowManager.TargetKey(obj));
+        };
+
         // ── 状态区操作回调（PropertyPanel 顶部实时状态条）──
         // 列表行右键菜单已取消，显示/锁定/删除/组合/快捷键操作全部移到面板状态区。
 
@@ -639,6 +699,8 @@ public partial class ManagementWindow : Window
     }
 
     public void ShowMergeDialog(Zone sourceZone) => ShowMergeDialogImpl(sourceZone);
+    /// <summary>组合分区页「新建」按钮 — 打开选择独立分区的二级窗口，勾选后创建新组合。</summary>
+    public Zone? ShowCreateMergedGroupDialog() => ShowCreateMergedGroupDialogImpl();
     public void DisbandEntireGroup(Zone masterZone)
     {
         var result = MessageBox.Show(
@@ -737,12 +799,38 @@ public partial class ManagementWindow : Window
     /// <summary>Confirm before performing a full hide-all (used by sidebar).</summary>
     public bool ConfirmHideAll()
     {
-        var totalZones = _zoneManager?.Zones?.Count ?? 0;
-        var msg = _loc.Get("Merge.HideAllConfirm", totalZones);
+        var count = CountHideAllWindows();
+        var msg = _loc.Get("Merge.HideAllConfirm", count);
         var res = MessageBox.Show(msg,
             _loc["Merge.HideAll"],
             MessageBoxButton.YesNo, MessageBoxImage.Question);
         return res == MessageBoxResult.Yes;
+    }
+
+    /// <summary>
+    /// 统计「全部隐藏」会影响的窗口数：分区(合并分区算 1 个窗口) + 时钟 + 日历 + 便签。
+    /// 旧实现只数 Zone 总数，既漏了小挂件，又把合并分区里的子分区分开算。
+    /// </summary>
+    int CountHideAllWindows()
+    {
+        int count = 0;
+        if (_zoneManager != null)
+        {
+            foreach (var z in _zoneManager.Zones)
+            {
+                // 合并分区里的子分区随主分区显示，不单独算窗口。
+                bool isSubZone = z.MergedGroupMembership.GroupId.HasValue
+                    && z.MergedGroupMembership.SubZoneIds.Count == 0;
+                if (!isSubZone) count++;
+            }
+        }
+        if (_widgetService != null)
+        {
+            count += _widgetService.Clocks.Count;
+            count += _widgetService.Calendars.Count;
+        }
+        if (_notesService != null) count += _notesService.Notes.Count;
+        return count;
     }
 
     public void ShowAllWidgetsFromVm() => ShowAllWidgets(baseDelayMs: (_zoneManager?.Zones?.Count ?? 0) * HoverExpandBehavior.BatchStaggerMs);
@@ -1022,6 +1110,46 @@ public partial class ManagementWindow : Window
         window.Activate();
     }
 
+    /// <summary>启动时恢复可见的小组件窗口（位置 + 显示状态持久化，与分区一致）。
+    /// 只打开模型里 IsVisible=true 且尚未开窗的组件；隐藏组件保持隐藏。</summary>
+    public void RestoreVisibleWidgets()
+    {
+        var app = (App)System.Windows.Application.Current;
+        if (_notesService != null)
+        {
+            foreach (var note in _notesService.Notes.Where(n => n.IsVisible).ToList())
+            {
+                try
+                {
+                    if (!app.IsNoteWindowOpen(note.Id))
+                        OpenNoteWindow(note);
+                }
+                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[RestoreVisibleWidgets] note {note.Id} failed: {ex}"); }
+            }
+        }
+        if (_widgetService != null)
+        {
+            foreach (var clock in _widgetService.Clocks.Where(c => c.IsVisible).ToList())
+            {
+                try
+                {
+                    if (!_openClockWindows.ContainsKey(clock.Id))
+                        OpenClockWindow(clock);
+                }
+                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[RestoreVisibleWidgets] clock {clock.Id} failed: {ex}"); }
+            }
+            foreach (var cal in _widgetService.Calendars.Where(c => c.IsVisible).ToList())
+            {
+                try
+                {
+                    if (!_openCalendarWindows.ContainsKey(cal.Id))
+                        OpenCalendarWindow(cal);
+                }
+                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[RestoreVisibleWidgets] calendar {cal.Id} failed: {ex}"); }
+            }
+        }
+    }
+
     // ── Visibility sync ──
 
     private void OnZoneVisibilityChanged(Guid zoneId, bool isVisible)
@@ -1244,8 +1372,9 @@ public partial class ManagementWindow : Window
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        var titleBar = new Border { Height = 30, Background = Brushes.Transparent, Cursor = Cursors.SizeAll, Margin = new Thickness(0, 0, 0, 12) };
+        var titleBar = new Border { Height = 30, Background = Brushes.Transparent, Cursor = Cursors.SizeAll, Margin = new Thickness(0, 0, 0, 8) };
         titleBar.MouseLeftButtonDown += (_, _) => { try { dlg.DragMove(); } catch { } };
         titleBar.Child = new TextBlock
         {
@@ -1257,13 +1386,24 @@ public partial class ManagementWindow : Window
         Grid.SetRow(titleBar, 0);
         grid.Children.Add(titleBar);
 
+        // ponytail 2026-08-28: 与液态玻璃二级窗口一致 — 标题栏与主体之间补一条
+        // 自适应分隔线（管理界面文字颜色同款）。
+        var separator = new Border
+        {
+            Height = 1,
+            Margin = new Thickness(0, 0, 0, 10)
+        };
+        separator.SetResourceReference(System.Windows.Controls.Border.BackgroundProperty, "Menu.Separator");
+        Grid.SetRow(separator, 1);
+        grid.Children.Add(separator);
+
         var instruction = new TextBlock
         {
             Text = _loc["Hotkey.PressHint"],
             FontSize = 12, Foreground = ThemeBrushes.TextSecondaryModern,
             HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, 12)
         };
-        Grid.SetRow(instruction, 1);
+        Grid.SetRow(instruction, 2);
         grid.Children.Add(instruction);
 
         var hotkeyDisplay = new TextBox
@@ -1276,31 +1416,26 @@ public partial class ManagementWindow : Window
             HorizontalContentAlignment = HorizontalAlignment.Center,
             Padding = new Thickness(8), Margin = new Thickness(0, 0, 0, 12)
         };
-        Grid.SetRow(hotkeyDisplay, 2);
+        Grid.SetRow(hotkeyDisplay, 3);
         grid.Children.Add(hotkeyDisplay);
 
         var buttonPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
         var cancelButton = new Button
         {
             Content = _loc["Common.Cancel"], Width = 60, Height = 28, FontSize = 11, Cursor = Cursors.Hand,
-            Background = ThemeBrushes.BgHoverModern,
-            Foreground = ThemeBrushes.TextSecondaryModern,
-            BorderThickness = new Thickness(1),
-            BorderBrush = ThemeBrushes.BorderDefaultModern,
+            Style = (Style)FindResource("OutlineBtn"),
             Margin = new Thickness(0, 0, 8, 0)
         };
         cancelButton.Click += (_, _) => dlg.Close();
         var saveButton = new Button
         {
             Content = _loc["Common.Save"], Width = 60, Height = 28, FontSize = 11, Cursor = Cursors.Hand,
-            Background = ThemeBrushes.AccentSolidModern,
-            Foreground = ThemeBrushes.TextTertiaryModern,
-            BorderThickness = new Thickness(0),
+            Style = (Style)FindResource("FillBtn"),
             IsEnabled = false
         };
         buttonPanel.Children.Add(cancelButton);
         buttonPanel.Children.Add(saveButton);
-        Grid.SetRow(buttonPanel, 3);
+        Grid.SetRow(buttonPanel, 4);
         grid.Children.Add(buttonPanel);
 
         mainBorder.Child = grid;
@@ -1326,8 +1461,8 @@ public partial class ManagementWindow : Window
             recordedKey = KeyInterop.VirtualKeyFromKey(key);
             hotkeyDisplay.Text = GetHotkeyLabel(recordedModifiers, recordedKey);
             saveButton.IsEnabled = true;
-            saveButton.Background = ThemeBrushes.AccentSolidModern;
-            saveButton.Foreground = Brushes.White;
+            saveButton.Background = ThemeBrushes.BtnSolidModern;
+            saveButton.Foreground = ThemeBrushes.BtnOnModern;
             isRecording = false;
         };
 
@@ -1473,7 +1608,8 @@ public partial class ManagementWindow : Window
             {
                 var itemPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(4) };
                 if (!string.IsNullOrEmpty(subZone.IconChar))
-                    itemPanel.Children.Add(new TextBlock { Text = subZone.IconChar, FontSize = 14, Foreground = ThemeBrushes.TextTertiaryModern, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
+                    if (Helpers.IconGlyph.CreateIcon(subZone.IconChar, ThemeBrushes.TextTertiaryModern, fontSize: 14, pathSize: 14) is { } subIcon)
+                        itemPanel.Children.Add(subIcon);
                 itemPanel.Children.Add(new TextBlock { Text = subZone.Name, VerticalAlignment = VerticalAlignment.Center, Foreground = ThemeBrushes.TextPrimaryModern });
                 listBox.Items.Add(new ListBoxItem { Content = itemPanel, Tag = subZone, Padding = new Thickness(6, 4, 6, 4) });
             }
@@ -1483,9 +1619,9 @@ public partial class ManagementWindow : Window
         grid.Children.Add(listBox);
 
         var btnRow = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-        var cancelBtn = new Button { Content = _loc["Common.Cancel"], Width = 70, Height = 28, Background = ThemeBrushes.BgHoverModern, Foreground = ThemeBrushes.TextPrimaryModern, BorderThickness = new Thickness(0), FontSize = 11, Cursor = Cursors.Hand, Margin = new Thickness(0, 0, 8, 0) };
+        var cancelBtn = new Button { Content = _loc["Common.Cancel"], Width = 70, Height = 28, Style = (Style)FindResource("OutlineBtn"), FontSize = 11, Cursor = Cursors.Hand, Margin = new Thickness(0, 0, 8, 0) };
         cancelBtn.Click += (_, _) => dialog.Close();
-        var disbandBtn = new Button { Content = _loc["Merge.DisbandSingle"], Width = 80, Height = 28, Background = ThemeBrushes.AccentSolidModern, Foreground = Brushes.White, BorderThickness = new Thickness(0), FontSize = 11, Cursor = Cursors.Hand };
+        var disbandBtn = new Button { Content = _loc["Merge.DisbandSingle"], Width = 80, Height = 28, Style = (Style)FindResource("FillBtn"), FontSize = 11, Cursor = Cursors.Hand };
         disbandBtn.Click += (_, _) =>
         {
             if (listBox.SelectedItem is ListBoxItem item && item.Tag is Zone selectedZone)
@@ -1531,7 +1667,8 @@ public partial class ManagementWindow : Window
         {
             var itemPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(4) };
             if (!string.IsNullOrEmpty(targetGroup.MergedGroupMembership.Icon))
-                itemPanel.Children.Add(new TextBlock { Text = targetGroup.MergedGroupMembership.Icon, FontSize = 14, Foreground = ThemeBrushes.TextTertiaryModern, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
+                if (Helpers.IconGlyph.CreateIcon(targetGroup.MergedGroupMembership.Icon, ThemeBrushes.TextTertiaryModern, fontSize: 14, pathSize: 14) is { } groupIcon)
+                    itemPanel.Children.Add(groupIcon);
             itemPanel.Children.Add(new TextBlock { Text = targetGroup.MergedGroupMembership.DisplayName, VerticalAlignment = VerticalAlignment.Center, Foreground = ThemeBrushes.TextPrimaryModern });
             listBox.Items.Add(new ListBoxItem { Content = itemPanel, Tag = targetGroup, Padding = new Thickness(6, 4, 6, 4) });
         }
@@ -1540,9 +1677,9 @@ public partial class ManagementWindow : Window
         grid.Children.Add(listBox);
 
         var btnRow = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-        var cancelBtn = new Button { Content = _loc["Common.Cancel"], Width = 70, Height = 28, Background = ThemeBrushes.BgHoverModern, Foreground = ThemeBrushes.TextPrimaryModern, BorderThickness = new Thickness(0), FontSize = 11, Cursor = Cursors.Hand, Margin = new Thickness(0, 0, 8, 0) };
+        var cancelBtn = new Button { Content = _loc["Common.Cancel"], Width = 70, Height = 28, Style = (Style)FindResource("OutlineBtn"), FontSize = 11, Cursor = Cursors.Hand, Margin = new Thickness(0, 0, 8, 0) };
         cancelBtn.Click += (_, _) => dialog.Close();
-        var mergeBtn = new Button { Content = _loc["Merge.MergeBtn"], Width = 80, Height = 28, Background = ThemeBrushes.AccentSolidModern, Foreground = Brushes.White, BorderThickness = new Thickness(0), FontSize = 11, Cursor = Cursors.Hand };
+        var mergeBtn = new Button { Content = _loc["Merge.MergeBtn"], Width = 80, Height = 28, Style = (Style)FindResource("FillBtn"), FontSize = 11, Cursor = Cursors.Hand };
         mergeBtn.Click += (_, _) =>
         {
             if (listBox.SelectedItem is ListBoxItem item && item.Tag is Zone targetGroup)
@@ -1564,6 +1701,83 @@ public partial class ManagementWindow : Window
 
         WrapDialogWithDarkTitleBar(dialog, bgBorder, mergeTargetTitle);
         dialog.ShowDialog();
+    }
+
+    Zone? ShowCreateMergedGroupDialogImpl()
+    {
+        var eligibleZones = _zoneManager.Zones
+            .Where(z => z.MergedGroupMembership.GroupId == null)
+            .ToList();
+
+        var dlg = new Window { Title = _loc["Merge.Title"], Width = 360, Height = 380, WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = this, ResizeMode = ResizeMode.NoResize };
+        var bgBorder = new Border { Background = ThemeBrushes.BgChromeModern, CornerRadius = new CornerRadius(8), Padding = new Thickness(16), Child = new Grid() };
+        var grid = (Grid)bgBorder.Child;
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        var header = new TextBlock { Text = _loc["Merge.SelectZonesToMerge"], FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = ThemeBrushes.TextPrimaryModern, Margin = new Thickness(0, 0, 0, 12) };
+        Grid.SetRow(header, 0);
+        grid.Children.Add(header);
+
+        var selectAllPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
+        var selectAllCheckBox = new CheckBox { Content = _loc["Merge.SelectAll"], Foreground = ThemeBrushes.TextPrimaryModern, FontSize = 12, IsChecked = false };
+        selectAllPanel.Children.Add(selectAllCheckBox);
+        Grid.SetRow(selectAllPanel, 1);
+        grid.Children.Add(selectAllPanel);
+
+        var checkBoxes = new List<CheckBox>();
+        var scrollViewer = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, MaxHeight = 200 };
+        var zonesPanel = new StackPanel();
+        foreach (var z in eligibleZones)
+        {
+            var itemPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(4) };
+            if (!string.IsNullOrEmpty(z.IconChar))
+                if (Helpers.IconGlyph.CreateIcon(z.IconChar, ThemeBrushes.TextTertiaryModern, fontSize: 14, pathSize: 14) is { } zoneIcon)
+                    itemPanel.Children.Add(zoneIcon);
+            itemPanel.Children.Add(new TextBlock { Text = z.Name, VerticalAlignment = VerticalAlignment.Center, Foreground = ThemeBrushes.TextPrimaryModern });
+            var checkBox = new CheckBox { Content = itemPanel, Tag = z, Margin = new Thickness(0, 2, 0, 2), Foreground = ThemeBrushes.TextPrimaryModern, FontSize = 12 };
+            checkBoxes.Add(checkBox);
+            zonesPanel.Children.Add(checkBox);
+        }
+        scrollViewer.Content = zonesPanel;
+        Grid.SetRow(scrollViewer, 2);
+        grid.Children.Add(scrollViewer);
+
+        selectAllCheckBox.Checked += (_, _) => { foreach (var cb in checkBoxes) cb.IsChecked = true; };
+        selectAllCheckBox.Unchecked += (_, _) => { foreach (var cb in checkBoxes) cb.IsChecked = false; };
+
+        Zone? result = null;
+        var btnRow = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+        var cancelBtn = new Button { Content = _loc["Rename.Cancel"], Width = 70, Height = 28, Style = (Style)FindResource("OutlineBtn"), FontSize = 11, Cursor = Cursors.Hand, Margin = new Thickness(0, 0, 8, 0) };
+        cancelBtn.Click += (_, _) => dlg.Close();
+        var createBtn = new Button { Content = _loc["Merge.CreateGroupBtn"], Width = 90, Height = 28, Style = (Style)FindResource("FillBtn"), FontSize = 11, Cursor = Cursors.Hand, IsEnabled = eligibleZones.Count >= 2 };
+        createBtn.Click += (_, _) =>
+        {
+            var selected = checkBoxes.Where(cb => cb.IsChecked == true).Select(cb => cb.Tag as Zone).Where(z => z != null).ToList();
+            if (selected.Count < 2) return; // 按钮已禁用,此处仅作防御,不再弹提示
+            var master = selected[0]!;
+            foreach (var tz in selected.Skip(1)) _zoneManager.MergeZones(master.Id, tz!.Id);
+            result = master;
+            dlg.Close();
+        };
+        btnRow.Children.Add(cancelBtn);
+        btnRow.Children.Add(createBtn);
+        Grid.SetRow(btnRow, 3);
+        grid.Children.Add(btnRow);
+
+        // 勾选不足两个时直接禁用创建按钮,不再弹「请至少选择两个」提示。
+        void UpdateCreateEnabled() => createBtn.IsEnabled = checkBoxes.Count(cb => cb.IsChecked == true) >= 2;
+        foreach (var cb in checkBoxes)
+        {
+            cb.Checked += (_, _) => UpdateCreateEnabled();
+            cb.Unchecked += (_, _) => UpdateCreateEnabled();
+        }
+
+        WrapDialogWithDarkTitleBar(dlg, bgBorder, _loc["Merge.Title"]);
+        dlg.ShowDialog();
+        return result;
     }
 
     void ShowMergeDialogImpl(Zone sourceZone)
@@ -1607,7 +1821,8 @@ public partial class ManagementWindow : Window
         {
             var itemPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(4) };
             if (!string.IsNullOrEmpty(z.IconChar))
-                itemPanel.Children.Add(new TextBlock { Text = z.IconChar, FontSize = 14, Foreground = ThemeBrushes.TextTertiaryModern, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
+                if (Helpers.IconGlyph.CreateIcon(z.IconChar, ThemeBrushes.TextTertiaryModern, fontSize: 14, pathSize: 14) is { } zoneIcon)
+                    itemPanel.Children.Add(zoneIcon);
             itemPanel.Children.Add(new TextBlock { Text = z.Name, VerticalAlignment = VerticalAlignment.Center, Foreground = ThemeBrushes.TextPrimaryModern });
             var checkBox = new CheckBox { Content = itemPanel, Tag = z, Margin = new Thickness(0, 2, 0, 2), Foreground = ThemeBrushes.TextPrimaryModern, FontSize = 12 };
             checkBoxes.Add(checkBox);
@@ -1621,9 +1836,9 @@ public partial class ManagementWindow : Window
         selectAllCheckBox.Unchecked += (_, _) => { foreach (var cb in checkBoxes) cb.IsChecked = false; };
 
         var btnRow = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-        var cancelBtn = new Button { Content = _loc["Rename.Cancel"], Width = 70, Height = 28, Background = ThemeBrushes.BgHoverModern, Foreground = ThemeBrushes.TextPrimaryModern, BorderThickness = new Thickness(0), FontSize = 11, Cursor = Cursors.Hand, Margin = new Thickness(0, 0, 8, 0) };
+        var cancelBtn = new Button { Content = _loc["Rename.Cancel"], Width = 70, Height = 28, Style = (Style)FindResource("OutlineBtn"), FontSize = 11, Cursor = Cursors.Hand, Margin = new Thickness(0, 0, 8, 0) };
         cancelBtn.Click += (_, _) => dlg.Close();
-        var mergeBtn = new Button { Content = _loc["Merge.MergeBtn"], Width = 80, Height = 28, Background = ThemeBrushes.AccentSolidModern, Foreground = Brushes.White, BorderThickness = new Thickness(0), FontSize = 11, Cursor = Cursors.Hand };
+        var mergeBtn = new Button { Content = _loc["Merge.MergeBtn"], Width = 80, Height = 28, Style = (Style)FindResource("FillBtn"), FontSize = 11, Cursor = Cursors.Hand };
         mergeBtn.Click += (_, _) =>
         {
             var selected = checkBoxes.Where(cb => cb.IsChecked == true).Select(cb => cb.Tag as Zone).Where(z => z != null).ToList();
@@ -1705,7 +1920,7 @@ public partial class ManagementWindow : Window
             "clock"    => new ClockPage(this, _viewModel, _widgetService),
             "sticky"   => new StickyNotePage(this, _viewModel, _notesService),
             "about"    => new AboutPage(),
-            "settings" => new SettingsPage(_configService),
+            "settings" => BuildSettingsPage(),
             _          => new ZonesPage(this, _viewModel, _zoneManager)
         };
         try { MainContent.Content = page; ApplyLoc(); } catch { }
@@ -1744,4 +1959,69 @@ public partial class ManagementWindow : Window
     }
 
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e) { e.Cancel = true; Hide(); }
+
+    // ponytail 2026-08-27: 构造 SettingsPage 并注入热键编辑/双击开关回调。
+    SettingsPage BuildSettingsPage()
+    {
+        var page = new SettingsPage(_configService);
+        var loc = LocalizationService.Instance;
+
+        page.GetShowAllHotkeyLabel = () => HotkeyText(LiveConfig.ShowAllHotkey.Modifiers, LiveConfig.ShowAllHotkey.Key);
+        page.GetMinimizeAllHotkeyLabel = () => HotkeyText(LiveConfig.MinimizeAllHotkey.Modifiers, LiveConfig.MinimizeAllHotkey.Key);
+        page.GetHideAllHotkeyLabel = () => HotkeyText(LiveConfig.HideAllHotkey.Modifiers, LiveConfig.HideAllHotkey.Key);
+        // getter 是在页面构造之后才注入的，注入后立刻刷新一次当前值文本。
+        page.RefreshHotkeyLabels();
+
+        page.OnShowAllHotkeyPicked = btn => GlobalHotkeyPicker(btn, LiveConfig.ShowAllHotkey,
+            h => { LiveConfig.ShowAllHotkey.Modifiers = h.Modifiers; LiveConfig.ShowAllHotkey.Key = h.Key;
+                   _configService.Save(LiveConfig);
+                   if (Application.Current is App app) app.ReRegisterGlobalHotkeys();
+                   page.RefreshHotkeyLabels(); },
+            ShowAllHotkeyPresets);
+        page.OnMinimizeAllHotkeyPicked = btn => GlobalHotkeyPicker(btn, LiveConfig.MinimizeAllHotkey,
+            h => { LiveConfig.MinimizeAllHotkey.Modifiers = h.Modifiers; LiveConfig.MinimizeAllHotkey.Key = h.Key;
+                   _configService.Save(LiveConfig);
+                   if (Application.Current is App app) app.ReRegisterGlobalHotkeys();
+                   page.RefreshHotkeyLabels(); },
+            MinimizeAllHotkeyPresets);
+        page.OnHideAllHotkeyPicked = btn => GlobalHotkeyPicker(btn, LiveConfig.HideAllHotkey,
+            h => { LiveConfig.HideAllHotkey.Modifiers = h.Modifiers; LiveConfig.HideAllHotkey.Key = h.Key;
+                   _configService.Save(LiveConfig);
+                   if (Application.Current is App app) app.ReRegisterGlobalHotkeys();
+                   page.RefreshHotkeyLabels(); },
+            HideAllHotkeyPresets);
+
+        page.OnDoubleClickToggleShowHideChanged = enabled =>
+        {
+            LiveConfig.DoubleClickToggleShowHide = enabled;
+            if (Application.Current is App app) app.SetDesktopDoubleClickEnabled(enabled);
+            _configService.Save(LiveConfig);
+        };
+        return page;
+    }
+
+    void GlobalHotkeyPicker(FrameworkElement placement, CustomHotkey current, Action<CustomHotkey> onSaved,
+        (string Label, int Modifiers, int Key, bool Enabled)[] presets)
+    {
+        ShowHotkeyPresetMenuImpl(placement, presets,
+            getCurrent: () => (current.Modifiers, current.Key, current.Modifiers != 0 && current.Key != 0),
+            onPick: picked => onSaved(picked.Enabled
+                ? new CustomHotkey { Modifiers = picked.Modifiers, Key = picked.Key }
+                : new CustomHotkey { Modifiers = 0, Key = 0 }),
+            onCustom: () =>
+            {
+                ShowHotkeyRecorderDialogImpl((mods, vk) =>
+                {
+                    current.Modifiers = mods;
+                    current.Key = vk;
+                    onSaved(current);
+                });
+            });
+    }
+
+    static string HotkeyText(int modifiers, int vk)
+    {
+        if (modifiers == 0 || vk == 0) return LocalizationService.Instance["Settings.Hotkey.NotSet"];
+        return GetHotkeyLabel(modifiers, vk);
+    }
 }

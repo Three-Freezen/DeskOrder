@@ -48,4 +48,10 @@ public class PanelConfig
     public double PanelBgImageOffsetY { get; set; } = 0;
     /// <summary>Spec §7.2: panel only honors hover-expand speed, not auto-expand toggle.</summary>
     public double PanelHoverExpandSpeed { get; set; } = 1.0;
+    /// <summary>面板弹出动画类型 — 与其他窗口共用 <see cref="HoverExpandAnimationKind"/> 预设。</summary>
+    public HoverExpandAnimationKind PanelPopupMotion { get; set; } = HoverExpandAnimationKind.ScaleExpand;
+    /// <summary>面板弹出动画展开原点 — 桌面的四角之一(焦点显示器工作区)。</summary>
+    public PanelPopupOrigin PanelPopupOrigin { get; set; } = PanelPopupOrigin.BottomRight;
+    /// <summary>面板弹出动画速度倍率（0.25–2.0）。</summary>
+    public double PanelPopupSpeed { get; set; } = 1.0;
 }

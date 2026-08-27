@@ -22,6 +22,23 @@ public partial class SubfolderItemView : UserControl
     /// wraps SubItem ZoneItems into ZoneItemViewModels for thumbnail icons.</summary>
     public static ShellIconService? IconService { get; set; }
 
+    /// <summary>磁贴/隐藏应用名时由外部绑定 — 为 true 时隐藏名称行(声明式,
+    /// 不依赖 ZoneWindow 遍历容器,容器重生成后依然保持隐藏)。</summary>
+    public static readonly DependencyProperty HideNameProperty =
+        DependencyProperty.Register(nameof(HideName), typeof(bool), typeof(SubfolderItemView),
+            new PropertyMetadata(false, OnHideNameChanged));
+    public bool HideName
+    {
+        get => (bool)GetValue(HideNameProperty);
+        set => SetValue(HideNameProperty, value);
+    }
+
+    static void OnHideNameChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is SubfolderItemView v && v.SubNameText != null)
+            v.SubNameText.Visibility = (bool)e.NewValue ? Visibility.Collapsed : Visibility.Visible;
+    }
+
     SubfolderItemViewModel? _vm;
 
     public SubfolderItemView()

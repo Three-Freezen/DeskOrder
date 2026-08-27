@@ -30,10 +30,6 @@ public partial class ClockWidget : Window
     private bool _restoreDragging;
     private Point _restoreDown;
 
-    // ponytail: frozen hover brushes — same color on every mouse-over.
-    private static readonly SolidColorBrush RestoreHoverBrush = Freeze(new(Color.FromArgb(0xFF, 0x2A, 0x2A, 0x4E)));
-    private static readonly SolidColorBrush RestoreIdleBrush  = Freeze(new(Color.FromArgb(0xDD, 0x1A, 0x1A, 0x2E)));
-    static SolidColorBrush Freeze(SolidColorBrush b) { b.Freeze(); return b; }
 
     public ClockWidget(DesktopClock clock, WidgetService widgetService)
     {
@@ -46,7 +42,9 @@ public partial class ClockWidget : Window
         Left = clock.X; Top = clock.Y;
         Opacity = clock.Opacity;
         MinWidth = 140; MinHeight = 80;
-        Width = 320; Height = 140;
+        // ponytail: 用当前模式的持久化尺寸初始化，避免 ctor 内 SizeChanged 把加载的尺寸覆盖掉。
+        var (cw, ch) = ResolveModeSize();
+        Width = cw; Height = ch;
 
         ApplyMode();
         ApplyStyle();
@@ -65,7 +63,8 @@ public partial class ClockWidget : Window
 
         Loaded += OnLoad;
         SizeChanged += OnSizeChanged;
-        LocationChanged += (_, _) => { _clock.X = Left; _clock.Y = Top; };
+        LocationChanged += (_, _) => { _clock.X = Left; _clock.Y = Top; ScheduleSave(); };
+        _saveDebounce.Tick += (_, _) => { _saveDebounce.Stop(); if (_savePending) { _savePending = false; _widgetService.Save(); } };
         _langChanged = _ => UpdateContextMenuLabels();
         _loc.LanguageChanged += _langChanged;
         _widgetService.ClocksChanged += OnClocksChanged;
@@ -86,8 +85,10 @@ public partial class ClockWidget : Window
         _clock.HoverExpandSettingsChanged += OnHoverExpandSettingsChanged;
         // ponytail: ghost-glass fix — see ZoneWindow. Acrylic follows the expand state so a
         // collapsed clock shows ONLY the RestoreButton (no full-window glass rectangle).
-        _hover.Expanded += ApplyAcrylic;
-        _hover.Collapsed += () => AcrylicHelper.DisableBlur(this);
+        // ponytail 2026-08-28 边框残影修复 — 与 ZoneWindow 同款:展开时恢复圆角,
+        // 收起完成时重断言关闭全部 OS 层装饰(玻璃/圆角/DWM 框架阴影)。
+        _hover.Expanded += ReapplyAcrylic;
+        _hover.Collapsed += OnHoverCollapsed;
         // ponytail: bug fix — see ZoneWindow ctor for full rationale. Window.Show()
         // (called by OpenClockWindow / --spawn-widget) doesn't route through
         // ShowClock, so SnapToExpanded never fires and HideClock → CollapseAnimated
@@ -100,6 +101,11 @@ public partial class ClockWidget : Window
         _snapResize = new SnapResize(this);
     }
     private Action<string>? _langChanged;
+
+    // ponytail: 位置防抖保存 — 拖拽移动后持久化 X/Y（与分区 ZoneWindow 一致）。
+    private readonly DispatcherTimer _saveDebounce = new() { Interval = TimeSpan.FromMilliseconds(500) };
+    private bool _savePending;
+    void ScheduleSave() { _savePending = true; _saveDebounce.Stop(); _saveDebounce.Start(); }
 
     void OnHoverExpandSettingsChanged()
     {
@@ -145,10 +151,9 @@ public partial class ClockWidget : Window
             NativeMethods.RemoveThickFrame(this);
         ApplyAcrylic();
         GenerateMarkers();
-        if (_clock.Mode == ClockDisplayMode.Digital)
-        {
-            Width = 320; Height = 140;
-        }
+        // ponytail: 用当前模式的持久化尺寸（而非硬编码默认），保证跨重启/模式切换尺寸不缩回。
+        var (w, h) = ResolveModeSize();
+        Width = w; Height = h;
         ApplyBackgroundImage();
         ApplyDigitalBackgroundImage();
         // Set rounded corners LAST after all sizing is complete
@@ -162,6 +167,8 @@ public partial class ClockWidget : Window
     {
         if (MainContent.Visibility != Visibility.Visible) return;
         _clock.Width = Width; _clock.Height = Height;
+        SaveCurrentSizeForMode(_clock.Mode);
+        UpdateDigitalBgClip();
         NativeMethods.UpdateRoundedCorners(this, _clock.CornerRadius);
     }
 
@@ -243,26 +250,19 @@ public partial class ClockWidget : Window
                 DigitalBgImage.Source = bi;
                 DigitalBgImage.Stretch = Stretch.UniformToFill;
 
-                // UniformToFill — fill target area maintaining aspect ratio
+                // UniformToFill — fill target area maintaining aspect ratio.
+                // 数字背景图全出血铺满整窗（DigitalBgBorder 拉伸填满 ClockBorder 内容区，
+                // 圆角由 MainContent 裁剪），因此裁剪/缩放目标 = 当前窗口尺寸。
                 double imgW = bi.PixelWidth;
                 double imgH = bi.PixelHeight;
-                double dw = 320 * _clock.DigitalBgImageZoom;
-                double dh = 140 * _clock.DigitalBgImageZoom;
+                double dw = Width * _clock.DigitalBgImageZoom;
+                double dh = Height * _clock.DigitalBgImageZoom;
                 double utfScale = Math.Max(dw / imgW, dh / imgH);
                 double displayedW = imgW * utfScale;
                 double displayedH = imgH * utfScale;
 
-                // ponytail: Match the analog pattern (AnalogBgClip.Width/Height = image size).
-                // The previous "center in zone (dw x dh)" formula assumed the Border parent was
-                // 320x140 — but DigitalBgBorder uses HorizontalAlignment=Stretch inside an
-                // auto-sized parent chain (Margin=10 Grid → DigitalPanel). In that chain Stretch
-                // doesn't propagate a deterministic size, so the centering math computed a Margin
-                // against a phantom zone, and the Border often ended up 0x0 → image clipped to
-                // nothing by ClipToBounds. Setting Border = image size directly makes the parent
-                // dimension explicit, mirroring AnalogBgClip (Canvas Width=200 Height=200 + code
-                // resizes to displayedW/displayedH at ClockWidget.xaml.cs:148-149).
-                DigitalBgBorder.Width = displayedW;
-                DigitalBgBorder.Height = displayedH;
+                // 全出血 Border 拉伸填满窗口；Image 按裁剪填充尺寸放大，由 Border 的
+                // ClipToBounds 裁掉超出部分，图片边缘紧贴窗框，不再留一圈轮廓。
                 DigitalBgImage.Width = displayedW;
                 DigitalBgImage.Height = displayedH;
 
@@ -281,6 +281,15 @@ public partial class ClockWidget : Window
             }
         }
         catch { if (DigitalBgImage != null) { DigitalBgImage.Source = null; DigitalBgImage.Opacity = 0; } }
+        UpdateDigitalBgClip();
+    }
+
+    /// <summary>给全出血数字背景图裁圆角，紧贴窗口圆角（Border 的 CornerRadius 不会裁剪子元素）。</summary>
+    void UpdateDigitalBgClip()
+    {
+        if (DigitalBgBorder == null) return;
+        int r = _clock.CornerRadius;
+        DigitalBgBorder.Clip = new RectangleGeometry(new Rect(0, 0, Width, Height), r, r);
     }
 
     // ── Generate proper clock tick marks using trigonometry ──
@@ -406,7 +415,18 @@ public partial class ClockWidget : Window
         // Buttons — 按钮颜色.
         if (HideBtn != null) HideBtn.Foreground = buttons;
         if (LockBtn != null) LockBtn.Foreground = buttons;
-        if (RestoreIconChar != null) RestoreIconChar.Foreground = buttons;
+        ApplyIconVisual(buttons);
+    }
+
+    /// <summary>恢复按钮图标 — 独立 IconColor；空则回退按钮颜色，不随系统深浅色。</summary>
+    void ApplyIconVisual(Brush fallback)
+    {
+        var color = !string.IsNullOrEmpty(_clock.IconColor) ? _clock.IconColor : _clock.ButtonColor;
+        Brush ic;
+        try { ic = new SolidColorBrush((Color)ColorConverter.ConvertFromString(color)!); }
+        catch { ic = fallback; }
+        var icon = string.IsNullOrEmpty(_clock.IconChar) ? Helpers.IconGlyph.Clock : _clock.IconChar;
+        Helpers.IconGlyph.Apply(RestoreIconChar, RestoreIconPath, icon, ic, 18);
     }
 
     void ApplyAcrylic()
@@ -420,22 +440,48 @@ public partial class ClockWidget : Window
         // keeps its full-size window (only the RestoreButton shows), so enabling blur here
         // would paint the tint across the whole window. Only enable while expanded.
         bool expanded = _hover?.IsExpanded ?? false;
-        if (_clock.EnableAcrylic && expanded)
+        if (_clock.EnableLiquidGlass && expanded)
         {
             var blurResult = AcrylicHelper.EnableBlur(this, _clock.GlassBlurAmount, _clock.GlassTintOpacity,
                 _clock.GlassTintLuminosity, _clock.GlassColorMode);
             if (!blurResult.Success)
                 System.Diagnostics.Debug.WriteLine($"[ClockWidget] EnableBlur failed: {blurResult.Error}");
-            if (_clock.EnableLiquidGlass)
+            if (ClockGlassBorder != null)
             {
-                ClockBorder.BorderBrush = AcrylicHelper.CreateChromaticBorder();
-                ClockBorder.BorderThickness = new Thickness(Math.Max(1.0, borderThickness));
+                ClockGlassBorder.BorderBrush = AcrylicHelper.CreateChromaticBorder();
+                ClockGlassBorder.BorderThickness = new Thickness(Math.Max(1.0, borderThickness));
+                ClockGlassBorder.CornerRadius = new CornerRadius(_clock.CornerRadius);
             }
         }
         else
         {
             AcrylicHelper.DisableBlur(this);
+            // ponytail: additive overlay — clear the glass border when the effect is off.
+            if (ClockGlassBorder != null)
+                ClockGlassBorder.BorderThickness = new Thickness(0);
         }
+    }
+
+    /// <summary>
+    /// ponytail 2026-08-28 边框残影修复 — 展开(悬停/点击恢复按钮)时把 Win11 圆角
+    /// 偏好一并恢复(收起时 OnHoverCollapsed 关掉了它),再走 ApplyAcrylic 恢复玻璃。
+    /// </summary>
+    void ReapplyAcrylic()
+    {
+        NativeMethods.SetRoundedCorners(this, _clock.CornerRadius);
+        ApplyAcrylic();
+    }
+
+    /// <summary>
+    /// ponytail 2026-08-28 边框残影修复 — 收起完成时的最终保险(与 ZoneWindow 同款):
+    /// 窗口收起后仍保持整窗大小,残留的丙烯酸玻璃 / Win11 圆角 / DWM 框架阴影
+    /// 都会以「原窗口轮廓」的形式残留在恢复按钮周围,这里全部重断言关闭。
+    /// </summary>
+    void OnHoverCollapsed()
+    {
+        AcrylicHelper.DisableBlur(this);
+        NativeMethods.DisableRoundedCorners(this);
+        NativeMethods.DisableDwmFrameShadow(this);
     }
 
     // ── Style (border / fill) ──
@@ -450,12 +496,26 @@ public partial class ClockWidget : Window
         if (clock != null) _clock = clock;
         // ApplyMode first if the Mode actually changed (preset load can switch Digital↔Analog,
         // changing window size + panel visibility). Gated by previous mode because ApplyMode
-        // resets Width/Height to mode defaults — calling it on every slider tweak would
-        // clobber any user-resized custom dimensions stored in _clock.Width/Height.
+        // loads the mode's OWN persisted size — calling it on every slider tweak would
+        // switch the size back and forth through the mode dimensions.
         if (_lastAppliedMode != _clock.Mode)
         {
+            // ponytail: 先把窗口当前显示的那个模式的尺寸存入其持久化字段，再切到新模式
+            // （ApplyMode 加载新模式自己的尺寸）— 保证来回切换互不覆盖。
+            SaveCurrentSizeForMode(_lastAppliedMode);
             _lastAppliedMode = _clock.Mode;
             ApplyMode();
+        }
+        else
+        {
+            // ponytail: 属性面板改 Width/Height 时实时改变窗口大小（仅模式未切换时——
+            // 模式切换由 ApplyMode 负责加载模式尺寸，避免这里把模式默认值覆盖回去）。
+            // Viewbox 会把内容按新窗口等比放大，文字随之同步放大。
+            if (_clock.Width >= MinWidth && _clock.Height >= MinHeight)
+            {
+                Width = _clock.Width;
+                Height = _clock.Height;
+            }
         }
         // ponytail: ApplyAcrylic's EnableBlur guards on IntPtr.Zero internally, and
         // ClockBorder.Background is a managed property — safe to run regardless of
@@ -465,7 +525,10 @@ public partial class ClockWidget : Window
         ApplyBackgroundImage();
         ApplyDigitalBackgroundImage();
         ApplyStyle();
-        _hover?.SetEnabled(_clock.EnableRestoreButton);
+        // ponytail 2026-08-28: 只在开关真正变化时才 SetEnabled，避免外观实时预览
+        // 打断正在播放的缩放动画。
+        if (_hover != null && _hover.IsEnabled != _clock.EnableRestoreButton)
+            _hover.SetEnabled(_clock.EnableRestoreButton);
     }
 
     private ClockDisplayMode _lastAppliedMode = ClockDisplayMode.Digital;
@@ -492,8 +555,16 @@ public partial class ClockWidget : Window
         int r = _clock.CornerRadius;
         MainContent.CornerRadius = new CornerRadius(r);
         ClockBorder.CornerRadius = new CornerRadius(r);
+        if (ClockGlassBorder != null)
+            ClockGlassBorder.CornerRadius = new CornerRadius(r);
         FillRect.RadiusX = FillRect.RadiusY = r;
-        if (System.Windows.PresentationSource.FromVisual(this) != null)
+        // ponytail 2026-08-28: 收起状态下跳过 DWM 圆角 — 设置面板显示开关 →
+        // HideClock → UpdateClock → ClocksChanged → OnClocksChanged → ApplyStyle
+        // 这条链会在窗口收起后重新打开整窗大小的圆角描边(边框残影来源)。
+        // 展开路径(ShowClock / ReapplyAcrylic)会各自恢复。
+        bool collapsed = RestoreButton.Visibility == Visibility.Visible
+                         || _hover is { IsExpanded: false };
+        if (System.Windows.PresentationSource.FromVisual(this) != null && !collapsed)
             NativeMethods.SetRoundedCorners(this, r);
 
         ApplyQuickBar();
@@ -549,21 +620,35 @@ public partial class ClockWidget : Window
     void ApplyMode()
     {
         bool isAnalog = _clock.Mode == ClockDisplayMode.Analog;
-        DigitalPanel.Visibility = isAnalog ? Visibility.Collapsed : Visibility.Visible;
-        AnalogPanel.Visibility = isAnalog ? Visibility.Visible : Visibility.Collapsed;
+        // ponytail: toggle the Viewbox hosts (the mode panels are their children);
+        // this keeps the Viewbox that drives proportional scaling attached to the
+        // correct content when the mode switches.
+        DigitalViewbox.Visibility = isAnalog ? Visibility.Collapsed : Visibility.Visible;
+        AnalogViewbox.Visibility = isAnalog ? Visibility.Visible : Visibility.Collapsed;
+        // ponytail: 数字背景图全出血铺满整窗，只在数字模式显示。
+        if (DigitalBgBorder != null)
+            DigitalBgBorder.Visibility = isAnalog ? Visibility.Collapsed : Visibility.Visible;
         if (isAnalog)
         {
-            Width = 240; Height = 260;
-            ResizeMode = ResizeMode.NoResize;
+            // 加载指针模式自己的持久化尺寸（新时钟/空值回退到默认 240×260）。
+            Width = Math.Max(MinWidth, _clock.AnalogWidth ?? 240);
+            Height = Math.Max(MinHeight, _clock.AnalogHeight ?? 260);
+            // ponytail: 指针模式也用同样的四角等比缩放（Viewbox 会把表盘/指针/刻度按新窗口
+            // 等比放大），所以与数字模式一致允许客户端缩放并显示缩放把手。
+            ResizeMode = ResizeMode.CanResize;
+            // 与数字模式一致：移除 OS 原生边缘缩放边框，四角改用 SnapResize 手动缩放。
+            NativeMethods.RemoveThickFrame(this);
             foreach (var grip in FindResizeGrips(this))
-                grip.Visibility = Visibility.Collapsed;
+                grip.Visibility = Visibility.Visible;
             PreviewMouseLeftButtonDown -= AnalogDrag;
             PreviewMouseLeftButtonDown += AnalogDrag;
             ApplyBackgroundImage();
         }
         else
         {
-            Width = 320; Height = 140;
+            // 加载数字模式自己的持久化尺寸（新时钟/空值回退到默认 320×140）。
+            Width = Math.Max(MinWidth, _clock.DigitalWidth ?? 320);
+            Height = Math.Max(MinHeight, _clock.DigitalHeight ?? 140);
             ResizeMode = ResizeMode.CanResize;
             NativeMethods.RemoveThickFrame(this);
             PreviewMouseLeftButtonDown -= AnalogDrag;
@@ -574,6 +659,31 @@ public partial class ClockWidget : Window
         // ponytail 2026-08-25: re-apply 极简模式/按钮透明度 after the mode
         // switch rebuilds the mode panels.
         ApplyQuickBar();
+    }
+
+    // ── 每模式尺寸持久化 ──
+
+    /// <summary>把当前窗口尺寸写入指定模式自己的持久化字段（内存内），供模式切换/保存使用。</summary>
+    void SaveCurrentSizeForMode(ClockDisplayMode mode)
+    {
+        if (mode == ClockDisplayMode.Analog)
+        {
+            _clock.AnalogWidth = Width;
+            _clock.AnalogHeight = Height;
+        }
+        else
+        {
+            _clock.DigitalWidth = Width;
+            _clock.DigitalHeight = Height;
+        }
+    }
+
+    /// <summary>解析当前模式应使用的窗口尺寸：优先用该模式自己的持久化尺寸，空值回退默认。</summary>
+    (double Width, double Height) ResolveModeSize()
+    {
+        if (_clock.Mode == ClockDisplayMode.Analog)
+            return (_clock.AnalogWidth ?? 240, _clock.AnalogHeight ?? 260);
+        return (_clock.DigitalWidth ?? 320, _clock.DigitalHeight ?? 140);
     }
 
     void AnalogDrag(object s, MouseButtonEventArgs e)
@@ -588,6 +698,12 @@ public partial class ClockWidget : Window
             {
                 if (src is System.Windows.Controls.ContextMenu) return;
                 if (src is System.Windows.Controls.Button) return;
+                // ponytail: corner grips — analog now shows resize grips too; this Window-level
+                // Preview handler fires before the grip's bubbling MouseLeftButtonDown, so skip
+                // the drag and let ResizeGrip_Down resize instead.
+                if (src is Border b && b.Tag is string tag
+                    && (tag == "TL" || tag == "TR" || tag == "BL" || tag == "BR"))
+                    return;
                 src = VisualTreeHelper.GetParent(src);
             }
         }
@@ -617,9 +733,9 @@ public partial class ClockWidget : Window
         CtxSwitchMode.Header = isAnalog ? _loc["Clock.DigitalMode"] : _loc["Clock.AnalogMode"];
         CtxToggleSeconds.Header = _clock.ShowSeconds ? _loc["Clock.HideSeconds"] : _loc["Clock.ShowSeconds"];
         CtxToggle24h.Header = _clock.Use24Hour ? _loc["Clock.Format12h"] : _loc["Clock.Format24h"];
-        CtxToggleRestore.Header = _clock.EnableRestoreButton
-            ? _loc["Clock.DisableRestore"]
-            : _loc["Clock.EnableRestore"];
+        CtxSettings.Header = _loc["Clock.Settings"];
+        CtxMinimize.Header = _loc["Clock.Minimize"];
+        CtxLock.Header = _loc[_vm?.IsLocked == true ? "Common.Unlock" : "Common.Lock"];
         CtxDelete.Header = _loc["Clock.Delete"];
     }
 
@@ -641,6 +757,12 @@ public partial class ClockWidget : Window
         while (src != null && src != s)
         {
             if (src == HideBtn || src is System.Windows.Controls.Button) return;
+            // ponytail: corner grips use Tag TL/TR/BL/BR — the Preview handler fires before the
+            // grip's own bubbling MouseLeftButtonDown, so if we start a drag here a grip click
+            // would MOVE the window instead of resizing. Skip and let ResizeGrip_Down handle it.
+            if (src is Border b && b.Tag is string tag
+                && (tag == "TL" || tag == "TR" || tag == "BL" || tag == "BR"))
+                return;
             src = System.Windows.Media.VisualTreeHelper.GetParent(src);
         }
         // Allow restore button to handle its own clicks
@@ -665,12 +787,22 @@ public partial class ClockWidget : Window
         if (_vm?.IsLocked == true) { e.Handled = true; return; }
         bool left = tag == "TL" || tag == "BL";
         bool top = tag == "TL" || tag == "TR";
-        _snapResize?.Start(e, left, top, !left, !top, 140, 80);
+        _snapResize?.Start(e, left, top, !left, !top, 140, 80, () =>
+        {
+            // ponytail: 缩放结束时把最终尺寸同步回模型 + 落盘（触发 ClocksChanged →
+            // 管理界面时钟条的尺寸显示随刷新）。
+            _clock.Width = Width; _clock.Height = Height;
+            SaveCurrentSizeForMode(_clock.Mode);
+            _widgetService?.UpdateClock(_clock);
+        });
         e.Handled = true;
     }
 
     void SwitchMode_Click(object s, RoutedEventArgs e)
     {
+        // ponytail: 切模式前先把当前模式的实际窗口尺寸存入该模式的持久化字段，
+        // 再加载新模式自己的尺寸 — 这样来回切换时两种模式各自记住大小，不会互相顶掉。
+        SaveCurrentSizeForMode(_clock.Mode);
         _clock.Mode = _clock.Mode == ClockDisplayMode.Digital ? ClockDisplayMode.Analog : ClockDisplayMode.Digital;
         _vm.Mode = _clock.Mode;
         ApplyMode();
@@ -699,6 +831,7 @@ public partial class ClockWidget : Window
         _widgetService.UpdateClock(_clock);
     }
 
+    // ponytail 2026-08-27: 已从右键菜单移除 — 保留方法体以防外部旧代码仍引用。
     void ToggleRestore_Click(object s, RoutedEventArgs e)
     {
         _clock.EnableRestoreButton = !_clock.EnableRestoreButton;
@@ -749,14 +882,36 @@ public partial class ClockWidget : Window
         var gripVis = _vm.IsLocked ? Visibility.Collapsed : Visibility.Visible;
         foreach (var grip in FindResizeGrips(this))
             grip.Visibility = gripVis;
-        if (_vm.IsLocked) NativeMethods.PinBelowProgman(this);
+        // ponytail 2026-08-27: 锁定态变化时同步右键菜单 Header(吸取时钟/日历教训)。
+        CtxLock.Header = _vm.IsLocked ? _loc["Common.Unlock"] : _loc["Common.Lock"];
+        // ponytail: guard with IsVisible — a re-entrant ClocksChanged during teardown
+        // would call PinBelowProgman → EnsureHandle and throw "关闭窗口后，无法设置可见性…".
+        if (_vm.IsLocked && IsVisible) NativeMethods.PinBelowProgman(this);
     }
 
     void Delete_Click(object s, RoutedEventArgs e)
     {
+        // ponytail 2026-08-27: 二级确认 — 删除时钟不可恢复。
+        var modeKey = _clock.Mode == ClockDisplayMode.Analog ? "Clock.AnalogMode" : "Clock.DigitalMode";
+        var confirm = string.Format(_loc["Clock.DeleteConfirm"], _loc[modeKey]);
+        if (MessageBox.Show(confirm, _loc["Clock.DeleteTitle"], MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
         _timer.Stop();
         _widgetService.DeleteClock(_clock.Id);
         Close();
+    }
+
+    // ponytail 2026-08-27: 设置 — 与分区齿轮入口同款 PropertyWindowService 调用,
+    // 弹时钟属性浮窗(模式/秒/12-24h/不透明度等)。
+    void Settings_Click(object s, RoutedEventArgs e)
+    {
+        PropertyWindowService.OpenOrFocus(_clock, this);
+    }
+
+    // ponytail 2026-08-27: 最小化 = 最小化到任务栏,HideClock 通过托盘图标恢复。
+    void Minimize_Click(object s, RoutedEventArgs e)
+    {
+        WindowState = WindowState.Minimized;
     }
 
     protected override void OnMouseWheel(MouseWheelEventArgs e)
@@ -815,8 +970,10 @@ public partial class ClockWidget : Window
         if (!skipResync)
             ApplyAcrylic();
         MinWidth = 140; MinHeight = 80;
-        Width = _clock.Width > 140 ? _clock.Width : 320;
-        Height = _clock.Height > 80 ? _clock.Height : 140;
+        // ponytail: 用当前模式的持久化尺寸（ApplyMode 已按模式设置，这里用 ResolveModeSize
+        // 保持一致），模式切换/图片应用后不再缩回硬编码默认。
+        var (showW, showH) = ResolveModeSize();
+        Width = showW; Height = showH;
         if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
         NativeMethods.SetRoundedCorners(this, 10);
         if (!_vm.IsLocked) Topmost = true;
@@ -929,8 +1086,9 @@ public partial class ClockWidget : Window
             // full-hide shrank it to 36×36 (collapsed mode keeps the window at full
             // size, matching ShowClock's sizing).
             MinWidth = 140; MinHeight = 80;
-            Width = _clock.Width > 140 ? _clock.Width : 320;
-            Height = _clock.Height > 80 ? _clock.Height : 140;
+            // ponytail: 用当前模式的持久化尺寸恢复满尺寸（收起/恢复按钮模式不再缩回默认）。
+            var (hiddenW, hiddenH) = ResolveModeSize();
+            Width = hiddenW; Height = hiddenH;
             // ponytail: minimized — window stays at full size, content collapses with animation
             _hover?.SnapToCollapsed();
         }
@@ -977,12 +1135,15 @@ public partial class ClockWidget : Window
         }
     }
 
-    void Restore_Enter(object s, MouseEventArgs e) { RestoreButton.Background = RestoreHoverBrush; }
-    void Restore_Leave(object s, MouseEventArgs e) { RestoreButton.Background = RestoreIdleBrush; }
+    void Restore_Enter(object s, MouseEventArgs e) { RestoreButton.SetResourceReference(Border.BackgroundProperty, "Menu.Bg.Hover"); }
+    void Restore_Leave(object s, MouseEventArgs e) { RestoreButton.SetResourceReference(Border.BackgroundProperty, "Menu.Bg.Surface"); }
 
     protected override void OnClosed(EventArgs e)
     {
         _timer.Stop();
+        // ponytail: 关闭前落盘未保存的位置/尺寸。
+        _saveDebounce.Stop();
+        if (_savePending) { _savePending = false; _widgetService.Save(); }
         if (_langChanged != null) _loc.LanguageChanged -= _langChanged;
         _langChanged = null;
         _widgetService.LockChanged -= OnServiceLockChanged;

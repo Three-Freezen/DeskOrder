@@ -32,6 +32,10 @@ public class PanelService
     /// <summary>Fires when the panel window is closed by the user (X button).</summary>
     public event Action? WindowClosed;
 
+    /// <summary>面板启用状态变化时触发(打开=true,关闭=false)。PropertyPanel 状态区
+    /// 订阅它做实时同步 — 无论面板是经热键/托盘/面板自身"─"按钮还是状态栏开关开关。</summary>
+    public event Action? PanelEnabledChanged;
+
     /// <summary>Lazy-creates the panel window and shows it. No-op if already open.
     /// Persists <c>Panel.PanelEnabled = true</c> in config so the panel reopens on next launch.</summary>
     public void Show(AppConfig cfg)
@@ -41,15 +45,26 @@ public class PanelService
             if (!_window.IsVisible) _window.Show();
             return;
         }
+
+        // 状态写两份:传入 cfg 走落盘(与旧行为一致),live AppConfig 的 Panel 写
+        // 一份给 PropertyPanel 的 Target(它就是 live PanelConfig 实例)实时读取。
+        // 参考分区/便签等组件 — 状态写 live model,再发 Changed 事件通知刷新。
         cfg.Panel.PanelEnabled = true;
+        _zoneManager.GetConfig().Panel.PanelEnabled = true;
         _configService.Save(cfg);
+
         _window = new PanelWindow(_zoneManager, _configService);
         _window.Closed += (_, _) =>
         {
             _window = null;
+            // 关窗时 OnClosed/HidePanel 已把 PanelEnabled=false 落盘,这里只需同步
+            // live 实例并广播,让状态区开关立即跟随(无需再次写盘)。
+            _zoneManager.GetConfig().Panel.PanelEnabled = false;
             WindowClosed?.Invoke();
+            PanelEnabledChanged?.Invoke();
         };
         _window.Show();
+        PanelEnabledChanged?.Invoke();
     }
 
     /// <summary>

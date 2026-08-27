@@ -18,14 +18,12 @@ public class Zone : AppearanceModel
     public int CornerRadius { get; set; } = 8;
     public bool IsVisible { get; set; } = true;
     public bool IsLocked { get; set; } = false;
-    public int GridSize { get; set; } = 56;
+    public int GridSize { get; set; } = 80;
     public bool SnapToGrid { get; set; } = true;
-    public string IconChar { get; set; } = "";
     public string TitleBarFillColor { get; set; } = "#10FFFFFF"; // title bar background
     public double ControlOpacity { get; set; } = 40;
     public double BackgroundImageOpacity { get; set; } = 40; // Zone-specific default (widgets use 30)
     public bool AutoArrange { get; set; } = true;
-    public string IconColor { get; set; } = "";              // emoji tint color
     public string TitleTextColor { get; set; } = "#A0FFFFFF";
     /// <summary>磁贴模式 — 隐藏标题栏与底部 8px 分割条，主体作为一块完整窗口。</summary>
     public bool TileMode { get; set; } = false;

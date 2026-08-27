@@ -18,27 +18,13 @@
                      Foreground="{DynamicResource Brush.Text.Tertiary}" VerticalAlignment="Center"/>
         </StackPanel>
         <Button Grid.Column="2" Content="{loc:Loc Key=Panel.Toggle}" Click="Toggle_Click" Cursor="Hand"
-                Background="{DynamicResource Brush.Accent.Solid}"
-                Foreground="{DynamicResource Brush.Accent.On}" FontWeight="SemiBold"
-                Padding="14,6" BorderThickness="0">
-        <Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="4"/></Style></Button.Resources>
-        <Button.Style>
-          <!-- ponytail 2026-08-25: 镂空 + 禁用态淡化 -->
-          <Style TargetType="Button">
-            <Style.Triggers>
-              <Trigger Property="IsEnabled" Value="False">
-                <Setter Property="Background" Value="{DynamicResource Brush.Accent.Solid.Disabled}"/>
-                <Setter Property="Foreground" Value="{DynamicResource Brush.Accent.On.Disabled}"/>
-                <Setter Property="Cursor" Value="Arrow"/>
-              </Trigger>
-            </Style.Triggers>
-          </Style>
-        </Button.Style>
-      </Button>
+                FontWeight="SemiBold" Padding="14,6"
+                Style="{DynamicResource FillBtn}"/>
       </Grid>
     </Border>
-    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="20,0,20,12">
-      <ItemsControl x:Name="ListHost">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="8,0,8,0"
+                  FocusVisualStyle="{x:Null}">
+      <ItemsControl x:Name="ListHost" Margin="12,12,12,12">
         <ItemsControl.ItemsPanel>
           <ItemsPanelTemplate><StackPanel/></ItemsPanelTemplate>
         </ItemsControl.ItemsPanel>

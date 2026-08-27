@@ -53,7 +53,8 @@ public partial class CalendarWidget : Window
 
         Loaded += OnLoad;
         SizeChanged += OnSizeChanged;
-        LocationChanged += (_, _) => { _calendar.X = Left; _calendar.Y = Top; };
+        LocationChanged += (_, _) => { _calendar.X = Left; _calendar.Y = Top; ScheduleSave(); };
+        _saveDebounce.Tick += (_, _) => { _saveDebounce.Stop(); if (_savePending) { _savePending = false; _widgetService.Save(); } };
         _langChanged = _ => ApplyLoc();
         _loc.LanguageChanged += _langChanged;
         _widgetService.CalendarsChanged += OnCalendarsChanged;
@@ -74,8 +75,10 @@ public partial class CalendarWidget : Window
         _calendar.HoverExpandSettingsChanged += OnHoverExpandSettingsChanged;
         // ponytail: ghost-glass fix — see ZoneWindow. Acrylic follows the expand state so a
         // collapsed calendar shows ONLY the RestoreButton (no full-window glass rectangle).
-        _hover.Expanded += ApplyAcrylic;
-        _hover.Collapsed += () => AcrylicHelper.DisableBlur(this);
+        // ponytail 2026-08-28 边框残影修复 — 与 ZoneWindow 同款:展开时恢复圆角,
+        // 收起完成时重断言关闭全部 OS 层装饰(玻璃/圆角/DWM 框架阴影)。
+        _hover.Expanded += ReapplyAcrylic;
+        _hover.Collapsed += OnHoverCollapsed;
         // ponytail: bug fix — see ZoneWindow ctor. Window.Show() (OpenCalendarWindow /
         // --spawn-widget) bypasses ShowCalendar, so SnapToExpanded never runs.
         if (_calendar.IsVisible) _hover.SnapToExpanded();
@@ -85,6 +88,11 @@ public partial class CalendarWidget : Window
         _snapResize = new SnapResize(this);
     }
     private Action<string>? _langChanged;
+
+    // ponytail: 位置防抖保存 — 拖拽移动后持久化 X/Y（与分区 ZoneWindow 一致）。
+    private readonly System.Windows.Threading.DispatcherTimer _saveDebounce = new() { Interval = TimeSpan.FromMilliseconds(500) };
+    private bool _savePending;
+    void ScheduleSave() { _savePending = true; _saveDebounce.Stop(); _saveDebounce.Start(); }
 
     void OnHoverExpandSettingsChanged()
     {
@@ -127,7 +135,10 @@ public partial class CalendarWidget : Window
             ApplyAcrylic();
         ApplyBackgroundImage();
         ApplyStyle();
-        _hover?.SetEnabled(_calendar.EnableRestoreButton);
+        // ponytail 2026-08-28: 模型同步路径只在 EnableRestoreButton 真正变化时才
+        // SetEnabled；否则每次 UpdateCalendar(收起/展开)都会打断进行中的缩放动画。
+        if (_hover != null && _hover.IsEnabled != _calendar.EnableRestoreButton)
+            _hover.SetEnabled(_calendar.EnableRestoreButton);
     }
 
     void OnLoad(object s, RoutedEventArgs e)
@@ -309,7 +320,18 @@ public partial class CalendarWidget : Window
         if (PrevMonthBtn != null) PrevMonthBtn.Foreground = buttons;
         if (NextMonthBtn != null) NextMonthBtn.Foreground = buttons;
         if (AddNoteBtn != null) AddNoteBtn.Foreground = buttons;
-        if (RestoreIconChar != null) RestoreIconChar.Foreground = buttons;
+        ApplyIconVisual(buttons);
+    }
+
+    /// <summary>恢复按钮图标 — 独立 IconColor；空则回退按钮颜色，不随系统深浅色。</summary>
+    void ApplyIconVisual(Brush fallback)
+    {
+        var color = !string.IsNullOrEmpty(_calendar.IconColor) ? _calendar.IconColor : _calendar.ButtonColor;
+        Brush ic;
+        try { ic = new SolidColorBrush((Color)ColorConverter.ConvertFromString(color)!); }
+        catch { ic = fallback; }
+        var icon = string.IsNullOrEmpty(_calendar.IconChar) ? Helpers.IconGlyph.Calendar : _calendar.IconChar;
+        Helpers.IconGlyph.Apply(RestoreIconChar, RestoreIconPath, icon, ic, 18);
     }
 
     void ApplyAcrylic()
@@ -323,24 +345,50 @@ public partial class CalendarWidget : Window
         // its full-size window, so enabling blur here would paint the tint across the whole
         // window. Only enable while content is expanded.
         bool expanded = _hover?.IsExpanded ?? false;
-        if (_calendar.EnableAcrylic && expanded)
+        if (_calendar.EnableLiquidGlass && expanded)
         {
             var blurResult = AcrylicHelper.EnableBlur(this, _calendar.GlassBlurAmount, _calendar.GlassTintOpacity,
                 _calendar.GlassTintLuminosity, _calendar.GlassColorMode);
             if (!blurResult.Success)
                 System.Diagnostics.Debug.WriteLine($"[CalendarWidget] EnableBlur failed: {blurResult.Error}");
-            // ponytail 2026-08-25: liquid-glass chromatic border branch — mirrors
-            // ClockWidget.ApplyAcrylic (the only component that had it).
-            if (_calendar.EnableLiquidGlass)
+            // ponytail: additive liquid-glass overlay — the chromatic border rides a
+            // separate overlay Border so it never replaces the user's base CalendarBorder.
+            if (CalendarGlassBorder != null)
             {
-                CalendarBorder.BorderBrush = AcrylicHelper.CreateChromaticBorder();
-                CalendarBorder.BorderThickness = new Thickness(Math.Max(1.0, borderThickness));
+                CalendarGlassBorder.BorderBrush = AcrylicHelper.CreateChromaticBorder();
+                CalendarGlassBorder.BorderThickness = new Thickness(Math.Max(1.0, borderThickness));
+                CalendarGlassBorder.CornerRadius = new CornerRadius(_calendar.CornerRadius);
             }
         }
         else
         {
             AcrylicHelper.DisableBlur(this);
+            // ponytail: additive overlay — clear the glass border when the effect is off.
+            if (CalendarGlassBorder != null)
+                CalendarGlassBorder.BorderThickness = new Thickness(0);
         }
+    }
+
+    /// <summary>
+    /// ponytail 2026-08-28 边框残影修复 — 展开(悬停/点击恢复按钮)时把 Win11 圆角
+    /// 偏好一并恢复(收起时 OnHoverCollapsed 关掉了它),再走 ApplyAcrylic 恢复玻璃。
+    /// </summary>
+    void ReapplyAcrylic()
+    {
+        NativeMethods.SetRoundedCorners(this, _calendar.CornerRadius);
+        ApplyAcrylic();
+    }
+
+    /// <summary>
+    /// ponytail 2026-08-28 边框残影修复 — 收起完成时的最终保险(与 ZoneWindow 同款):
+    /// 窗口收起后仍保持整窗大小,残留的丙烯酸玻璃 / Win11 圆角 / DWM 框架阴影
+    /// 都会以「原窗口轮廓」的形式残留在恢复按钮周围,这里全部重断言关闭。
+    /// </summary>
+    void OnHoverCollapsed()
+    {
+        AcrylicHelper.DisableBlur(this);
+        NativeMethods.DisableRoundedCorners(this);
+        NativeMethods.DisableDwmFrameShadow(this);
     }
 
     // ── Background image ──
@@ -420,8 +468,16 @@ public partial class CalendarWidget : Window
         int r = _calendar.CornerRadius;
         MainContent.CornerRadius = new CornerRadius(r);
         CalendarBorder.CornerRadius = new CornerRadius(r);
+        if (CalendarGlassBorder != null)
+            CalendarGlassBorder.CornerRadius = new CornerRadius(r);
         FillRect.RadiusX = FillRect.RadiusY = r;
-        if (System.Windows.PresentationSource.FromVisual(this) != null)
+        // ponytail 2026-08-28: 收起状态下跳过 DWM 圆角 — 设置面板显示开关 →
+        // HideCalendar → UpdateCalendar → CalendarsChanged → OnCalendarsChanged →
+        // ApplyStyle 这条链会在窗口收起后重新打开整窗大小的圆角描边(边框残影来源)。
+        // 展开路径(ShowCalendar / ReapplyAcrylic)会各自恢复。
+        bool collapsed = RestoreButton.Visibility == Visibility.Visible
+                         || _hover is { IsExpanded: false };
+        if (System.Windows.PresentationSource.FromVisual(this) != null && !collapsed)
             NativeMethods.SetRoundedCorners(this, r);
 
         ApplyQuickBar();
@@ -465,7 +521,10 @@ public partial class CalendarWidget : Window
         ApplyAcrylic();
         ApplyBackgroundImage();
         ApplyStyle();
-        _hover?.SetEnabled(_calendar.EnableRestoreButton);
+        // ponytail 2026-08-28: 只在开关真正变化时才 SetEnabled，避免外观实时预览
+        // 打断正在播放的缩放动画。
+        if (_hover != null && _hover.IsEnabled != _calendar.EnableRestoreButton)
+            _hover.SetEnabled(_calendar.EnableRestoreButton);
     }
 
     void ApplyLoc()
@@ -473,6 +532,15 @@ public partial class CalendarWidget : Window
         TodayBtn.Content = _loc["Calendar.Today"];
         AddNoteBtn.ToolTip = _loc["Calendar.AddNote"];
         NotesDateLabel.Text = _loc["Common.Notes"];
+        // ponytail 2026-08-27: 切语言时刷新右键菜单 — XAML 静态绑定只读一次 i18n,
+        // 菜单项 Header 必须手动同步,否则切语言后保留旧键值。
+        CtxStartOnMonday.Header = _calendar.StartOnMonday
+            ? _loc["Calendar.StartOnMonday"]
+            : _loc["Calendar.EndOnSunday"];
+        CtxSettings.Header = _loc["Calendar.Settings"];
+        CtxMinimize.Header = _loc["Calendar.Minimize"];
+        // ponytail 2026-08-27: 切语言时同步刷新 CtxLock。
+        CtxLock.Header = _loc[_calendar.IsLocked ? "Common.Unlock" : "Common.Lock"];
         CtxDelete.Header = _loc["Calendar.Delete"];
         ApplyWeekdayHeader();
         MonthTitleText.Text = _loc.Get("Calendar.MonthYear", _vm.DisplayYear, _vm.DisplayMonth);
@@ -506,6 +574,7 @@ public partial class CalendarWidget : Window
         }
     }
 
+    // ponytail 2026-08-27: 已从右键菜单移除 — 保留方法体以防外部旧代码仍引用。
     void ToggleRestore_Click(object s, RoutedEventArgs e)
     {
         _calendar.EnableRestoreButton = !_calendar.EnableRestoreButton;
@@ -513,6 +582,30 @@ public partial class CalendarWidget : Window
             mi.Header = _calendar.EnableRestoreButton
                 ? _loc["Calendar.DisableRestore"]
                 : _loc["Calendar.EnableRestore"];
+    }
+
+    // ponytail 2026-08-27: 右键点击切换"周一开头"。RebuildCells 已支持 StartOnMonday。
+    void StartOnMonday_Click(object s, RoutedEventArgs e)
+    {
+        _calendar.StartOnMonday = !_calendar.StartOnMonday;
+        _vm.RebuildCells();
+        if (s is MenuItem mi)
+            mi.Header = _calendar.StartOnMonday
+                ? _loc["Calendar.StartOnMonday"]
+                : _loc["Calendar.EndOnSunday"];
+        _widgetService.UpdateCalendar(_calendar);
+    }
+
+    // ponytail 2026-08-27: 设置 — 与分区齿轮入口同款 PropertyWindowService 调用。
+    void Settings_Click(object s, RoutedEventArgs e)
+    {
+        PropertyWindowService.OpenOrFocus(_calendar, this);
+    }
+
+    // ponytail 2026-08-27: 最小化 = 最小化到任务栏。
+    void Minimize_Click(object s, RoutedEventArgs e)
+    {
+        WindowState = WindowState.Minimized;
     }
 
     void RebuildDisplay()
@@ -634,10 +727,11 @@ public partial class CalendarWidget : Window
 
         var grid = new Grid();
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });    // 0: title
-        grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // 1: content
-        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });    // 2: priority
-        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });    // 3: reminder
-        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });    // 4: buttons
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });    // 1: divider
+        grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // 2: content
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });    // 3: priority
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });    // 4: reminder
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });    // 5: buttons
 
         // Title
         grid.Children.Add(new TextBlock
@@ -648,6 +742,16 @@ public partial class CalendarWidget : Window
             Margin = new Thickness(0, 0, 0, 8)
         });
         Grid.SetRow(grid.Children[^1], 0);
+
+        // Title/content divider (与液态玻璃二级窗口同款,用本窗口自己的半透明白配色)
+        var noteDivider = new Border
+        {
+            Height = 1,
+            Margin = new Thickness(0, 0, 0, 10)
+        };
+        noteDivider.SetResourceReference(System.Windows.Controls.Border.BackgroundProperty, "Menu.Separator");
+        Grid.SetRow(noteDivider, 1);
+        grid.Children.Add(noteDivider);
 
         // Content textbox
         var textBox = new TextBox
@@ -660,14 +764,17 @@ public partial class CalendarWidget : Window
             Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0)),
             BorderBrush = new SolidColorBrush(Color.FromArgb(0x15, 0xFF, 0xFF, 0xFF)),
             BorderThickness = new Thickness(1),
-            FontSize = 13, Padding = new Thickness(8, 6, 8, 6)
+            FontSize = 13, Padding = new Thickness(8, 6, 8, 6),
+            // ponytail 2026-08-27: 自定义右键菜单 — 默认 WPF ContextMenu 的"剪贴/复制/粘贴"
+            // 是 PresentationFramework 内置字符串,切语言不变。改用自定义菜单挂 i18n。
+            ContextMenu = BuildTextBoxContextMenu()
         };
-        Grid.SetRow(textBox, 1);
+        Grid.SetRow(textBox, 2);
         grid.Children.Add(textBox);
 
         // Priority
         var priorityPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
-        Grid.SetRow(priorityPanel, 2);
+        Grid.SetRow(priorityPanel, 3);
         var cmb = ComboBoxHelper.Create(width: 120);
         cmb.Items.Add(_loc["Calendar.Priority.None"]);
         cmb.Items.Add(_loc["Calendar.Priority.Low"]);
@@ -692,7 +799,7 @@ public partial class CalendarWidget : Window
 
         // Reminder row
         var reminderPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 0) };
-        Grid.SetRow(reminderPanel, 3);
+        Grid.SetRow(reminderPanel, 4);
         var reminderCheck = new CheckBox
         {
             Content = _loc["Calendar.Reminder"],
@@ -769,7 +876,7 @@ public partial class CalendarWidget : Window
             HorizontalAlignment = HorizontalAlignment.Right,
             Margin = new Thickness(0, 12, 0, 0)
         };
-        Grid.SetRow(btnPanel, 4);
+        Grid.SetRow(btnPanel, 5);
         var cancelBtn = new Button
         {
             Content = _loc["Settings.Cancel"], Width = 70, Height = 30,
@@ -890,11 +997,26 @@ public partial class CalendarWidget : Window
         if (GripTR != null) GripTR.Visibility = gripVis;
         if (GripBL != null) GripBL.Visibility = gripVis;
         if (GripBR != null) GripBR.Visibility = gripVis;
-        if (_vm.IsLocked) NativeMethods.PinBelowProgman(this);
+        // ponytail 2026-08-27: 锁定态变化时同步右键菜单 Header(吸取教训)。
+        CtxLock.Header = _vm.IsLocked ? _loc["Common.Unlock"] : _loc["Common.Lock"];
+        // ponytail: guard with IsVisible — OnClosed → UpdateCalendar → CalendarsChanged
+        // re-enters this handler during teardown, and PinBelowProgman → EnsureHandle
+        // would throw "关闭窗口后，无法设置可见性…".
+        if (_vm.IsLocked && IsVisible) NativeMethods.PinBelowProgman(this);
     }
+
+    // ponytail 2026-08-27: 调用 helper 替换默认 TextBox 右键菜单 — 默认 WPF
+    // ContextMenu 是 PresentationFramework 内置字符串,切语言不变。
+    System.Windows.Controls.ContextMenu BuildTextBoxContextMenu()
+        => TextBoxContextMenuBuilder.Build(_loc);
 
     void DeleteCalendar_Click(object s, RoutedEventArgs e)
     {
+        // ponytail 2026-08-27: 二级确认 — 删除日历不可恢复。
+        var title = $"{_calendar.DisplayYear}-{_calendar.DisplayMonth:D2}";
+        var confirm = string.Format(_loc["Calendar.DeleteConfirm"], title);
+        if (MessageBox.Show(confirm, _loc["Calendar.DeleteTitle"], MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
         _widgetService.DeleteCalendar(_calendar.Id);
         Close();
     }
@@ -1095,15 +1217,22 @@ public partial class CalendarWidget : Window
         }
     }
 
-    void Restore_Enter(object s, MouseEventArgs e) { RestoreButton.Background = new SolidColorBrush(Color.FromArgb(0xFF, 0x2A, 0x2A, 0x4E)); }
-    void Restore_Leave(object s, MouseEventArgs e) { RestoreButton.Background = new SolidColorBrush(Color.FromArgb(0xDD, 0x1A, 0x1A, 0x2E)); }
+    void Restore_Enter(object s, MouseEventArgs e) { RestoreButton.SetResourceReference(Border.BackgroundProperty, "Menu.Bg.Hover"); }
+    void Restore_Leave(object s, MouseEventArgs e) { RestoreButton.SetResourceReference(Border.BackgroundProperty, "Menu.Bg.Surface"); }
 
     protected override void OnClosed(EventArgs e)
     {
         UnsubscribeDayCellStatusChanged();
+        // ponytail: 关闭前落盘未保存的位置/尺寸。
+        _saveDebounce.Stop();
+        if (_savePending) { _savePending = false; _widgetService.Save(); }
         if (_langChanged != null) _loc.LanguageChanged -= _langChanged;
         _langChanged = null;
         _widgetService.LockChanged -= OnServiceLockChanged;
+        // ponytail: unsubscribe BEFORE UpdateCalendar so this closing window doesn't
+        // re-enter its own CalendarsChanged handler while WmDestroy tears it down
+        // (re-entrant ApplyLockState → PinBelowProgman → EnsureHandle crash on exit).
+        _widgetService.CalendarsChanged -= OnCalendarsChanged;
         _calendar.HoverExpandSettingsChanged -= OnHoverExpandSettingsChanged;
         _snapDrag?.Detach();
         _snapResize?.Detach();

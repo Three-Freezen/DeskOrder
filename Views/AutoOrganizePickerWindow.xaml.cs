@@ -89,7 +89,7 @@ public partial class AutoOrganizePickerWindow : Window
     {
         bool selected = Target.Contains(text, StringComparer.OrdinalIgnoreCase);
         var bg = selected
-            ? (SolidColorBrush)FindResource("Brush.Accent.Solid")
+            ? (SolidColorBrush)FindResource("Brush.Btn.Solid")
             : (SolidColorBrush)FindResource("Brush.Bg.Hover");
         // 自适应文字：按 chip 背景的黑白对比度选前景色（跟随主题/强调色变化）。
         var fg = AdaptiveTextColor.ResolveBrush(bg.Color);
@@ -104,7 +104,7 @@ public partial class AutoOrganizePickerWindow : Window
             Padding = new Thickness(10, 0, 10, 0),
             Background = bg,
             BorderBrush = selected
-                ? (Brush)FindResource("Brush.Accent.Solid")
+                ? (Brush)FindResource("Brush.Btn.Solid")
                 : (Brush)FindResource("Brush.Border.Subtle"),
             BorderThickness = new Thickness(1),
             Cursor = Cursors.Hand,

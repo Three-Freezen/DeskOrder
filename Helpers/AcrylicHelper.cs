@@ -111,23 +111,63 @@ public static class AcrylicHelper
         "RoyalPurple", "SunsetOrange", "ChampagneGold", "MorandiSage"
     };
 
-    public static readonly IReadOnlyDictionary<string, string> ColorPresetNamesCN = new Dictionary<string, string>
+    // ponytail 2026-08-27: 静态字典会冻结 i18n — 切语言后下拉框仍显示旧语言。
+    // 改成按需查表:每次调用读取当前 LocalizationService,自动跟随语言。
+    public static string GetPresetDisplayName(string key) => key switch
     {
-        ["Default"] = _loc["LiquidGlass.Default"],
-        ["Accent"] = _loc["LiquidGlass.FollowSystem"],
-        ["GlassWhite"] = _loc["LiquidGlass.GlassWhite"],
-        ["MistGrey"] = _loc["LiquidGlass.MistGray"],
-        ["DeepBlack"] = _loc["LiquidGlass.DeepBlack"],
-        ["OceanBlue"] = _loc["LiquidGlass.OceanBlue"],
-        ["AuroraCyan"] = _loc["LiquidGlass.AuroraCyan"],
-        ["RosePink"] = _loc["LiquidGlass.RosePink"],
-        ["BordeauxRed"] = _loc["LiquidGlass.BordeauxRed"],
-        ["ForestGreen"] = _loc["LiquidGlass.ForestGreen"],
-        ["RoyalPurple"] = _loc["LiquidGlass.RoyalPurple"],
-        ["SunsetOrange"] = _loc["LiquidGlass.SunsetOrange"],
-        ["ChampagneGold"] = _loc["LiquidGlass.ChampagneGold"],
-        ["MorandiSage"] = _loc["LiquidGlass.MorandiGrayGreen"]
+        "Default"       => _loc["LiquidGlass.Default"],
+        "Accent"        => _loc["LiquidGlass.FollowSystem"],
+        "GlassWhite"    => _loc["LiquidGlass.GlassWhite"],
+        "MistGrey"      => _loc["LiquidGlass.MistGray"],
+        "DeepBlack"     => _loc["LiquidGlass.DeepBlack"],
+        "OceanBlue"     => _loc["LiquidGlass.OceanBlue"],
+        "AuroraCyan"    => _loc["LiquidGlass.AuroraCyan"],
+        "RosePink"      => _loc["LiquidGlass.RosePink"],
+        "BordeauxRed"   => _loc["LiquidGlass.BordeauxRed"],
+        "ForestGreen"   => _loc["LiquidGlass.ForestGreen"],
+        "RoyalPurple"   => _loc["LiquidGlass.RoyalPurple"],
+        "SunsetOrange"  => _loc["LiquidGlass.SunsetOrange"],
+        "ChampagneGold" => _loc["LiquidGlass.ChampagneGold"],
+        "MorandiSage"   => _loc["LiquidGlass.MorandiGrayGreen"],
+        _ => key,
     };
+
+    /// <summary>True when the glass color mode is a custom "#RRGGBB"/"#AARRGGBB" hex
+    /// instead of one of the preset names.</summary>
+    public static bool IsCustomGlassColor(string? mode)
+        => !string.IsNullOrEmpty(mode) && mode![0] == '#';
+
+    /// <summary>Parse a custom glass color hex ("#RRGGBB" or "#AARRGGBB") into a WPF Color.</summary>
+    public static bool TryParseGlassColor(string? mode, out Color color)
+    {
+        color = default;
+        if (!IsCustomGlassColor(mode)) return false;
+        var hex = mode!.TrimStart('#');
+        try
+        {
+            byte a = 255, r, g, b;
+            if (hex.Length == 8)
+            {
+                a = byte.Parse(hex.Substring(0, 2), System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture);
+                r = byte.Parse(hex.Substring(2, 2), System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture);
+                g = byte.Parse(hex.Substring(4, 2), System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture);
+                b = byte.Parse(hex.Substring(6, 2), System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture);
+            }
+            else if (hex.Length == 6)
+            {
+                r = byte.Parse(hex.Substring(0, 2), System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture);
+                g = byte.Parse(hex.Substring(2, 2), System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture);
+                b = byte.Parse(hex.Substring(4, 2), System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture);
+            }
+            else
+            {
+                return false;
+            }
+            color = Color.FromArgb(a, r, g, b);
+            return true;
+        }
+        catch { return false; }
+    }
 
     /// <summary>
     /// ponytail 2026-08-26: 可见的"液态玻璃"渐变预览画刷(3 停靠点)。用于预设卡 /
@@ -138,7 +178,8 @@ public static class AcrylicHelper
     public static LinearGradientBrush MakePreviewGlassBrush(string? mode)
     {
         string m = mode ?? "Default";
-        if (!s_PreviewGlassBase.TryGetValue(m, out var baseColor))
+        if (!s_PreviewGlassBase.TryGetValue(m, out var baseColor) &&
+            !TryParseGlassColor(m, out baseColor))
             baseColor = s_PreviewGlassBase["Default"];
 
         const byte stopAlpha = 0xC0;
@@ -184,6 +225,12 @@ public static class AcrylicHelper
     /// </summary>
     private static uint ResolveBaseColorARGB(string colorMode)
     {
+        // ponytail: custom color — stored as "#RRGGBB"/"#AARRGGBB" in GlassColorMode.
+        if (IsCustomGlassColor(colorMode))
+            return TryParseGlassColor(colorMode, out var c)
+                ? ((uint)c.A << 24) | ((uint)c.R << 16) | ((uint)c.G << 8) | c.B
+                : 0u;
+
         return colorMode switch
         {
             "Default" => 0x00000000,      // Transparent / use system default
@@ -238,6 +285,19 @@ public static class AcrylicHelper
         }
         // Fallback: Win11 default blue.
         return 0xFF_00_78_D4;
+    }
+
+    /// <summary>ponytail 2026-08-28: 公有访问器 — 返回 Windows 系统强调色(Win10/11
+    /// 注册表 AccentColorMenu,失败回退默认蓝)。供 MenuThemeService 等需要「真·系统
+    /// 强调色」(不随应用主题模式)的模块使用。</summary>
+    public static Color GetSystemAccentColor()
+    {
+        uint argb = GetSystemAccentARGB();
+        return Color.FromArgb(
+            (byte)((argb >> 24) & 0xFF),
+            (byte)((argb >> 16) & 0xFF),
+            (byte)((argb >>  8) & 0xFF),
+            (byte)( argb        & 0xFF));
     }
 
     /// <summary>DWM blur-behind toggle. Logs + returns Fail on P/Invoke exception.</summary>
@@ -572,12 +632,14 @@ public static class AcrylicHelper
         System.Windows.Controls.Grid.SetColumn(closeBtn, 0);
         titleBar.Child = titleRow;
 
+        // ponytail 2026-08-28: 分隔线改接管理界面同款文字自适应色（Brush.Text.Secondary
+        // 跟随 Light/Dark/HC 主题与系统强调色重绘），不再用固定半透明白。
         var separator = new Border
         {
             Height = 1,
-            Background = new SolidColorBrush(Color.FromArgb(0x20, 0xFF, 0xFF, 0xFF)),
-            Margin = new Thickness(12, 0, 12, 0)
+            Margin = new Thickness(0, 0, 0, 0)
         };
+        separator.SetResourceReference(System.Windows.Controls.Border.BackgroundProperty, "Menu.Separator");
 
         System.Windows.Controls.Grid.SetRow(titleBar, 0);
         System.Windows.Controls.Grid.SetRow(separator, 1);
@@ -595,12 +657,14 @@ public static class AcrylicHelper
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // opacity slider
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // luminosity slider
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // color preset
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // custom color
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // exclusive hint
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // hint
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // buttons
 
         var t1 = (Brush)Application.Current.FindResource("Brush.Text.Primary");
         var t2 = (Brush)Application.Current.FindResource("Brush.Text.Secondary");
-        var accent = (Brush)Application.Current.FindResource("Brush.Accent.Solid");
         var ibg = (Brush)Application.Current.FindResource("Brush.Bg.Input");
         var ibd = (Brush)Application.Current.FindResource("Brush.Border.Subtle");
 
@@ -637,20 +701,21 @@ public static class AcrylicHelper
         Grid.SetRow(luminosityLabelRow, row++);
         grid.Children.Add(luminosityLabelRow);
 
-        // Color preset dropdown
-        var colorRow = new StackPanel
+        // ── Color mode: preset (checkbox + combo) ──
+        bool usePreset = !IsCustomGlassColor(localColorMode);
+        bool useCustom = !usePreset;
+        string customColor = useCustom ? localColorMode : "#FF7095C5"; // Default preset base color
+        bool syncingColorMode = false;
+
+        var presetCb = new CheckBox
         {
-            Orientation = Orientation.Horizontal,
-            Margin = new Thickness(0, 12, 0, 0)
-        };
-        colorRow.Children.Add(new TextBlock
-        {
-            Text = _loc["LiquidGlass.ColorPreset"],
+            Content = _loc["LiquidGlass.ColorPreset"],
             Foreground = t2, FontSize = 12,
             VerticalAlignment = VerticalAlignment.Center,
-            Width = 100
-        });
-        var presetCombo = ComboBoxHelper.Create(width: 220, fontSize: 12,
+            Width = 100,
+            Cursor = System.Windows.Input.Cursors.Hand
+        };
+        var presetCombo = ComboBoxHelper.Create(width: 200, fontSize: 12,
             margin: new Thickness(8, 0, 0, 0));
         // ponytail: implicit Style from Controls/ComboBox.xaml sets Foreground to
         // {DynamicResource Brush.Text.Primary} — leave it alone, don't bypass with a
@@ -658,19 +723,130 @@ public static class AcrylicHelper
         int selectedIdx = 0;
         for (int i = 0; i < ColorPresetNames.Count; i++)
         {
-            string displayName = ColorPresetNamesCN.TryGetValue(ColorPresetNames[i], out var name)
-                ? name
-                : ColorPresetNames[i];
-            presetCombo.Items.Add(displayName);
-            if (ColorPresetNames[i] == colorMode) selectedIdx = i;
+            // ponytail 2026-08-27: GetPresetDisplayName 每次按当前 _loc 读 — 切语言后
+            // 下次开 dialog 自动拿新语言(吸取 XAML 静态绑定冻结教训)。
+            presetCombo.Items.Add(GetPresetDisplayName(ColorPresetNames[i]));
+            if (ColorPresetNames[i] == localColorMode) selectedIdx = i;
         }
         presetCombo.SelectedIndex = selectedIdx;
-        presetCombo.SelectionChanged += (_, _) => { localColorMode = ColorPresetNames[presetCombo.SelectedIndex]; FirePreview(); };
+        presetCombo.SelectionChanged += (_, _) =>
+        {
+            if (syncingColorMode || !usePreset) return;
+            localColorMode = ColorPresetNames[presetCombo.SelectedIndex];
+            FirePreview();
+        };
+        var colorRow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Margin = new Thickness(0, 12, 0, 0)
+        };
+        colorRow.Children.Add(presetCb);
         colorRow.Children.Add(presetCombo);
         Grid.SetRow(colorRow, row++);
         grid.Children.Add(colorRow);
 
-        // Hint text
+        // ── Custom color: checkbox + pick button + swatch ──
+        var customCb = new CheckBox
+        {
+            Content = _loc["LiquidGlass.Custom"],
+            Foreground = t2, FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center,
+            Width = 100,
+            Cursor = System.Windows.Input.Cursors.Hand
+        };
+        var customBtn = new Button
+        {
+            Content = _loc["LiquidGlass.CustomPick"],
+            Padding = new Thickness(10, 4, 10, 4),
+            FontSize = 12,
+            Cursor = System.Windows.Input.Cursors.Hand,
+            Background = ibg, Foreground = t2,
+            BorderBrush = ibd, BorderThickness = new Thickness(1),
+            Margin = new Thickness(8, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        var customSwatch = new Border
+        {
+            Width = 18, Height = 18,
+            CornerRadius = new CornerRadius(3),
+            Margin = new Thickness(8, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            BorderBrush = ibd, BorderThickness = new Thickness(1),
+            Background = TryParseGlassColor(customColor, out var swatchColor)
+                ? new SolidColorBrush(swatchColor)
+                : Brushes.Transparent
+        };
+        var customRow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Margin = new Thickness(0, 10, 0, 0)
+        };
+        customRow.Children.Add(customCb);
+        customRow.Children.Add(customBtn);
+        customRow.Children.Add(customSwatch);
+        Grid.SetRow(customRow, row++);
+        grid.Children.Add(customRow);
+
+        void ApplyColorModeVisuals()
+        {
+            syncingColorMode = true;
+            presetCb.IsChecked = usePreset;
+            customCb.IsChecked = useCustom;
+            presetCombo.IsEnabled = usePreset;
+            customBtn.IsEnabled = useCustom;
+            customSwatch.Opacity = useCustom ? 1.0 : 0.5;
+            syncingColorMode = false;
+        }
+
+        // 预设与自定义互斥：勾选一方自动取消另一方；取消当前一方则切到另一方，
+        // 保证始终有且仅有一个颜色来源生效。
+        void SetColorMode(bool presetOn)
+        {
+            usePreset = presetOn;
+            useCustom = !presetOn;
+            ApplyColorModeVisuals();
+            localColorMode = presetOn ? ColorPresetNames[presetCombo.SelectedIndex] : customColor;
+            FirePreview();
+        }
+
+        ApplyColorModeVisuals(); // initial visual state (no preview fire)
+
+        presetCb.Checked += (_, _) => { if (syncingColorMode || usePreset) return; SetColorMode(true); };
+        presetCb.Unchecked += (_, _) => { if (syncingColorMode || !usePreset) return; SetColorMode(false); };
+        customCb.Checked += (_, _) => { if (syncingColorMode || useCustom) return; SetColorMode(false); };
+        customCb.Unchecked += (_, _) => { if (syncingColorMode || !useCustom) return; SetColorMode(true); };
+
+        customBtn.Click += (_, _) =>
+        {
+            var initial = customColor.Length >= 6 ? customColor.Substring(customColor.Length - 6) : "7095C5";
+            var picker = new DesktopZones.Views.ColorPickerDialog(initial) { Owner = dlg };
+            if (picker.ShowDialog() == true)
+            {
+                customColor = "#FF" + picker.SelectedColor;
+                customSwatch.Background = TryParseGlassColor(customColor, out var picked)
+                    ? new SolidColorBrush(picked)
+                    : Brushes.Transparent;
+                if (useCustom)
+                {
+                    localColorMode = customColor;
+                    FirePreview();
+                }
+            }
+        };
+
+        // Mutual-exclusion note (below both color rows)
+        var exclusiveTb = new TextBlock
+        {
+            Text = _loc["LiquidGlass.ExclusiveHint"],
+            FontSize = 9,
+            Margin = new Thickness(0, 6, 0, 0),
+            TextWrapping = TextWrapping.Wrap
+        };
+        exclusiveTb.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "Brush.Text.Tertiary");
+        Grid.SetRow(exclusiveTb, row++);
+        grid.Children.Add(exclusiveTb);
+
+        // Original hint (moved down)
         var hintTb = new TextBlock
         {
             Text = _loc["LiquidGlass.Hint"],
@@ -693,8 +869,7 @@ public static class AcrylicHelper
         {
             Content = _loc["LiquidGlass.Cancel"],
             Width = 80, Height = 32,
-            Background = ibg, Foreground = t2,
-            BorderBrush = ibd, BorderThickness = new Thickness(1),
+            Style = (Style)Application.Current.FindResource("OutlineBtn"),
             FontSize = 12, Cursor = System.Windows.Input.Cursors.Hand,
             Margin = new Thickness(0, 0, 8, 0)
         };
@@ -702,8 +877,7 @@ public static class AcrylicHelper
         {
             Content = _loc["LiquidGlass.Save"],
             Width = 80, Height = 32,
-            Background = accent, Foreground = System.Windows.Media.Brushes.White,
-            BorderThickness = new Thickness(0),
+            Style = (Style)Application.Current.FindResource("FillBtn"),
             FontSize = 12, Cursor = System.Windows.Input.Cursors.Hand,
             FontWeight = FontWeights.SemiBold
         };
@@ -711,7 +885,7 @@ public static class AcrylicHelper
         bool saved = false;
         saveBtn.Click += (_, _) =>
         {
-            localColorMode = ColorPresetNames[presetCombo.SelectedIndex];
+            localColorMode = usePreset ? ColorPresetNames[presetCombo.SelectedIndex] : customColor;
             saved = true;
             dlg.Close();
         };
@@ -873,47 +1047,87 @@ public static class AcrylicHelper
         // 恰好切换过也能保证这一屏就是正确主题。
         MenuThemeService.Apply();
 
-        // 兜底:代码 new 出来、尚未挂到任何元素的 ContextMenu(如托盘菜单)可能错过
-        // 隐式样式解析。按类型键取回 ContextMenu.xaml 里定义的同一份 Win11 样式
-        // 显式应用一次(幂等;已有显式样式时 menu.Style != null,不会覆盖)。
-        if (menu.Style == null)
-            menu.Style = Application.Current.TryFindResource(typeof(ContextMenu)) as Style;
-
-        // 菜单项兜底:隐式样式在部分树形态下可能不命中 MenuItem/Separator。
-        // 直接取回同一份 XAML 样式,给没拿到样式的项显式补上;Separator 必须用
-        // SeparatorStyleKey 那份(MenuBase 会给菜单分隔线强设资源引用,主题样式
-        // 自带侧边距,换成我们定义的贯穿版)。
-        var miStyle = Application.Current.TryFindResource(typeof(MenuItem)) as Style;
-        var sepKeyStyle = Application.Current.TryFindResource(MenuItem.SeparatorStyleKey) as Style;
-        if (miStyle != null || sepKeyStyle != null)
-        {
-            foreach (var item in menu.Items)
-            {
-                if (item is MenuItem mi && mi.Style == null && miStyle != null)
-                    mi.Style = miStyle;
-                else if (item is Separator sep && sepKeyStyle != null &&
-                         !ReferenceEquals(sep.Style, sepKeyStyle))
-                    sep.Style = sepKeyStyle;
-            }
-        }
+        // ponytail 2026-08-28: 偶发旧色的根因 — WPF 复用已实现过的 ContextMenu
+        // Popup 内容;上一次打开建立的 DynamicResource 引用在 Popup 关闭(断开)期间
+        // 收不到资源变化通知,再打开时不一定重新解析。这里每次打开(菜单已连接)强制
+        // 重挂样式/重设画刷 DP,让全部 DynamicResource 重新解析到刚写入的调色板。
+        ForceRethemeMenu(menu);
 
         // 子菜单(新建 ▸ 等)的 PART_Popup 也要挂同样的圆角 + 毛玻璃。
         HookSubmenuPopups(menu);
 
-        try
+        // 圆角 + 毛玻璃推迟到下一帧(Loaded 优先级)再挂:实例级 Opened 处理器
+        // (如 ZoneWindow.ZoneMenu_Opened 会在打开时按映射状态切换 CtxPaste/
+        // CtxPasteSep 的 Visibility)在 class handler 之后才跑 —— 立刻算区域会用
+        // 尚未显示粘贴项的旧布局,首次右键时 Popup 已被裁成小一号,粘贴项就变成
+        // 一块露出来的液态玻璃。等实例处理器跑完、重新布局后再取 DesiredSize。
+        menu.Dispatcher.BeginInvoke(new Action(() =>
         {
-            var src = PresentationSource.FromVisual(menu) as HwndSource;
-            if (src != null && src.Handle != IntPtr.Zero)
+            try
             {
-                // 强制按新模板布局一遍,拿到 DesiredSize 再算圆角区域:框架内置的
-                // 编辑菜单(剪切/复制/粘贴)默认模板带阴影边距,Popup 窗口会比
-                // 我们模板的实际内容高一截;按 GetWindowRect 整窗开毛玻璃会在
-                // 菜单下方露出一条空白液态玻璃。DesiredSize 才是真实内容尺寸。
-                menu.UpdateLayout();
-                ApplyMenuPopupEffects(src.Handle, menu);
+                var src = PresentationSource.FromVisual(menu) as HwndSource;
+                if (src != null && src.Handle != IntPtr.Zero)
+                {
+                    // 强制按当前模板/可见项布局一遍:框架内置编辑菜单默认模板带阴影
+                    // 边距,Popup 窗口会比实际内容大;DesiredSize 才是真实内容尺寸,
+                    // 按它裁区域就不会在菜单外露出多余液态玻璃。
+                    menu.UpdateLayout();
+                    // 布局后再补一次子菜单 hook — 首次打开时 MenuItem 模板可能尚未应用,
+                    // mi.Template?.FindName("PART_Popup") 会拿到 null,子菜单就漏挂毛玻璃。
+                    HookSubmenuPopups(menu);
+                    ApplyMenuPopupEffects(src.Handle, menu);
+                }
+            }
+            catch { }
+        }), System.Windows.Threading.DispatcherPriority.Loaded);
+    }
+
+    /// <summary>
+    /// ponytail 2026-08-28: 强制把已实现过的菜单重挂到当前调色板。WPF 会复用
+    /// ContextMenu 的 Popup 内容,上次打开建立的 DynamicResource 引用在 Popup
+    /// 关闭(断开)期间收不到资源变化通知,再打开时可能仍指向旧画刷实例 → 偶发
+    /// 停在旧色。菜单打开时(已连接)重挂样式/重设 brush DP 会强制重新解析。
+    /// ContextMenu 自身不重建模板(避免打断正在打开的 Popup),只重设三个 brush
+    /// DP;MenuItem/Separator 重挂样式以重建模板内箭头/悬停/子菜单等 DynamicResource。
+    /// </summary>
+    static void ForceRethemeMenu(ContextMenu menu)
+    {
+        // ContextMenu 表面/边框/前景:直接重设 resource reference,TemplateBinding 立即跟进。
+        menu.SetResourceReference(Control.BackgroundProperty, "Menu.Bg.Surface");
+        menu.SetResourceReference(Control.BorderBrushProperty, "Menu.Border.Subtle");
+        menu.SetResourceReference(Control.ForegroundProperty, "Menu.Text.Primary");
+
+        // 代码 new 出来、尚未挂到任何元素的 ContextMenu(如托盘菜单)可能错过隐式样式,
+        // 补一次;已有样式的不覆盖(SetResourceReference 已覆盖表面三件套)。
+        if (menu.Style == null)
+            menu.Style = Application.Current.TryFindResource(typeof(ContextMenu)) as Style;
+
+        ForceRethemeItems(menu.Items);
+    }
+
+    static void ForceRethemeItems(ItemCollection items)
+    {
+        var miStyle = Application.Current.TryFindResource(typeof(MenuItem)) as Style;
+        var sepKeyStyle = Application.Current.TryFindResource(MenuItem.SeparatorStyleKey) as Style;
+        foreach (var item in items)
+        {
+            if (item is MenuItem mi)
+            {
+                // null → 原样式 强制重挂,重建模板内 DynamicResource(箭头/悬停/子菜单)。
+                if (miStyle != null)
+                {
+                    mi.Style = null;
+                    mi.Style = miStyle;
+                }
+                ForceRethemeItems(mi.Items);
+            }
+            else if (item is Separator sep && sepKeyStyle != null)
+            {
+                // Separator 必须用 SeparatorStyleKey 那份(否则回到主题样式自带侧边距)。
+                sep.Style = null;
+                sep.Style = sepKeyStyle;
             }
         }
-        catch { }
     }
 
     static void OnAnyContextMenuClosed(object sender, RoutedEventArgs e)
@@ -961,6 +1175,107 @@ public static class AcrylicHelper
             if (w <= 0 || h <= 0) return;
             int rad = (int)Math.Round(8 * dpi / 96.0);
 
+            ApplyMenuSurfaceEffects(hwnd, w, h, rad);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[AcrylicHelper] ApplyMenuPopupEffects: {ex}");
+        }
+    }
+
+    /// <summary>
+    /// 给「跟随系统深浅色」的普通 Window（重命名 / 导入系统项目 / 取色器等二级弹窗）
+    /// 挂上跟分区右键菜单完全相同的圆角 + DWM 毛玻璃配方，保证菜单与弹窗的颜色和
+    /// 透明度对齐。与 Popup 版共用同一套核心 <see cref="ApplyMenuSurfaceEffects"/>。
+    /// </summary>
+    public static void ApplyMenuSurface(Window window, int cornerRadius = 8)
+    {
+        window.Loaded += OnLoaded;
+        void OnLoaded(object? s, RoutedEventArgs e)
+        {
+            window.Loaded -= OnLoaded;
+            try
+            {
+                var src = PresentationSource.FromVisual(window) as HwndSource;
+                if (src == null || src.Handle == IntPtr.Zero) return;
+
+                uint dpi = GetDpiForWindow(src.Handle);
+                if (dpi < 96) dpi = 96;
+                double scale = dpi / 96.0;
+
+                int w, h;
+                if (window.ActualWidth > 0 && window.ActualHeight > 0)
+                {
+                    w = (int)Math.Round(window.ActualWidth * scale);
+                    h = (int)Math.Round(window.ActualHeight * scale);
+                }
+                else
+                {
+                    GetWindowRect(src.Handle, out var r);
+                    w = r.Right - r.Left;
+                    h = r.Bottom - r.Top;
+                }
+                int rad = (int)Math.Round(cornerRadius * scale);
+                ApplyMenuSurfaceEffects(src.Handle, w, h, rad);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[AcrylicHelper] ApplyMenuSurface: {ex}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// 给「跟随系统深浅色」的 Popup（如便签颜色菜单）挂上与右键菜单完全相同的
+    /// 圆角 + DWM 毛玻璃配方，消除「菜单是磨砂、弹出菜单是另一透明度」的差异。
+    /// </summary>
+    public static void ApplyMenuSurfaceToPopup(Popup popup, int cornerRadius = 6)
+    {
+        popup.Opened += OnOpened;
+        void OnOpened(object? s, EventArgs e)
+        {
+            popup.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                try
+                {
+                    if (!popup.IsOpen || popup.Child == null) return;
+                    var src = PresentationSource.FromVisual(popup.Child) as HwndSource;
+                    if (src == null || src.Handle == IntPtr.Zero) return;
+
+                    uint dpi = GetDpiForWindow(src.Handle);
+                    if (dpi < 96) dpi = 96;
+                    double scale = dpi / 96.0;
+
+                    var fe = popup.Child as FrameworkElement;
+                    int w = 0, h = 0;
+                    if (fe != null)
+                    {
+                        w = (int)Math.Round(fe.DesiredSize.Width * scale);
+                        h = (int)Math.Round(fe.DesiredSize.Height * scale);
+                    }
+                    if (w <= 0 || h <= 0)
+                    {
+                        GetWindowRect(src.Handle, out var r);
+                        w = r.Right - r.Left;
+                        h = r.Bottom - r.Top;
+                    }
+                    int rad = (int)Math.Round(cornerRadius * scale);
+                    ApplyMenuSurfaceEffects(src.Handle, w, h, rad);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[AcrylicHelper] ApplyMenuSurfaceToPopup: {ex}");
+                }
+            }), System.Windows.Threading.DispatcherPriority.Loaded);
+        }
+    }
+
+    /// <summary>圆角裁剪 + 模糊背板 + Win11 圆角偏好 + 磨砂 accent（主菜单 / 子菜单 / 系统弹窗共用）。</summary>
+    static void ApplyMenuSurfaceEffects(IntPtr hwnd, int w, int h, int rad)
+    {
+        if (hwnd == IntPtr.Zero || w <= 0 || h <= 0) return;
+        try
+        {
             // 1) 窗口级圆角裁剪。SetWindowRgn 会接管 hRgn 的所有权,不能 DeleteObject。
             SetWindowRgn(hwnd, CreateRoundRectRgn(0, 0, w, h, rad, rad), true);
 
@@ -984,7 +1299,7 @@ public static class AcrylicHelper
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"[AcrylicHelper] ApplyMenuPopupEffects: {ex}");
+            System.Diagnostics.Debug.WriteLine($"[AcrylicHelper] ApplyMenuSurfaceEffects: {ex}");
         }
 
         // 4) 保持原有的 acrylic accent(磨砂质感;tint 透明,只取模糊)。

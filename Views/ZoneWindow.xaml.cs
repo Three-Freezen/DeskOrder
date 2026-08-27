@@ -34,14 +34,24 @@ public partial class ZoneWindow : Window
     private Zone _zone;
     private readonly ZoneManager _mgr;
 
-    // ponytail: frozen hover brushes — same color on every mouse-over, no need to
-    // reallocate. Per-class so each Window can Freeze independently (freeze is thread-safe).
-    private static readonly SolidColorBrush RestoreHoverBrush = Freeze(new(Color.FromArgb(0xFF, 0x2A, 0x2A, 0x4E)));
-    private static readonly SolidColorBrush RestoreIdleBrush  = Freeze(new(Color.FromArgb(0xDD, 0x1A, 0x1A, 0x2E)));
     private static readonly SolidColorBrush CtrlHoverBrush    = Freeze(new(Color.FromArgb(0x60, 0xFF, 0xFF, 0xFF)));
     private static readonly SolidColorBrush CtrlIdleBrush     = Freeze(new(Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF)));
     private static readonly SolidColorBrush ItemHoverBrush    = Freeze(new(Color.FromArgb(0x18, 0xFF, 0xFF, 0xFF)));
     static SolidColorBrush Freeze(SolidColorBrush b) { b.Freeze(); return b; }
+
+    // 图标文字（ItemNameText / 次级文件夹名称）固定颜色。声明式绑定到该 DP：
+    // 容器实例化瞬间即取到正确颜色，避免先渲染默认 #E0FFFFFF 再在 Loaded 之后
+    // 补刷导致的「跳颜色」闪烁。
+    private static readonly SolidColorBrush DefaultItemTextBrush = Freeze(new(Color.FromArgb(0xE0, 0xFF, 0xFF, 0xFF)));
+    public static readonly DependencyProperty ItemTextBrushProperty =
+        DependencyProperty.Register(nameof(ItemTextBrush), typeof(Brush), typeof(ZoneWindow),
+            new PropertyMetadata(DefaultItemTextBrush));
+    public Brush ItemTextBrush
+    {
+        get => (Brush)GetValue(ItemTextBrushProperty);
+        set => SetValue(ItemTextBrushProperty, value);
+    }
+
     public bool IsMinimized => RestoreButton.Visibility == Visibility.Visible;
     private readonly ZoneViewModel _vm;
     private readonly LocalizationService _loc = LocalizationService.Instance;
@@ -55,7 +65,7 @@ public partial class ZoneWindow : Window
     private ZoneItemViewModel? _dv;
     private FrameworkElement? _de;
     private System.Windows.Shapes.Rectangle? _dropIndicator;
-    private const double BarThickness = 3, BarLength = 56;
+    private const double BarThickness = 3, BarLength = 80;
 
     // ── Marquee multi-select (long-press + drag) ──
     // Zone items: hold 350ms → drag draws the marquee (quick drag stays move).
@@ -71,9 +81,27 @@ public partial class ZoneWindow : Window
     HashSet<Guid>? _selectStartZone;
     HashSet<string>? _selectStartList;
     private System.Windows.Threading.DispatcherTimer? _selectHoldTimer;
-    // The item footprint is one grid cell (square); the icon is centered inside it.
+    // The item footprint is one square grid cell (80×80, panel-aligned); the icon is centered inside it.
     double ItemW => _zone.GridSize;
-    double ItemH => _zone.GridSize + ZoneLayout.LabelArea;
+    double ItemH => _zone.GridSize;
+
+    // ── Tile-mode title-bar cut ──
+    // 磁贴模式砍掉最上面一层 24px 标题栏:窗口高度同步缩小 24px,内容区高度不变。
+    // 组合分区/文件夹映射只砍最上面一层,下面一层(子标签栏/映射头部行)保留。
+    const double TileTitleBarCut = 24;
+    bool _tileVisual;
+
+    double TileWindowHeight() => _tileVisual ? Math.Max(36, _zone.Height - TileTitleBarCut) : _zone.Height;
+    double FullHeightFromWindowHeight() => _tileVisual ? Height + TileTitleBarCut : Height;
+
+    // 程序化改高度(切磁贴/恢复)时记录期望值 — OnSize 据此跳过自动重排,避免
+    // 切换磁贴或恢复普通模式时把图标重新居中。
+    double _expectedTileHeight = double.NaN;
+    void ApplyProgrammaticHeight(double h)
+    {
+        _expectedTileHeight = h;
+        Height = h;
+    }
     private readonly System.Windows.Threading.DispatcherTimer _saveDebounce = new() { Interval = TimeSpan.FromMilliseconds(500) };
     private bool _savePending;
     private readonly System.Windows.Threading.DispatcherTimer _recycleTimer = new() { Interval = TimeSpan.FromSeconds(2.5) };
@@ -156,6 +184,8 @@ public partial class ZoneWindow : Window
         Left = zone.X; Top = zone.Y;
         Width = SanitizeW(zone.Width); Height = SanitizeW(zone.Height);
         ApplyStyle();
+        // 磁贴模式:构造期即砍掉最上面一层标题栏高度(ApplyStyle 已设 _tileVisual)。
+        ApplyProgrammaticHeight(TileWindowHeight());
         // Acrylic is applied in OnLoad (needs valid HWND)
         ZoneTitleText.Text = zone.Name;
         SetRestoreIcon();
@@ -218,7 +248,12 @@ public partial class ZoneWindow : Window
         // content expands (hover preview / click), disable when it collapses, so a collapsed
         // zone shows ONLY the RestoreButton and never a full-window glass rectangle.
         _hover.Expanded += ReapplyAcrylic;
-        _hover.Collapsed += () => AcrylicHelper.DisableBlur(this);
+        // ponytail 2026-08-28 边框残影修复 — 收起完成时把「OS 层装饰」全套重断言一遍:
+        // 玻璃、Win11 圆角、DWM 框架阴影。收起后窗口仍保持整窗大小,这三样任何一样
+        // 残留都会显示成「原窗口轮廓的边框残影」(玻璃染色、圆角描边、深色阴影环)。
+        // 仅靠动画开始前的 DisableBlur 不够:窗口失去焦点时经设置面板/热键触发的
+        // 收起可能被后续 ApplyStyle/RefreshItems 打断,完成回调就是最后的保险。
+        _hover.Collapsed += OnHoverCollapsed;
         // ponytail: bug fix — ZoneManager.ShowZone new-window branch calls window.Show()
         // but NOT window.ShowZone(), so SnapToExpanded never runs and _isExpanded stays
         // false. Clicking Hide then early-returns inside CollapseAnimated ("!_isExpanded")
@@ -244,19 +279,20 @@ public partial class ZoneWindow : Window
 
     void ApplyLoc()
     {
-        CtxImport.Header = _loc["Zone.Import"];
+        CtxImport.Header = _loc["ZoneMenu.Import"];
+        CtxImport2.Header = _loc["ZoneMenu.Import"];
         CtxImportFolder.Header = _loc["ZoneMenu.ImportFolder"];
         CtxImportFiles.Header = _loc["ZoneMenu.ImportFiles"];
         CtxImportFolder2.Header = _loc["ZoneMenu.ImportFolder"];
         CtxImportShell.Header = _loc["Zone.ImportShellItems"];
         CtxImportShell2.Header = _loc["Zone.ImportShellItems"];
-        CtxNew.Header = _loc["Zone.New"];
-        CtxNew2.Header = _loc["Zone.New"];
+        CtxNew.Header = _loc["ZoneMenu.New"];
+        CtxNew2.Header = _loc["ZoneMenu.New"];
         CtxNewFolder.Header = _loc["ZoneMenu.NewFolder"];
-        // ponytail 2026-08-25 (Task 6): "New Subfolder" menu entry, mirrored in both
-        // ContextMenus. Localization keys Subfolder.New* live in i18n/source.*.json.
-        CtxNewSubfolder.Header = _loc["Subfolder.New"];
-        CtxNewSubfolder2.Header = _loc["Subfolder.New"];
+        // ponytail 2026-08-27: "新建次级分区"(原"新建次级文件夹")— Zone 与 SubZone 概念合并,
+        // 命名统一;i18n 键 Subfolder.* → SubZone.*。
+        CtxNewSubZone.Header = _loc["SubZone.New"];
+        CtxNewSubZone2.Header = _loc["SubZone.New"];
         CtxNewTxt.Header = _loc["ZoneMenu.NewTxt"];
         CtxNewDocx.Header = _loc["ZoneMenu.NewDocx"];
         CtxNewPptx.Header = _loc["ZoneMenu.NewPptx"];
@@ -266,11 +302,15 @@ public partial class ZoneWindow : Window
         CtxNewDocx2.Header = _loc["ZoneMenu.NewDocx"];
         CtxNewPptx2.Header = _loc["ZoneMenu.NewPptx"];
         CtxNewXlsx2.Header = _loc["ZoneMenu.NewXlsx"];
+        CtxMapFolderNew.Header = _loc["FolderMap.MenuMap"];
+        CtxMapFolder2.Header = _loc["FolderMap.MenuMap"];
         CtxDisbandAll.Header = _loc["Merge.DisbandAll"];
-        CtxEdit.Header = _loc["Zone.Edit"];
-        CtxHide.Header = _loc["Zone.Hide"];
-        CtxDelete.Header = _loc["Zone.Delete"];
-        CtxMapFolder.Header = _loc["FolderMap.MenuMap"];
+        CtxSettings.Header = _loc["ZoneMenu.Settings"];
+        // ponytail 2026-08-27: 切语言时同步刷新 CtxLock(吸取教训 — ApplyLockState 不在
+        // LanguageChanged 路径上,XAML 静态绑定只读一次,需手动同步)。
+        CtxLock.Header = _loc[_zone.IsLocked ? "Common.Unlock" : "Common.Lock"];
+        CtxMinimize.Header = _loc["ZoneMenu.Minimize"];
+        CtxDelete.Header = _loc["ZoneMenu.DeleteZone"];
         CtxPaste.Header = _loc["FolderMap.Paste"];
         FolderMapUpBtn.ToolTip = _loc["FolderMap.Up"];
         FolderMapRefreshBtn.ToolTip = _loc["FolderMap.Refresh"];
@@ -580,8 +620,8 @@ public partial class ZoneWindow : Window
         {
             if (vm.Type != ItemType.SubFolder) continue;
             var src = vm.Source;
-            double w = 56.0;
-            double h = 56.0 + ZoneLayout.LabelArea;
+            double w = ItemW;
+            double h = ItemH;
             if (p.X >= src.X && p.X <= src.X + w && p.Y >= src.Y && p.Y <= src.Y + h)
                 return src;
         }
@@ -714,7 +754,7 @@ public partial class ZoneWindow : Window
         return new SubfolderFill(
             s.FillColor, 100,
             s.BgImagePath, s.BgImageOpacity,
-            _zone.EnableAcrylic ? _zone.GlassColorMode : null,
+            _zone.EnableLiquidGlass ? _zone.GlassColorMode : null,
             _zone.GlassBlurAmount, _zone.GlassTintOpacity, _zone.GlassTintLuminosity);
     }
 
@@ -1136,8 +1176,13 @@ public partial class ZoneWindow : Window
         // invisible. Re-show symmetrically with ShowClock/ShowCalendar/ShowNote.
         if (!IsVisible) Show();
         if (_zone.Width < 100) _zone.Width = 400; if (_zone.Height < 100) _zone.Height = 300;
-        Width = _zone.Width; Height = _zone.Height; Left = _zone.X; Top = _zone.Y;
-        if (waveDelayMs > 0)
+        Width = _zone.Width; ApplyProgrammaticHeight(TileWindowHeight()); Left = _zone.X; Top = _zone.Y;
+        // 已经展开显示的窗口不再重复播放 wave 动画(再次「全部显示」时跳过)，
+        // 但仍走 SnapToExpanded 以维持「永久展开」(不会因鼠标离开而自动收起)。
+        bool alreadyExpanded = _hover?.IsExpanded == true
+            && MainContent.Visibility == Visibility.Visible
+            && RestoreButton.Visibility != Visibility.Visible;
+        if (waveDelayMs > 0 && !alreadyExpanded)
         {
             // ponytail: batch "Show All" wave — start collapsed and play the zone's own
             // configured animation after its stagger delay (each window uses its own
@@ -1175,7 +1220,7 @@ public partial class ZoneWindow : Window
         // If minimized, the original dimensions are already saved in _zone
         if (RestoreButton.Visibility != Visibility.Visible)
         {
-            _zone.X = Left; _zone.Y = Top; _zone.Width = Width; _zone.Height = Height;
+            _zone.X = Left; _zone.Y = Top; _zone.Width = Width; _zone.Height = FullHeightFromWindowHeight();
             _mgr.SaveConfig();
         }
         if (!_zone.EnableRestoreButton)
@@ -1215,7 +1260,13 @@ public partial class ZoneWindow : Window
             // ponytail: minimized — window stays at full size, content collapses
             // with animation, RestoreButton stays visible at top-left for hover/click
             // to expand again.
+            // ponytail 2026-08-28 边框残影修复 — 与三个小挂件(HideClock/HideCalendar/
+            // HideNote)同款:收起分支必须同步关闭 DWM 玻璃。分区此前只依赖 Collapsed
+            // 事件在动画结束后关玻璃,收起期间(以及动画被外部打断时)整窗大小的
+            // 丙烯酸/边框会残留为「原窗口轮廓残影」;设置面板与全部最小化两条路径
+            // 都在窗口失去焦点的情况下触发,残影最明显。
             NativeMethods.DisableRoundedCorners(this);
+            AcrylicHelper.DisableBlur(this);
             if ((DataContext as ZoneViewModel)?.IsLocked != true) NativeMethods.PinToDesktop(this);
             if (waveDelayMs > 0)
                 _hover?.CollapseAfterDelay(waveDelayMs, null);
@@ -1314,7 +1365,7 @@ public partial class ZoneWindow : Window
             // the window keeps its size while collapsed; the anchor math and the
             // hover region depend on it).
             Width = _zone.Width < 100 ? 400 : _zone.Width;
-            Height = _zone.Height < 100 ? 300 : _zone.Height;
+            ApplyProgrammaticHeight(_zone.Height < 100 ? 300 : TileWindowHeight());
             // ponytail: keep window at full size; HoverExpandBehavior owns
             // visibility/scale from here.
             _hover?.SnapToCollapsed();
@@ -1442,10 +1493,10 @@ public partial class ZoneWindow : Window
             new DoubleAnimation(on ? 1.24 : 1.0, TimeSpan.FromMilliseconds(140)) { EasingFunction = ease });
     }
 
-    // ── Window-level mouse: body drag (Tile mode) + Ctrl marquee ──
+    // ── Window-level mouse: body drag + marquee (swapped per user request) ──
 
-    // ponytail 2026-08-26 (磁贴模式): 主体空白按下 = 拖动整窗（复用 _snapDrag 合并检测），
-    // Ctrl+按下 = 保留原有框选。双击由 Window_MouseDoubleClick 处理（自定义图标打开）。
+    // ponytail: 直接拖拽空白 = 框选；Ctrl+拖拽 = 拖动整窗（复用 _snapDrag 合并检测）。
+    // 双击由 Window_MouseDoubleClick 处理（自定义图标打开）。
     void Window_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (e.OriginalSource is TextBox) return; // title inline editing
@@ -1455,26 +1506,26 @@ public partial class ZoneWindow : Window
         if (MainContent.Visibility != Visibility.Visible) return;
         if (FolderMappingView.Visibility == Visibility.Visible) return;
 
-        // 自定义图标模式下第二次按下（ClickCount==2）不启动拖动，交给双击打开。
+        // 自定义图标模式下第二次按下（ClickCount==2）不启动框选，交给双击打开。
         if (_customIconOpenFirst && e.ClickCount == 2) return;
 
-        // Ctrl+drag 走框选（保留旧行为）。
+        // Ctrl+拖拽 = 拖动整窗。
         if ((Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
         {
-            _selectMode = SelectMode.Draw;
-            _selectTarget = SelectTarget.ZoneItems;
-            _selectStart = e.GetPosition(this);
-            _selectCurrent = _selectStart;
-            _selectMoved = false;
-            _selectFromEmpty = true;
-            _selectStartZone = null;
-            _selectStartList = null;
-            try { Mouse.Capture(this); } catch { }
+            StartBodyDrag(e);
             return;
         }
 
-        // 主体空白 = 拖动整窗（复用 _snapDrag + 合并检测）。
-        StartBodyDrag(e);
+        // 直接拖拽空白 = 框选（原 Ctrl+拖拽行为，用户要求"反一下"）。
+        _selectMode = SelectMode.Draw;
+        _selectTarget = SelectTarget.ZoneItems;
+        _selectStart = e.GetPosition(this);
+        _selectCurrent = _selectStart;
+        _selectMoved = false;
+        _selectFromEmpty = true;
+        _selectStartZone = null;
+        _selectStartList = null;
+        try { Mouse.Capture(this); } catch { }
     }
 
     /// <summary>从主体空白触发的窗口拖动，复用 TitleBar_Drag 同款 _snapDrag + 合并检测。</summary>
@@ -1750,8 +1801,22 @@ public partial class ZoneWindow : Window
             for (int j = i; j < Math.Min(i + batch, entries.Count); j++)
             {
                 var e = entries[j];
-                var icon = _iconService.GetIcon(e.FullPath,
-                    e.IsFolder ? Models.ItemType.Folder : Models.ItemType.Shortcut);
+                // 分区图片预览:图片文件显示内容缩略图(与分区 ZoneItemViewModel.Icon 同逻辑),
+                // 其余文件/文件夹照旧解析 shell 图标。解析失败回退到默认图标。
+                ImageSource? icon;
+                if (e.IsFolder)
+                {
+                    icon = _iconService.GetIcon(e.FullPath, Models.ItemType.Folder);
+                }
+                else if (ShellIconService.ImagePreviewEnabled && ShellIconService.IsImageFile(e.FullPath))
+                {
+                    icon = _iconService.GetImageThumbnail(e.FullPath)
+                        ?? _iconService.GetIcon(e.FullPath, Models.ItemType.Shortcut);
+                }
+                else
+                {
+                    icon = _iconService.GetIcon(e.FullPath, Models.ItemType.Shortcut);
+                }
                 if (icon == null) continue;
                 try { (icon as Freezable)?.Freeze(); } catch { }
                 batchItems.Add((e, icon));
@@ -1895,14 +1960,6 @@ public partial class ZoneWindow : Window
             }
             catch { }
         }
-    }
-
-    void FolderList_MouseDoubleClick(object s, MouseButtonEventArgs e)
-    {
-        // Only left double-click navigates/opens — right double-click must not enter a folder.
-        if (e.ChangedButton != MouseButton.Left) return;
-        OpenFolderMapSelected();
-        e.Handled = true;
     }
 
     // ── Folder-entry context menu (code-built, opened manually on right-down so
@@ -2232,7 +2289,7 @@ public partial class ZoneWindow : Window
         if (PasteClipboardIntoMapping()) e.Handled = true;
     }
 
-    (double, double) FindFreeSpot() => ZoneLayout.FindFreeSpot(_vm.GetPlacementItems(), _zone.Width, _zone.Height, _zone.GridSize, _zone.GridSize + ZoneLayout.LabelArea);
+    (double, double) FindFreeSpot() => ZoneLayout.FindFreeSpot(_vm.GetPlacementItems(), _zone.Width, _zone.Height, _zone.GridSize, _zone.GridSize);
 
     void RearrangeAll()
     {
@@ -2262,7 +2319,10 @@ public partial class ZoneWindow : Window
         // 按窗口宽度计算列数并把整块水平居中 — 左右留白相等（不再出现
         // 左侧 10px、右侧一大片的偏斜布局；换行临界处的留白跳变也被摊平）。
         double avail = Math.Max(0, _zone.Width - 2 * pad);
-        int cols = Math.Max(1, (int)Math.Floor((avail - gridSize) / pitch) + 1);
+        int fitCols = Math.Max(1, (int)Math.Floor((avail - gridSize) / pitch) + 1);
+        // 只按实际用到的列数居中(与 ZoneLayout.NormalizeZone 一致)：
+        // 窗口能容纳 7 列但只有 2 个图标时，按 7 列居中会把图标挤到左侧、右侧留一大片。
+        int cols = Math.Min(fitCols, items.Count);
         double blockWidth = (cols - 1) * pitch + gridSize;
         double offsetX = Math.Max(pad, (_zone.Width - blockWidth) / 2);
         int idx = 0;
@@ -2308,6 +2368,8 @@ public partial class ZoneWindow : Window
         var (enabled, path) = ResolveFolderMapping();
         bool canPaste = enabled && !string.IsNullOrEmpty(path) && Directory.Exists(path);
         CtxPaste.Visibility = canPaste ? Visibility.Visible : Visibility.Collapsed;
+        // 粘贴项上方的分割线跟粘贴项同显隐:无映射时保持菜单整洁(避免双分割线)。
+        CtxPasteSep.Visibility = CtxPaste.Visibility;
     }
 
     static bool IsOnFolderEntry(object s)
@@ -2323,6 +2385,17 @@ public partial class ZoneWindow : Window
     void EditZone_Click(object s, RoutedEventArgs e) { _vm.IsEditing = !_vm.IsEditing; EditBtnText.Text = _vm.IsEditing ? "✓" : "⚙"; }
     void HideZone_Click(object s, RoutedEventArgs e) { HideZone(); }
     void DeleteZone_Click(object s, RoutedEventArgs e) { if (MessageBox.Show(_loc.Get("Dialog.DeleteZoneMsg", _zone.Name), _loc["Dialog.DeleteZoneTitle"], MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes) { _mgr.DeleteZone(_zone.Id); Close(); } }
+    // ponytail 2026-08-27: 右键 → 设置 = 弹 PropertyPanel 样式浮窗(与齿轮按钮同入口)。
+    // ponytail 2026-08-27: 对齐分区右上角齿轮 — 走 PropertyWindowService 而不是
+    // ManagementWindow.OpenFloatingProperty,合并组目标走 MergedGroupTarget.For,
+    // 浮窗位置锚定在 ZoneWindow。
+    void SettingsZone_Click(object s, RoutedEventArgs e)
+    {
+        if (_zone.MergedGroupMembership.SubZoneIds.Count > 0)
+            PropertyWindowService.OpenOrFocus(MergedGroupTarget.For(_zone), this);
+        else
+            PropertyWindowService.OpenOrFocus(_zone, this);
+    }
     void DisbandAll_Click(object s, RoutedEventArgs e)
     {
         if (!_zone.MergedGroupMembership.GroupId.HasValue) return;
@@ -2480,8 +2553,8 @@ public partial class ZoneWindow : Window
         }
     }
 
-    void Restore_Enter(object s, MouseEventArgs e) { RestoreButton.Background = RestoreHoverBrush; }
-    void Restore_Leave(object s, MouseEventArgs e) { RestoreButton.Background = RestoreIdleBrush; }
+    void Restore_Enter(object s, MouseEventArgs e) { RestoreButton.SetResourceReference(Border.BackgroundProperty, "Menu.Bg.Hover"); }
+    void Restore_Leave(object s, MouseEventArgs e) { RestoreButton.SetResourceReference(Border.BackgroundProperty, "Menu.Bg.Surface"); }
 
     void Ctrl_Enter(object s, MouseEventArgs e) { if (s is Border b) b.Background = CtrlHoverBrush; }
     void Ctrl_Leave(object s, MouseEventArgs e) { if (s is Border b) b.Background = CtrlIdleBrush; }
@@ -2501,6 +2574,12 @@ public partial class ZoneWindow : Window
         _mgr.SaveConfig();
     }
 
+    // ponytail 2026-08-27: 右键菜单专用 — RoutedEventHandler 签名(不能用 MouseButtonEventArgs 版)。
+    void CtxLock_Click(object sender, RoutedEventArgs e)
+    {
+        LockBtn_Click(sender, new System.Windows.Input.MouseButtonEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = Button.ClickEvent });
+    }
+
     void OnServiceLockChanged(string id, bool locked)
     {
         var vm = DataContext as ZoneViewModel;
@@ -2518,6 +2597,8 @@ public partial class ZoneWindow : Window
         TitleBarBg.Cursor = vm.IsLocked ? System.Windows.Input.Cursors.Arrow : System.Windows.Input.Cursors.SizeAll;
         GripTL.Visibility = GripTR.Visibility = GripBL.Visibility = GripBR.Visibility =
             vm.IsLocked ? Visibility.Collapsed : Visibility.Visible;
+        // ponytail 2026-08-27: 锁定态变化时同步右键菜单 Header,切语言后下次打开也会刷新。
+        CtxLock.Header = vm.IsLocked ? _loc["Common.Unlock"] : _loc["Common.Lock"];
         if (vm.IsLocked) NativeMethods.PinBelowProgman(this);
     }
 
@@ -2786,6 +2867,17 @@ public partial class ZoneWindow : Window
     /// (click-select still happens); empty-area press marquees immediately.</summary>
     void FolderList_PreviewMouseLeftButtonDown(object s, MouseButtonEventArgs e)
     {
+        // 双击 = 进入文件夹 / 打开文件。必须在 Preview 阶段处理:下方捕获鼠标 +
+        // 长按框选计时会吞掉 ListBox 自身的 MouseDoubleClick(第二击 ClickCount==2
+        // 时 ListBoxItem 已选中,ListBox 不再按普通点击路径派发双击事件)。
+        if (e.ClickCount == 2 && e.ChangedButton == MouseButton.Left && IsOnFolderEntry(e.OriginalSource))
+        {
+            SelectFolderEntryAtCursor();
+            OpenFolderMapSelected();
+            e.Handled = true;
+            return;
+        }
+
         // Capture so the marquee still commits when released outside the window.
         try { Mouse.Capture(FolderList); } catch { }
         if (IsOnFolderEntry(e.OriginalSource))
@@ -3115,7 +3207,7 @@ public partial class ZoneWindow : Window
             {
                 vertical = false;     // wraps to a new row below
                 barX = 10;
-                barY = prev.Y + gs + ZoneLayout.LabelArea + ZoneLayout.CellGap / 2;
+                barY = prev.Y + gs + ZoneLayout.CellGap / 2;
             }
         }
         else
@@ -3179,13 +3271,19 @@ public partial class ZoneWindow : Window
     void Item_Enter(object s, MouseEventArgs e)
     {
         if (s is Grid g)
-            g.Background = ItemHoverBrush;
+        {
+            var hover = FindVisualChild<Border>(g, b => b.Name is "HoverBox" or "SubHoverBox");
+            if (hover != null) hover.Background = ItemHoverBrush;
+        }
     }
 
     void Item_Leave(object s, MouseEventArgs e)
     {
         if (s is Grid g)
-            g.Background = Brushes.Transparent;
+        {
+            var hover = FindVisualChild<Border>(g, b => b.Name is "HoverBox" or "SubHoverBox");
+            if (hover != null) hover.Background = Brushes.Transparent;
+        }
     }
 
     // ── Context menu ──
@@ -3476,7 +3574,13 @@ public partial class ZoneWindow : Window
         // radius 0 → DONOTROUND so Win11 stops clipping the sharp WPF corners.
         // Guarded: ApplyStyle also runs in the constructor before the HWND
         // exists, where WindowInteropHelper.Handle would throw.
-        if (PresentationSource.FromVisual(this) != null)
+        // ponytail 2026-08-28: 收起状态下跳过 — 设置面板显示开关 → HideZone →
+        // ZonesChanged → OnZonesChanged → ApplyStyle 这条链会在窗口收起后重新
+        // 打开 Win11 圆角,整窗大小的圆角描边正是「原窗口轮廓残影」来源之一。
+        // 展开路径(ShowZone / ReapplyAcrylic)会各自恢复圆角。
+        bool collapsed = RestoreButton.Visibility == Visibility.Visible
+                         || _hover is { IsExpanded: false };
+        if (PresentationSource.FromVisual(this) != null && !collapsed)
             NativeMethods.SetRoundedCorners(this, s.CornerRadius);
 
         // Body fill
@@ -3500,18 +3604,7 @@ public partial class ZoneWindow : Window
         try { ZoneTitleText.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.TitleTextColor)!); } catch { }
 
         // Title icon — resolved IconColor (falling back to the resolved title text color).
-        var iconColor = !string.IsNullOrEmpty(s.IconColor) ? s.IconColor : s.TitleTextColor;
-        try
-        {
-            var ic = new SolidColorBrush((Color)ColorConverter.ConvertFromString(iconColor)!);
-            TitleIconChar.Foreground = ic;
-            RestoreIconChar.Foreground = ic;
-        }
-        catch
-        {
-            TitleIconChar.Foreground = Brushes.Transparent;
-            RestoreIconChar.Foreground = Brushes.Transparent;
-        }
+        ApplyIconVisuals();
 
         // ControlPoint button labels — fixed 按钮颜色 (replaces the old title-bar adaptive).
         SolidColorBrush btnBrush;
@@ -3527,6 +3620,7 @@ public partial class ZoneWindow : Window
         var vis = s.TileMode ? Visibility.Collapsed : Visibility.Visible;
         TitleBarBg.Visibility = vis;
         ControlPoint.Visibility = vis;
+        _tileVisual = s.TileMode;
 
         // 磁贴模式 = 隐藏底部 8px 分割条。
         if (BottomBarBg != null)
@@ -3546,16 +3640,18 @@ public partial class ZoneWindow : Window
     }
 
     /// <summary>遍历 ItemsHost 内的 ContentPresenter，根据 hide 切换名称 TextBlock
-    /// （x:Name="ItemNameText"）可见性。容器未生成时无操作 — StatusChanged
-    /// 处理器会在容器生成后补一次。</summary>
+    /// （x:Name="ItemNameText"）可见性。次级分区名称走 SubfolderItemView.HideName
+    /// 声明式绑定,不在此重复处理。容器未生成时无操作 — StatusChanged 处理器会在
+    /// 容器生成后补一次。</summary>
     void ApplyHideAppName(bool hide)
     {
         if (ItemsHost == null) return;
+        var target = hide ? Visibility.Collapsed : Visibility.Visible;
         for (int i = 0; i < ItemsHost.Items.Count; i++)
         {
             if (ItemsHost.ItemContainerGenerator.ContainerFromIndex(i) is not DependencyObject container) continue;
             var tb = FindVisualChild<TextBlock>(container, tb => tb.Name == "ItemNameText");
-            if (tb != null) tb.Visibility = hide ? Visibility.Collapsed : Visibility.Visible;
+            if (tb != null) tb.Visibility = target;
         }
     }
 
@@ -3664,27 +3760,18 @@ public partial class ZoneWindow : Window
         else { BgImage.Source = null; BgImage.Opacity = 0; }
     }
 
-    /// <summary>Walk the item template subtree under <see cref="ItemsHost"/> and apply the
-    /// fixed 主体内容颜色 (replaces the old body adaptive walk). Scoped to ItemsHost so it
-    /// never clobbers the title-bar brushes applied by <see cref="ApplyStyle"/>.</summary>
+    /// <summary>Apply the resolved 主体内容颜色 to item labels. The brush is exposed as
+    /// <see cref="ItemTextBrush"/> and bound declaratively in the item templates, so newly
+    /// generated containers pick the right color at instantiation — no post-render walk,
+    /// no default-color flash.</summary>
     public void ApplyItemTextColor(string? effectiveColor = null)
     {
         string color = effectiveColor ?? ResolveStyle().TextColor;
         SolidColorBrush brush;
         try { brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(color)!); }
         catch { brush = Brushes.White; }
-        if (ItemsHost == null) return;
-        AdaptiveTextColor.ApplyBrushToTree(ItemsHost, brush);
-        // Defer a second pass until item containers are realized. RefreshItems
-        // (OnZonesChanged) wipes + re-adds items asynchronously, so the immediate walk
-        // above can hit an empty visual tree and leave the XAML default #E0FFFFFF;
-        // re-applying at Loaded priority makes the body content color survive that
-        // regeneration instead of silently reverting to default.
-        Dispatcher.BeginInvoke(new Action(() =>
-        {
-            if (ItemsHost != null)
-                AdaptiveTextColor.ApplyBrushToTree(ItemsHost, brush);
-        }), System.Windows.Threading.DispatcherPriority.Loaded);
+        brush.Freeze();
+        ItemTextBrush = brush;
     }
 
     /// <summary>Re-apply the full style (fixed title/body content colors included). Called
@@ -3696,14 +3783,49 @@ public partial class ZoneWindow : Window
 
     void SetRestoreIcon()
     {
-        // For merged groups, prefer MergedGroupMembership.Icon; otherwise use IconChar
-        string iconChar = _zone.MergedGroupMembership.SubZoneIds.Count > 0 && !string.IsNullOrEmpty(_zone.MergedGroupMembership.Icon)
-            ? _zone.MergedGroupMembership.Icon : _zone.IconChar;
-        var icon = string.IsNullOrEmpty(iconChar) ? (string.IsNullOrEmpty(_zone.Name) ? "⊞" : _zone.Name[..1]) : iconChar;
-        RestoreIconChar.Text = icon;
-        TitleIconChar.Text = string.IsNullOrEmpty(iconChar) ? icon : iconChar;
+        // 组合分区优先用 MergedGroupMembership.Icon，否则用 IconChar；为空时回退到
+        // 软件原生默认图标（组合 → @merged，分区 → @zones），不再用名称首字母兜底。
+        ApplyIconVisuals();
     }
-    void OnSize(object s, SizeChangedEventArgs e) { if (!IsLoaded || MainContent.Visibility != Visibility.Visible) return; _zone.Width = Width; _zone.Height = Height; ScheduleSave(); RearrangeAll(); UpdateCanvasSize(); NativeMethods.UpdateRoundedCorners(this, (int)_zone.CornerRadius); }
+
+    /// <summary>解析当前应显示的图标字符串（含原生默认兜底）。</summary>
+    string ResolveIconText()
+    {
+        bool isMergedMaster = _zone.MergedGroupMembership.SubZoneIds.Count > 0;
+        string iconChar = isMergedMaster && !string.IsNullOrEmpty(_zone.MergedGroupMembership.Icon)
+            ? _zone.MergedGroupMembership.Icon : _zone.IconChar;
+        return string.IsNullOrEmpty(iconChar)
+            ? (isMergedMaster ? Helpers.IconGlyph.Merged : Helpers.IconGlyph.Zones)
+            : iconChar;
+    }
+
+    /// <summary>把解析后的图标（emoji 或原生矢量）刷到标题栏 + 恢复按钮。
+    /// 两处图标都走「设置的颜色」（IconColor ?? 名称/文字颜色），不随系统深浅色变化。</summary>
+    void ApplyIconVisuals()
+    {
+        var s = ResolveStyle();
+        Brush titleBrush;
+        var titleColor = !string.IsNullOrEmpty(s.IconColor) ? s.IconColor : s.TitleTextColor;
+        try { titleBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(titleColor)!); }
+        catch { titleBrush = Brushes.Transparent; }
+
+        string icon = ResolveIconText();
+        Helpers.IconGlyph.Apply(TitleIconChar, TitleIconPath, icon, titleBrush, 12);
+        Helpers.IconGlyph.Apply(RestoreIconChar, RestoreIconPath, icon, titleBrush, 18);
+    }
+    void OnSize(object s, SizeChangedEventArgs e)
+    {
+        if (!IsLoaded || MainContent.Visibility != Visibility.Visible) return;
+        _zone.Width = Width;
+        _zone.Height = FullHeightFromWindowHeight();
+        ScheduleSave();
+        bool tileSync = !double.IsNaN(_expectedTileHeight) && Math.Abs(Height - _expectedTileHeight) < 0.5;
+        if (tileSync) _expectedTileHeight = double.NaN;
+        // ponytail: 窗口拖拽缩放时不再自动重排/居中图标——只更新画布大小，图标保持
+        // 在原网格位置，避免“一拉窗口图标就偏移”。手动对齐仍由 AlignGrid_Click 触发。
+        UpdateCanvasSize();
+        NativeMethods.UpdateRoundedCorners(this, (int)_zone.CornerRadius);
+    }
 
     void ScheduleSave() { _savePending = true; _saveDebounce.Stop(); _saveDebounce.Start(); }
 
@@ -3727,7 +3849,7 @@ public partial class ZoneWindow : Window
 
         if (displayItems.Count == 0) { _itemCanvas.Width = Math.Max(0, _zone.Width - 2); _itemCanvas.Height = Math.Max(0, _zone.Height - 50); return; }
         double maxX = 0, maxY = 0;
-        foreach (var i in displayItems) { if (i.X + gs + 20 > maxX) maxX = i.X + gs + 20; if (i.Y + gs + ZoneLayout.LabelArea + 20 > maxY) maxY = i.Y + gs + ZoneLayout.LabelArea + 20; }
+        foreach (var i in displayItems) { if (i.X + gs + 20 > maxX) maxX = i.X + gs + 20; if (i.Y + gs + 20 > maxY) maxY = i.Y + gs + 20; }
         _itemCanvas.Width = Math.Max(_zone.Width - 20, maxX + 20);
         _itemCanvas.Height = Math.Max(_zone.Height - 50, maxY + 20);
     }
@@ -3741,7 +3863,23 @@ public partial class ZoneWindow : Window
     void ReapplyAcrylic()
     {
         var s = ResolveStyle();
+        // ponytail 2026-08-28: 展开时把 Win11 圆角偏好一并恢复(收起时
+        // OnHoverCollapsed 关掉了它),否则恢复按钮点开的分区会一直保持尖角。
+        NativeMethods.SetRoundedCorners(this, (int)_zone.CornerRadius);
         ApplyAcrylic(s.FillColor, s.TitleBarFillColor);
+    }
+
+    /// <summary>
+    /// ponytail 2026-08-28 边框残影修复 — 收起完成时的最终保险。窗口收起后仍保持
+    /// 整窗大小,任何残留的 OS 层装饰(丙烯酸玻璃 / Win11 圆角 / DWM 框架阴影)
+    /// 都会以「原窗口轮廓」的形式残留在恢复按钮周围。这里把三样全部重断言关闭,
+    /// 与三个小挂件的收起分支行为对齐。
+    /// </summary>
+    void OnHoverCollapsed()
+    {
+        AcrylicHelper.DisableBlur(this);
+        NativeMethods.DisableRoundedCorners(this);
+        NativeMethods.DisableDwmFrameShadow(this);
     }
 
     void ApplyAcrylic(string fillColor, string titleBarFillColor)
@@ -3751,7 +3889,7 @@ public partial class ZoneWindow : Window
         // bounds with a ghost glass rectangle. Only enable blur while the content is
         // expanded; whenever collapsed (or mid-collapse), disable it instead.
         bool expanded = _hover?.IsExpanded ?? false;
-        if (_zone.EnableAcrylic && expanded)
+        if (_zone.EnableLiquidGlass && expanded)
         {
             var blurResult = AcrylicHelper.EnableBlur(this, _zone.GlassBlurAmount, _zone.GlassTintOpacity, _zone.GlassTintLuminosity, _zone.GlassColorMode);
             if (!blurResult.Success)
@@ -3813,12 +3951,12 @@ public partial class ZoneWindow : Window
         _zone = zone; // ← KEY FIX: update the reference
         // ponytail: skip _vm.RefreshZone (Items.Clear/Add). Items don't actually change
         // in this path — PushToZone/preset-apply only touch style fields, CopyZoneFields
-        // doesn't copy Items. The Clear/Add race with ApplyStyle's ApplyBrushToTree is
-        // the reason item names "stuck on previous color" — WPF defers container
-        // generation to the next layout pass, so the walk runs before new TextBlocks
-        // exist. Actual item add/remove/rename goes through OnZonesChanged which uses
-        // Dispatcher.BeginInvoke (Fix C). Updating VM.Zone keeps its binding consumers
-        // (SourceZoneId et al.) happy without touching the Items collection.
+        // doesn't copy Items. Clearing/re-adding would force container regeneration, and
+        // the item-label color now rides a declarative binding on ItemTextBrush, so the
+        // color simply re-evaluates without any walk/regeneration race. Actual item
+        // add/remove/rename goes through OnZonesChanged which uses Dispatcher.BeginInvoke
+        // (Fix C). Updating VM.Zone keeps its binding consumers (SourceZoneId et al.)
+        // happy without touching the Items collection.
         _vm.Zone = zone;
         ZoneTitleText.Text = zone.Name;
         SetRestoreIcon();
@@ -3975,14 +4113,12 @@ public partial class ZoneWindow : Window
 
         if (!string.IsNullOrEmpty(iconChar))
         {
-            sp.Children.Add(new TextBlock
+            var iconEl = Helpers.IconGlyph.CreateIcon(iconChar, textBrush, fontSize: 10, pathSize: 10);
+            if (iconEl != null)
             {
-                Text = iconChar,
-                FontSize = 10,
-                Foreground = textBrush,
-                VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(0, 0, 3, 0)
-            });
+                iconEl.Margin = new Thickness(0, 0, 3, 0);
+                sp.Children.Add(iconEl);
+            }
         }
 
         sp.Children.Add(new TextBlock
@@ -4074,7 +4210,8 @@ public partial class ZoneWindow : Window
         // The selected tab owns the visible folder mapping (sub-zone keeps its own
         // mapping after joining the group) — re-resolve + reload for the new tab.
         RefreshFolderMapping();
-        RearrangeAll(); // Rearrange items for the newly selected sub-zone
+        // ponytail: 切到子分区 tab 时不再自动重排/居中图标 — 保持子分区自己的网格位置，
+        // 避免「分区加入组合分区后图标偏移」（与窗口缩放/启动重排的修复一致）。
         UpdateCanvasSize();
     }
 

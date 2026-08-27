@@ -129,13 +129,10 @@ public partial class EditableListRow : UserControl
             if (committing) return;
             committing = true;
             var raw = box.Text?.Trim() ?? "";
-            // Resolve collisions: don't collide with current Title; if user left it unchanged, skip.
-            if (!string.IsNullOrEmpty(raw))
-            {
-                var final = NameCollisionResolver.ResolveName(raw, new[] { Title ?? "" });
-                if (RenameCommand != null && final != Title)
-                    RenameCommand.Execute(final);
-            }
+            // ponytail 2026-08-28: 同名自动加数字的功能已移除 — 用户自己改重名即可,
+            // 这里不再做任何冲突解析;重命名成原名字则视为未修改。
+            if (!string.IsNullOrEmpty(raw) && raw != Title && RenameCommand != null)
+                RenameCommand.Execute(raw);
             parent.Children.Remove(box);
             parent.Children.Insert(0, tb);
             tb.Text = Title;

@@ -1,7 +1,7 @@
-<Window x:Class="DesktopZones.Views.MotionSettingsDialog"
+<Window x:Class="DesktopZones.Views.PanelPopupMotionDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:loc="clr-namespace:DesktopZones.Helpers"
-        Title="{loc:Loc Key=Motion.Title}" Width="320" Height="320"
+        Title="{loc:Loc Key=Motion.Title}" Width="320" Height="330"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         WindowStyle="None"
@@ -25,25 +25,27 @@
             <TextBlock x:Name="TitleLabel" Text="{loc:Loc Key=Motion.Title}" FontSize="13" FontWeight="SemiBold"
                        Foreground="{DynamicResource Brush.Text.Primary}" Margin="0,4,0,12"/>
 
-            <!-- Title/content divider (自适应文字色,同液态玻璃二级窗口) -->
+            <!-- Title/content divider -->
             <Border Grid.Row="1" Height="1" Margin="0,0,0,10"
                     Background="{DynamicResource Menu.Separator}"/>
 
-            <!-- Origin mode (hidden for SubFolder targets — origin is always the icon) -->
-            <Grid Grid.Row="2" Margin="0,0,0,10" x:Name="OriginRow">
+            <!-- 展开原点(桌面四角) -->
+            <Grid Grid.Row="2" Margin="0,0,0,10">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <StackPanel Margin="0,0,8,0">
-                    <TextBlock x:Name="OriginLabel" Text="{loc:Loc Key=Motion.Origin}" FontSize="12"
-                               Foreground="{DynamicResource Brush.Text.Primary}" TextWrapping="Wrap"/>
-                    <TextBlock x:Name="OriginHint" Text="{loc:Loc Key=Motion.OriginHint}" FontSize="10" Margin="0,2,0,0"
-                               Foreground="{DynamicResource Brush.Text.Tertiary}" TextWrapping="Wrap"/>
+                <StackPanel>
+                    <TextBlock x:Name="OriginLabel" Text="{loc:Loc Key=PanelPopupMotion.Origin}" FontSize="12"
+                               Foreground="{DynamicResource Brush.Text.Primary}"/>
+                    <TextBlock x:Name="OriginHint" Text="{loc:Loc Key=PanelPopupMotion.OriginHint}" FontSize="10" Margin="0,2,0,0"
+                               Foreground="{DynamicResource Brush.Text.Tertiary}" TextWrapping="Wrap" MaxWidth="170"/>
                 </StackPanel>
-                <ComboBox Grid.Column="1" x:Name="OriginCombo" VerticalAlignment="Center" Width="140">
-                    <ComboBoxItem x:Name="ItemOriginCenter" Content="{loc:Loc MotionOriginButtonCenter}" Tag="ButtonCenter"/>
-                    <ComboBoxItem x:Name="ItemOriginCorner" Content="{loc:Loc MotionOriginButtonCorner}" Tag="ButtonCorner"/>
+                <ComboBox Grid.Column="1" x:Name="OriginCombo" VerticalAlignment="Center" Width="130">
+                    <ComboBoxItem x:Name="ItemOriginTopLeft" Content="{loc:Loc PanelPopupMotionOriginTopLeft}" Tag="TopLeft"/>
+                    <ComboBoxItem x:Name="ItemOriginTopRight" Content="{loc:Loc PanelPopupMotionOriginTopRight}" Tag="TopRight"/>
+                    <ComboBoxItem x:Name="ItemOriginBottomLeft" Content="{loc:Loc PanelPopupMotionOriginBottomLeft}" Tag="BottomLeft"/>
+                    <ComboBoxItem x:Name="ItemOriginBottomRight" Content="{loc:Loc PanelPopupMotionOriginBottomRight}" Tag="BottomRight"/>
                 </ComboBox>
             </Grid>
 
@@ -57,7 +59,7 @@
                     <TextBlock x:Name="AnimationKindLabel" Text="{loc:Loc Key=Motion.AnimationKind}" FontSize="12"
                                Foreground="{DynamicResource Brush.Text.Primary}"/>
                     <TextBlock x:Name="AnimationKindHint" Text="{loc:Loc Key=Motion.AnimationKindHint}" FontSize="10" Margin="0,2,0,0"
-                               Foreground="{DynamicResource Brush.Text.Tertiary}"/>
+                               Foreground="{DynamicResource Brush.Text.Tertiary}" TextWrapping="Wrap" MaxWidth="170"/>
                 </StackPanel>
                 <ComboBox Grid.Column="1" x:Name="AnimationCombo" VerticalAlignment="Center" Width="120">
                     <ComboBoxItem x:Name="ItemScaleExpand" Content="{loc:Loc MotionAnimationScaleExpand}" Tag="ScaleExpand"/>

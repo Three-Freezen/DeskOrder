@@ -13,7 +13,7 @@ public class AppConfig
         get => _zones;
         set => _zones = value ?? new();
     }
-    public bool StartWithWindows { get; set; } = false;
+    public bool StartWithWindows { get; set; } = true;
     public bool StartMinimized { get; set; } = true;
     public bool ShowAllOnStartup { get; set; } = true;
 
@@ -21,10 +21,10 @@ public class AppConfig
     public bool AutoAlign { get; set; } = true;
 
     // ── 逆向同步：原文件消失/变更时自动删除分区图标 ──
-    public bool ReverseSyncEnabled { get; set; } = false;
+    public bool ReverseSyncEnabled { get; set; } = true;
 
     // ── 分区图片预览：导入的图片文件显示内容缩略图而非默认图标 ──
-    public bool ImagePreviewEnabled { get; set; } = false;
+    public bool ImagePreviewEnabled { get; set; } = true;
 
     // ── Theme selection (three-valued; replaces ambiguous single `Theme`) ──
     /// <summary>"System" / "Light" / "Dark". Defaults to "System" so existing configs fall back to OS preference.</summary>
@@ -50,6 +50,14 @@ public class AppConfig
     // ── Panel (POCOs, was 19 inline fields) ──
     public PanelConfig Panel { get; set; } = new();
     public PanelHotkeyConfig PanelHotkey { get; set; } = new();
+
+    // ponytail 2026-08-27: 全部显示 / 全部隐藏 / 全部最小化 全局热键。
+    public CustomHotkey ShowAllHotkey { get; set; } = new() { Modifiers = 0x0006, Key = 0x41 }; // Ctrl+Shift+A
+    public CustomHotkey HideAllHotkey { get; set; } = new() { Modifiers = 0x0006, Key = 0x48 }; // Ctrl+Shift+H
+    public CustomHotkey MinimizeAllHotkey { get; set; } = new() { Modifiers = 0x0006, Key = 0x4D }; // Ctrl+Shift+M
+
+    // ponytail 2026-08-27: 双击桌面切换全部显示/隐藏。仅在桌面区有效,其他窗口不拦截。
+    public bool DoubleClickToggleShowHide { get; set; } = true;
     /// <summary>Orphan: user-added extra hotkeys (not the primary toggle).
     /// Stays on AppConfig because it is rarely touched and the primary hotkey
     /// state lives in <see cref="PanelHotkey"/>.</summary>

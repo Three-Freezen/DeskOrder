@@ -50,19 +50,28 @@
                             <MenuItem x:Name="CtxDelete" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.Delete]}" Click="ItemDelete_Click" Foreground="#FF6666"/>
                         </ContextMenu>
                     </Grid.ContextMenu>
-                    <Image Source="{Binding Icon}" Width="{Binding IconSize}" Height="{Binding IconSize}"
-                           Stretch="Uniform"
-                           RenderOptions.BitmapScalingMode="HighQuality"
-                           HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,2,0,0"/>
-                    <TextBlock x:Name="ItemNameText" Text="{Binding Name}" FontSize="10"
-                               Foreground="#E0FFFFFF" TextAlignment="Center"
-                               TextTrimming="CharacterEllipsis"
-                               MaxWidth="{Binding ItemSize}" Margin="1,0,1,1"
-                               HorizontalAlignment="Center" VerticalAlignment="Bottom"/>
-                    <!-- Multi-select highlight (marquee / Ctrl+click) -->
-                    <Border x:Name="SelBox" Visibility="Collapsed" IsHitTestVisible="False"
-                            Background="#26FFFFFF" BorderBrush="#80FFFFFF" BorderThickness="1.2"
-                            CornerRadius="6"/>
+                    <!-- 方形 hover 高光(仅图标格区域,与面板一致的标准正方形) -->
+                    <Border x:Name="HoverBox" Width="{Binding ItemSize}" Height="{Binding ItemSize}"
+                            HorizontalAlignment="Left" VerticalAlignment="Top"
+                            Background="Transparent" CornerRadius="6" IsHitTestVisible="False"/>
+                    <!-- 图标+名称整体垂直居中(面板对齐):80 格子里 40px 图标居中,名称在下方。 -->
+                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" IsHitTestVisible="False">
+                        <Image Source="{Binding Icon}" Width="{Binding IconSize}" Height="{Binding IconSize}"
+                               Stretch="Uniform"
+                               RenderOptions.BitmapScalingMode="HighQuality"
+                               HorizontalAlignment="Center" Margin="0,0,0,4"/>
+                        <TextBlock x:Name="ItemNameText" Text="{Binding Name}" FontSize="10"
+                                   Foreground="{Binding ItemTextBrush, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=#E0FFFFFF}"
+                                   TextAlignment="Center"
+                                   TextTrimming="CharacterEllipsis"
+                                   MaxWidth="{Binding NameMaxWidth}"
+                                   HorizontalAlignment="Center"/>
+                    </StackPanel>
+                    <!-- 方形选中高光(标准正方形,不含名称行) -->
+                    <Border x:Name="SelBox" Width="{Binding ItemSize}" Height="{Binding ItemSize}"
+                            HorizontalAlignment="Left" VerticalAlignment="Top"
+                            Visibility="Collapsed" IsHitTestVisible="False"
+                            Background="#26FFFFFF" CornerRadius="6"/>
                 </Grid>
                 <DataTemplate.Triggers>
                     <DataTrigger Binding="{Binding IsSelected}" Value="True">
@@ -78,10 +87,13 @@
                 </DataTemplate.Triggers>
             </DataTemplate>
             <DataTemplate x:Key="SubfolderItemTemplate">
-                <Grid Background="Transparent" Cursor="Hand"
+                <Grid Width="{Binding ItemSize}" Height="{Binding ItemSize}"
+                      Background="Transparent" Cursor="Hand"
                       MouseLeftButtonDown="Item_MouseDown"
                       MouseMove="Item_MouseMove"
-                      MouseLeftButtonUp="Item_MouseUp">
+                      MouseLeftButtonUp="Item_MouseUp"
+                      MouseEnter="Item_Enter"
+                      MouseLeave="Item_Leave">
                     <Grid.ContextMenu>
                         <!-- ponytail: 次级文件夹右键菜单 — 打开/重命名/解散/删除。
                              与普通图标同款重命名弹窗;解散=图标散入分区(自动排列),删除=连同内部图标一起删。 -->
@@ -93,11 +105,17 @@
                             <MenuItem x:Name="CtxSubDelete" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.Delete]}" Click="SubfolderDelete_Click" Foreground="#FF6666"/>
                         </ContextMenu>
                     </Grid.ContextMenu>
-                    <c:SubfolderItemView/>
-                    <!-- Multi-select highlight (marquee / Ctrl+click) -->
-                    <Border x:Name="SubSelBox" Visibility="Collapsed" IsHitTestVisible="False"
-                            Background="#26FFFFFF" BorderBrush="#80FFFFFF" BorderThickness="1.2"
-                            CornerRadius="6"/>
+                    <c:SubfolderItemView HideName="{Binding DataContext.Zone.HideAppName, RelativeSource={RelativeSource AncestorType=Window}}"
+                                         HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    <!-- 方形 hover 高光(次级分区图标格区域) -->
+                    <Border x:Name="SubHoverBox" Width="{Binding ItemSize}" Height="{Binding ItemSize}"
+                            HorizontalAlignment="Left" VerticalAlignment="Top"
+                            Background="Transparent" CornerRadius="6" IsHitTestVisible="False"/>
+                    <!-- 方形选中高光 -->
+                    <Border x:Name="SubSelBox" Width="{Binding ItemSize}" Height="{Binding ItemSize}"
+                            HorizontalAlignment="Left" VerticalAlignment="Top"
+                            Visibility="Collapsed" IsHitTestVisible="False"
+                            Background="#26FFFFFF" CornerRadius="6"/>
                 </Grid>
                 <DataTemplate.Triggers>
                     <DataTrigger Binding="{Binding IsSelected}" Value="True">
@@ -132,14 +150,22 @@
                         Background="Transparent">
                     <Border.ContextMenu>
                         <ContextMenu Opened="ZoneMenu_Opened">
-                            <MenuItem x:Name="CtxImport" Header="{loc:Loc Key=ZoneMenu.ImportFiles}" Click="ImportFiles_Click"/>
-                            <MenuItem x:Name="CtxImportFolder" Header="{loc:Loc Key=ZoneMenu.ImportFolder}" Click="ImportFolder_Click"/>
-                            <MenuItem x:Name="CtxImportShell" Header="{loc:Loc Key=Zone.ImportShellItems}" Click="ImportShellItems_Click"/>
-                            <MenuItem x:Name="CtxPaste" Header="{loc:Loc Key=FolderMap.Paste}" Click="PasteClipboard_Click" Visibility="Collapsed"/>
+                            <!-- ponytail 2026-08-27: 5 段结构 — 导入 ▶ / 新建次级文件夹 /
+                                 新建 ▶ / 设置 / 最小化 / 删除分区。导入与"新建"作为二级
+                                 菜单(▶ 子菜单箭头),其它项平级。设置 → 弹 PropertyPanel
+                                 样式浮窗;最小化 = 隐藏分区(沿用 HideZone);删除分区保留
+                                 红色 #FF6666 提示。合并解散(条件显示)放在"删除分区"上方。 -->
+                            <!-- ponytail 2026-08-27: 父项 CtxImport/CtxNew 不挂 Click — 只承担
+                                 展开子菜单职责。挂 Click 会同时触发父项 + 子项两个 Click,
+                                 导致"导入系统项目"关闭后父项 ImportFiles_Click 又弹一次。 -->
+                            <MenuItem x:Name="CtxImport" Header="{loc:Loc Key=ZoneMenu.Import}">
+                                <MenuItem x:Name="CtxImportFiles" Header="{loc:Loc Key=ZoneMenu.ImportFiles}" Click="ImportFiles_Click"/>
+                                <MenuItem x:Name="CtxImportFolder" Header="{loc:Loc Key=ZoneMenu.ImportFolder}" Click="ImportFolder_Click"/>
+                                <MenuItem x:Name="CtxImportShell" Header="{loc:Loc Key=Zone.ImportShellItems}" Click="ImportShellItems_Click"/>
+                            </MenuItem>
                             <Separator/>
-                            <MenuItem x:Name="CtxNewSubfolder" Header="{loc:Loc Key=Subfolder.New}" Click="NewSubfolder_Click"/>
-                            <Separator/>
-                            <MenuItem x:Name="CtxNew" Header="{loc:Loc Key=Panel.New}">
+                            <MenuItem x:Name="CtxNewSubZone" Header="{loc:Loc Key=SubZone.New}" Click="NewSubfolder_Click"/>
+                            <MenuItem x:Name="CtxNew" Header="{loc:Loc Key=ZoneMenu.New}">
                                 <MenuItem x:Name="CtxNewFolder" Header="{loc:Loc Key=ZoneMenu.NewFolder}" Click="NewFolder_Click"/>
                                 <Separator/>
                                 <MenuItem x:Name="CtxNewTxt" Header="{loc:Loc Key=ZoneMenu.NewTxt}" Click="NewTxt_Click"/>
@@ -147,14 +173,20 @@
                                 <MenuItem x:Name="CtxNewPptx" Header="{loc:Loc Key=ZoneMenu.NewPptx}" Click="NewPptx_Click"/>
                                 <MenuItem x:Name="CtxNewXlsx" Header="{loc:Loc Key=ZoneMenu.NewXlsx}" Click="NewXlsx_Click"/>
                             </MenuItem>
+                            <MenuItem x:Name="CtxMapFolderNew" Header="{loc:Loc Key=FolderMap.MenuMap}" Click="FolderMapChoose_Click"/>
+                            <Separator/>
+                            <MenuItem x:Name="CtxSettings" Header="{loc:Loc Key=ZoneMenu.Settings}" Click="SettingsZone_Click"/>
                             <Separator/>
                             <MenuItem x:Name="CtxDisbandAll" Header="{loc:Loc Key=Merge.DisbandAll}" Click="DisbandAll_Click" Visibility="Collapsed"/>
                             <MenuItem x:Name="CtxDisbandThis" Header="{loc:Loc Key=Merge.DisbandSingle}" Click="DisbandThis_Click" Visibility="Collapsed"/>
                             <Separator x:Name="CtxMergeSep" Visibility="Collapsed"/>
-                            <MenuItem x:Name="CtxEdit" Header="{loc:Loc Key=Zone.Edit}" Click="EditZone_Click"/>
-                            <MenuItem x:Name="CtxHide" Header="{loc:Loc Key=Zone.Hide}" Click="HideZone_Click"/>
-                            <Separator/>
-                            <MenuItem x:Name="CtxDelete" Header="{loc:Loc Key=Zone.Delete}" Foreground="#FF6666" Click="DeleteZone_Click"/>
+                            <!-- ponytail 2026-08-27: 锁定/解锁 — 复用 LockBtn_Click; ApplyLockState
+                                 切锁定态同步菜单 Header;合并组时随主分区状态同步(同一右键菜单)。 -->
+                            <MenuItem x:Name="CtxLock" Header="{loc:Loc Key=Common.Lock}" Click="CtxLock_Click"/>
+                            <MenuItem x:Name="CtxMinimize" Header="{loc:Loc Key=ZoneMenu.Minimize}" Click="HideZone_Click"/>
+                            <MenuItem x:Name="CtxDelete" Header="{loc:Loc Key=ZoneMenu.DeleteZone}" Foreground="#FF6666" Click="DeleteZone_Click"/>
+                            <Separator x:Name="CtxPasteSep" Visibility="Collapsed"/>
+                            <MenuItem x:Name="CtxPaste" Header="{loc:Loc Key=FolderMap.Paste}" Click="PasteClipboard_Click" Visibility="Collapsed"/>
                         </ContextMenu>
                     </Border.ContextMenu>
 
@@ -178,6 +210,10 @@
                             </Border.RenderTransform>
                             <Grid>
                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,0,0">
+                                    <Path x:Name="TitleIconPath" Width="12" Height="12"
+                                          Stretch="Uniform" Stroke="#A0FFFFFF" StrokeThickness="1.5"
+                                          StrokeLineJoin="Round" VerticalAlignment="Center"
+                                          Margin="0,0,4,0" Visibility="Collapsed"/>
                                     <TextBlock x:Name="TitleIconChar" Text="" FontSize="12"
                                                Foreground="#A0FFFFFF" VerticalAlignment="Center" Margin="0,0,4,0"/>
                                     <TextBox x:Name="ZoneTitleText" Text="New Zone"
@@ -213,13 +249,17 @@
                                             ToolTip="{loc:Loc Key=Subfolder.New}">
                                     <Border.ContextMenu>
                                         <ContextMenu>
-                                            <MenuItem x:Name="CtxImportFiles" Header="{loc:Loc Key=ZoneMenu.ImportFiles}" Click="ImportFiles_Click"/>
-                                            <MenuItem x:Name="CtxImportFolder2" Header="{loc:Loc Key=ZoneMenu.ImportFolder}" Click="ImportFolder_Click"/>
-                                            <MenuItem x:Name="CtxImportShell2" Header="{loc:Loc Key=Zone.ImportShellItems}" Click="ImportShellItems_Click"/>
+                                            <!-- ponytail 2026-08-27: 加号菜单 — 与右键结构一致
+                                                 (导入 ▶ / 新建次级分区 / 新建 ▶ 含映射文件夹),
+                                                 不再带设置/最小化/删除分区。父项不挂 Click 防双触发。 -->
+                                            <MenuItem x:Name="CtxImport2" Header="{loc:Loc Key=ZoneMenu.Import}">
+                                                <MenuItem x:Name="CtxImportFiles2" Header="{loc:Loc Key=ZoneMenu.ImportFiles}" Click="ImportFiles_Click"/>
+                                                <MenuItem x:Name="CtxImportFolder2" Header="{loc:Loc Key=ZoneMenu.ImportFolder}" Click="ImportFolder_Click"/>
+                                                <MenuItem x:Name="CtxImportShell2" Header="{loc:Loc Key=Zone.ImportShellItems}" Click="ImportShellItems_Click"/>
+                                            </MenuItem>
                                             <Separator/>
-                                            <MenuItem x:Name="CtxNewSubfolder2" Header="{loc:Loc Key=Subfolder.New}" Click="NewSubfolder_Click"/>
-                                            <Separator/>
-                                            <MenuItem x:Name="CtxNew2" Header="{loc:Loc Key=Panel.New}">
+                                            <MenuItem x:Name="CtxNewSubZone2" Header="{loc:Loc Key=SubZone.New}" Click="NewSubfolder_Click"/>
+                                            <MenuItem x:Name="CtxNew2" Header="{loc:Loc Key=ZoneMenu.New}">
                                                 <MenuItem x:Name="CtxNewFolder2" Header="{loc:Loc Key=ZoneMenu.NewFolder}" Click="NewFolder_Click"/>
                                                 <Separator/>
                                                 <MenuItem x:Name="CtxNewTxt2" Header="{loc:Loc Key=ZoneMenu.NewTxt}" Click="NewTxt_Click"/>
@@ -227,8 +267,7 @@
                                                 <MenuItem x:Name="CtxNewPptx2" Header="{loc:Loc Key=ZoneMenu.NewPptx}" Click="NewPptx_Click"/>
                                                 <MenuItem x:Name="CtxNewXlsx2" Header="{loc:Loc Key=ZoneMenu.NewXlsx}" Click="NewXlsx_Click"/>
                                             </MenuItem>
-                                            <Separator/>
-                                            <MenuItem x:Name="CtxMapFolder" Header="{loc:Loc Key=FolderMap.MenuMap}" Click="FolderMapChoose_Click"/>
+                                            <MenuItem x:Name="CtxMapFolder2" Header="{loc:Loc Key=FolderMap.MenuMap}" Click="FolderMapChoose_Click"/>
                                         </ContextMenu>
                                     </Border.ContextMenu>
                                         <TextBlock x:Name="ImportBtnText" Text="+" FontSize="11" FontWeight="Bold"
@@ -348,8 +387,7 @@
                                          ScrollViewer.CanContentScroll="True"
                                          ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                                          ScrollViewer.VerticalScrollBarVisibility="Auto"
-                                         PreviewMouseLeftButtonDown="FolderList_PreviewMouseLeftButtonDown"
-                                         MouseDoubleClick="FolderList_MouseDoubleClick">
+                                         PreviewMouseLeftButtonDown="FolderList_PreviewMouseLeftButtonDown">
                                     <ListBox.ItemsPanel>
                                         <ItemsPanelTemplate>
                                             <c:VirtualizingWrapPanel ItemWidth="76" ItemHeight="66" Spacing="4"/>
@@ -462,16 +500,22 @@
                 Visibility="Collapsed"
                 Width="36" Height="36"
                 CornerRadius="18"
-                Background="#DD1A1A2E"
+                Background="{DynamicResource Menu.Bg.Surface}"
                 BorderThickness="0"
                 Cursor="Hand"
                 MouseLeftButtonDown="Restore_MouseDown"
                 MouseMove="Restore_MouseMove"
                 MouseLeftButtonUp="Restore_MouseUp"
                 MouseEnter="Restore_Enter" MouseLeave="Restore_Leave">
-            <TextBlock x:Name="RestoreIconChar" Text="⊞"
-                       FontSize="18" Foreground="#C0FFFFFF"
-                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            <Grid>
+                <Path x:Name="RestoreIconPath" Width="18" Height="18"
+                      Stretch="Uniform" Stroke="#C0FFFFFF" StrokeThickness="1.5"
+                      StrokeLineJoin="Round" HorizontalAlignment="Center"
+                      VerticalAlignment="Center" Visibility="Collapsed"/>
+                <TextBlock x:Name="RestoreIconChar" Text="⊞"
+                           FontSize="18" Foreground="#C0FFFFFF"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Grid>
         </Border>
 
         <!-- ponytail 2026-08-26: SubFolder flyout — StaysOpen=True (ZoneWindow 自己管

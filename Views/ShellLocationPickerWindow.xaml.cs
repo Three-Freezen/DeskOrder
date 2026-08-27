@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using DesktopZones.Helpers;
 using DesktopZones.Services;
 
 namespace DesktopZones.Views;
@@ -23,6 +24,7 @@ public partial class ShellLocationPickerWindow : Window
     public ShellLocationPickerWindow()
     {
         InitializeComponent();
+        AcrylicHelper.ApplyMenuSurface(this, 10);
         TitleLabel.Text = _loc["ShellPicker.Title"];
         OkBtn.Content = _loc["ShellPicker.Confirm"];
         CancelBtn.Content = _loc["ShellPicker.Cancel"];
@@ -41,9 +43,10 @@ public partial class ShellLocationPickerWindow : Window
             Content = name,
             Tag = spec,
             FontSize = 13,
-            Padding = new Thickness(0, 3, 0, 3)
+            Padding = new Thickness(0, 3, 0, 3),
+            Style = (Style)FindResource("SystemAccentCheckBox")
         };
-        cb.SetResourceReference(Control.ForegroundProperty, "Brush.Text.Primary");
+        cb.SetResourceReference(Control.ForegroundProperty, "Menu.Text.Primary");
         return cb;
     }
 

@@ -40,10 +40,10 @@
             </Trigger>
             <!-- ponytail 2026-08-25: 镂空 SegmentItem — 选中态 = Accent.Solid 填充 + Accent.On 镂空文字 -->
             <Trigger Property="IsChecked" Value="True">
-              <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Accent.Solid}"/>
+              <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Btn.Solid}"/>
               <Setter TargetName="Bd" Property="CornerRadius" Value="3"/>
               <Setter TargetName="Bd" Property="Margin" Value="2"/>
-              <Setter Property="Foreground" Value="{DynamicResource Brush.Accent.On}"/>
+              <Setter Property="Foreground" Value="{DynamicResource Brush.Btn.On}"/>
               <Setter Property="Cursor" Value="Arrow"/>
             </Trigger>
             <Trigger Property="IsEnabled" Value="False">
@@ -90,7 +90,7 @@
               <Setter Property="Foreground" Value="{DynamicResource Brush.Text.Primary}"/>
             </Trigger>
             <Trigger Property="IsChecked" Value="True">
-              <Setter Property="Foreground" Value="{DynamicResource Brush.Accent.On}"/>
+              <Setter Property="Foreground" Value="{DynamicResource Brush.Btn.On}"/>
               <Setter Property="Cursor" Value="Arrow"/>
             </Trigger>
             <Trigger Property="IsEnabled" Value="False">

@@ -18,11 +18,19 @@
                 <!-- Context menu on root Grid for full-area right-click -->
         <Grid.ContextMenu>
             <ContextMenu>
+                <!-- ponytail 2026-08-27: 5 段结构 — 前 3 项(切换模式/秒/12-24h) /
+                     设置 / 最小化 / 删除时钟。设置走 PropertyWindowService 与齿轮
+                     入口对齐。删除时钟加二级确认。 -->
                 <MenuItem x:Name="CtxSwitchMode" Header="{loc:Loc Key=Clock.AnalogMode}" Click="SwitchMode_Click"/>
                 <MenuItem x:Name="CtxToggleSeconds" Header="{loc:Loc Key=Clock.HideSeconds}" Click="ToggleSeconds_Click"/>
                 <MenuItem x:Name="CtxToggle24h" Header="{loc:Loc Key=Clock.Format12h}" Click="Toggle24h_Click"/>
                 <Separator/>
-                <MenuItem x:Name="CtxToggleRestore" Header="{loc:Loc Key=Clock.DisableRestore}" Click="ToggleRestore_Click"/>
+                <MenuItem x:Name="CtxSettings" Header="{loc:Loc Key=Clock.Settings}" Click="Settings_Click"/>
+                <Separator/>
+                <!-- ponytail 2026-08-27: 锁定/解锁 — 复用 LockBtn_Click; OnServiceLockChanged
+                     / ApplyLockState 切锁定态同步菜单 Header;切语言后下次打开也会刷新。 -->
+                <MenuItem x:Name="CtxLock" Header="{loc:Loc Key=Common.Lock}" Click="LockBtn_Click"/>
+                <MenuItem x:Name="CtxMinimize" Header="{loc:Loc Key=Clock.Minimize}" Click="Minimize_Click"/>
                 <MenuItem x:Name="CtxDelete" Header="{loc:Loc Key=Clock.Delete}" Click="Delete_Click" Foreground="#FF6666"/>
             </ContextMenu>
         </Grid.ContextMenu>
@@ -38,6 +46,15 @@
                      dedicated Rectangle child paints reliably when its Fill is reassigned. -->
                 <Rectangle x:Name="FillRect" RadiusX="10" RadiusY="10"
                            Fill="#02000000" IsHitTestVisible="False"/>
+                <!-- ponytail: 数字背景图全出血铺满整窗（位于 Margin 网格之下，文字/按钮之上），
+                     MainContent 的圆角 + ClipToBounds 负责裁圆角。只在数字模式显示（ApplyMode 切换）。 -->
+                <Border x:Name="DigitalBgBorder" ClipToBounds="True" IsHitTestVisible="False"
+                        HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                        Visibility="Collapsed">
+                    <Image x:Name="DigitalBgImage" Stretch="UniformToFill"
+                           RenderOptions.BitmapScalingMode="HighQuality"
+                           Opacity="0" IsHitTestVisible="False"/>
+                </Border>
                 <Grid Margin="10">
                     <!-- Lock button (top-left, symmetric with HideBtn top-right) -->
                     <Button x:Name="LockBtn" Content="🔓" Width="20" Height="20"
@@ -68,33 +85,27 @@
                     </Button.Resources>
                 </Button>
 
-                <!-- Digital mode -->
-                <Grid x:Name="DigitalPanel" Visibility="Visible"
-                            HorizontalAlignment="Center" VerticalAlignment="Center">
-                    <!-- Digital background image -->
-                    <Border x:Name="DigitalBgBorder" ClipToBounds="True" IsHitTestVisible="False"
-                            HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
-                        <Image x:Name="DigitalBgImage" Stretch="UniformToFill"
-                               RenderOptions.BitmapScalingMode="HighQuality"
-                               Opacity="0" IsHitTestVisible="False"/>
-                    </Border>
-                    <!-- Text content stacked vertically -->
-                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-                        <TextBlock x:Name="TimeText" Text="00:00:00"
-                                   FontSize="48" FontWeight="Light"
-                                   FontFamily="Segoe UI"
-                                   Foreground="#EEFFFFFF"
-                                   TextAlignment="Center"/>
-                        <TextBlock x:Name="DateText" Text="2026-06-10"
-                                   FontSize="16" Foreground="#AAFFFFFF"
-                                   TextAlignment="Center" Margin="0,4,0,0"/>
-                    </StackPanel>
-                </Grid>
+                <!-- Digital mode — Viewbox scales the text proportionally with the window,
+                     so enlarging the clock also enlarges the time/date text in sync. -->
+                <Viewbox x:Name="DigitalViewbox" Stretch="Uniform" Visibility="Visible">
+                    <Grid x:Name="DigitalPanel" Width="300" Height="120">
+                        <!-- Text content stacked vertically -->
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <TextBlock x:Name="TimeText" Text="00:00:00"
+                                       FontSize="48" FontWeight="Light"
+                                       FontFamily="Segoe UI"
+                                       Foreground="#EEFFFFFF"
+                                       TextAlignment="Center"/>
+                            <TextBlock x:Name="DateText" Text="2026-06-10"
+                                       FontSize="16" Foreground="#AAFFFFFF"
+                                       TextAlignment="Center" Margin="0,4,0,0"/>
+                        </StackPanel>
+                    </Grid>
+                </Viewbox>
 
-                <!-- Analog mode -->
-                <Grid x:Name="AnalogPanel" Visibility="Collapsed"
-                      Width="200" Height="200"
-                      HorizontalAlignment="Center" VerticalAlignment="Center">
+                <!-- Analog mode — Viewbox scales the face proportionally with the window. -->
+                <Viewbox x:Name="AnalogViewbox" Stretch="Uniform" Visibility="Collapsed">
+                    <Grid x:Name="AnalogPanel" Width="200" Height="200">
                     <!-- Clock face background -->
                     <Ellipse x:Name="AnalogFaceEllipse" Width="200" Height="200" Fill="#18000000"
                              Stroke="#40FFFFFF" StrokeThickness="2"/>
@@ -155,9 +166,16 @@
                                    HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Border>
                 </Grid>
+                </Viewbox>
                 </Grid>
             </Grid>
         </Border>
+
+        <!-- ponytail: liquid-glass chromatic overlay — additive, never replaces
+             ClockBorder's configured BorderBrush/BorderThickness. -->
+        <Border x:Name="ClockGlassBorder" CornerRadius="10"
+                Background="Transparent" BorderThickness="0"
+                IsHitTestVisible="False" Panel.ZIndex="20"/>
 
         <!-- Four corner resize grips -->
         <Border Width="12" Height="12" HorizontalAlignment="Left" VerticalAlignment="Top"
@@ -179,16 +197,22 @@
                 Visibility="Collapsed"
                 Width="36" Height="36"
                 CornerRadius="18"
-                Background="#DD1A1A2E"
+                Background="{DynamicResource Menu.Bg.Surface}"
                 BorderThickness="0"
                 Cursor="Hand"
                 MouseLeftButtonDown="Restore_MouseDown"
                 MouseMove="Restore_MouseMove"
                 MouseLeftButtonUp="Restore_MouseUp"
                 MouseEnter="Restore_Enter" MouseLeave="Restore_Leave">
-            <TextBlock x:Name="RestoreIconChar" Text="🕐"
-                       FontSize="18" Foreground="#C0FFFFFF"
-                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            <Grid>
+                <Path x:Name="RestoreIconPath" Width="18" Height="18"
+                      Stretch="Uniform" Stroke="#C0FFFFFF" StrokeThickness="1.5"
+                      StrokeLineJoin="Round" HorizontalAlignment="Center"
+                      VerticalAlignment="Center" Visibility="Collapsed"/>
+                <TextBlock x:Name="RestoreIconChar" Text="🕐"
+                           FontSize="18" Foreground="#C0FFFFFF"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Grid>
         </Border>
     </Grid>
 </Window>

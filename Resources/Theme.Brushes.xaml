@@ -23,6 +23,19 @@
   <SolidColorBrush x:Key="Brush.Accent.Solid.Disabled" Color="{DynamicResource Color.Accent.Solid.Disabled}"/>
   <SolidColorBrush x:Key="Brush.Accent.On"           Color="{DynamicResource Color.Accent.On}"/>
   <SolidColorBrush x:Key="Brush.Accent.On.Disabled"  Color="{DynamicResource Color.Accent.On.Disabled}"/>
+  <!-- ponytail 2026-08-28: 固定蓝色按钮系 — 不跟随系统强调色（FillBtn / OutlineBtn /
+       勾选类控件共用）。深蓝底 = Solid 系；亮蓝底 = Outline 系；文字/√/圆点 = On 白。 -->
+  <SolidColorBrush x:Key="Brush.Btn.Solid" Color="#256FC8"/>
+  <SolidColorBrush x:Key="Brush.Btn.Solid.Hover" Color="#2E83D5"/>
+  <SolidColorBrush x:Key="Brush.Btn.Solid.Press" Color="#1F5DAB"/>
+  <SolidColorBrush x:Key="Brush.Btn.Solid.Disabled" Color="#66256FC8"/>
+  <SolidColorBrush x:Key="Brush.Btn.On" Color="#FFFFFF"/>
+  <SolidColorBrush x:Key="Brush.Btn.On.Disabled" Color="#66FFFFFF"/>
+  <SolidColorBrush x:Key="Brush.Btn.Outline" Color="#2E97F0"/>
+  <SolidColorBrush x:Key="Brush.Btn.Outline.Hover" Color="#3AA3F2"/>
+  <SolidColorBrush x:Key="Brush.Btn.Outline.Press" Color="#2784CF"/>
+  <SolidColorBrush x:Key="Brush.Btn.Border" Color="#59AEF4"/>
+  <SolidColorBrush x:Key="Brush.Btn.Border.Hover" Color="#7CC2F9"/>
   <SolidColorBrush x:Key="Brush.Accent.2"            Color="{DynamicResource Color.Accent.2}"/>
   <SolidColorBrush x:Key="Brush.Success"             Color="{DynamicResource Color.Success}"/>
   <SolidColorBrush x:Key="Brush.Warning"             Color="{DynamicResource Color.Warning}"/>

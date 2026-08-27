@@ -14,7 +14,7 @@
           Padding="0">
     <Grid x:Name="HostGrid" SizeChanged="HostGrid_SizeChanged">
       <Border x:Name="Highlight"
-              Background="{DynamicResource Brush.Accent.Solid}"
+              Background="{DynamicResource Brush.Btn.Solid}"
               CornerRadius="4"
               Margin="2"
               HorizontalAlignment="Left"

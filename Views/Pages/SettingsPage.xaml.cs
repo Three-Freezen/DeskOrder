@@ -22,6 +22,20 @@ public partial class SettingsPage : UserControl
     readonly ConfigService _configService;
     bool _suppress;
 
+    // 当前值 TextBlock + 取值委托，改键后/注入 getter 后增量刷新，避免一直停留在「未设置」。
+    readonly System.Collections.Generic.List<(TextBlock Value, Func<string> Getter)> _hotkeyValueBindings = new();
+
+    // ponytail 2026-08-27: 注入全局热键 UI → 保存/注册回调(由 ManagementWindow 设置,
+    // 因为热键注册需要 App 实例的 _mainHwnd + WM_HOTKEY 分发)。
+    public Action<FrameworkElement>? OnShowAllHotkeyPicked { get; set; }
+    public Action<FrameworkElement>? OnHideAllHotkeyPicked { get; set; }
+    public Action<FrameworkElement>? OnMinimizeAllHotkeyPicked { get; set; }
+    public Action<bool>? OnDoubleClickToggleShowHideChanged { get; set; }
+
+    public Func<string>? GetShowAllHotkeyLabel { get; set; }
+    public Func<string>? GetHideAllHotkeyLabel { get; set; }
+    public Func<string>? GetMinimizeAllHotkeyLabel { get; set; }
+
     public SettingsPage(ConfigService configService)
     {
         InitializeComponent();
@@ -43,10 +57,41 @@ public partial class SettingsPage : UserControl
     void BuildHotkeys()
     {
         var loc = LocalizationService.Instance;
-        // 面板快捷键设置已移入属性面板顶部状态区（面板目标的状态区快捷键行）。
-        // 此处只保留全局快捷键（只读显示）。
-        HotkeyStack.Children.Add(MakeHotkeyRow(loc["Settings.Hotkey.ShowAll"], () => "Ctrl+Shift+A"));
-        HotkeyStack.Children.Add(MakeHotkeyRow(loc["Settings.Hotkey.HideAll"], () => "Ctrl+Shift+H"));
+        _hotkeyValueBindings.Clear();
+
+        // ponytail 2026-08-27: 顶部 — 双击桌面切换全部显示/隐藏 勾选项。
+        var dblClickRow = new Grid { Margin = new Thickness(0, 8, 0, 8) };
+        var dblClickCb = new CheckBox
+        {
+            Content = loc["Settings.DoubleClickToggleShowHide"],
+            IsChecked = _configService.Load().DoubleClickToggleShowHide,
+        };
+        dblClickCb.Checked += (_, _) => OnDoubleClickToggleShowHideChanged?.Invoke(true);
+        dblClickCb.Unchecked += (_, _) => OnDoubleClickToggleShowHideChanged?.Invoke(false);
+        dblClickRow.Children.Add(dblClickCb);
+        HotkeyStack.Children.Add(dblClickRow);
+
+        // ponytail 2026-08-27: 全局热键行 — 顺序与左侧边栏一致：
+        // 全部显示 → 全部最小化 → 全部隐藏。
+        HotkeyStack.Children.Add(MakeHotkeyRow(
+            loc["Settings.Hotkey.ShowAll"],
+            () => GetShowAllHotkeyLabel?.Invoke() ?? loc["Settings.Hotkey.NotSet"],
+            btn => OnShowAllHotkeyPicked?.Invoke(btn)));
+        HotkeyStack.Children.Add(MakeHotkeyRow(
+            loc["Settings.Hotkey.MinimizeAll"],
+            () => GetMinimizeAllHotkeyLabel?.Invoke() ?? loc["Settings.Hotkey.NotSet"],
+            btn => OnMinimizeAllHotkeyPicked?.Invoke(btn)));
+        HotkeyStack.Children.Add(MakeHotkeyRow(
+            loc["Settings.Hotkey.HideAll"],
+            () => GetHideAllHotkeyLabel?.Invoke() ?? loc["Settings.Hotkey.NotSet"],
+            btn => OnHideAllHotkeyPicked?.Invoke(btn)));
+    }
+
+    /// <summary>改键后 / getter 注入后刷新三个快捷键当前值文本。</summary>
+    public void RefreshHotkeyLabels()
+    {
+        foreach (var (value, getter) in _hotkeyValueBindings)
+            value.Text = getter();
     }
 
     void RebuildHotkeys()
@@ -55,22 +100,46 @@ public partial class SettingsPage : UserControl
         BuildHotkeys();
     }
 
-    UIElement MakeHotkeyRow(string label, Func<string> getCurrent)
+    UIElement MakeHotkeyRow(string label, Func<string> getCurrent, Action<FrameworkElement>? onButtonClick = null)
     {
         var grid = new Grid { Margin = new Thickness(0, 8, 0, 8) };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var stack = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
         stack.Children.Add(new TextBlock { Text = label, Foreground = (System.Windows.Media.Brush)FindResource("Brush.Text.Primary") });
-        stack.Children.Add(new TextBlock
+        var valueText = new TextBlock
         {
             Text = getCurrent(),
             FontSize = 11,
             FontFamily = new System.Windows.Media.FontFamily("Cascadia Code, Consolas, monospace"),
             Margin = new Thickness(0, 2, 0, 0),
             Foreground = (System.Windows.Media.Brush)FindResource("Brush.Text.Tertiary"),
-        });
+        };
+        _hotkeyValueBindings.Add((valueText, getCurrent));
+        stack.Children.Add(valueText);
         Grid.SetColumn(stack, 0);
         grid.Children.Add(stack);
+        if (onButtonClick != null)
+        {
+            // ponytail 2026-08-27: 按钮样式与属性面板「设置快捷键」按钮一致
+            // (Brush.Bg.Input 底 + 1px 描边 + 次级文字)，不再是一个裸「...」。
+            var btn = new Button
+            {
+                Content = LocalizationService.Instance["StickyNotePage.SetHotkey"],
+                Cursor = System.Windows.Input.Cursors.Hand,
+                Padding = new Thickness(10, 4, 10, 4),
+                Margin = new Thickness(8, 0, 0, 0),
+                FontSize = 11,
+                Background = (System.Windows.Media.Brush)FindResource("Brush.Bg.Input"),
+                Foreground = (System.Windows.Media.Brush)FindResource("Brush.Text.Secondary"),
+                BorderBrush = (System.Windows.Media.Brush)FindResource("Brush.Border.Subtle"),
+                BorderThickness = new Thickness(1),
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            btn.Click += (_, _) => onButtonClick(btn);
+            Grid.SetColumn(btn, 1);
+            grid.Children.Add(btn);
+        }
         return grid;
     }
 

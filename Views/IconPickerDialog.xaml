@@ -1,8 +1,8 @@
-<Window x:Class="DesktopZones.Views.EmojiPickerDialog"
+<Window x:Class="DesktopZones.Views.IconPickerDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:loc="clr-namespace:DesktopZones.Helpers"
-        Title="{loc:Loc Key=EmojiPicker.Title}" Width="380" Height="420"
+        Title="{loc:Loc Key=IconPicker.Title}" Width="380" Height="420"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         WindowStyle="None"
@@ -18,15 +18,15 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
-            <TextBlock x:Name="TitleLabel" Text="Pick Emoji" FontSize="14"
+            <TextBlock x:Name="TitleLabel" Text="Pick Icon" FontSize="14"
                        FontWeight="SemiBold" Foreground="{DynamicResource Brush.Text.Primary}" Margin="4,4,0,10"/>
 
-            <!-- Title/content divider (自适应文字色,同液态玻璃二级窗口) -->
+            <!-- Title/content divider -->
             <Border Grid.Row="1" Height="1" Margin="0,0,0,10"
                     Background="{DynamicResource Menu.Separator}"/>
 
             <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
-                <WrapPanel x:Name="EmojiGrid"/>
+                <WrapPanel x:Name="IconGrid"/>
             </ScrollViewer>
 
             <Button x:Name="CancelBtn" Content="Cancel" Grid.Row="3"

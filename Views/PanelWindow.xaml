@@ -37,7 +37,16 @@
         <SolidColorBrush x:Key="LockedDark.AccentWash" Color="#242E97F0"/>
     </Window.Resources>
 
-    <Grid>
+    <Grid x:Name="RootGrid" RenderTransformOrigin="0.5,0.5">
+        <!-- 面板弹出动画:先绕面板中心缩放(展开/收起),再平移(从桌面角落滑到屏幕中央)。
+             RenderTransformOrigin=0.5,0.5 让缩放以面板中心为原点;PopupSlide 由代码写入
+             「角落 → 中央」的位移量。 -->
+        <Grid.RenderTransform>
+            <TransformGroup>
+                <ScaleTransform x:Name="PopupScale" ScaleX="1" ScaleY="1"/>
+                <TranslateTransform x:Name="PopupSlide"/>
+            </TransformGroup>
+        </Grid.RenderTransform>
         <Border x:Name="PanelBorder" CornerRadius="10"
                 BorderBrush="#30FFFFFF" BorderThickness="1.5"
                 Background="Transparent">
@@ -171,10 +180,17 @@
                                     ToolTip="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Panel.Import]}">
                                 <Border.ContextMenu>
                                     <ContextMenu>
-                                        <MenuItem x:Name="CtxImportFiles" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Panel.ImportFiles]}" Click="ImportFile_Click"/>
-                                        <MenuItem x:Name="CtxImportFolder" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Panel.ImportFolder]}" Click="ImportFolder_Click"/>
-                                        <MenuItem x:Name="CtxNewSubfolder" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Subfolder.New]}" Click="NewSubfolder_Click"/>
+                                        <!-- ponytail 2026-08-27: 加号菜单 — 与分区加号同款 3 段
+                                             结构(导入 ▶ / 新建次级分区 / 新建 ▶)。
+                                             面板无 FolderMapping 概念,故不加映射文件夹。
+                                            父项 Import 不挂 Click 防双触发。 -->
+                                        <MenuItem x:Name="CtxImport" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Panel.Import]}">
+                                            <MenuItem x:Name="CtxImportFiles" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Panel.ImportFiles]}" Click="ImportFile_Click"/>
+                                            <MenuItem x:Name="CtxImportFolder" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Panel.ImportFolder]}" Click="ImportFolder_Click"/>
+                                            <MenuItem x:Name="CtxImportShell" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Panel.ImportShellItems]}" Click="ImportShellItems_Click"/>
+                                        </MenuItem>
                                         <Separator/>
+                                        <MenuItem x:Name="CtxNewSubZone" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[SubZone.New]}" Click="NewSubfolder_Click"/>
                                         <MenuItem x:Name="CtxNew" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Panel.New]}">
                                             <MenuItem x:Name="CtxNewFolder" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Panel.NewFolder]}" Click="NewFolder_Click"/>
                                             <Separator/>

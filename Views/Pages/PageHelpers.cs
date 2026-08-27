@@ -35,6 +35,30 @@ public static class PageHelpers
     }
 
     /// <summary>
+    /// Fill an <see cref="EditableListRow"/>'s icon slot from a model icon string.
+    /// Native tokens ("@zones") map to the vector Path slot (IconKey); emoji map to
+    /// the text slot (IconText); empty falls back to <paramref name="defaultKey"/>.
+    /// </summary>
+    public static void ApplyIcon(EditableListRow row, string? icon, string defaultKey)
+    {
+        if (IconGlyph.IsNative(icon))
+        {
+            row.IconKey = IconGlyph.ResourceKey(icon) ?? defaultKey;
+            row.IconText = "";
+        }
+        else if (string.IsNullOrEmpty(icon))
+        {
+            row.IconKey = defaultKey;
+            row.IconText = "";
+        }
+        else
+        {
+            row.IconKey = "";
+            row.IconText = icon;
+        }
+    }
+
+    /// <summary>
     /// Mark exactly one <see cref="EditableListRow"/> in <paramref name="host"/> as selected
     /// — the one whose <c>Tag</c> reference-equals <paramref name="selected"/>. Passing
     /// <c>null</c> clears all rows. Pages set row.Tag in BuildRow and call this on click.

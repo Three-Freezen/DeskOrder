@@ -53,9 +53,9 @@
         </Border>
 
         <!-- 名字 label 放到方框外面,和正常图标布局一致 -->
-        <TextBlock Grid.Row="1"
+        <TextBlock x:Name="SubNameText" Grid.Row="1"
                    Text="{Binding Source.Name}"
-                   Foreground="#E0FFFFFF"
+                   Foreground="{Binding ItemTextBrush, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=#E0FFFFFF}"
                    TextAlignment="Center"
                    TextTrimming="CharacterEllipsis"
                    MaxWidth="{Binding ActualWidth, ElementName=Root}"

@@ -9,25 +9,8 @@
         Topmost="False"
         ShowInTaskbar="False"
         SnapsToDevicePixels="True"
-        PreviewMouseLeftButtonDown="Window_PreviewMouseLeftButtonDown">
-    <Window.Resources>
-        <!-- ponytail 2026-08-24: locked dark-theme dropdown chrome. The sticky note
-             sits over user-picked fill colors (yellow / custom image / etc.) so its
-             own chrome ignores the management interface theme palette; the dropdowns
-             (font size + font color picker) need a stable dark background that
-             stays readable regardless of the surrounding note color. These
-             brushes intentionally mirror Theme.Colors.Dark.xaml hex values and
-             are NOT bound to Brush.* — when the management UI flips to Light/HC
-             the dropdowns keep this dark look. -->
-        <SolidColorBrush x:Key="LockedDark.Bg"        Color="#262626"/>
-        <SolidColorBrush x:Key="LockedDark.Input"     Color="#2A2A2A"/>
-        <SolidColorBrush x:Key="LockedDark.Border"    Color="#454545"/>
-        <SolidColorBrush x:Key="LockedDark.BgHover"   Color="#2E2E2E"/>
-        <SolidColorBrush x:Key="LockedDark.Text"      Color="#ECECEC"/>
-        <SolidColorBrush x:Key="LockedDark.TextDim"   Color="#A8A8A8"/>
-        <SolidColorBrush x:Key="LockedDark.Accent"    Color="#2E97F0"/>
-        <SolidColorBrush x:Key="LockedDark.AccentWash" Color="#242E97F0"/>
-    </Window.Resources>
+        PreviewMouseLeftButtonDown="Window_PreviewMouseLeftButtonDown"
+        PreviewMouseRightButtonDown="Window_PreviewMouseRightButtonDown">
     <Grid>
         <!-- Main content wrapper -->
         <Border x:Name="MainContent" Visibility="Visible" ClipToBounds="True" CornerRadius="10">
@@ -36,9 +19,23 @@
                         BorderBrush="#40FFFFFF" BorderThickness="1">
             <Border.ContextMenu>
                 <ContextMenu>
-                    <MenuItem x:Name="CtxToggleRestore" Header="{loc:Loc Key=Note.DisableRestore}" Click="ToggleRestore_Click"/>
+                    <!-- ponytail 2026-08-28: 6 段结构 — 置顶 / 保存·另存为·打开文件 /
+                         设置 / 最小化 / 删除便签。保存组直接绑定 💾 按钮同款功能。
+                         关闭/开启可恢复按钮选项已删除;设置走 PropertyWindowService
+                         与齿轮入口对齐。删除便签加二级确认。 -->
+                    <MenuItem x:Name="CtxPinTop" Header="{loc:Loc Key=Note.PinTop}" Click="PinTop_Click"/>
                     <Separator/>
-                    <MenuItem x:Name="CtxDelete" Header="{loc:Loc Key=Item.Delete}" Click="Delete_Click" Foreground="#FF6666"/>
+                    <MenuItem x:Name="CtxSave" Header="{loc:Loc Key=Note.Save}" Click="CtxSave_Click"/>
+                    <MenuItem x:Name="CtxSaveAs" Header="{loc:Loc Key=Note.SaveAs}" Click="CtxSaveAs_Click"/>
+                    <MenuItem x:Name="CtxOpenFile" Header="{loc:Loc Key=Note.OpenFile}" Click="CtxOpenFile_Click"/>
+                    <Separator/>
+                    <MenuItem x:Name="CtxSettings" Header="{loc:Loc Key=Note.Settings}" Click="Settings_Click"/>
+                    <Separator/>
+                    <!-- ponytail 2026-08-27: 锁定/解锁 — 复用 LockBtn_Click; 锁定态变化时
+                         ApplyLockState 同步菜单 Header;切语言后下次打开也会刷新。 -->
+                    <MenuItem x:Name="CtxLock" Header="{loc:Loc Key=Common.Lock}" Click="LockBtn_Click"/>
+                    <MenuItem x:Name="CtxMinimize" Header="{loc:Loc Key=Note.Minimize}" Click="Minimize_Click"/>
+                    <MenuItem x:Name="CtxDelete" Header="{loc:Loc Key=Note.Delete}" Click="Delete_Click" Foreground="#FF6666"/>
                 </ContextMenu>
             </Border.ContextMenu>
             <Grid>
@@ -65,15 +62,26 @@
                         Cursor="SizeAll" MouseLeftButtonDown="TitleBar_Drag"
                         Background="#20000000">
                     <Grid>
-                        <TextBox x:Name="TitleBox" Text="Note"
-                                 FontSize="12" Foreground="#E0E0E0"
-                                 Background="Transparent" BorderThickness="0"
-                                 CaretBrush="#E0E0E0"
-                                 VerticalAlignment="Center" HorizontalAlignment="Left"
-                                 Width="120" Margin="10,0,0,0"
-                                 MaxWidth="180"
-                                 LostFocus="TitleBox_LostFocus"
-                                 KeyDown="TitleBox_KeyDown"/>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center"
+                                    HorizontalAlignment="Left" Margin="10,0,0,0">
+                            <Path x:Name="TitleIconPath" Width="12" Height="12"
+                                  Stretch="Uniform" Stroke="#E0E0E0" StrokeThickness="1.5"
+                                  StrokeLineJoin="Round" VerticalAlignment="Center"
+                                  Margin="0,0,4,0" Visibility="Collapsed"/>
+                            <TextBlock x:Name="TitleIconChar" Text="" FontSize="12"
+                                       Foreground="#E0E0E0" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                            <TextBox x:Name="TitleBox" Text="Note"
+                                     FontSize="12" Foreground="#E0E0E0"
+                                     Background="Transparent" BorderThickness="0"
+                                     CaretBrush="#E0E0E0"
+                                     VerticalAlignment="Center" HorizontalAlignment="Left"
+                                     Width="120"
+                                     MaxWidth="180"
+                                     PreviewMouseLeftButtonDown="TitleBox_PreviewMouseLeftButtonDown"
+                                     PreviewMouseMove="TitleBox_PreviewMouseMove"
+                                     LostFocus="TitleBox_LostFocus"
+                                     KeyDown="TitleBox_KeyDown"/>
+                        </StackPanel>
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,4,0">
                             <Button x:Name="LockBtn" Content="🔓" Width="20" Height="20"
                                     FontSize="10"
@@ -104,34 +112,14 @@
                 <!-- Formatting toolbar -->
                 <Border x:Name="ToolbarBorder" Grid.Row="1" Background="#10000000" Padding="4,2">
                     <StackPanel Orientation="Horizontal">
-                        <!-- Font Size — locked white regardless of adaptive: the number itself
-                             (10/12/14/…) is a label, not an icon, and shouldn't compete with bg.
-                             ponytail 2026-08-24: chrome locked to dark-theme hex via Window.Resources
-                             LockedDark.* brushes (independent of ThemeService). ComboBoxItems get a
-                             local Style override that mirrors the dark-theme hover/selected states
-                             so the dropdown stays consistently dark even when the management UI
-                             flips to Light/HC. -->
+                        <!-- Font Size — 跟随系统深浅色(Menu.* 调色板)，与管理界面主题解耦。 -->
                         <ComboBox x:Name="FontSizeCombo" Width="50" Height="22"
-                                   FontSize="11" Foreground="#FFFFFF"
-                                   Background="{StaticResource LockedDark.Input}"
-                                   BorderBrush="{StaticResource LockedDark.Border}"
-                                   BorderThickness="1" Padding="2,0"
+                                   FontSize="11"
+                                   Style="{DynamicResource Menu.ComboBox}"
+                                   ItemContainerStyle="{DynamicResource Menu.ComboBoxItem}"
+                                   Padding="2,0"
                                    SelectedIndex="2"
                                    SelectionChanged="FontSizeCombo_SelectionChanged">
-                            <ComboBox.Resources>
-                                <Style TargetType="ComboBoxItem">
-                                    <Setter Property="Background" Value="Transparent"/>
-                                    <Setter Property="Foreground" Value="{StaticResource LockedDark.Text}"/>
-                                    <Style.Triggers>
-                                        <Trigger Property="IsMouseOver" Value="True">
-                                            <Setter Property="Background" Value="{StaticResource LockedDark.BgHover}"/>
-                                        </Trigger>
-                                        <Trigger Property="IsSelected" Value="True">
-                                            <Setter Property="Background" Value="{StaticResource LockedDark.AccentWash}"/>
-                                        </Trigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </ComboBox.Resources>
                             <ComboBoxItem Content="10" Tag="10"/>
                             <ComboBoxItem Content="12" Tag="12"/>
                             <ComboBoxItem Content="14" Tag="14"/>
@@ -152,6 +140,7 @@
                                 FontSize="12" FontWeight="Bold"
                                 Foreground="#E0E0E0"
                                 Background="Transparent" BorderThickness="0"
+                                Focusable="False"
                                 Cursor="Hand" Click="BoldBtn_Click">
                             <Button.Resources>
                                 <Style TargetType="Border">
@@ -165,6 +154,7 @@
                                 FontSize="12" FontStyle="Italic"
                                 Foreground="#E0E0E0"
                                 Background="Transparent" BorderThickness="0"
+                                Focusable="False"
                                 Cursor="Hand" Click="ItalicBtn_Click">
                             <Button.Resources>
                                 <Style TargetType="Border">
@@ -178,6 +168,7 @@
                                 FontSize="12"
                                 Foreground="#E0E0E0"
                                 Background="Transparent" BorderThickness="0"
+                                Focusable="False"
                                 Cursor="Hand" Click="UnderlineBtn_Click">
                             <Button.Resources>
                                 <Style TargetType="Border">
@@ -202,6 +193,7 @@
                                 FontSize="12" FontWeight="Bold"
                                 Foreground="#E0E0E0"
                                 Background="Transparent" BorderThickness="0"
+                                Focusable="False"
                                 Cursor="Hand" Click="FontColorBtn_Click">
                             <Button.Resources>
                                 <Style TargetType="Border">
@@ -209,87 +201,34 @@
                                 </Style>
                             </Button.Resources>
                         </Button>
-                        <Popup x:Name="FontColorPopup" StaysOpen="False"
+                        <Popup x:Name="FontColorPopup" StaysOpen="True"
                                PlacementTarget="{Binding ElementName=FontColorBtn}"
                                Placement="Bottom" AllowsTransparency="True">
-                            <!-- ponytail 2026-08-24: popup chrome uses LockedDark.* brushes from
-                                 Window.Resources (independent of ThemeService). Preset swatch
-                                 Background values stay hardcoded — they ARE the colors they
-                                 represent. Preset borders + ColorCustomBtn all use the same
-                                 locked brushes so the popup looks consistent regardless of
-                                 the management interface theme. -->
-                            <Border Background="{StaticResource LockedDark.Bg}" CornerRadius="8"
-                                    BorderBrush="{StaticResource LockedDark.Border}" BorderThickness="1"
-                                    Padding="8">
+                            <!-- ponytail 2026-08-28: StaysOpen=True — 与 ZoneWindow 的
+                                 SubfolderFlyoutPopup 同款。StaysOpen=False 的 Popup 会
+                                 抢鼠标捕获,透明窗口里的色块收不到点击。关闭由窗口级
+                                 PreviewMouseLeftButtonDown / Deactivated / HideNote 手动
+                                 管理。配色跟随系统深浅色(Menu.* 调色板),与分区右键菜单
+                                 对齐:预设标签 + 6×2 圆角小方块网格(代码构建) + 分隔线
+                                 + 全宽自定义按钮。 -->
+                            <Border Background="{DynamicResource Menu.Bg.Surface}" CornerRadius="6"
+                                    BorderBrush="{DynamicResource Menu.Border.Subtle}" BorderThickness="1"
+                                    Padding="6" MinWidth="220">
                                 <StackPanel>
-                                    <TextBlock Text="{loc:Loc Key=NoteProp.NameColor}" FontSize="10"
-                                               Foreground="{StaticResource LockedDark.TextDim}" Margin="0,0,0,6"/>
-                                    <WrapPanel x:Name="ColorPresetsPanel" Width="200">
-                                        <Border x:Name="PresetTransparent" Width="24" Height="24" CornerRadius="12"
-                                                Margin="0,0,4,4" Cursor="Hand" Tag="#01000000"
-                                                BorderBrush="{StaticResource LockedDark.Border}" BorderThickness="1"
-                                                MouseLeftButtonDown="ColorPreset_Click" ToolTip="{loc:Loc Key=Common.Transparent}">
-                                            <Border.Background>
-                                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                                                    <GradientStop Color="#FFFFFF" Offset="0"/>
-                                                    <GradientStop Color="#CCCCCC" Offset="0.5"/>
-                                                    <GradientStop Color="#FFFFFF" Offset="1"/>
-                                                </LinearGradientBrush>
-                                            </Border.Background>
-                                        </Border>
-                                        <Border x:Name="PresetBlack" Width="24" Height="24" CornerRadius="12"
-                                                Margin="0,0,4,4" Cursor="Hand" Tag="#000000"
-                                                Background="#000000" BorderBrush="{StaticResource LockedDark.Border}" BorderThickness="1"
-                                                MouseLeftButtonDown="ColorPreset_Click"/>
-                                        <Border x:Name="PresetWhite" Width="24" Height="24" CornerRadius="12"
-                                                Margin="0,0,4,4" Cursor="Hand" Tag="#FFFFFF"
-                                                Background="#FFFFFF" BorderBrush="{StaticResource LockedDark.Border}" BorderThickness="1"
-                                                MouseLeftButtonDown="ColorPreset_Click"/>
-                                        <Border x:Name="PresetGray" Width="24" Height="24" CornerRadius="12"
-                                                Margin="0,0,4,4" Cursor="Hand" Tag="#808080"
-                                                Background="#808080" BorderBrush="{StaticResource LockedDark.Border}" BorderThickness="1"
-                                                MouseLeftButtonDown="ColorPreset_Click"/>
-                                        <Border x:Name="PresetRed" Width="24" Height="24" CornerRadius="12"
-                                                Margin="0,0,4,4" Cursor="Hand" Tag="#FF0000"
-                                                Background="#FF0000" BorderBrush="{StaticResource LockedDark.Border}" BorderThickness="1"
-                                                MouseLeftButtonDown="ColorPreset_Click"/>
-                                        <Border x:Name="PresetOrange" Width="24" Height="24" CornerRadius="12"
-                                                Margin="0,0,4,4" Cursor="Hand" Tag="#FF7D00"
-                                                Background="#FF7D00" BorderBrush="{StaticResource LockedDark.Border}" BorderThickness="1"
-                                                MouseLeftButtonDown="ColorPreset_Click"/>
-                                        <Border x:Name="PresetYellow" Width="24" Height="24" CornerRadius="12"
-                                                Margin="0,0,4,4" Cursor="Hand" Tag="#FFFF00"
-                                                Background="#FFFF00" BorderBrush="{StaticResource LockedDark.Border}" BorderThickness="1"
-                                                MouseLeftButtonDown="ColorPreset_Click"/>
-                                        <Border x:Name="PresetGreen" Width="24" Height="24" CornerRadius="12"
-                                                Margin="0,0,4,4" Cursor="Hand" Tag="#00FF00"
-                                                Background="#00FF00" BorderBrush="{StaticResource LockedDark.Border}" BorderThickness="1"
-                                                MouseLeftButtonDown="ColorPreset_Click"/>
-                                        <Border x:Name="PresetBlue" Width="24" Height="24" CornerRadius="12"
-                                                Margin="0,0,4,4" Cursor="Hand" Tag="#0000FF"
-                                                Background="#0000FF" BorderBrush="{StaticResource LockedDark.Border}" BorderThickness="1"
-                                                MouseLeftButtonDown="ColorPreset_Click"/>
-                                        <Border x:Name="PresetIndigo" Width="24" Height="24" CornerRadius="12"
-                                                Margin="0,0,4,4" Cursor="Hand" Tag="#00FFFF"
-                                                Background="#00FFFF" BorderBrush="{StaticResource LockedDark.Border}" BorderThickness="1"
-                                                MouseLeftButtonDown="ColorPreset_Click"/>
-                                        <Border x:Name="PresetViolet" Width="24" Height="24" CornerRadius="12"
-                                                Margin="0,0,4,4" Cursor="Hand" Tag="#FF00FF"
-                                                Background="#FF00FF" BorderBrush="{StaticResource LockedDark.Border}" BorderThickness="1"
-                                                MouseLeftButtonDown="ColorPreset_Click"/>
-                                        <!-- Custom -->
-                                        <Button x:Name="ColorCustomBtn" Content="..." Width="24" Height="24"
-                                                FontSize="9" Foreground="{StaticResource LockedDark.TextDim}"
-                                                Background="{StaticResource LockedDark.Input}" BorderBrush="{StaticResource LockedDark.Border}"
-                                                BorderThickness="1" Cursor="Hand"
-                                                Click="ColorCustomBtn_Click">
-                                            <Button.Resources>
-                                                <Style TargetType="Border">
-                                                    <Setter Property="CornerRadius" Value="12"/>
-                                                </Style>
-                                            </Button.Resources>
-                                        </Button>
-                                    </WrapPanel>
+                                    <TextBlock Text="{loc:Loc Key=Common.Preset}" FontSize="11" FontWeight="SemiBold"
+                                               Foreground="{DynamicResource Menu.Text.Secondary}" Margin="4,2,0,4"/>
+                                    <UniformGrid x:Name="ColorPresetsPanel" Columns="6" Rows="2"/>
+                                    <Separator Margin="0,4" Background="{DynamicResource Menu.Separator}"/>
+                                    <Border x:Name="ColorCustomBtn"
+                                            Background="{DynamicResource Menu.Bg.Hover}"
+                                            BorderBrush="{DynamicResource Menu.Border.Subtle}"
+                                            BorderThickness="1"
+                                            CornerRadius="4"
+                                            HorizontalAlignment="Stretch" Padding="8,6" Cursor="Hand">
+                                        <TextBlock Text="{loc:Loc Key=Common.Custom}"
+                                                   Foreground="{DynamicResource Menu.Text.Primary}"
+                                                   HorizontalAlignment="Center"/>
+                                    </Border>
                                 </StackPanel>
                             </Border>
                         </Popup>
@@ -305,10 +244,18 @@
                              Margin="8,4,8,8" MinHeight="100"
                              AcceptsTab="True"
                              SelectionChanged="ContentBox_SelectionChanged"
-                             TextChanged="ContentBox_TextChanged"
-                             PreviewTextInput="ContentBox_TextInput"/>
+                             PreviewKeyDown="ContentBox_PreviewKeyDown"
+                             PreviewMouseLeftButtonDown="ContentBox_PreviewMouseLeftButtonDown"
+                             PreviewTextInput="ContentBox_PreviewTextInput"
+                             TextChanged="ContentBox_TextChanged"/>
             </Grid>
         </Border>
+
+        <!-- ponytail: liquid-glass chromatic overlay — additive, never replaces
+             NoteBorder's configured BorderBrush/BorderThickness. -->
+        <Border x:Name="NoteGlassBorder" CornerRadius="10"
+                Background="Transparent" BorderThickness="0"
+                IsHitTestVisible="False" Panel.ZIndex="20"/>
 
                 <!-- Four corner resize grips -->
                 <Border x:Name="GripTL" Width="12" Height="12" HorizontalAlignment="Left" VerticalAlignment="Top"
@@ -331,16 +278,22 @@
                 Visibility="Collapsed"
                 Width="36" Height="36"
                 CornerRadius="18"
-                Background="#DD1A1A2E"
+                Background="{DynamicResource Menu.Bg.Surface}"
                 BorderThickness="0"
                 Cursor="Hand"
                 MouseLeftButtonDown="Restore_MouseDown"
                 MouseMove="Restore_MouseMove"
                 MouseLeftButtonUp="Restore_MouseUp"
                 MouseEnter="Restore_Enter" MouseLeave="Restore_Leave">
-            <TextBlock x:Name="RestoreIconChar" Text="📝"
-                       FontSize="18" Foreground="#C0FFFFFF"
-                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            <Grid>
+                <Path x:Name="RestoreIconPath" Width="18" Height="18"
+                      Stretch="Uniform" Stroke="#C0FFFFFF" StrokeThickness="1.5"
+                      StrokeLineJoin="Round" HorizontalAlignment="Center"
+                      VerticalAlignment="Center" Visibility="Collapsed"/>
+                <TextBlock x:Name="RestoreIconChar" Text="📝"
+                           FontSize="18" Foreground="#C0FFFFFF"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Grid>
         </Border>
     </Grid>
 </Window>

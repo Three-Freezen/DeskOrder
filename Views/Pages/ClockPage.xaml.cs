@@ -79,10 +79,10 @@ public partial class ClockPage : UserControl
             Tag = clock,
             Title = $"Clock ({mode})",
             Subtitle = $"{format} · {(int)clock.Width}×{(int)clock.Height}",
-            IconKey = "Icon.Clock",
             IsLocked = clock.IsLocked,
             IsVisible = clock.IsVisible,
         };
+        ApplyIcon(row, clock.IconChar, "Icon.Clock");
         row.ReorderRequested += (src, targetIdx) =>
         {
             if (src.Tag is not DesktopClock c || _widgetService == null) return;

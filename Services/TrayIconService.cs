@@ -185,38 +185,13 @@ public class TrayIconService : IDisposable
         _openMenu = menu;
         menu.Closed += (_, _) => _openMenu = null;
 
-        var showAll = new MenuItem { Header = loc["Tray.ShowAll"] };
-        showAll.Click += (_, _) => ShowAllZones?.Invoke();
-
-        var hideAll = new MenuItem { Header = loc["Tray.HideAll"] };
-        hideAll.Click += (_, _) => HideAllZones?.Invoke();
-
-        menu.Items.Add(showAll);
-        menu.Items.Add(hideAll);
-        menu.Items.Add(new Separator());
-
-        var newZone = new MenuItem { Header = loc["Tray.NewZone"] };
-        newZone.Click += (_, _) => NewZone?.Invoke();
-
-        menu.Items.Add(newZone);
-        menu.Items.Add(new Separator());
-
-        var newNote = new MenuItem { Header = loc["Tray.NewNote"] };
-        newNote.Click += (_, _) => NewNote?.Invoke();
-        var newClock = new MenuItem { Header = loc["Tray.NewClock"] };
-        newClock.Click += (_, _) => NewClock?.Invoke();
-        var newCalendar = new MenuItem { Header = loc["Tray.NewCalendar"] };
-        newCalendar.Click += (_, _) => NewCalendar?.Invoke();
-        menu.Items.Add(newNote);
-        menu.Items.Add(newClock);
-        menu.Items.Add(newCalendar);
-        menu.Items.Add(new Separator());
+        // ponytail 2026-08-27: 精简到 3 项 — 管理分区 / 语言 / 退出。ShowAll/HideAll/
+        // NewZone/NewNote/NewClock/NewCalendar 已废弃。每次右键重新构建,所以语言
+        // 切换后再开菜单自动拿新 i18n(吸取 XAML 静态绑定教训)。
 
         var manage = new MenuItem { Header = loc["Tray.Manage"] };
         manage.Click += (_, _) => ManageZones?.Invoke();
-
         menu.Items.Add(manage);
-        menu.Items.Add(new Separator());
 
         // Language submenu
         var langMenu = new MenuItem { Header = loc["Menu.Language"] };
@@ -235,8 +210,6 @@ public class TrayIconService : IDisposable
         langMenu.Items.Add(chineseItem);
         langMenu.Items.Add(englishItem);
         menu.Items.Add(langMenu);
-
-        menu.Items.Add(new Separator());
 
         var exit = new MenuItem { Header = loc["Tray.Exit"] };
         exit.Click += (_, _) => Exit?.Invoke();

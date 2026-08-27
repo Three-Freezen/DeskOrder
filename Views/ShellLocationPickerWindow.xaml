@@ -6,59 +6,117 @@
         WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         PreviewKeyDown="Window_PreviewKeyDown">
-    <Border Background="{DynamicResource Brush.Bg.Chrome}" CornerRadius="10"
-            BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1">
+    <Window.Resources>
+        <!-- 跟随系统主题的勾选框:框体用 Menu 调色板,选中填充/边框用系统强调色
+             Menu.Accent.Solid,✓用 Menu.Accent.On(随电脑深浅色/强调色变化)。 -->
+        <Style x:Key="SystemAccentCheckBox" TargetType="CheckBox">
+            <Setter Property="Foreground" Value="{DynamicResource Menu.Text.Primary}"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Height" Value="24"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <Grid Background="Transparent" VerticalAlignment="Center" SnapsToDevicePixels="True">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Border x:Name="Box" Grid.Column="0" Width="16" Height="16" CornerRadius="3"
+                                    Background="{DynamicResource Menu.Bg.Hover}"
+                                    BorderBrush="{DynamicResource Menu.Border.Subtle}"
+                                    BorderThickness="1" VerticalAlignment="Center">
+                                <Path x:Name="Check" Width="12" Height="12" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                      Stretch="Uniform" Stroke="{DynamicResource Menu.Accent.On}" StrokeThickness="2"
+                                      StrokeEndLineCap="Round" StrokeStartLineCap="Round" StrokeLineJoin="Round"
+                                      Data="{StaticResource Icon.Check}" Visibility="Collapsed"/>
+                            </Border>
+                            <ContentPresenter Grid.Column="1" Margin="8,0,0,0" VerticalAlignment="Center" HorizontalAlignment="Left"
+                                              TextElement.Foreground="{TemplateBinding Foreground}" RecognizesAccessKey="True"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Box" Property="Background" Value="{DynamicResource Menu.Accent.Solid}"/>
+                                <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource Menu.Accent.Solid}"/>
+                                <Setter TargetName="Check" Property="Stroke" Value="{DynamicResource Menu.Accent.On}"/>
+                                <Setter TargetName="Check" Property="Visibility" Value="Visible"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource Menu.Text.Secondary}"/>
+                            </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsChecked" Value="True"/>
+                                    <Condition Property="IsMouseOver" Value="True"/>
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource Menu.Accent.Solid}"/>
+                            </MultiTrigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Box" Property="Background" Value="{DynamicResource Menu.Bg.Hover}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource Menu.Text.Disabled}"/>
+                                <Setter Property="Cursor" Value="Arrow"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+    <!-- 背景填充/文字跟随电脑深浅色(与分区右键菜单同一套 Menu.* 调色板,不跟随管理界面主题) -->
+    <Border Background="{DynamicResource Menu.Bg.Surface}" CornerRadius="10"
+            BorderBrush="{DynamicResource Menu.Border.Subtle}" BorderThickness="1">
         <Grid Margin="16">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
             <TextBlock x:Name="TitleLabel" Text="Import System Items" FontSize="13" FontWeight="SemiBold"
-                       Foreground="{DynamicResource Brush.Text.Primary}" Margin="0,4,0,10"/>
-            <Border Grid.Row="1" Background="{DynamicResource Brush.Bg.Input}"
-                    BorderBrush="{DynamicResource Brush.Border.Default}" BorderThickness="1"
+                       Foreground="{DynamicResource Menu.Text.Primary}" Margin="0,4,0,10"/>
+            <!-- Title/content divider (贯穿;跟随电脑深浅色,同分区右键菜单分割线) -->
+            <Border Grid.Row="1" Height="1" Margin="0,0,0,10"
+                    Background="{DynamicResource Menu.Separator}"/>
+            <Border Grid.Row="2" Background="{DynamicResource Menu.Bg.Hover}"
+                    BorderBrush="{DynamicResource Menu.Border.Subtle}" BorderThickness="1"
                     CornerRadius="6">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="330" Padding="10,6">
                     <StackPanel x:Name="ListPanel"/>
                 </ScrollViewer>
             </Border>
-            <StackPanel Grid.Row="2" Margin="0,12,0,0">
+            <StackPanel Grid.Row="3" Margin="0,12,0,0">
                 <TextBlock x:Name="CustomHintLabel" Text="Custom shell location:" FontSize="11"
-                           Foreground="{DynamicResource Brush.Text.Secondary}" Margin="0,0,0,4"/>
-                <TextBox x:Name="SpecInput" Background="{DynamicResource Brush.Bg.Input}"
-                         Foreground="{DynamicResource Brush.Text.Primary}"
-                         BorderBrush="{DynamicResource Brush.Border.Default}" BorderThickness="1"
+                           Foreground="{DynamicResource Menu.Text.Secondary}" Margin="0,0,0,4"/>
+                <TextBox x:Name="SpecInput" Background="{DynamicResource Menu.Bg.Hover}"
+                         Foreground="{DynamicResource Menu.Text.Primary}"
+                         BorderBrush="{DynamicResource Menu.Border.Subtle}" BorderThickness="1"
                          Padding="8,6" FontSize="12" KeyDown="NameInput_KeyDown"/>
                 <TextBlock x:Name="CustomNameLabel" Text="Display name (optional):" FontSize="11"
-                           Foreground="{DynamicResource Brush.Text.Secondary}" Margin="0,6,0,4"/>
+                           Foreground="{DynamicResource Menu.Text.Secondary}" Margin="0,6,0,4"/>
                 <DockPanel>
                     <Button x:Name="AddBtn" Content="+" DockPanel.Dock="Right"
-                            Background="{DynamicResource Brush.Accent.Solid}" Foreground="{DynamicResource Brush.Accent.On}"
-                            BorderThickness="0" Padding="12,6" Margin="8,0,0,0" Cursor="Hand" Click="AddCustom_Click">
-                        <Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="4"/></Style></Button.Resources>
-                    </Button>
-                    <TextBox x:Name="NameInput" Background="{DynamicResource Brush.Bg.Input}"
-                             Foreground="{DynamicResource Brush.Text.Primary}"
-                             BorderBrush="{DynamicResource Brush.Border.Default}" BorderThickness="1"
+                            Padding="12,6" Margin="8,0,0,0" Cursor="Hand" Click="AddCustom_Click"
+                            Style="{DynamicResource FillBtn}"/>
+                    <TextBox x:Name="NameInput" Background="{DynamicResource Menu.Bg.Hover}"
+                             Foreground="{DynamicResource Menu.Text.Primary}"
+                             BorderBrush="{DynamicResource Menu.Border.Subtle}" BorderThickness="1"
                              Padding="8,6" FontSize="12" KeyDown="NameInput_KeyDown"/>
                 </DockPanel>
             </StackPanel>
-            <StackPanel Grid.Row="3" Orientation="Horizontal"
+            <StackPanel Grid.Row="4" Orientation="Horizontal"
                         HorizontalAlignment="Right" Margin="0,14,0,0">
                 <Button x:Name="CancelBtn" Content="Cancel"
-                        Background="Transparent" Foreground="{DynamicResource Brush.Text.Secondary}"
-                        BorderBrush="{DynamicResource Brush.Border.Default}" BorderThickness="1"
-                        Padding="14,6" Cursor="Hand" Click="Cancel_Click">
-                    <Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="4"/></Style></Button.Resources>
-                </Button>
+                        Padding="14,6" Cursor="Hand" Click="Cancel_Click"
+                        Style="{DynamicResource OutlineBtn}"/>
                 <Button x:Name="OkBtn" Content="Import"
-                        Background="{DynamicResource Brush.Accent.Solid}" Foreground="{DynamicResource Brush.Accent.On}"
-                        BorderThickness="0" Padding="14,6" Margin="8,0,0,0"
-                        Cursor="Hand" Click="Ok_Click">
-                    <Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="4"/></Style></Button.Resources>
-                </Button>
+                        Padding="14,6" Margin="8,0,0,0"
+                        Cursor="Hand" Click="Ok_Click"
+                        Style="{DynamicResource FillBtn}"/>
             </StackPanel>
         </Grid>
     </Border>

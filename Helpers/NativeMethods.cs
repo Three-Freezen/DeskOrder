@@ -411,3 +411,249 @@ public static class NativeMethods
         return null;
     }
 }
+
+// ponytail 2026-08-27: 桌面双击全局监听 — LowLevel 鼠标钩子。
+public static class DesktopHook
+{
+    public delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+    public const int WH_MOUSE_LL = 14;
+    public const int WM_LBUTTONDOWN = 0x0201;
+    public const int WM_LBUTTONUP   = 0x0202;
+
+    // ListView 命中测试：用于区分「空白桌面」与「桌面图标」。
+    const int LVM_FIRST = 0x1000;
+    const int LVM_HITTEST = LVM_FIRST + 18;
+    const uint LVHT_ONITEMICON = 0x0002;
+    const uint LVHT_ONITEMLABEL = 0x0004;
+    const uint LVHT_ONITEMSTATEICON = 0x0008;
+    const uint LVHT_ONITEM = LVHT_ONITEMICON | LVHT_ONITEMLABEL | LVHT_ONITEMSTATEICON;
+
+    const uint PROCESS_QUERY_INFORMATION = 0x0400;
+    const uint PROCESS_VM_OPERATION = 0x0008;
+    const uint PROCESS_VM_READ = 0x0010;
+    const uint PROCESS_VM_WRITE = 0x0020;
+    const uint MEM_COMMIT = 0x1000;
+    const uint MEM_RESERVE = 0x2000;
+    const uint MEM_RELEASE = 0x8000;
+    const uint PAGE_READWRITE = 0x04;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct LVHITTESTINFO
+    {
+        public NativeMethods.POINT pt;
+        public uint flags;
+        public int iItem;
+        public int iSubItem;
+        public int iGroup;
+    }
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+    public static extern IntPtr SetWindowsHookEx(int idHook, LowLevelMouseProc lpfn, IntPtr hMod, uint dwThreadId);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+    public static extern bool UnhookWindowsHookEx(IntPtr hhk);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+    public static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetDesktopWindow();
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr WindowFromPoint(NativeMethods.POINT point);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder lpClassName, int nMaxCount);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetParent(IntPtr hWnd);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern IntPtr FindWindow(string? lpClassName, string? lpWindowName);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern IntPtr FindWindowEx(IntPtr hwndParent, IntPtr hwndChildAfter, string? lpszClass, string? lpszWindow);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool ScreenToClient(IntPtr hWnd, ref NativeMethods.POINT lpPoint);
+
+    [DllImport("user32.dll", EntryPoint = "SendMessage")]
+    public static extern IntPtr SendMessage(IntPtr hWnd, int Msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, uint dwProcessId);
+
+    [DllImport("kernel32.dll")]
+    public static extern bool CloseHandle(IntPtr hObject);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern IntPtr VirtualAllocEx(IntPtr hProcess, IntPtr lpAddress, IntPtr dwSize, uint flAllocationType, uint flProtect);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool VirtualFreeEx(IntPtr hProcess, IntPtr lpAddress, IntPtr dwSize, uint dwFreeType);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool WriteProcessMemory(IntPtr hProcess, IntPtr lpBaseAddress, ref LVHITTESTINFO lpBuffer, IntPtr nSize, out IntPtr lpNumberOfBytesWritten);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool ReadProcessMemory(IntPtr hProcess, IntPtr lpBaseAddress, out LVHITTESTINFO lpBuffer, IntPtr nSize, out IntPtr lpNumberOfBytesRead);
+
+    // ---- 桌面窗口缓存（Explorer 重启后句柄会失效，失效时重新查找）----
+    static IntPtr _desktopProgman;
+    static IntPtr _desktopWorkerW;
+    static IntPtr _desktopDefView;
+    static IntPtr _desktopListView;
+
+    static void EnsureDesktopWindows()
+    {
+        if (_desktopDefView != IntPtr.Zero && IsWindow(_desktopDefView)) return;
+
+        _desktopProgman = IntPtr.Zero;
+        _desktopWorkerW = IntPtr.Zero;
+        _desktopDefView = IntPtr.Zero;
+        _desktopListView = IntPtr.Zero;
+
+        _desktopProgman = FindWindow("Progman", null);
+        if (_desktopProgman == IntPtr.Zero) return;
+
+        // 收集候选：Progman 直系 DefView + 顶层 WorkerW 内的 DefView。
+        // Win10/11 上真实桌面 DefView 常驻 WorkerW；Progman 有时会残留一个隐藏 DefView，
+        // 因此优先选择「SysListView32 可见」的那一组。
+        IntPtr bestWorkerW = IntPtr.Zero, bestDefView = IntPtr.Zero, bestListView = IntPtr.Zero;
+        bool bestVisible = false;
+
+        void Consider(IntPtr workerW, IntPtr defView, IntPtr listView)
+        {
+            if (defView == IntPtr.Zero) return;
+            bool visible = listView != IntPtr.Zero && IsWindow(listView) && IsWindowVisible(listView);
+            if (bestDefView == IntPtr.Zero || (visible && !bestVisible))
+            {
+                bestWorkerW = workerW;
+                bestDefView = defView;
+                bestListView = listView;
+                bestVisible = visible;
+            }
+        }
+
+        var progmanDefView = FindWindowEx(_desktopProgman, IntPtr.Zero, "SHELLDLL_DefView", null);
+        if (progmanDefView != IntPtr.Zero)
+            Consider(IntPtr.Zero, progmanDefView, FindWindowEx(progmanDefView, IntPtr.Zero, "SysListView32", null));
+
+        IntPtr workerw = IntPtr.Zero;
+        while ((workerw = FindWindowEx(IntPtr.Zero, workerw, "WorkerW", null)) != IntPtr.Zero)
+        {
+            var defView = FindWindowEx(workerw, IntPtr.Zero, "SHELLDLL_DefView", null);
+            if (defView != IntPtr.Zero)
+                Consider(workerw, defView, FindWindowEx(defView, IntPtr.Zero, "SysListView32", null));
+        }
+
+        _desktopWorkerW = bestWorkerW;
+        _desktopDefView = bestDefView;
+        _desktopListView = bestListView;
+    }
+
+    /// <summary>
+    /// 判定 hwnd 是否属于桌面窗口树：沿父链比对「桌面自身」的窗口句柄
+    /// （Progman / WorkerW / SHELLDLL_DefView / SysListView32）。
+    /// 这里必须比句柄而不是类名 —— 文件资源管理器的文件列表同样是
+    /// SHELLDLL_DefView + SysListView32，按类名会把资源管理器误判成桌面。
+    /// </summary>
+    static bool IsDesktopTreeWindow(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero) return false;
+        var current = hwnd;
+        for (int i = 0; i < 16 && current != IntPtr.Zero; i++)
+        {
+            if (current == _desktopProgman || current == _desktopWorkerW ||
+                current == _desktopDefView || current == _desktopListView)
+                return true;
+            current = GetParent(current);
+        }
+        return false;
+    }
+
+    static bool IsSameOrDescendant(IntPtr ancestor, IntPtr node)
+    {
+        if (ancestor == IntPtr.Zero || node == IntPtr.Zero) return false;
+        var current = node;
+        for (int i = 0; i < 16 && current != IntPtr.Zero; i++)
+        {
+            if (current == ancestor) return true;
+            current = GetParent(current);
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// 桌面图标列表属于 explorer.exe 进程，LVM_HITTEST 的 lParam 是指针，
+    /// 跨进程必须把 LVHITTESTINFO 写到目标进程再读回，不能直接传本进程地址。
+    /// </summary>
+    static bool IsIconAtPoint(IntPtr listView, NativeMethods.POINT ptScreen)
+    {
+        if (listView == IntPtr.Zero) return false;
+        var pt = ptScreen;
+        if (!ScreenToClient(listView, ref pt)) return false;
+
+        var info = new LVHITTESTINFO { pt = pt };
+        int size = Marshal.SizeOf<LVHITTESTINFO>();
+
+        GetWindowThreadProcessId(listView, out uint pid);
+        IntPtr hProc = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION | PROCESS_VM_READ | PROCESS_VM_WRITE, false, pid);
+        if (hProc == IntPtr.Zero) return false; // 拿不到进程权限时保守视为空白桌面
+
+        try
+        {
+            IntPtr remote = VirtualAllocEx(hProc, IntPtr.Zero, (IntPtr)size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+            if (remote == IntPtr.Zero) return false;
+            try
+            {
+                WriteProcessMemory(hProc, remote, ref info, (IntPtr)size, out _);
+                SendMessage(listView, LVM_HITTEST, IntPtr.Zero, remote);
+                ReadProcessMemory(hProc, remote, out info, (IntPtr)size, out _);
+            }
+            finally
+            {
+                VirtualFreeEx(hProc, remote, IntPtr.Zero, MEM_RELEASE);
+            }
+        }
+        finally
+        {
+            CloseHandle(hProc);
+        }
+
+        return (info.flags & LVHT_ONITEM) != 0;
+    }
+
+    /// <summary>
+    /// 判定某点是否落在「空白桌面」上（可触发双击切换），排除：
+    /// - 桌面图标（SysListView32 命中到图标/文字）；
+    /// - 文件资源管理器等其他窗口。
+    /// </summary>
+    public static bool IsDesktopBackground(IntPtr hwndAtPoint, NativeMethods.POINT ptScreen)
+    {
+        EnsureDesktopWindows();
+        if (_desktopProgman == IntPtr.Zero) return false;
+        if (!IsDesktopTreeWindow(hwndAtPoint)) return false;
+
+        if (_desktopListView != IntPtr.Zero && IsSameOrDescendant(_desktopListView, hwndAtPoint))
+        {
+            if (IsIconAtPoint(_desktopListView, ptScreen)) return false;
+        }
+        return true;
+    }
+
+    [DllImport("user32.dll")]
+    public static extern bool GetCursorPos(out NativeMethods.POINT lpPoint);
+
+    public struct MSLLHOOKSTRUCT { public NativeMethods.POINT pt; public uint mouseData; public uint flags; public uint time; public IntPtr dwExtraInfo; }
+}

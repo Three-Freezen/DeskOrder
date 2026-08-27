@@ -16,11 +16,13 @@
         </Style>
     </Window.Resources>
 
-    <Border Background="{DynamicResource Brush.Bg.Chrome}" CornerRadius="12"
-            BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1"
+    <!-- 背景填充/文字跟随电脑深浅色(与分区右键菜单同一套 Menu.* 调色板,不跟随管理界面主题) -->
+    <Border Background="{DynamicResource Menu.Bg.Surface}" CornerRadius="12"
+            BorderBrush="{DynamicResource Menu.Border.Subtle}" BorderThickness="1"
             MouseLeftButtonDown="TitleBar_Down">
         <Grid Margin="16">
             <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
@@ -32,29 +34,33 @@
 
             <!-- Title -->
             <TextBlock x:Name="TitleLabel" Text="Pick Color" FontSize="14" FontWeight="SemiBold"
-                       Foreground="{DynamicResource Brush.Text.Primary}" Margin="0,4,0,12"/>
+                       Foreground="{DynamicResource Menu.Text.Primary}" Margin="0,4,0,12"/>
+
+            <!-- Title/content divider (自适应文字色,同液态玻璃二级窗口) -->
+            <Border Grid.Row="1" Height="1" Margin="0,0,0,10"
+                    Background="{DynamicResource Menu.Separator}"/>
 
             <!-- Preview -->
-            <Border x:Name="ColorPreview" Grid.Row="1" Height="40" CornerRadius="6"
-                    BorderBrush="{DynamicResource Brush.Border.Default}" BorderThickness="1" Margin="0,0,0,8"/>
+            <Border x:Name="ColorPreview" Grid.Row="2" Height="40" CornerRadius="6"
+                    BorderBrush="{DynamicResource Menu.Border.Subtle}" BorderThickness="1" Margin="0,0,0,8"/>
 
             <!-- Hex input -->
-            <Grid Grid.Row="2" Margin="0,0,0,8">
+            <Grid Grid.Row="3" Margin="0,0,0,8">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
-                <TextBlock Text="#" Foreground="{DynamicResource Brush.Text.Secondary}"
+                <TextBlock Text="#" Foreground="{DynamicResource Menu.Text.Secondary}"
                            FontSize="14" VerticalAlignment="Center" Margin="0,0,6,0"/>
                 <TextBox x:Name="HexBox" Grid.Column="1" Text="FFFFFF"
-                         FontSize="14" Foreground="{DynamicResource Brush.Text.Primary}"
-                         Background="{DynamicResource Brush.Bg.Input}" BorderBrush="{DynamicResource Brush.Border.Default}"
+                         FontSize="14" Foreground="{DynamicResource Menu.Text.Primary}"
+                         Background="{DynamicResource Menu.Bg.Hover}" BorderBrush="{DynamicResource Menu.Border.Subtle}"
                          BorderThickness="1" Padding="8,4"
                          MaxLength="6" TextChanged="HexBox_Changed"/>
             </Grid>
 
             <!-- R -->
-            <Grid Grid.Row="3" Margin="0,0,0,4">
+            <Grid Grid.Row="4" Margin="0,0,0,4">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="20"/>
                     <ColumnDefinition Width="*"/>
@@ -67,14 +73,14 @@
                 <Slider x:Name="SliderR" Grid.Column="1" Minimum="0" Maximum="255"
                         Style="{StaticResource SliderStyle}" ValueChanged="Slider_Changed"/>
                 <TextBox x:Name="ValR" Grid.Column="2" Text="255" Width="32"
-                         Foreground="{DynamicResource Brush.Text.Primary}"
-                         Background="{DynamicResource Brush.Bg.Input}" BorderBrush="{DynamicResource Brush.Border.Default}"
+                         Foreground="{DynamicResource Menu.Text.Primary}"
+                         Background="{DynamicResource Menu.Bg.Hover}" BorderBrush="{DynamicResource Menu.Border.Subtle}"
                          BorderThickness="1" Padding="2" FontSize="11"
                          TextChanged="ValR_Changed"/>
             </Grid>
 
             <!-- G -->
-            <Grid Grid.Row="4" Margin="0,0,0,4">
+            <Grid Grid.Row="5" Margin="0,0,0,4">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="20"/>
                     <ColumnDefinition Width="*"/>
@@ -84,14 +90,14 @@
                 <Slider x:Name="SliderG" Grid.Column="1" Minimum="0" Maximum="255"
                         Style="{StaticResource SliderStyle}" ValueChanged="Slider_Changed"/>
                 <TextBox x:Name="ValG" Grid.Column="2" Text="255" Width="32"
-                         Foreground="{DynamicResource Brush.Text.Primary}"
-                         Background="{DynamicResource Brush.Bg.Input}" BorderBrush="{DynamicResource Brush.Border.Default}"
+                         Foreground="{DynamicResource Menu.Text.Primary}"
+                         Background="{DynamicResource Menu.Bg.Hover}" BorderBrush="{DynamicResource Menu.Border.Subtle}"
                          BorderThickness="1" Padding="2" FontSize="11"
                          TextChanged="ValG_Changed"/>
             </Grid>
 
             <!-- B -->
-            <Grid Grid.Row="5" Margin="0,0,0,12">
+            <Grid Grid.Row="6" Margin="0,0,0,12">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="20"/>
                     <ColumnDefinition Width="*"/>
@@ -101,40 +107,21 @@
                 <Slider x:Name="SliderB" Grid.Column="1" Minimum="0" Maximum="255"
                         Style="{StaticResource SliderStyle}" ValueChanged="Slider_Changed"/>
                 <TextBox x:Name="ValB" Grid.Column="2" Text="255" Width="32"
-                         Foreground="{DynamicResource Brush.Text.Primary}"
-                         Background="{DynamicResource Brush.Bg.Input}" BorderBrush="{DynamicResource Brush.Border.Default}"
+                         Foreground="{DynamicResource Menu.Text.Primary}"
+                         Background="{DynamicResource Menu.Bg.Hover}" BorderBrush="{DynamicResource Menu.Border.Subtle}"
                          BorderThickness="1" Padding="2" FontSize="11"
                          TextChanged="ValB_Changed"/>
             </Grid>
 
             <!-- Buttons -->
-            <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button x:Name="CancelBtn" Content="Cancel" Background="Transparent"
-                        Foreground="{DynamicResource Brush.Text.Secondary}"
-                        BorderBrush="{DynamicResource Brush.Border.Default}" BorderThickness="1"
-                        Padding="16,6" Cursor="Hand" FontSize="12"
-                        Click="Cancel_Click">
-                    <Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="4"/></Style></Button.Resources>
-                </Button>
-                <Button x:Name="OkBtn" Content="OK"
-                        Background="{DynamicResource Brush.Accent.Solid}" Foreground="{DynamicResource Brush.Accent.On}"
-                        BorderThickness="0" Padding="16,6" Margin="8,0,0,0"
+            <StackPanel Grid.Row="7" Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button x:Name="CancelBtn" Content="Cancel" Padding="16,6" Cursor="Hand" FontSize="12"
+                        Click="Cancel_Click"
+                        Style="{DynamicResource OutlineBtn}"/>
+                <Button x:Name="OkBtn" Content="OK" Padding="16,6" Margin="8,0,0,0"
                         Cursor="Hand" FontSize="12" FontWeight="SemiBold"
-                        Click="Ok_Click">
-                    <Button.Resources><Style TargetType="Border"><Setter Property="CornerRadius" Value="4"/></Style></Button.Resources>
-                    <Button.Style>
-                      <!-- ponytail 2026-08-25: 镂空 + 禁用态淡化 -->
-                      <Style TargetType="Button">
-                        <Style.Triggers>
-                          <Trigger Property="IsEnabled" Value="False">
-                            <Setter Property="Background" Value="{DynamicResource Brush.Accent.Solid.Disabled}"/>
-                            <Setter Property="Foreground" Value="{DynamicResource Brush.Accent.On.Disabled}"/>
-                            <Setter Property="Cursor" Value="Arrow"/>
-                          </Trigger>
-                        </Style.Triggers>
-                      </Style>
-                    </Button.Style>
-                </Button>
+                        Click="Ok_Click"
+                        Style="{DynamicResource FillBtn}"/>
             </StackPanel>
         </Grid>
     </Border>

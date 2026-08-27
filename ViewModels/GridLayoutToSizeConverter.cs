@@ -9,8 +9,8 @@ namespace DesktopZones.ViewModels;
 /// <summary>
 /// CellLayout (1 or 2) → SubFolder icon box size in px.
 /// parameter: "W" → box width; "H" → box height; "TotalH" → box height + name label area.
-/// The icon box sits on one grid cell (or 2×2 when CellLayout=2) so it lines up with
-/// normal zone items (GridSize 56); the name label hangs below the box like a normal icon.
+/// The sub-folder 2×2 box is fixed 56×56 (panel-aligned), and the whole 56×72
+/// (box + name) view is centered inside the 80×80 zone/panel cell.
 /// </summary>
 public class GridLayoutToSizeConverter : IValueConverter
 {

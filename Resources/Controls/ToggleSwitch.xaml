@@ -37,8 +37,8 @@
                  状态区要求开关带滑动动画：IsChecked 进出用 EnterActions/ExitActions 平移 DotTransform（2→18），
                  程序设置 IsChecked 同样播放，保证实时同步刷新时开关滑动到位。 -->
             <Trigger Property="IsChecked" Value="True">
-              <Setter TargetName="Track" Property="Background" Value="{DynamicResource Brush.Accent.Solid}"/>
-              <Setter TargetName="Dot" Property="Background" Value="{DynamicResource Brush.Accent.On}"/>
+              <Setter TargetName="Track" Property="Background" Value="{DynamicResource Brush.Btn.Solid}"/>
+              <Setter TargetName="Dot" Property="Background" Value="{DynamicResource Brush.Btn.On}"/>
               <Trigger.EnterActions>
                 <BeginStoryboard>
                   <Storyboard>

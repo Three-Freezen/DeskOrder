@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -9,6 +10,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Interop;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using DesktopZones.Helpers;
 using DesktopZones.Models;
@@ -60,6 +62,27 @@ public partial class PanelWindow : Window
     private bool _flyoutClosing;
     private int _flyoutOpenToken;
 
+    // ── 面板弹出动画(从桌面角落滑到屏幕中央 + 展开/收起,与其他窗口共用 HoverExpandAnimationKind) ──
+    private HoverExpandAnimationKind _popupAnimation = HoverExpandAnimationKind.ScaleExpand;
+    private PanelPopupOrigin _popupOrigin = PanelPopupOrigin.BottomRight;
+    private double _popupSpeed = 1.0;
+    private double _popupSlideStartX;
+    private double _popupSlideStartY;
+    private bool _popupOpenStarted;
+    private bool _popupCloseAnimating;
+    private bool _popupAllowClose;
+
+    // ponytail: 面板主体文字色（PanelTextColor）— 供 SubfolderItemView 名称绑定
+    // (RelativeSource AncestorType=Window → ItemTextBrush) 使用，与分区端 ItemTextBrush 对称。
+    public static readonly DependencyProperty ItemTextBrushProperty =
+        DependencyProperty.Register(nameof(ItemTextBrush), typeof(Brush), typeof(PanelWindow),
+            new PropertyMetadata(Brushes.White));
+    public Brush ItemTextBrush
+    {
+        get => (Brush)GetValue(ItemTextBrushProperty);
+        set => SetValue(ItemTextBrushProperty, value);
+    }
+
     public PanelWindow(ZoneManager zoneManager, ConfigService configService)
     {
         InitializeComponent();
@@ -79,6 +102,13 @@ public partial class PanelWindow : Window
         }
         Width = config.Panel.PanelWidth > 200 ? config.Panel.PanelWidth : 800;
         Height = config.Panel.PanelHeight > 200 ? config.Panel.PanelHeight : 450;
+
+        // 面板弹出动画配置(打开/关闭都从这里读;若为 None 则无动效)。
+        _popupAnimation = config.Panel.PanelPopupMotion;
+        _popupOrigin = config.Panel.PanelPopupOrigin;
+        _popupSpeed = Math.Clamp(config.Panel.PanelPopupSpeed, 0.25, 2.0);
+        ConfigurePopupSlide();
+        ApplyPopupClosedVisual();
 
         _zoneManager.ZonesChanged += RebuildDisplay;
         Loaded += OnLoad;
@@ -185,6 +215,7 @@ public partial class PanelWindow : Window
         // Set rounded corners LAST after all sizing
         NativeMethods.SetRoundedCorners(this, _zoneManager.GetConfig().Panel.PanelCornerRadius);
         NativeMethods.UpdateRoundedCorners(this, _zoneManager.GetConfig().Panel.PanelCornerRadius);
+        PlayPopupOpenAnimation();
     }
 
     void SavePosition(object? _, EventArgs __)
@@ -219,7 +250,7 @@ public partial class PanelWindow : Window
         var config = _zoneManager.GetConfig();
         string fillColorStr = config.Panel.PanelFillColor;
 
-        if (config.Panel.PanelEnableLiquidGlass || config.Panel.PanelGlassBlurAmount > 0)
+        if (config.Panel.PanelEnableLiquidGlass)
         {
             var blurResult = AcrylicHelper.EnableBlur(this, config.Panel.PanelGlassBlurAmount,
                 config.Panel.PanelGlassTintOpacity, config.Panel.PanelGlassTintLuminosity,
@@ -409,6 +440,8 @@ public partial class PanelWindow : Window
                 Brush? bodyBrush = null;
                 try { titleBarBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(cfg.Panel.PanelButtonColor)!); } catch { }
                 try { bodyBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(cfg.Panel.PanelTextColor)!); } catch { }
+                // 供 SubfolderItemView 名称绑定同步主体文字色（网格视图次级分区名称）。
+                ItemTextBrush = bodyBrush ?? Brushes.White;
 
                 if (_isGridView)
                 {
@@ -467,15 +500,16 @@ public partial class PanelWindow : Window
             Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center
         };
         // ponytail: zone header icon + name ride the fixed title-bar content color.
-        var iconTb = new TextBlock
+        // 空图标回退到软件原生「田字」分区图标（不再用 "⊞"）。
+        var icon = string.IsNullOrEmpty(zone.IconChar) ? Helpers.IconGlyph.Zones : zone.IconChar;
+        var iconEl = Helpers.IconGlyph.CreateIcon(icon, titleBarBrush ?? Brushes.White, fontSize: 13, pathSize: 13);
+        if (iconEl != null)
         {
-            Text = string.IsNullOrEmpty(zone.IconChar) ? "⊞" : zone.IconChar,
-            FontSize = 13,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        if (titleBarBrush != null) iconTb.Foreground = titleBarBrush;
-        iconBorder.Child = iconTb;
+            iconEl.Margin = new Thickness(0);
+            iconEl.HorizontalAlignment = HorizontalAlignment.Center;
+            iconEl.VerticalAlignment = VerticalAlignment.Center;
+            iconBorder.Child = iconEl;
+        }
         stack.Children.Add(iconBorder);
 
         // Zone name
@@ -703,8 +737,6 @@ public partial class PanelWindow : Window
             Visibility = Visibility.Collapsed,
             IsHitTestVisible = false,
             Background = new SolidColorBrush(Color.FromArgb(0x26, 0xFF, 0xFF, 0xFF)),
-            BorderBrush = new SolidColorBrush(Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF)),
-            BorderThickness = new Thickness(1.2),
             CornerRadius = new CornerRadius(4)
         };
         var wrapper = new Grid();
@@ -815,6 +847,12 @@ public partial class PanelWindow : Window
         // 拖拽歧义(分区有 Item_MouseUp 区分单击/拖拽),不需要消歧。
         if (item.Type == ItemType.SubFolder)
         {
+            // 单击次级分区也选中并高亮(与普通图标一致)。
+            if (!_selectedItemIds.Contains(item.Id))
+            {
+                ClearSelection();
+                SelectItem(item);
+            }
             OpenSubfolderFlyout(item, zone, b);
             e.Handled = true;
             return;
@@ -1236,7 +1274,7 @@ public partial class PanelWindow : Window
         return new SubfolderFill(
             zone.FillColor, 100,
             zone.BackgroundImagePath, zone.BackgroundImageOpacity,
-            zone.EnableAcrylic ? zone.GlassColorMode : null,
+            zone.EnableLiquidGlass ? zone.GlassColorMode : null,
             zone.GlassBlurAmount, zone.GlassTintOpacity, zone.GlassTintLuminosity);
     }
 
@@ -1408,65 +1446,56 @@ public partial class PanelWindow : Window
 
     void ContentArea_RightClick(object s, MouseButtonEventArgs e)
     {
+        // ponytail 2026-08-27: 与分区右键同款 5 段结构 — 导入 ▶ / 新建次级分区 /
+        // 新建 ▶ / 设置 / 隐藏。面板无 FolderMapping 和删除项,故省略。
+        // 父项 Import/New 不挂 Click,防双触发(同分区修复)。
         var contextMenu = new ContextMenu();
 
-        // Import Files
+        var importItem = new MenuItem { Header = _loc["Panel.Import"] };
         var importFilesItem = new MenuItem { Header = _loc["Panel.ImportFiles"] };
         importFilesItem.Click += ImportFile_Click;
-        contextMenu.Items.Add(importFilesItem);
-
-        // Import Folder
+        importItem.Items.Add(importFilesItem);
         var importFolderItem = new MenuItem { Header = _loc["Panel.ImportFolder"] };
         importFolderItem.Click += ImportFolder_Click;
-        contextMenu.Items.Add(importFolderItem);
-
-        // Import System Items (virtual shell objects — Recycle Bin, This PC, ...)
+        importItem.Items.Add(importFolderItem);
         var importShellItem = new MenuItem { Header = _loc["Panel.ImportShellItems"] };
         importShellItem.Click += ImportShellItems_Click;
-        contextMenu.Items.Add(importShellItem);
-
-        // 新建次级文件夹(与分区右键菜单一致)
-        var newSubfolderItem = new MenuItem { Header = _loc["Subfolder.New"] };
-        newSubfolderItem.Click += NewSubfolder_Click;
-        contextMenu.Items.Add(newSubfolderItem);
+        importItem.Items.Add(importShellItem);
+        contextMenu.Items.Add(importItem);
 
         contextMenu.Items.Add(new Separator());
 
-        // New submenu - same structure as zone
-        var newItem = new MenuItem { Header = _loc["Panel.New"] };
+        var newSubZoneItem = new MenuItem { Header = _loc["SubZone.New"] };
+        newSubZoneItem.Click += NewSubfolder_Click;
+        contextMenu.Items.Add(newSubZoneItem);
 
+        var newItem = new MenuItem { Header = _loc["Panel.New"] };
         var newFolderItem = new MenuItem { Header = _loc["Panel.NewFolder"] };
         newFolderItem.Click += NewFolder_Click;
         newItem.Items.Add(newFolderItem);
-
         newItem.Items.Add(new Separator());
-
         var newTxtItem = new MenuItem { Header = _loc["Panel.NewTxt"] };
         newTxtItem.Click += NewTextFile_Click;
         newItem.Items.Add(newTxtItem);
-
         var newDocxItem = new MenuItem { Header = _loc["Panel.NewDocx"] };
         newDocxItem.Click += NewWordFile_Click;
         newItem.Items.Add(newDocxItem);
-
         var newPptxItem = new MenuItem { Header = _loc["Panel.NewPptx"] };
         newPptxItem.Click += NewPptFile_Click;
         newItem.Items.Add(newPptxItem);
-
         var newXlsxItem = new MenuItem { Header = _loc["Panel.NewXlsx"] };
         newXlsxItem.Click += NewExcelFile_Click;
         newItem.Items.Add(newXlsxItem);
-
         contextMenu.Items.Add(newItem);
 
         contextMenu.Items.Add(new Separator());
 
-        // Edit Panel - same position as zone's "Edit Zone"
-        var editItem = new MenuItem { Header = _loc["Panel.Settings"] };
-        editItem.Click += (_, _) => SettingsBtn_Click(null!, null!);
-        contextMenu.Items.Add(editItem);
+        // 设置 — 与分区端"设置"对齐(无"面板"前缀)。
+        var settingsItem = new MenuItem { Header = _loc["Panel.Settings"] };
+        settingsItem.Click += (_, _) => SettingsBtn_Click(null!, null!);
+        contextMenu.Items.Add(settingsItem);
 
-        // Hide Panel - same position as zone's "Hide Zone"
+        // 隐藏面板 — 与分区端"最小化"对齐。
         var hideItem = new MenuItem { Header = _loc["Panel.Hide"] };
         hideItem.Click += (_, _) => HideButton_Click(null!, null!);
         contextMenu.Items.Add(hideItem);
@@ -1664,6 +1693,7 @@ public partial class PanelWindow : Window
 
             var grid = new Grid { Margin = new Thickness(18) };
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
@@ -1679,6 +1709,16 @@ public partial class PanelWindow : Window
             Grid.SetRow(titleText, 0);
             grid.Children.Add(titleText);
 
+            // Title/content divider (与液态玻璃二级窗口同款,用本窗口自己的半透明白配色)
+            var separator = new Border
+            {
+                Height = 1,
+                Margin = new Thickness(0, 0, 0, 10)
+            };
+            separator.SetResourceReference(System.Windows.Controls.Border.BackgroundProperty, "Menu.Separator");
+            Grid.SetRow(separator, 1);
+            grid.Children.Add(separator);
+
             // Zone list
             var listBox = new ListBox
             {
@@ -1692,7 +1732,7 @@ public partial class PanelWindow : Window
                 listBox.Items.Add(zone.Name);
             }
             listBox.SelectedIndex = 0;
-            Grid.SetRow(listBox, 1);
+            Grid.SetRow(listBox, 2);
             grid.Children.Add(listBox);
 
             // Buttons
@@ -1736,7 +1776,7 @@ public partial class PanelWindow : Window
             };
             buttonPanel.Children.Add(selectButton);
 
-            Grid.SetRow(buttonPanel, 2);
+            Grid.SetRow(buttonPanel, 3);
             grid.Children.Add(buttonPanel);
 
             mainBorder.Child = grid;
@@ -1768,7 +1808,7 @@ public partial class PanelWindow : Window
     }
 
     private (double, double) FindFreeSpot(Zone zone)
-        => ZoneLayout.FindFreeSpot(zone.Items, zone.Width, zone.Height, zone.GridSize, zone.GridSize + ZoneLayout.LabelArea);
+        => ZoneLayout.FindFreeSpot(zone.Items, zone.Width, zone.Height, zone.GridSize, zone.GridSize);
 
     // ── Drag-drop from Explorer (WPF AllowDrop — files only) ──
 
@@ -1818,6 +1858,296 @@ public partial class PanelWindow : Window
         catch { }
     }
 
+    // ── 面板弹出动画(从桌面角落滑到屏幕中央 + 展开/收起,关闭时逆向) ──
+
+    /// <summary>当前焦点显示器工作区,换算成 DIP(与 Left/Top/Width/Height 同坐标系)。
+    /// GetMonitorInfo 返回物理像素,按面板窗口 DPI 换算(与 SubfolderFlyout 的约定一致)。</summary>
+    Rect GetFocusedWorkAreaDip()
+    {
+        var waPx = MonitorHelper.FocusedWorkArea();
+        double sx = 1, sy = 1;
+        try { var d = VisualTreeHelper.GetDpi(this); sx = d.DpiScaleX; sy = d.DpiScaleY; } catch { }
+        return new Rect(waPx.Left / sx, waPx.Top / sy, waPx.Width / sx, waPx.Height / sy);
+    }
+
+    /// <summary>把面板定位到当前焦点屏幕正中央(忽略历史拖动位置)。</summary>
+    void CenterPanelOnFocusedScreen()
+    {
+        var wa = GetFocusedWorkAreaDip();
+        Left = wa.Left + (wa.Width - Width) / 2;
+        Top = wa.Top + (wa.Height - Height) / 2;
+    }
+
+    /// <summary>计算「桌面角落 → 面板中心」的滑动位移量(写入 _popupSlideStartX/Y)。
+    /// 以面板当前 Left/Top 的中心为终点,所选桌面角落为起点。</summary>
+    void ConfigurePopupSlide()
+    {
+        var wa = GetFocusedWorkAreaDip();
+        double ox, oy;
+        switch (_popupOrigin)
+        {
+            case PanelPopupOrigin.TopLeft:
+                ox = wa.Left; oy = wa.Top; break;
+            case PanelPopupOrigin.TopRight:
+                ox = wa.Right; oy = wa.Top; break;
+            case PanelPopupOrigin.BottomLeft:
+                ox = wa.Left; oy = wa.Bottom; break;
+            default: // BottomRight
+                ox = wa.Right; oy = wa.Bottom; break;
+        }
+        double centerX = Left + Width / 2;
+        double centerY = Top + Height / 2;
+        _popupSlideStartX = ox - centerX;
+        _popupSlideStartY = oy - centerY;
+    }
+
+    /// <summary>把窗口复位到「关闭态」(打开动画的 from 帧)。在 Show 前调用,避免整窗闪一帧。</summary>
+    void ApplyPopupClosedVisual()
+    {
+        if (RootGrid == null) return;
+        StopPopupAnimations();
+
+        switch (_popupAnimation)
+        {
+            case HoverExpandAnimationKind.None:
+                ApplyPopupFinalVisual();
+                return;
+            case HoverExpandAnimationKind.Fade:
+                PopupScale.ScaleX = 1; PopupScale.ScaleY = 1;
+                PopupSlide.X = _popupSlideStartX; PopupSlide.Y = _popupSlideStartY;
+                RootGrid.Opacity = 0;
+                break;
+            case HoverExpandAnimationKind.VerticalExpand:
+                PopupScale.ScaleX = 1; PopupScale.ScaleY = 0;
+                PopupSlide.X = _popupSlideStartX; PopupSlide.Y = _popupSlideStartY;
+                RootGrid.Opacity = 1;
+                break;
+            case HoverExpandAnimationKind.DirectionalExpand:
+                PopupScale.ScaleX = 0; PopupScale.ScaleY = 1;
+                PopupSlide.X = _popupSlideStartX; PopupSlide.Y = _popupSlideStartY;
+                RootGrid.Opacity = 1;
+                break;
+            default: // ScaleExpand / BounceExpand
+                PopupScale.ScaleX = 0; PopupScale.ScaleY = 0;
+                PopupSlide.X = _popupSlideStartX; PopupSlide.Y = _popupSlideStartY;
+                RootGrid.Opacity = 1;
+                break;
+        }
+    }
+
+    void ApplyPopupFinalVisual()
+    {
+        StopPopupAnimations();
+        if (PopupScale != null) { PopupScale.ScaleX = 1; PopupScale.ScaleY = 1; }
+        if (PopupSlide != null) { PopupSlide.X = 0; PopupSlide.Y = 0; }
+        if (RootGrid != null) RootGrid.Opacity = 1;
+    }
+
+    void StopPopupAnimations()
+    {
+        if (PopupScale != null)
+        {
+            PopupScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+            PopupScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+        }
+        if (PopupSlide != null)
+        {
+            PopupSlide.BeginAnimation(TranslateTransform.XProperty, null);
+            PopupSlide.BeginAnimation(TranslateTransform.YProperty, null);
+        }
+        if (RootGrid != null) RootGrid.BeginAnimation(UIElement.OpacityProperty, null);
+    }
+
+    void PlayPopupOpenAnimation()
+    {
+        if (_popupOpenStarted) return;
+        _popupOpenStarted = true;
+
+        // 先居中,再按「角落 → 中央」计算滑动位移。
+        CenterPanelOnFocusedScreen();
+        ConfigurePopupSlide();
+
+        if (_popupAnimation == HoverExpandAnimationKind.None || Motion.IsReducedMotion())
+        {
+            ApplyPopupFinalVisual();
+            return;
+        }
+
+        ApplyPopupClosedVisual();
+        var dur = new Duration(TimeSpan.FromMilliseconds(240.0 / _popupSpeed));
+        switch (_popupAnimation)
+        {
+            case HoverExpandAnimationKind.Fade:
+                AnimatePopupSlide(_popupSlideStartX, 0, _popupSlideStartY, 0, dur, EasingMode.EaseOut, null);
+                AnimatePopupOpacity(RootGrid.Opacity, 1, dur, EasingMode.EaseOut, null);
+                break;
+            case HoverExpandAnimationKind.VerticalExpand:
+                AnimatePopupScaleY(PopupScale.ScaleY, 1, dur, EasingMode.EaseOut, null);
+                AnimatePopupSlide(_popupSlideStartX, 0, _popupSlideStartY, 0, dur, EasingMode.EaseOut, null);
+                break;
+            case HoverExpandAnimationKind.DirectionalExpand:
+                AnimatePopupScaleX(PopupScale.ScaleX, 1, dur, EasingMode.EaseOut, null);
+                AnimatePopupSlide(_popupSlideStartX, 0, _popupSlideStartY, 0, dur, EasingMode.EaseOut, null);
+                break;
+            case HoverExpandAnimationKind.BounceExpand:
+                AnimatePopupBounce(isExpand: true, dur, null);
+                AnimatePopupSlide(_popupSlideStartX, 0, _popupSlideStartY, 0, dur, EasingMode.EaseOut, null);
+                break;
+            default: // ScaleExpand
+                AnimatePopupScaleXY(PopupScale.ScaleX, 1, dur, EasingMode.EaseOut, null);
+                AnimatePopupSlide(_popupSlideStartX, 0, _popupSlideStartY, 0, dur, EasingMode.EaseOut, null);
+                break;
+        }
+    }
+
+    void PlayPopupCloseAnimation(Action completed)
+    {
+        if (_popupAnimation == HoverExpandAnimationKind.None || Motion.IsReducedMotion())
+        {
+            completed();
+            return;
+        }
+        StopPopupAnimations();
+
+        // 关闭时按面板当前位置重新算「角落」偏移,保证滑回正确角落。
+        ConfigurePopupSlide();
+        var dur = new Duration(TimeSpan.FromMilliseconds(200.0 / _popupSpeed));
+        switch (_popupAnimation)
+        {
+            case HoverExpandAnimationKind.Fade:
+            {
+                var once = CombinePopup(2, completed);
+                AnimatePopupSlide(PopupSlide.X, _popupSlideStartX, PopupSlide.Y, _popupSlideStartY, dur, EasingMode.EaseIn, once);
+                AnimatePopupOpacity(RootGrid.Opacity, 0, dur, EasingMode.EaseIn, once);
+                break;
+            }
+            case HoverExpandAnimationKind.VerticalExpand:
+            {
+                var once = CombinePopup(2, completed);
+                AnimatePopupScaleY(PopupScale.ScaleY, 0, dur, EasingMode.EaseIn, once);
+                AnimatePopupSlide(PopupSlide.X, _popupSlideStartX, PopupSlide.Y, _popupSlideStartY, dur, EasingMode.EaseIn, once);
+                break;
+            }
+            case HoverExpandAnimationKind.DirectionalExpand:
+            {
+                var once = CombinePopup(2, completed);
+                AnimatePopupScaleX(PopupScale.ScaleX, 0, dur, EasingMode.EaseIn, once);
+                AnimatePopupSlide(PopupSlide.X, _popupSlideStartX, PopupSlide.Y, _popupSlideStartY, dur, EasingMode.EaseIn, once);
+                break;
+            }
+            case HoverExpandAnimationKind.BounceExpand:
+            {
+                var once = CombinePopup(2, completed);
+                AnimatePopupBounce(isExpand: false, dur, once);
+                AnimatePopupSlide(PopupSlide.X, _popupSlideStartX, PopupSlide.Y, _popupSlideStartY, dur, EasingMode.EaseIn, once);
+                break;
+            }
+            default: // ScaleExpand
+            {
+                var once = CombinePopup(2, completed);
+                AnimatePopupScaleXY(PopupScale.ScaleX, 0, dur, EasingMode.EaseIn, once);
+                AnimatePopupSlide(PopupSlide.X, _popupSlideStartX, PopupSlide.Y, _popupSlideStartY, dur, EasingMode.EaseIn, once);
+                break;
+            }
+        }
+    }
+
+    void AnimatePopupOpacity(double from, double to, Duration dur, EasingMode ease, Action? onComplete)
+    {
+        var fire = onComplete ?? (() => { });
+        if (Math.Abs(from - to) < 1e-9)
+        {
+            RootGrid.Opacity = to;
+            fire();
+            return;
+        }
+        var anim = new DoubleAnimation(from, to, dur) { EasingFunction = new CubicEase { EasingMode = ease } };
+        anim.Completed += (_, _) => { RootGrid.Opacity = to; fire(); };
+        RootGrid.BeginAnimation(UIElement.OpacityProperty, anim);
+    }
+
+    void AnimatePopupSlide(double fromX, double toX, double fromY, double toY, Duration dur, EasingMode ease, Action? onComplete)
+    {
+        var once = CombinePopup(2, onComplete);
+        AnimatePopupTransformDouble(PopupSlide, TranslateTransform.XProperty, fromX, toX, dur, ease, once);
+        AnimatePopupTransformDouble(PopupSlide, TranslateTransform.YProperty, fromY, toY, dur, ease, once);
+    }
+
+    void AnimatePopupScaleXY(double from, double to, Duration dur, EasingMode ease, Action? onComplete)
+    {
+        var once = CombinePopup(2, onComplete);
+        AnimatePopupTransformDouble(PopupScale, ScaleTransform.ScaleXProperty, from, to, dur, ease, once);
+        AnimatePopupTransformDouble(PopupScale, ScaleTransform.ScaleYProperty, from, to, dur, ease, once);
+    }
+
+    void AnimatePopupScaleX(double from, double to, Duration dur, EasingMode ease, Action? onComplete)
+        => AnimatePopupTransformDouble(PopupScale, ScaleTransform.ScaleXProperty, from, to, dur, ease, onComplete);
+
+    void AnimatePopupScaleY(double from, double to, Duration dur, EasingMode ease, Action? onComplete)
+        => AnimatePopupTransformDouble(PopupScale, ScaleTransform.ScaleYProperty, from, to, dur, ease, onComplete);
+
+    void AnimatePopupTransformDouble(Animatable target, DependencyProperty prop, double from, double to, Duration dur, EasingMode ease, Action? onComplete)
+    {
+        var fire = onComplete ?? (() => { });
+        if (Math.Abs(from - to) < 1e-9)
+        {
+            target.SetValue(prop, to);
+            fire();
+            return;
+        }
+        var anim = new DoubleAnimation(from, to, dur) { EasingFunction = new CubicEase { EasingMode = ease } };
+        anim.Completed += (_, _) => { target.SetValue(prop, to); fire(); };
+        target.BeginAnimation(prop, anim);
+    }
+
+    /// <summary>把 N 组子动画的完成信号收敛成一次回调(滑动/缩放/淡入都完成后才触发)。</summary>
+    static Action CombinePopup(int count, Action? onComplete)
+    {
+        int remaining = count;
+        bool fired = false;
+        return () =>
+        {
+            if (fired) return;
+            if (--remaining > 0) return;
+            fired = true;
+            onComplete?.Invoke();
+        };
+    }
+
+    /// <summary>弹性展开/收起 — 与 HoverExpandBehavior.AnimateBounce 同配方:
+    /// 打开 0→1.08→1,关闭 1→0.85(弹)→0,速度由 _popupSpeed 统一控制。</summary>
+    void AnimatePopupBounce(bool isExpand, Duration duration, Action? onComplete)
+    {
+        if (!isExpand && Math.Abs(PopupScale.ScaleX) < 1e-9)
+        {
+            PopupScale.ScaleX = 0; PopupScale.ScaleY = 0;
+            onComplete?.Invoke();
+            return;
+        }
+        var bounce = new DoubleAnimationUsingKeyFrames();
+        var ease = new BounceEase { Bounces = 2, Bounciness = 2, EasingMode = EasingMode.EaseOut };
+        if (isExpand)
+        {
+            bounce.KeyFrames.Add(new EasingDoubleKeyFrame(PopupScale.ScaleX, KeyTime.FromTimeSpan(TimeSpan.Zero)));
+            bounce.KeyFrames.Add(new EasingDoubleKeyFrame(1.08, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(120.0 / _popupSpeed)), ease));
+            bounce.KeyFrames.Add(new EasingDoubleKeyFrame(1, KeyTime.FromTimeSpan(duration.TimeSpan)));
+        }
+        else
+        {
+            var squashTime = TimeSpan.FromMilliseconds(duration.TimeSpan.TotalMilliseconds * 0.45);
+            bounce.KeyFrames.Add(new EasingDoubleKeyFrame(PopupScale.ScaleX, KeyTime.FromTimeSpan(TimeSpan.Zero)));
+            bounce.KeyFrames.Add(new EasingDoubleKeyFrame(0.85, KeyTime.FromTimeSpan(squashTime), ease));
+            bounce.KeyFrames.Add(new EasingDoubleKeyFrame(0, KeyTime.FromTimeSpan(duration.TimeSpan),
+                new CubicEase { EasingMode = EasingMode.EaseOut }));
+        }
+        double final = isExpand ? 1 : 0;
+        bool done = false;
+        Action fireOnce = () => { if (done) return; done = true; onComplete?.Invoke(); };
+        bounce.Completed += (_, _) => { PopupScale.ScaleX = final; PopupScale.ScaleY = final; fireOnce(); };
+        PopupScale.BeginAnimation(ScaleTransform.ScaleXProperty, bounce);
+        PopupScale.BeginAnimation(ScaleTransform.ScaleYProperty, bounce);
+    }
+
     // ── Hide (minimize) ──
 
     /// <summary>
@@ -1850,6 +2180,42 @@ public partial class PanelWindow : Window
     void Ctrl_Leave(object s, MouseEventArgs e)
     {
         if (s is Border b) b.Background = CtrlIdleBrush;
+    }
+
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        // 用户触发关闭(隐藏按钮/托盘/热键/关闭面板设置)时先播逆向动画再真正关窗。
+        // 应用退出(Dispatcher.HasShutdownStarted)直接放行;关闭动画进行中则忽略重复关闭请求。
+        if (_popupAllowClose || Dispatcher.HasShutdownStarted)
+        {
+            base.OnClosing(e);
+            return;
+        }
+
+        if (_popupCloseAnimating)
+        {
+            e.Cancel = true;
+            return;
+        }
+
+        if (_popupAnimation == HoverExpandAnimationKind.None || Motion.IsReducedMotion())
+        {
+            base.OnClosing(e);
+            return;
+        }
+
+        e.Cancel = true;
+        _popupCloseAnimating = true;
+        ConfigurePopupSlide();
+        PlayPopupCloseAnimation(() =>
+        {
+            _popupAllowClose = true;
+            // 不能在 OnClosing/WmClose 内同步再调 Close() — 面板快速连续开关时,
+            // 关闭动画的 from==to 会同步触发 onComplete,此时窗口仍在关闭流程中,
+            // 直接 Close() 抛 InvalidOperationException("在窗口关闭期间无法调用 Close")。
+            // 推迟到下一个 Dispatcher 周期再真正关窗。
+            Dispatcher.BeginInvoke(new Action(Close));
+        });
     }
 
     protected override void OnClosed(EventArgs e)

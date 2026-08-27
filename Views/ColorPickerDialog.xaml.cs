@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using DesktopZones.Helpers;
 using DesktopZones.Services;
 
 namespace DesktopZones.Views;
@@ -10,15 +11,52 @@ namespace DesktopZones.Views;
 public partial class ColorPickerDialog : Window
 {
     private bool _updating;
+    private readonly bool _followSystemTheme;
     private readonly LocalizationService _loc = LocalizationService.Instance;
     public string SelectedColor { get; private set; } = "FFFFFF";
 
-    public ColorPickerDialog(string initialHex = "FFFFFF")
+    /// <param name="followSystemTheme">
+    /// true = 跟随系统深浅色（Menu.*，供便签字体颜色等非管理界面调用）；
+    /// false = 跟随管理界面主题（Brush.*，供设置面板取色等管理界面调用）。
+    /// </param>
+    public ColorPickerDialog(string initialHex = "FFFFFF", bool followSystemTheme = false)
     {
         InitializeComponent();
+        _followSystemTheme = followSystemTheme;
+        if (!followSystemTheme)
+        {
+            ApplyManagementPalette();
+            ThemeService.Changed += OnThemeChanged;
+            Closed += (_, _) => ThemeService.Changed -= OnThemeChanged;
+        }
+        else
+        {
+            AcrylicHelper.ApplyMenuSurface(this, 12);
+        }
         SelectedColor = initialHex;
         SetFromHex(initialHex);
         ApplyLoc();
+    }
+
+    void OnThemeChanged(AppThemeMode _)
+    {
+        if (!_followSystemTheme) ApplyManagementPalette();
+    }
+
+    /// <summary>管理界面模式：把本窗口用到的 Menu.* 键局部覆盖为 Brush.* 管理主题画刷。</summary>
+    void ApplyManagementPalette()
+    {
+        Resources["Menu.Bg.Surface"]   = new SolidColorBrush(BrushColor("Brush.Bg.Chrome",      Color.FromRgb(0x1E, 0x1E, 0x24)));
+        Resources["Menu.Bg.Hover"]     = new SolidColorBrush(BrushColor("Brush.Bg.Input",       Color.FromRgb(0x2A, 0x2A, 0x33)));
+        Resources["Menu.Border.Subtle"]= new SolidColorBrush(BrushColor("Brush.Border.Subtle",  Color.FromRgb(0x3A, 0x3A, 0x44)));
+        Resources["Menu.Text.Primary"] = new SolidColorBrush(BrushColor("Brush.Text.Primary",   Colors.White));
+        Resources["Menu.Text.Secondary"]= new SolidColorBrush(BrushColor("Brush.Text.Secondary", Color.FromRgb(0xB0, 0xB0, 0xB8)));
+    }
+
+    static Color BrushColor(string key, Color fallback)
+    {
+        try { return Application.Current?.TryFindResource(key) is SolidColorBrush b ? b.Color : fallback; }
+        catch { return fallback; }
     }
 
     void ApplyLoc()

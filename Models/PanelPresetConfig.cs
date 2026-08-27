@@ -39,6 +39,10 @@ public class PanelPresetConfig
     public double HoverExpandSpeed { get; set; } = 1.0;
     /// <summary>Panel never has a restore button (spec §7.2 removed it). Default false; migration forces false.</summary>
     public bool EnableRestoreButton { get; set; } = false;
+    // ── Panel popup animation (打开/关闭面板的弹出动效,共用 HoverExpandAnimationKind 预设) ──
+    public HoverExpandAnimationKind PanelPopupMotion { get; set; } = HoverExpandAnimationKind.ScaleExpand;
+    public PanelPopupOrigin PanelPopupOrigin { get; set; } = PanelPopupOrigin.BottomRight;
+    public double PanelPopupSpeed { get; set; } = 1.0;
 
     public PanelPresetConfig Clone() => new()
     {
@@ -67,7 +71,10 @@ public class PanelPresetConfig
         GlassTintLuminosity = GlassTintLuminosity,
         GlassColorMode = GlassColorMode,
         HoverExpandSpeed = HoverExpandSpeed,
-        EnableRestoreButton = EnableRestoreButton
+        EnableRestoreButton = EnableRestoreButton,
+        PanelPopupMotion = PanelPopupMotion,
+        PanelPopupOrigin = PanelPopupOrigin,
+        PanelPopupSpeed = PanelPopupSpeed
     };
 
     /// <summary>Snapshot the Panel POCO off an AppConfig instance (ponytail: reads from Panel POCO instead of 19 loose fields).</summary>
@@ -98,7 +105,10 @@ public class PanelPresetConfig
         GlassTintLuminosity = cfg.Panel.PanelGlassTintLuminosity,
         GlassColorMode = cfg.Panel.PanelGlassColorMode,
         HoverExpandSpeed = cfg.Panel.PanelHoverExpandSpeed,
-        EnableRestoreButton = false
+        EnableRestoreButton = false,
+        PanelPopupMotion = cfg.Panel.PanelPopupMotion,
+        PanelPopupOrigin = cfg.Panel.PanelPopupOrigin,
+        PanelPopupSpeed = cfg.Panel.PanelPopupSpeed
     };
 
     /// <summary>Apply this preset's fields back to a target AppConfig's Panel POCO. Caller is responsible for Save() + repaint.</summary>
@@ -129,5 +139,8 @@ public class PanelPresetConfig
         cfg.Panel.PanelGlassTintLuminosity = GlassTintLuminosity;
         cfg.Panel.PanelGlassColorMode = GlassColorMode;
         cfg.Panel.PanelHoverExpandSpeed = HoverExpandSpeed;
+        cfg.Panel.PanelPopupMotion = PanelPopupMotion;
+        cfg.Panel.PanelPopupOrigin = PanelPopupOrigin;
+        cfg.Panel.PanelPopupSpeed = PanelPopupSpeed;
     }
 }

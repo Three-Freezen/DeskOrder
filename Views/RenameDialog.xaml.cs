@@ -1,3 +1,4 @@
+using DesktopZones.Helpers;
 using DesktopZones.Services;
 using System.Windows;
 using System.Windows.Input;
@@ -18,6 +19,7 @@ public partial class RenameDialog : Window
     public RenameDialog(string currentName, string? title = null, string? prompt = null)
     {
         InitializeComponent();
+        AcrylicHelper.ApplyMenuSurface(this, 10);
         _titleOverride = title;
         NameInput.Text = currentName;
         NameInput.SelectAll();

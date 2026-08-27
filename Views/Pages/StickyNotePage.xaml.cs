@@ -79,10 +79,10 @@ public partial class StickyNotePage : UserControl
             Tag = note,
             Title = title,
             Subtitle = string.Format(_loc["StickyNotePage.Subtitle"], chars, updated),
-            IconKey = "Icon.Sticky",
             IsLocked = note.IsLocked,
             IsVisible = note.IsVisible,
         };
+        ApplyIcon(row, note.IconChar, "Icon.Sticky");
         row.ReorderRequested += (src, targetIdx) =>
         {
             if (src.Tag is not StickyNote n || _notesService == null) return;

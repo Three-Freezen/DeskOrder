@@ -84,7 +84,8 @@
       <components:SidebarNav Grid.Row="1" Grid.Column="0" x:Name="SideNav"/>
 
       <!-- Content -->
-      <ContentControl Grid.Row="1" Grid.Column="1" x:Name="MainContent" Margin="0"/>
+      <ContentControl Grid.Row="1" Grid.Column="1" x:Name="MainContent" Margin="0"
+                      FocusVisualStyle="{x:Null}"/>
 
       <!-- PropertyPanel (docked) -->
       <Grid Grid.Row="1" Grid.Column="2" x:Name="RightPane" Visibility="Collapsed">

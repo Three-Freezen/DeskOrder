@@ -20,8 +20,17 @@
                 BorderThickness="1">
             <Border.ContextMenu>
                 <ContextMenu>
-                    <MenuItem x:Name="CtxToggleRestore" Header="{loc:Loc Key=Calendar.DisableRestore}" Click="ToggleRestore_Click"/>
+                    <!-- ponytail 2026-08-27: 5 段结构 — 周一开头 / 设置 / 最小化 / 删除日历。
+                         关闭/开启可恢复按钮选项已删除;设置走 PropertyWindowService 与齿轮
+                         入口对齐。删除日历加二级确认。 -->
+                    <MenuItem x:Name="CtxStartOnMonday" Header="{loc:Loc Key=Calendar.StartOnMonday}" Click="StartOnMonday_Click"/>
                     <Separator/>
+                    <MenuItem x:Name="CtxSettings" Header="{loc:Loc Key=Calendar.Settings}" Click="Settings_Click"/>
+                    <Separator/>
+                    <!-- ponytail 2026-08-27: 锁定/解锁 — 复用 LockBtn_Click; 锁定态变化时
+                         ApplyLockState 同步菜单 Header;切语言后下次打开也会刷新。 -->
+                    <MenuItem x:Name="CtxLock" Header="{loc:Loc Key=Common.Lock}" Click="LockBtn_Click"/>
+                    <MenuItem x:Name="CtxMinimize" Header="{loc:Loc Key=Calendar.Minimize}" Click="Minimize_Click"/>
                     <MenuItem x:Name="CtxDelete" Header="{loc:Loc Key=Calendar.Delete}" Click="DeleteCalendar_Click" Foreground="#FF6666"/>
                 </ContextMenu>
             </Border.ContextMenu>
@@ -273,6 +282,12 @@
             </Grid>
         </Border>
 
+        <!-- ponytail: liquid-glass chromatic overlay — additive, never replaces
+             CalendarBorder's configured BorderBrush/BorderThickness. -->
+        <Border x:Name="CalendarGlassBorder" CornerRadius="10"
+                Background="Transparent" BorderThickness="0"
+                IsHitTestVisible="False" Panel.ZIndex="20"/>
+
         <!-- Four corner resize grips -->
         <Border x:Name="GripTL" Width="12" Height="12" HorizontalAlignment="Left" VerticalAlignment="Top"
                 Cursor="SizeNWSE" Background="Transparent"
@@ -295,16 +310,22 @@
                 Visibility="Collapsed"
                 Width="36" Height="36"
                 CornerRadius="18"
-                Background="#DD1A1A2E"
+                Background="{DynamicResource Menu.Bg.Surface}"
                 BorderThickness="0"
                 Cursor="Hand"
                 MouseLeftButtonDown="Restore_MouseDown"
                 MouseMove="Restore_MouseMove"
                 MouseLeftButtonUp="Restore_MouseUp"
                 MouseEnter="Restore_Enter" MouseLeave="Restore_Leave">
-            <TextBlock x:Name="RestoreIconChar" Text="📅"
-                       FontSize="18" Foreground="#C0FFFFFF"
-                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            <Grid>
+                <Path x:Name="RestoreIconPath" Width="18" Height="18"
+                      Stretch="Uniform" Stroke="#C0FFFFFF" StrokeThickness="1.5"
+                      StrokeLineJoin="Round" HorizontalAlignment="Center"
+                      VerticalAlignment="Center" Visibility="Collapsed"/>
+                <TextBlock x:Name="RestoreIconChar" Text="📅"
+                           FontSize="18" Foreground="#C0FFFFFF"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Grid>
         </Border>
     </Grid>
 </Window>

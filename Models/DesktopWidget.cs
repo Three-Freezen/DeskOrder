@@ -22,6 +22,8 @@ public class StickyNote : AppearanceModel
     public bool IsVisible { get; set; } = true;
     public bool IsLocked { get; set; } = false;
     public bool PinnedTop { get; set; } = false;
+    /// <summary>磁贴模式 — 砍掉最上面一层标题栏(28px),窗口高度同步缩小,格式化工具栏保留。</summary>
+    public bool TileMode { get; set; } = false;
     // ── Appearance (most fields inherited from AppearanceModel) ──
     public double BorderThickness { get; set; } = 1.0;
     // ponytail 2026-08-26: per-instance corner radius (圆角/尖角 switch).
@@ -56,6 +58,7 @@ public class StickyNote : AppearanceModel
             X = X, Y = Y, Width = Width, Height = Height,
             NoteColor = NoteColor, FontSize = FontSize,
             IsVisible = IsVisible, IsLocked = IsLocked, PinnedTop = PinnedTop,
+            TileMode = TileMode,
             BorderThickness = BorderThickness,
             CornerRadius = CornerRadius,
             TitleBarFillColor = TitleBarFillColor, TitleBarOpacity = TitleBarOpacity,
@@ -84,6 +87,12 @@ public class DesktopClock : AppearanceModel
     public double Y { get; set; } = 100;
     public double Width { get; set; } = 320;
     public double Height { get; set; } = 140;
+    // ponytail: 每模式独立持久化的窗口大小。旧配置(只有共享的 Width/Height)在反序列化
+    // 时按当前模式回填,避免升级后用户自定义的时钟尺寸丢失。
+    public double? DigitalWidth { get; set; }
+    public double? DigitalHeight { get; set; }
+    public double? AnalogWidth { get; set; }
+    public double? AnalogHeight { get; set; }
     public bool IsVisible { get; set; } = true;
     public bool IsLocked { get; set; } = false;
     public bool ShowSeconds { get; set; } = true;
@@ -103,6 +112,23 @@ public class DesktopClock : AppearanceModel
         if (ExtensionData.TryGetValue("QuickBarMode", out var old)
             && old.ValueKind is JsonValueKind.True or JsonValueKind.False)
             TileMode = old.GetBoolean();
+    }
+
+    // ponytail: 旧配置只有共享 Width/Height,按加载时的当前模式回填到对应模式的持久化
+    // 尺寸;另一模式保持内置默认值,避免「数字时钟改小后切到指针却被数字尺寸顶大」。
+    [OnDeserialized]
+    internal void OnDeserializedMigrateClockSize(StreamingContext _)
+    {
+        if (!DigitalWidth.HasValue)
+        {
+            DigitalWidth = Mode == ClockDisplayMode.Digital && Width > 0 ? Width : 320;
+            DigitalHeight = Mode == ClockDisplayMode.Digital && Height > 0 ? Height : 140;
+        }
+        if (!AnalogWidth.HasValue)
+        {
+            AnalogWidth = Mode == ClockDisplayMode.Analog && Width > 0 ? Width : 240;
+            AnalogHeight = Mode == ClockDisplayMode.Analog && Height > 0 ? Height : 260;
+        }
     }
     /// <summary>Opacity of the title-bar control buttons (lock / hide), 5-100. Zone-style.</summary>
     public double ControlOpacity { get; set; } = 40;
@@ -139,6 +165,8 @@ public class DesktopClock : AppearanceModel
         {
             Id = Id, X = X, Y = Y, Width = Width, Height = Height, IsVisible = IsVisible,
             IsLocked = IsLocked,
+            DigitalWidth = DigitalWidth, DigitalHeight = DigitalHeight,
+            AnalogWidth = AnalogWidth, AnalogHeight = AnalogHeight,
             ShowSeconds = ShowSeconds, ShowDate = ShowDate,
             Use24Hour = Use24Hour, TextColor = TextColor,
             ButtonColor = ButtonColor, SecondHandColor = SecondHandColor,

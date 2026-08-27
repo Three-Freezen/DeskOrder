@@ -52,9 +52,15 @@ public class ZoneManager
         foreach (var zone in _config.Zones)
         {
             Zones.Add(zone);
-            // Re-space auto-arrange zones onto the current grid pitch once
-            // (idempotent — keeps free-form zones untouched).
-            if (ZoneLayout.NormalizeZone(zone)) anyNormalized = true;
+            // 面板对齐迁移：旧默认网格 56 → 新 80×80（间距 88），与面板卡片一致。
+            if (zone.GridSize == 56)
+            {
+                zone.GridSize = 80;
+                anyNormalized = true;
+                // 仅在旧网格迁移时重排到新间距一次；之后每次启动不再自动重排/居中，
+                // 避免重新打开应用后图标又偏移（与 ZoneWindow.OnSize 的修复一致）。
+                if (ZoneLayout.NormalizeZone(zone)) anyNormalized = true;
+            }
             // Migrate legacy shortcuts: re-associate imported .lnk items with their real
             // targets AND keep the shortcut's custom icon location, so icons render
             // without the link-arrow overlay and identical to the desktop (the "二次关联" fix).
@@ -160,11 +166,10 @@ public class ZoneManager
     public ZoneItem CreateSubfolder(Zone owner, string name)
     {
         // ponytail 2026-08-26: 占位走 ZoneLayout.FindFreeSpot,和正常 AddItem 同一路径,
-        // 自动按 GridSize + LabelArea 在当前已有 items 周围找空格子,
+        // 自动按方形格子(GridSize×GridSize)在当前已有 items 周围找空格子,
         // 而不是无脑追加到 last 后面导致挤到一起或越界。
-        double itemH = owner.GridSize + ZoneLayout.LabelArea;
         var (x, y) = ZoneLayout.FindFreeSpot(
-            owner.Items, owner.Width, owner.Height, owner.GridSize, itemH);
+            owner.Items, owner.Width, owner.Height, owner.GridSize, owner.GridSize);
         var sub = new ZoneItem(name, "", ItemType.SubFolder, x, y);
         owner.Items.Add(sub);
         SaveConfig();
@@ -202,8 +207,7 @@ public class ZoneManager
         ShellIconService.Instance.GetIcon(item.TargetPath, item.Type, item.IconPath);
 
         double itemW = zone.GridSize;
-        double itemH = zone.GridSize + ZoneLayout.LabelArea;
-        var (x, y) = ZoneLayout.FindFreeSpot(zone.Items, zone.Width, zone.Height, itemW, itemH);
+        var (x, y) = ZoneLayout.FindFreeSpot(zone.Items, zone.Width, zone.Height, itemW, itemW);
         item.X = x;
         item.Y = y;
 
@@ -363,7 +367,9 @@ public class ZoneManager
                                        && z.MergedGroupMembership.SubZoneIds.Count == 0))
                          .OrderBy(z => z.Y).ThenBy(z => z.X))
             {
-                ShowZone(zone, i * HoverExpandBehavior.BatchStaggerMs);
+                // (i+1) 保证第一个分区也拿到 >0 的 waveDelay，走动画分支；
+                // 旧实现第一个 delay=0 走 SnapToExpanded，导致总有一个分区不播动画。
+                ShowZone(zone, (i + 1) * HoverExpandBehavior.BatchStaggerMs);
                 i++;
             }
         }

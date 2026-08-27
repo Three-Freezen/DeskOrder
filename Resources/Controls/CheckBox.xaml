@@ -35,7 +35,7 @@
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"
                     Stretch="Uniform"
-                    Stroke="{DynamicResource Brush.Accent.On}"
+                    Stroke="{DynamicResource Brush.Btn.On}"
                     StrokeThickness="2"
                     StrokeEndLineCap="Round"
                     StrokeStartLineCap="Round"
@@ -57,9 +57,9 @@
                  （同色，视觉上边框融入填充），✓勾 = Accent.On（镂空文字）。
                  保留 BorderThickness=1 让边框物理存在，不要再设 0。-->
             <Trigger Property="IsChecked" Value="True">
-              <Setter TargetName="Box" Property="Background" Value="{DynamicResource Brush.Accent.Solid}"/>
-              <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource Brush.Accent.Solid}"/>
-              <Setter TargetName="Check" Property="Stroke" Value="{DynamicResource Brush.Accent.On}"/>
+              <Setter TargetName="Box" Property="Background" Value="{DynamicResource Brush.Btn.Solid}"/>
+              <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource Brush.Btn.Solid}"/>
+              <Setter TargetName="Check" Property="Stroke" Value="{DynamicResource Brush.Btn.On}"/>
               <Setter TargetName="Check" Property="Visibility" Value="Visible"/>
             </Trigger>
             <Trigger Property="IsMouseOver" Value="True">
@@ -70,7 +70,7 @@
                 <Condition Property="IsChecked" Value="True"/>
                 <Condition Property="IsMouseOver" Value="True"/>
               </MultiTrigger.Conditions>
-              <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource Brush.Accent}"/>
+              <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource Brush.Btn.Border}"/>
             </MultiTrigger>
             <Trigger Property="IsEnabled" Value="False">
               <Setter TargetName="Box" Property="Background" Value="{DynamicResource Brush.Bg.Base}"/>

@@ -26,11 +26,17 @@ public abstract class AppearanceModel
     public bool EnableAcrylic { get; set; } = true;
     public string BorderColor { get; set; } = "#40FFFFFF";
     public string FillColor { get; set; } = "#08000000";
+    /// <summary>分区/组件图标。emoji 原样存储；"@zones" 等 token 为软件原生矢量图标（见 Helpers.IconGlyph）。</summary>
+    public string IconChar { get; set; } = "";
+    /// <summary>图标颜色（独立于标题/按钮颜色）。空 = 回退到各组件的默认图标色。</summary>
+    public string IconColor { get; set; } = "";
     public int GlassBlurAmount { get; set; } = 18;
     public int GlassTintOpacity { get; set; } = 50;
     public int GlassTintLuminosity { get; set; } = 100;
     public string GlassColorMode { get; set; } = "Default";
-    public bool EnableLiquidGlass { get; set; } = false;
+    /// <summary>ponytail 2026-08-28: 新建分区/时钟/日历/便签默认开启液态玻璃。
+    /// JSON 反序列化时旧数据里显式的 false 仍会覆盖此默认,已存在对象不受影响。</summary>
+    public bool EnableLiquidGlass { get; set; } = true;
     public string BackgroundImagePath { get; set; } = "";
     public string BgImageStretch { get; set; } = "UniformToFill";
     public double BgImageZoom { get; set; } = 1.0;

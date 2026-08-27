@@ -76,10 +76,10 @@ public partial class CalendarPage : UserControl
             Tag = cal,
             Title = $"Calendar {cal.DisplayYear}-{cal.DisplayMonth:D2}",
             Subtitle = $"{(int)cal.Width}×{(int)cal.Height} · {_loc.Get("CalendarPage.Subtitle", cal.Notes.Count)}",
-            IconKey = "Icon.Calendar",
             IsLocked = cal.IsLocked,
             IsVisible = cal.IsVisible,
         };
+        ApplyIcon(row, cal.IconChar, "Icon.Calendar");
         row.ReorderRequested += (src, targetIdx) =>
         {
             if (src.Tag is not DesktopCalendar c || _widgetService == null) return;

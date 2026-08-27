@@ -71,11 +71,10 @@ public partial class MergedGroupsPage : UserControl
             Tag = master,
             Title = master.MergedGroupMembership.DisplayName,
             Subtitle = _loc.Get("MergedGroupsPage.Subtitle", subCount, master.Items.Count),
-            IconKey = "Icon.Merged",
-            IconText = master.MergedGroupMembership.Icon ?? "",
             IsLocked = master.IsLocked,
             IsVisible = master.IsVisible,
         };
+        ApplyIcon(row, master.MergedGroupMembership.Icon, "Icon.Merged");
         // ponytail: no status badge on merged-group rows (lock/hidden/merged chips
         // removed; folder-mapping badge intentionally NOT shown here).
 
@@ -141,10 +140,10 @@ public partial class MergedGroupsPage : UserControl
 
     void NewGroup_Click(object sender, RoutedEventArgs e)
     {
-        _main.NewZone();
+        // ponytail: 右上角「新建」改为打开「选择要合并的分区」二级窗口，勾选后创建新组合。
+        var master = _main.ShowCreateMergedGroupDialog();
         RefreshList();
-        var last = _zoneManager.Zones.LastOrDefault();
-        if (last != null) Select(last);
+        if (master != null) Select(master);
     }
 
     void Delete(Zone master)
