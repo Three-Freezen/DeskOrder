@@ -44,15 +44,6 @@ public partial class StickyNoteWindow : Window
     // ponytail: 字体颜色弹层 — 最近一次应用的颜色(语言切换重建后恢复高亮环)。
     private string _lastTextColorHex = "#E0E0E0";
 
-    // ── 待输入格式(Word 式光标格式)──
-    // 无选区点格式按钮时写入;ContentBox_TextChanged 时应用到新插入的文本,
-    // 规避 WPF 在空 Run 处打字格式失效/被重置的问题。
-    private FontWeight? _pendingWeight;
-    private FontStyle? _pendingStyle;
-    private bool? _pendingUnderline;
-    private double? _pendingSize;
-    private SolidColorBrush? _pendingColor;
-    private bool _applyingPendingFormat;
     // 程序化同步字号下拉时为 true,防止其 SelectionChanged 再触发应用逻辑(防循环)。
     private bool _updatingFormatButtons;
     private DispatcherTimer? _autoSaveTimer;
@@ -1496,7 +1487,10 @@ public partial class StickyNoteWindow : Window
         _bringToFrontTimer.Start();
     }
 
-    // ── Formatting toolbar handlers (per-character via RichTextBox) ──
+    // ── Formatting toolbar handlers ──
+    // 重构(Word 式富文本):格式统一经 ApplyFormat 写入。有选区 → 只改选区;
+    // 无选区 → 写入 WPF 光标打字格式,后续输入自动继承。不再维护跨光标存活的
+    // pending 状态机、也不在 TextChanged 里按偏移回写格式 —— 那是格式串位的根源。
 
     void FontSizeCombo_SelectionChanged(object s, SelectionChangedEventArgs e)
     {
@@ -1504,17 +1498,7 @@ public partial class StickyNoteWindow : Window
         if (FontSizeCombo.SelectedItem is ComboBoxItem item && item.Tag is string tag
             && double.TryParse(tag, out var fs))
         {
-            var sel = ContentBox.Selection;
-            if (sel != null && !sel.IsEmpty)
-            {
-                sel.ApplyPropertyValue(TextElement.FontSizeProperty, fs);
-                _pendingSize = null;
-            }
-            else
-            {
-                _pendingSize = fs;
-                ApplyToCaret(TextElement.FontSizeProperty, fs);
-            }
+            ApplyFormat(TextElement.FontSizeProperty, fs);
             UpdateFormatButtons();
             // ComboBox 会抢焦点:应用完把焦点还给正文,用户可直接继续输入。
             RefocusContentBox();
@@ -1523,72 +1507,24 @@ public partial class StickyNoteWindow : Window
 
     void BoldBtn_Click(object s, RoutedEventArgs e)
     {
-        var sel = ContentBox.Selection;
-        if (sel == null) return;
-        bool hasSelection = !sel.IsEmpty;
-        object? current;
-        if (hasSelection) current = sel.GetPropertyValue(Inline.FontWeightProperty);
-        else if (_pendingWeight is FontWeight pw) current = pw;
-        else current = EffectiveValue(Inline.FontWeightProperty, ContentBox.FontWeight);
-        var next = IsBold(current) ? FontWeights.Normal : FontWeights.Bold;
-        if (hasSelection)
-        {
-            sel.ApplyPropertyValue(Inline.FontWeightProperty, next);
-            _pendingWeight = null;
-        }
-        else
-        {
-            _pendingWeight = next;
-            ApplyToCaret(Inline.FontWeightProperty, next);
-        }
+        var current = EffectiveValue(Inline.FontWeightProperty, ContentBox.FontWeight);
+        ApplyFormat(Inline.FontWeightProperty, IsBold(current) ? FontWeights.Normal : FontWeights.Bold);
         UpdateFormatButtons();
         RefocusContentBox();
     }
 
     void ItalicBtn_Click(object s, RoutedEventArgs e)
     {
-        var sel = ContentBox.Selection;
-        if (sel == null) return;
-        bool hasSelection = !sel.IsEmpty;
-        object? current;
-        if (hasSelection) current = sel.GetPropertyValue(Inline.FontStyleProperty);
-        else if (_pendingStyle is FontStyle ps) current = ps;
-        else current = EffectiveValue(Inline.FontStyleProperty, ContentBox.FontStyle);
-        var next = IsItalic(current) ? FontStyles.Normal : FontStyles.Italic;
-        if (hasSelection)
-        {
-            sel.ApplyPropertyValue(Inline.FontStyleProperty, next);
-            _pendingStyle = null;
-        }
-        else
-        {
-            _pendingStyle = next;
-            ApplyToCaret(Inline.FontStyleProperty, next);
-        }
+        var current = EffectiveValue(Inline.FontStyleProperty, ContentBox.FontStyle);
+        ApplyFormat(Inline.FontStyleProperty, IsItalic(current) ? FontStyles.Normal : FontStyles.Italic);
         UpdateFormatButtons();
         RefocusContentBox();
     }
 
     void UnderlineBtn_Click(object s, RoutedEventArgs e)
     {
-        var sel = ContentBox.Selection;
-        if (sel == null) return;
-        bool hasSelection = !sel.IsEmpty;
-        object? current;
-        if (hasSelection) current = sel.GetPropertyValue(Inline.TextDecorationsProperty);
-        else if (_pendingUnderline is bool pu) current = pu ? TextDecorations.Underline : null;
-        else current = EffectiveValue(Inline.TextDecorationsProperty, null);
-        var next = IsUnderlined(current) ? null : TextDecorations.Underline;
-        if (hasSelection)
-        {
-            sel.ApplyPropertyValue(Inline.TextDecorationsProperty, next);
-            _pendingUnderline = null;
-        }
-        else
-        {
-            _pendingUnderline = next != null;
-            ApplyToCaret(Inline.TextDecorationsProperty, next);
-        }
+        var current = EffectiveValue(Inline.TextDecorationsProperty, null);
+        ApplyFormat(Inline.TextDecorationsProperty, IsUnderlined(current) ? null : TextDecorations.Underline);
         UpdateFormatButtons();
         RefocusContentBox();
     }
@@ -1726,29 +1662,13 @@ public partial class StickyNoteWindow : Window
     }
 
     /// <summary>
-    /// ponytail 2026-08-28 选色 BUG 修复 — 选中的文字变色 + 光标插入格式同步,
-    /// 保证「后续输入内容」也用新色:
-    /// ① 有选区 → 选区直接变色;
-    /// ② 光标处空选区应用属性 = WPF 打字格式机制,决定下一字符颜色(旧实现只改
-    ///    ContentBox.Foreground,既连累已有文字一起变继承色,又盖不掉光标前一行
-    ///    已带显式颜色的行尾,导致新打的字仍是旧颜色);
-    /// ③ 「A」图标换成所选颜色。
+    /// 选色应用 — 有选区给选区上色,无选区写入光标打字格式(后续输入自动继承),
+    /// 并把「A」图标同步成所选颜色。格式串位修复的一部分:不再有跨光标存活的
+    /// pending 颜色,颜色只作用在当下光标/选区上。
     /// </summary>
     void ApplyTextColor(SolidColorBrush brush, string? sourceHex = null)
     {
-        var sel = ContentBox.Selection;
-        if (sel != null && !sel.IsEmpty)
-        {
-            // 有选区 → 直接给选区上色。
-            sel.ApplyPropertyValue(TextElement.ForegroundProperty, brush);
-            _pendingColor = null;
-        }
-        else
-        {
-            // 无选区 → 只写光标插入格式(新输入继承)。
-            _pendingColor = brush;
-            ApplyToCaret(TextElement.ForegroundProperty, brush);
-        }
+        ApplyFormat(TextElement.ForegroundProperty, brush);
         // 记住最近颜色:语言切换触发 BuildColorPresets 重建后仍能恢复选中高亮环。
         if (!string.IsNullOrEmpty(sourceHex))
             _lastTextColorHex = sourceHex;
@@ -1765,88 +1685,20 @@ public partial class StickyNoteWindow : Window
     void ContentBox_SelectionChanged(object s, RoutedEventArgs e)
     {
         if (_initializing) return;
-        // 注意:这里不主动清待输入格式。打字/退格都会触发 SelectionChanged,
-        // 若在这里清,退格删掉刚输入的字后待输入格式就被清掉,光标会跳到前一个
-        // 字符的格式上去。待输入格式只在格式按钮/下拉再次操作时改变,移动光标
-        // (方向键/点击)也不清,保证「先设置、再定位、再输入」即时同步。
+        // 光标移动/选区变化 → 工具条反显光标处或选区处格式。格式本身不做任何
+        // 写入,不干预用户输入,从机制上杜绝格式串位。
         UpdateFormatButtons();
     }
 
     /// <summary>
-    /// 方向键/Home/End/PageUp/PageDown 移动光标:不再清掉待输入格式。
-    /// 用户设置格式后期望「接下来输入的内容」都用该格式,即使中途移动了光标
-    /// (常见流程:先选字号 → 再点进正文定位 → 输入)。待输入格式只由格式按钮/
-    /// 下拉的再次操作改变,保证设置与输入即时同步,不再需要反复调整才生效。
-    /// </summary>
-    void ContentBox_PreviewKeyDown(object s, KeyEventArgs e)
-    {
-        // 待输入格式跨光标移动保留(有意为之)。
-    }
-
-    /// <summary>点击正文定位光标:同样保留待输入格式(理由同上)。</summary>
-    void ContentBox_PreviewMouseLeftButtonDown(object s, MouseButtonEventArgs e)
-    {
-        // 待输入格式跨点击定位保留(有意为之)。
-    }
-
-    /// <summary>文本真正插入前,把待输入格式写到光标处,保证首个字符继承(空白便签也生效)。</summary>
-    void ContentBox_PreviewTextInput(object s, TextCompositionEventArgs e)
-    {
-        if (_initializing) return;
-        if (_pendingWeight == null && _pendingStyle == null && _pendingUnderline == null
-            && _pendingSize == null && _pendingColor == null)
-            return;
-        ApplyPendingToCaret();
-    }
-
-    void ApplyPendingToCaret()
-    {
-        if (_pendingWeight is FontWeight w) ApplyToCaret(TextElement.FontWeightProperty, w);
-        if (_pendingStyle is FontStyle st) ApplyToCaret(TextElement.FontStyleProperty, st);
-        if (_pendingUnderline is bool u) ApplyToCaret(Inline.TextDecorationsProperty, u ? TextDecorations.Underline : null);
-        if (_pendingSize is double sz) ApplyToCaret(TextElement.FontSizeProperty, sz);
-        if (_pendingColor is SolidColorBrush c) ApplyToCaret(TextElement.ForegroundProperty, c);
-    }
-
-    /// <summary>
-    /// 兜底:新插入的文字直接套用待输入格式(加粗/斜体/下划线/字号/颜色),
-    /// 覆盖粘贴/输入法合成等 PreviewTextInput 没覆盖到的路径。
+    /// 自动保存富文本 JSON(防抖,避免每个按键都写盘)。
+    /// 重构后这里不再回写任何格式 —— 旧实现按 TextChange 符号偏移把 pending
+    /// 格式刷到新增区间,粘贴/输入法/其它位置打字都会被误刷,是格式串位的根源。
+    /// 新输入格式由 WPF 光标打字格式(ApplyFormat 写入)负责,天然只作用于光标处。
     /// </summary>
     void ContentBox_TextChanged(object s, TextChangedEventArgs e)
     {
-        if (_initializing || _applyingPendingFormat) return;
-
-        bool hasPending = _pendingWeight != null || _pendingStyle != null || _pendingUnderline != null
-                          || _pendingSize != null || _pendingColor != null;
-        if (hasPending)
-        {
-            _applyingPendingFormat = true;
-            try
-            {
-                foreach (var change in e.Changes)
-                {
-                    if (change.AddedLength <= 0) continue;
-                    try
-                    {
-                        // TextChange.Offset 与 TextPointer.GetPositionAtOffset 的 offset
-                        // 语义一致,都是「符号(symbol)」偏移(字符 + 段落/Run 等元素边界),
-                        // 直接使用即可精确定位到本次新增的文字范围。
-                        var start = ContentBox.Document.ContentStart
-                            .GetPositionAtOffset(change.Offset, LogicalDirection.Forward);
-                        var end = start?.GetPositionAtOffset(change.AddedLength, LogicalDirection.Forward);
-                        if (start != null && end != null)
-                            ApplyPendingToRange(new TextRange(start, end));
-                    }
-                    catch { }
-                }
-            }
-            finally
-            {
-                _applyingPendingFormat = false;
-            }
-        }
-
-        // 自动保存富文本 JSON(防抖,避免每个按键都写盘)。
+        if (_initializing) return;
         ScheduleNoteFileAutoSave();
     }
 
@@ -1876,23 +1728,25 @@ public partial class StickyNoteWindow : Window
     }
 
     /// <summary>
-    /// 无选区时把格式写到光标处:①写 WPF 光标插入格式;②把格式直接写到「光标所在的
-    /// 空 Run」上。只有 ② 才能真正让光标高度跟着新字号变、并让空白处输入的首个字符
-    /// 继承新格式 —— 空选区的 ApplyPropertyValue 只改插入属性,不会改变光标所在 Run/
-    /// 新输入字符实际落进的相邻 Run(它们沿用旧属性,这就是「光标大小跟旧文字 / 首字符
-    /// 继承旧属性」的根因)。非空 Run 不写,避免把已有文字改掉,新增文字由
-    /// ContentBox_TextChanged 兜底补格式。
+    /// Word 式格式应用 — 唯一写入入口:
+    /// ① 有选区 → 只格式化选区;
+    /// ② 无选区 → 写入 WPF 光标打字格式,后续输入自动继承(run 边界、已有显式
+    ///    格式的行尾都会以打字格式为准 —— WPF 文本编辑器原生机制);
+    /// ③ 同时把格式写到光标所在的「空 Run」:空 Run 无可见文字,写入零副作用,
+    ///    却保证空白便签/空段落的首字符继承新格式 + 光标高度即时跟随新字号。
+    /// 不再维护跨光标存活的 pending 状态机、不在 TextChanged 里按偏移回写 ——
+    /// 那两处是格式串位的根源(设置一次格式后,粘贴/输入法/任意位置打字都会被刷)。
     /// </summary>
-    void ApplyToCaret(DependencyProperty prop, object value)
+    void ApplyFormat(DependencyProperty prop, object value)
     {
         var sel = ContentBox.Selection;
         if (sel == null) return;
         sel.ApplyPropertyValue(prop, value);
-        ApplyFormatToCaretRun(prop, value);
+        ApplyFormatToEmptyCaretRun(prop, value);
     }
 
     /// <summary>把格式直接写到「光标所在的空 Run」上,空白便签/空段落均命中。</summary>
-    void ApplyFormatToCaretRun(DependencyProperty prop, object value)
+    void ApplyFormatToEmptyCaretRun(DependencyProperty prop, object value)
     {
         var caret = ContentBox.CaretPosition;
         if (caret == null) return;
@@ -1902,16 +1756,6 @@ public partial class StickyNoteWindow : Window
         {
             try { run.SetValue(prop, value); } catch { }
         }
-    }
-
-    /// <summary>把已记录的待输入格式应用到一段文本范围(新输入的文字)。</summary>
-    void ApplyPendingToRange(TextRange range)
-    {
-        if (_pendingWeight is FontWeight w) range.ApplyPropertyValue(TextElement.FontWeightProperty, w);
-        if (_pendingStyle is FontStyle st) range.ApplyPropertyValue(TextElement.FontStyleProperty, st);
-        if (_pendingUnderline is bool u) range.ApplyPropertyValue(Inline.TextDecorationsProperty, u ? TextDecorations.Underline : null);
-        if (_pendingSize is double sz) range.ApplyPropertyValue(TextElement.FontSizeProperty, sz);
-        if (_pendingColor is SolidColorBrush c) range.ApplyPropertyValue(TextElement.ForegroundProperty, c);
     }
 
     /// <summary>
@@ -1931,38 +1775,32 @@ public partial class StickyNoteWindow : Window
     static bool IsItalic(object? v) => v is FontStyle fs && fs == FontStyles.Italic;
     static bool IsUnderlined(object? v) => v is TextDecorationCollection td && td.Count > 0;
 
+    /// <summary>
+    /// 工具条状态反显 — 纯读取,绝不写格式:
+    /// 选区/光标处的实际格式(空选区时 GetPropertyValue 返回 WPF 打字格式,
+    /// 即「接下来输入的样子」)驱动 B/I/U 高亮、字号下拉与「A」图标颜色。
+    /// </summary>
     void UpdateFormatButtons()
     {
         var sel = ContentBox.Selection;
         bool hasSelection = sel != null && !sel.IsEmpty;
 
-        // Bold
-        object? boldCurrent;
-        if (hasSelection) boldCurrent = sel!.GetPropertyValue(Inline.FontWeightProperty);
-        else if (_pendingWeight is FontWeight pw) boldCurrent = pw;
-        else boldCurrent = EffectiveValue(Inline.FontWeightProperty, ContentBox.FontWeight);
+        // Bold / Italic / Underline:有选区显选区,无选区显光标处(含打字格式)。
+        object? boldCurrent = hasSelection ? sel!.GetPropertyValue(Inline.FontWeightProperty)
+            : EffectiveValue(Inline.FontWeightProperty, ContentBox.FontWeight);
         BoldBtn.Background = IsBold(boldCurrent) ? FormatActiveBrush : Brushes.Transparent;
 
-        // Italic
-        object? italicCurrent;
-        if (hasSelection) italicCurrent = sel!.GetPropertyValue(Inline.FontStyleProperty);
-        else if (_pendingStyle is FontStyle ps) italicCurrent = ps;
-        else italicCurrent = EffectiveValue(Inline.FontStyleProperty, ContentBox.FontStyle);
+        object? italicCurrent = hasSelection ? sel!.GetPropertyValue(Inline.FontStyleProperty)
+            : EffectiveValue(Inline.FontStyleProperty, ContentBox.FontStyle);
         ItalicBtn.Background = IsItalic(italicCurrent) ? FormatActiveBrush : Brushes.Transparent;
 
-        // Underline
-        object? underlineCurrent;
-        if (hasSelection) underlineCurrent = sel!.GetPropertyValue(Inline.TextDecorationsProperty);
-        else if (_pendingUnderline is bool pu) underlineCurrent = pu ? TextDecorations.Underline : null;
-        else underlineCurrent = EffectiveValue(Inline.TextDecorationsProperty, null);
+        object? underlineCurrent = hasSelection ? sel!.GetPropertyValue(Inline.TextDecorationsProperty)
+            : EffectiveValue(Inline.TextDecorationsProperty, null);
         UnderlineBtn.Background = IsUnderlined(underlineCurrent) ? FormatActiveBrush : Brushes.Transparent;
 
-        // 字号下拉:有选区时反显选区字号;无选区时反显光标处字号(含待输入字号),
-        // 保证下拉显示与正文/待输入格式实时同步(启动后第一次移动光标也会同步)。
-        object? sizeCurrent;
-        if (hasSelection) sizeCurrent = sel!.GetPropertyValue(TextElement.FontSizeProperty);
-        else if (_pendingSize is double psz) sizeCurrent = psz;
-        else sizeCurrent = EffectiveValue(TextElement.FontSizeProperty, ContentBox.FontSize);
+        // 字号下拉:有选区反显选区字号;无选区反显光标处字号(含打字格式)。
+        object? sizeCurrent = hasSelection ? sel!.GetPropertyValue(TextElement.FontSizeProperty)
+            : EffectiveValue(TextElement.FontSizeProperty, ContentBox.FontSize);
         if (sizeCurrent is double fontSize)
         {
             foreach (ComboBoxItem item in FontSizeCombo.Items)
@@ -1978,11 +1816,9 @@ public partial class StickyNoteWindow : Window
             }
         }
 
-        // 文字颜色图标:有选区显示选区色,无选区显示待输入色/光标色。
-        object? fg;
-        if (hasSelection) fg = sel!.GetPropertyValue(Inline.ForegroundProperty);
-        else if (_pendingColor is SolidColorBrush pc) fg = pc;
-        else fg = EffectiveValue(Inline.ForegroundProperty, ContentBox.Foreground);
+        // 文字颜色图标:有选区显示选区色,无选区显示光标处色(含打字格式)。
+        object? fg = hasSelection ? sel!.GetPropertyValue(Inline.ForegroundProperty)
+            : EffectiveValue(Inline.ForegroundProperty, ContentBox.Foreground);
         if (fg is SolidColorBrush scb)
             FontColorBtn.Foreground = scb;
     }
