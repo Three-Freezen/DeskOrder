@@ -279,6 +279,9 @@ public partial class StickyNoteWindow : Window
             switch (inline)
             {
                 case Run run:
+                    // 跳过空 run(格式锚点):锚点只在编辑期有意义,保存后会
+                    // 让旧颜色在重载时复活(「颜色跳到别的颜色」来源之一)。
+                    if (run.Text.Length == 0) break;
                     runs.Add(new NoteRunData
                     {
                         Text = run.Text,
@@ -328,6 +331,7 @@ public partial class StickyNoteWindow : Window
             var para = new Paragraph();
             foreach (var rd in pd.Runs)
             {
+                if (string.IsNullOrEmpty(rd.Text)) continue; // 防御:旧文件里的空锚点 run 不复活
                 var run = new Run(rd.Text);
                 if (rd.Bold) run.FontWeight = FontWeights.Bold;
                 if (rd.Italic) run.FontStyle = FontStyles.Italic;
@@ -1700,7 +1704,7 @@ public partial class StickyNoteWindow : Window
     void ContentBox_TextChanged(object s, TextChangedEventArgs e)
     {
         if (_initializing) return;
-        if (_pendingFormat != null && _pendingCaret != null)
+        if (_pendingFormat != null)
         {
             foreach (var change in e.Changes)
             {
@@ -1713,15 +1717,24 @@ public partial class StickyNoteWindow : Window
                     if (start == null || wideEnd == null) continue;
                     var text = new TextRange(start, wideEnd).Text;
                     if (string.IsNullOrEmpty(text)) continue;
+                    // 纯段符变更(回车)不消费 pending:回车后 WPF 会把拆分点前
+                    // 文字的格式写成新光标的打字格式,若此时把格式写到新段落
+                    // 反而会被打字格式压过;保持 pending,由回车后输入的第一个
+                    // 字符照常精确应用。
+                    if (text.All(c => c is '\r' or '\n')) continue;
                     _pendingInsertText = text;
-                    var token = _pendingToken;
-                    Dispatcher.BeginInvoke(new Action(() =>
-                    {
-                        if (token == _pendingToken) ApplyPendingDeferred();
-                    }), DispatcherPriority.Input);
-                    break; // 只调度一次
                 }
                 catch { }
+            }
+            if (_pendingInsertText != null && !_pendingDeferredQueued)
+            {
+                _pendingDeferredQueued = true;
+                var token = _pendingToken;
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    _pendingDeferredQueued = false;
+                    if (token == _pendingToken) ApplyPendingDeferred();
+                }), DispatcherPriority.Input);
             }
         }
         ScheduleNoteFileAutoSave();
@@ -1734,24 +1747,17 @@ public partial class StickyNoteWindow : Window
     /// </summary>
     void ApplyPendingDeferred()
     {
-        if (_pendingFormat is not { } pf || _pendingCaret == null || _pendingInsertText is not { } target) return;
-        var caret = _pendingCaret;
+        if (_pendingFormat is not { } pf || _pendingInsertText is not { } target) return;
         var text = _pendingInsertText;
+        var k = _pendingCaretOffset;
         ClearPendingFormat();
+        DzTrace.Log($"[Fmt] deferred apply: text='{EscapeForLog(text)}' k={k}");
         try
         {
-            // 回车产生的段符:格式写到新段落(段落级默认),绝不碰旧段落 ——
-            // 否则会把前一段无局部字号的文字整体刷掉(串位)。
-            if (text.Contains('\r') || text.Contains('\n'))
+            if (k < 0) return;
+            for (int delta = 0; delta <= 3; delta++)
             {
-                var after = caret.GetPositionAtOffset(text.Length, LogicalDirection.Forward);
-                if (after?.Paragraph is Paragraph para) ApplyPendingToParagraph(pf, para);
-                return;
-            }
-            // 在记录位置 ±4 符号内找与插入文本精确相等的紧区间(优先最近的位置)。
-            for (int back = 0; back <= 4; back++)
-            {
-                var s = back == 0 ? caret : caret.GetPositionAtOffset(-back, LogicalDirection.Backward);
+                var s = ContentBox.Document.ContentStart.GetPositionAtOffset(k + delta, LogicalDirection.Forward);
                 if (s == null) break;
                 var e2 = s.GetPositionAtOffset(text.Length, LogicalDirection.Forward);
                 if (e2 == null) continue;
@@ -1759,12 +1765,13 @@ public partial class StickyNoteWindow : Window
                 if (range.Text == text)
                 {
                     ApplyPendingToRange(pf, range);
+                    DzTrace.Log($"[Fmt] deferred applied at delta=+{delta}");
                     return;
                 }
             }
-            for (int fwd = 1; fwd <= 4; fwd++)
+            for (int delta = 1; delta <= 2; delta++)
             {
-                var s = caret.GetPositionAtOffset(fwd, LogicalDirection.Forward);
+                var s = ContentBox.Document.ContentStart.GetPositionAtOffset(k - delta, LogicalDirection.Forward);
                 if (s == null) break;
                 var e2 = s.GetPositionAtOffset(text.Length, LogicalDirection.Forward);
                 if (e2 == null) continue;
@@ -1772,22 +1779,16 @@ public partial class StickyNoteWindow : Window
                 if (range.Text == text)
                 {
                     ApplyPendingToRange(pf, range);
+                    DzTrace.Log($"[Fmt] deferred applied at delta=-{delta}");
                     return;
                 }
             }
+            DzTrace.Log("[Fmt] deferred no-match in window, dropped");
         }
         catch { }
     }
 
-    /// <summary>回车后把待输入格式写在新段落的段落级默认上,后续输入自动继承。</summary>
-    void ApplyPendingToParagraph(PendingFormat pf, Paragraph para)
-    {
-        if (pf.Size is double sz) { try { para.SetValue(TextElement.FontSizeProperty, sz); } catch { } }
-        if (pf.Weight is FontWeight w) { try { para.SetValue(Inline.FontWeightProperty, w); } catch { } }
-        if (pf.Style is FontStyle st) { try { para.SetValue(Inline.FontStyleProperty, st); } catch { } }
-        if (pf.Underline is bool u) { try { para.SetValue(Inline.TextDecorationsProperty, u ? TextDecorations.Underline : null); } catch { } }
-        if (pf.Color is SolidColorBrush c) { try { para.SetValue(TextElement.ForegroundProperty, c); } catch { } }
-    }
+    static string EscapeForLog(string s) => s.Replace("\r", "\\r").Replace("\n", "\\n");
 
     void ApplyPendingToRange(PendingFormat pf, TextRange range)
     {
@@ -1844,18 +1845,20 @@ public partial class StickyNoteWindow : Window
 
     // ── 光标待输入格式(Word 式,一次一位置) ──
     // 工具条点击(无选区)时记录;TextChanged 时精确应用到「本次插入的范围」
-    // (必须紧邻记录的光标位置)后立即清空;方向键/点击定位也会清空 —— 格式只
-    // 作用于设置处光标的后续输入。与旧版 pending 的关键区别:旧版跨光标移动
-    // 永久存活 + 对任意 TextChange 无条件回写,这就是格式串位的根源。
+    // 后立即清空;方向键/点击定位也会清空 —— 格式只作用于设置处光标的后续
+    // 输入。与旧版 pending 的关键区别:旧版跨光标移动永久存活 + 对任意
+    // TextChange 无条件回写,这就是格式串位的根源。
     sealed record PendingFormat(double? Size, FontWeight? Weight, FontStyle? Style, bool? Underline, SolidColorBrush? Color);
 
     private PendingFormat? _pendingFormat;
-    private TextPointer? _pendingCaret;
-    // 延迟应用:TextChanged 时暂存插入的文本,Input 优先级回调时在记录位置附近
-    // 精确匹配该文本并应用格式(插入过程中算出的区间指针会随编辑器后续重组失效)。
+    // 设置格式时快照的光标整数偏移(TextPointer 快照会随文档重组悬空,整数不会)。
+    private int _pendingCaretOffset = -1;
+    // 延迟应用:TextChanged 时暂存插入的文本,Input 优先级回调时在记录偏移附近
+    // 精确匹配该文本并应用格式。
     private string? _pendingInsertText;
     // 每次设置/清空待输入格式自增;延迟回调校验令牌,过期回调直接丢弃。
     private int _pendingToken;
+    private bool _pendingDeferredQueued;
 
     void SetPendingFormat(DependencyProperty prop, object value)
     {
@@ -1870,18 +1873,50 @@ public partial class StickyNoteWindow : Window
             _pendingFormat = _pendingFormat with { Underline = value != null };
         else if (prop == TextElement.ForegroundProperty)
             _pendingFormat = _pendingFormat with { Color = value as SolidColorBrush };
-        // 用 Backward 引力记录位置:文本在此位置插入时指针停在插入文本之前,
-        // [指针, 当前光标] 恰好就是本次插入的区间(延迟应用时用它定位)。
-        _pendingCaret = ContentBox.CaretPosition?.GetInsertionPosition(LogicalDirection.Backward);
+        try
+        {
+            _pendingCaretOffset = ContentBox.Document.ContentStart
+                .GetOffsetToPosition(ContentBox.CaretPosition);
+        }
+        catch { _pendingCaretOffset = -1; }
         _pendingToken++;
     }
 
+    /// <summary>
+    /// 清待输入格式并删除相邻的空锚点 Run —— 锚点只在 pending 存活期内有效,
+    /// 导航/定位后残留的锚点会把旧颜色带进以后输入的文字(「颜色莫名其妙
+    /// 跳到别的颜色」的根源之一)。
+    /// </summary>
     void ClearPendingFormat()
     {
         _pendingFormat = null;
-        _pendingCaret = null;
+        _pendingCaretOffset = -1;
         _pendingInsertText = null;
         _pendingToken++;
+        RemoveAdjacentEmptyAnchorRuns();
+    }
+
+    void RemoveAdjacentEmptyAnchorRuns()
+    {
+        try
+        {
+            var caret = ContentBox.CaretPosition;
+            if (caret == null) return;
+            if (caret.Parent is Run inRun && inRun.Text.Length == 0 && inRun.Parent is Paragraph inPara)
+            {
+                inPara.Inlines.Remove(inRun);
+                return;
+            }
+            var fwd = caret.GetInsertionPosition(LogicalDirection.Forward);
+            if (fwd?.Parent is Run fRun && fRun.Text.Length == 0 && fRun.Parent is Paragraph fPara
+                && ReferenceEquals(fPara.Inlines.LastInline, fRun))
+                fPara.Inlines.Remove(fRun);
+            var bwd = caret.GetInsertionPosition(LogicalDirection.Backward);
+            if (bwd?.Parent is Run bRun && bRun.Text.Length == 0 && bRun.Parent is Paragraph bPara
+                && ReferenceEquals(bPara.Inlines.LastInline, bRun))
+                bPara.Inlines.Remove(bRun);
+        }
+        catch { }
     }
 
     object? EffectiveValue(DependencyProperty prop, object? inheritedFallback)
@@ -1911,18 +1946,18 @@ public partial class StickyNoteWindow : Window
             return;
         }
         SetPendingFormat(prop, value);
-        EnsureCaretAnchorRun(prop, value);
+        EnsureCaretAnchorRun();
     }
 
     /// <summary>
-    /// 空 Run 锚点兜底(保证后续输入确定性地继承新格式):
-    /// ① 光标已在空 Run 内 → 直接写格式;
-    /// ② 光标前方紧邻空 Run(上次设置遗留)→ 写它,不重复拆分(避免堆积);
-    /// ③ 光标在「段落末尾 run 的行尾」→ 段末追加带格式空 Run。
+    /// 空 Run 锚点(保证后续输入确定性地继承新格式):
+    /// ① 光标在空 Run 内 ② 前方紧邻空 Run(上次遗留)③ 段落末尾 run 的行尾追加。
     /// 其它位置(run 开头/行中)不建锚点:实测 WPF 归一化会把锚点合并回去、
     /// 打字并入相邻 run,锚点无效;这些位置由 ContentBox_TextChanged 精确兜底。
+    /// 锚点样式 = 「光标前方文字的当前格式」+ 全部待输入属性的合并快照:
+    /// 复用旧锚点时先整体重置,上一次设置的颜色等属性绝不残留。
     /// </summary>
-    void EnsureCaretAnchorRun(DependencyProperty prop, object value)
+    void EnsureCaretAnchorRun()
     {
         var caret = ContentBox.CaretPosition;
         if (caret == null) return;
@@ -1932,7 +1967,7 @@ public partial class StickyNoteWindow : Window
         while (el != null && el is not Run) el = el.Parent as TextElement;
         if (el is Run run && string.IsNullOrEmpty(run.Text))
         {
-            try { run.SetValue(prop, value); } catch { }
+            StyleAnchorRun(run);
             return;
         }
 
@@ -1945,7 +1980,8 @@ public partial class StickyNoteWindow : Window
             if (fwd != null && fe is Run fwdRun && string.IsNullOrEmpty(fwdRun.Text)
                 && fwdRun.ContentStart.CompareTo(fwd) == 0)
             {
-                try { fwdRun.SetValue(prop, value); return; } catch { return; }
+                StyleAnchorRun(fwdRun);
+                return;
             }
         }
         catch { /* 保守:走段末追加兜底 */ }
@@ -1958,8 +1994,30 @@ public partial class StickyNoteWindow : Window
         catch { return; }
         if (offset != target.Text.Length || target.Text.Length == 0) return;
         var anchor = new Run("");
-        try { anchor.SetValue(prop, value); } catch { }
         para.Inlines.Add(anchor);
+        StyleAnchorRun(anchor);
+    }
+
+    /// <summary>
+    /// 锚点快照:对 5 个属性逐一写入「待输入值 ?? 光标前文字的有效值(无则框默认)」。
+    /// 这样锚点 = 当前打字位置的格式快照 + 本次设置,后续输入确定性地继承。
+    /// </summary>
+    void StyleAnchorRun(Run anchor)
+    {
+        var pf = _pendingFormat;
+        var basePos = ContentBox.CaretPosition?.GetInsertionPosition(LogicalDirection.Backward);
+        TextElement? el = basePos?.Parent as TextElement;
+        while (el != null && el is not Run) el = el.Parent as TextElement;
+        var src = el as Run; // 光标前方文字所在 run(无则用框默认)
+        void Set(DependencyProperty prop, object? pendingVal, object fallback)
+        {
+            try { anchor.SetValue(prop, pendingVal ?? (src != null ? src.GetValue(prop) : fallback)); } catch { }
+        }
+        Set(TextElement.FontSizeProperty, pf?.Size, ContentBox.FontSize);
+        Set(Inline.FontWeightProperty, pf?.Weight is FontWeight w ? w : null, ContentBox.FontWeight);
+        Set(Inline.FontStyleProperty, pf?.Style is FontStyle st ? st : null, ContentBox.FontStyle);
+        Set(Inline.TextDecorationsProperty, pf?.Underline is bool u ? (u ? TextDecorations.Underline : null) : null, null);
+        Set(TextElement.ForegroundProperty, pf?.Color, ContentBox.Foreground);
     }
 
     /// <summary>
