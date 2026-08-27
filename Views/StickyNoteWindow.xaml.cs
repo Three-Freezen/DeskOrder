@@ -1740,6 +1740,14 @@ public partial class StickyNoteWindow : Window
         ClearPendingFormat();
         try
         {
+            // 回车产生的段符:格式写到新段落(段落级默认),绝不碰旧段落 ——
+            // 否则会把前一段无局部字号的文字整体刷掉(串位)。
+            if (text.Contains('\r') || text.Contains('\n'))
+            {
+                var after = caret.GetPositionAtOffset(text.Length, LogicalDirection.Forward);
+                if (after?.Paragraph is Paragraph para) ApplyPendingToParagraph(pf, para);
+                return;
+            }
             // 在记录位置 ±4 符号内找与插入文本精确相等的紧区间(优先最近的位置)。
             for (int back = 0; back <= 4; back++)
             {
@@ -1769,6 +1777,16 @@ public partial class StickyNoteWindow : Window
             }
         }
         catch { }
+    }
+
+    /// <summary>回车后把待输入格式写在新段落的段落级默认上,后续输入自动继承。</summary>
+    void ApplyPendingToParagraph(PendingFormat pf, Paragraph para)
+    {
+        if (pf.Size is double sz) { try { para.SetValue(TextElement.FontSizeProperty, sz); } catch { } }
+        if (pf.Weight is FontWeight w) { try { para.SetValue(Inline.FontWeightProperty, w); } catch { } }
+        if (pf.Style is FontStyle st) { try { para.SetValue(Inline.FontStyleProperty, st); } catch { } }
+        if (pf.Underline is bool u) { try { para.SetValue(Inline.TextDecorationsProperty, u ? TextDecorations.Underline : null); } catch { } }
+        if (pf.Color is SolidColorBrush c) { try { para.SetValue(TextElement.ForegroundProperty, c); } catch { } }
     }
 
     void ApplyPendingToRange(PendingFormat pf, TextRange range)
@@ -1876,10 +1894,11 @@ public partial class StickyNoteWindow : Window
 
     /// <summary>
     /// Word 式格式应用 — 唯一写入入口:
-    /// ① 有选区 → 只格式化选区(已验证安全);
-    /// ② 无选区 → 记录「光标待输入格式」并尝试建空 Run 锚点。WPF 打字格式只在
-    ///    run 边界/空 run 处安全写入;行中写入会把整个 run 刷成新格式(实测),
-    ///    行中一律跳过,交给 ContentBox_TextChanged 的精确区间应用。
+    /// ① 有选区 → 只格式化选区;
+    /// ② 无选区 → 记录「光标待输入格式」并尝试建空 Run 锚点。空选区一律不写
+    ///    WPF 打字格式 —— 实测两 run 边界处(前 run 尾/后 run 头)的
+    ///    ApplyPropertyValue 会把前后 run 整体刷成新格式,这正是「设置新属性时
+    ///    前面内容一起被改」的根源;无选区只走「锚点 + TextChanged 精确应用」。
     /// </summary>
     void ApplyFormat(DependencyProperty prop, object value)
     {
@@ -1891,24 +1910,8 @@ public partial class StickyNoteWindow : Window
             ClearPendingFormat();
             return;
         }
-        if (!IsCaretMidRun())
-            sel.ApplyPropertyValue(prop, value);   // 安全位置才写 WPF 打字格式
         SetPendingFormat(prop, value);
         EnsureCaretAnchorRun(prop, value);
-    }
-
-    /// <summary>光标是否在非空 run 的「中间」(0 &lt; offset &lt; len)。</summary>
-    bool IsCaretMidRun()
-    {
-        var caret = ContentBox.CaretPosition;
-        if (caret == null) return false;
-        TextElement? el = caret.Parent as TextElement;
-        while (el != null && el is not Run) el = el.Parent as TextElement;
-        if (el is not Run run || string.IsNullOrEmpty(run.Text)) return false;
-        int offset;
-        try { offset = run.ContentStart.GetOffsetToPosition(caret); }
-        catch { return false; }
-        return offset > 0 && offset < run.Text.Length;
     }
 
     /// <summary>
