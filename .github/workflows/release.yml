@@ -21,21 +21,26 @@ jobs:
       - name: Publish (win-x64, self-contained)
         run: dotnet publish DesktopZones.csproj -c Release -r win-x64 --self-contained -o publish
 
-      - name: Pack (Velopack)
+      - name: Portable zip
         shell: pwsh
         run: |
-          dotnet tool install -g vpk
-          $env:VER = ("${{ github.ref_name }}" -replace '^v','')
-          vpk pack -u DeskOrder -v $env:VER -p publish -o releases
+          New-Item -ItemType Directory -Force -Path releases | Out-Null
+          Compress-Archive -Path "publish/*" -DestinationPath "releases/DeskOrder-win-Portable.zip" -Force
 
+      - name: Inno Setup compile
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          $env:VER = ("${{ github.ref_name }}" -replace '^v','')
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=$env:VER tools/DeskOrder.iss
+
+      # 文件名固定不带版本号：releases/latest/download/DeskOrder-win-Setup.exe 永远最新
       - name: Upload to GitHub Release
         shell: pwsh
-        # vpk 1.2.0: GitHub 上传是 `upload github` 子命令(publish 是官方托管服务)。
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: >
-          vpk upload github
-          --repoUrl "https://github.com/Three-Freezen/DeskOrder"
-          --token "${{ secrets.GITHUB_TOKEN }}"
-          --releaseName "${{ github.ref_name }}"
-          --tag "${{ github.ref_name }}"
-          --publish True
-          --merge True
+          gh release create "${{ github.ref_name }}"
+          --title "${{ github.ref_name }}" --generate-notes
+          "releases/DeskOrder-win-Setup.exe"
+          "releases/DeskOrder-win-Portable.zip"

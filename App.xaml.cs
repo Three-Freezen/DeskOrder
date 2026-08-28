@@ -64,11 +64,6 @@ public partial class App : System.Windows.Application
 
     private void Application_Startup(object sender, StartupEventArgs e)
     {
-        // ponytail 2026-08-28: Velopack 启动钩子必须最先跑——安装/卸载/更新场景下
-        // 进程是以 hook 参数被拉起的，这里处理完参数会自行退出；其余场景 no-op。
-        // 未打包运行（dotnet run）时 Velopack 定位器失败，同样是 no-op。
-        Velopack.VelopackApp.Build().Run();
-
 #if DEBUG
         // ponytail 2026-08-26: fresh diagnostics log per run (ghost-ring regression trace).
         Helpers.DzTrace.Reset();

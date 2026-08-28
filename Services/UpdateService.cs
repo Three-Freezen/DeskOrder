@@ -1,11 +1,13 @@
 using System;
+using System.Diagnostics;
 using System.IO;
+using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Velopack;
-using Velopack.Sources;
+using DesktopZones.Helpers;
 
 namespace DesktopZones.Services;
 
@@ -26,34 +28,42 @@ public enum UpdateState
 public sealed record UpdateCheckResult(string Version, string? ReleaseUrl);
 
 /// <summary>
-/// 更新渠道抽象。GitHub 渠道由 Velopack 实现；微软商店渠道（打包 MSIX 后运行）
-/// 必须走系统 StoreContext API，未来在此接口下补一个实现即可，UI 层零改动。
+/// 更新渠道抽象。当前实现：GitHub Releases + Inno Setup 安装包。
+/// 微软商店渠道（打包 MSIX 后运行）必须走系统 StoreContext API，
+/// 未来在此接口下补一个实现即可，UI 层零改动。
 /// </summary>
 public interface IUpdateChannel
 {
     /// <summary>检查新版本；返回 null 表示已是最新。网络失败抛异常。</summary>
     Task<UpdateCheckResult?> CheckAsync(CancellationToken ct);
 
-    /// <summary>下载并暂存已检查到的版本（进度 0-100）。</summary>
+    /// <summary>下载安装包到临时目录（进度 0-100）。</summary>
     Task DownloadAsync(IProgress<int> progress, CancellationToken ct);
 
-    /// <summary>应用已暂存的更新并重启本进程（成功则不返回）。需先 Check + Download。</summary>
+    /// <summary>启动安装器静默升级到原路径并退出本进程（成功则不返回）。需先 Check + Download。</summary>
     void ApplyAndRestart();
 }
 
 public sealed class UpdateService
 {
     public const string DefaultRepoUrl = "https://github.com/Three-Freezen/DeskOrder";
-    private const string ReleasesUrl = DefaultRepoUrl + "/releases/latest";
+    internal const string ReleasesApiUrl = "https://api.github.com/repos/Three-Freezen/DeskOrder/releases/latest";
+    internal const string SetupAssetName = "DeskOrder-win-Setup.exe";
+    internal static readonly string TempSetupPath = Path.Combine(Path.GetTempPath(), SetupAssetName);
 
-    /// <summary>运行时覆盖更新源（--update-source=本地目录|URL）。
-    /// 本地目录用于端到端测试；URL 用于镜像加速，均为 Velopack 支持的源。</summary>
+    /// <summary>运行时覆盖更新源（--update-source=本地目录）：目录里含 DeskOrder-win-Setup.exe
+    /// 即视为有更新（版本取安装包内嵌 ProductVersion），供本地端到端测试，不触网。</summary>
     public static string? SourceOverride { get; set; }
 
     public static bool IsRunningPackaged { get; } = DetectPackaged();
 
-    /// <summary>本环境是否支持应用内更新（懒建渠道判定）：非商店包 && Velopack 已安装（dotnet run 开发目录运行时为否）。</summary>
-    public bool InAppUpdateSupported => GetChannel() != null;
+    /// <summary>本进程是否由安装器安装而来：Inno 安装必然在 {app} 落一个 unins000.exe。
+    /// 开发目录运行（dotnet run / bin\Debug）没有 → 不支持应用内更新。</summary>
+    public static bool IsInstalledBuild =>
+        File.Exists(Path.Combine(AppContext.BaseDirectory, "unins000.exe"));
+
+    /// <summary>本环境是否支持应用内更新。</summary>
+    public bool InAppUpdateSupported => !IsRunningPackaged && IsInstalledBuild;
 
     /// <summary>状态变化通知。已在 UI 线程上触发，订阅方无需自行 marshal。</summary>
     public event Action? StateChanged;
@@ -62,11 +72,10 @@ public sealed class UpdateService
     public string? NewVersion { get; private set; }
     public string? ErrorText { get; private set; }
     public int ProgressPercent { get; private set; }
-    public string ReleaseUrl => ReleasesUrl;
+    public string ReleaseUrl => DefaultRepoUrl + "/releases/latest";
 
     private readonly ConfigService _configService;
     private IUpdateChannel? _channel;
-    private bool _veloUnavailable;
     private bool _busy;
 
     public UpdateService(ConfigService configService) => _configService = configService;
@@ -123,7 +132,8 @@ public sealed class UpdateService
         }
     }
 
-    /// <summary>应用已暂存的更新并重启进程（Velopack 拉起安装器完成换装）。失败抛异常。</summary>
+    /// <summary>启动已下载的安装器静默升级到原路径（/SILENT /DIR=当前目录），
+    /// 随后退出本进程让 Inno 接管；装完由安装器自动重启应用。失败抛异常。</summary>
     public void ApplyAndRestart() => GetChannel()?.ApplyAndRestart();
 
     /// <summary>启动后台检查：环境不支持 / 开关关闭 / 24 小时内查过 → 直接返回。
@@ -132,7 +142,8 @@ public sealed class UpdateService
     {
         try
         {
-            if (!InAppUpdateSupported) return;            var cfg = _configService.Load();
+            if (!InAppUpdateSupported) return;
+            var cfg = _configService.Load();
             if (!cfg.AutoCheckUpdate) return;
             if (cfg.LastUpdateCheckUtc != default &&
                 DateTime.UtcNow - cfg.LastUpdateCheckUtc < TimeSpan.FromHours(24)) return;
@@ -153,34 +164,10 @@ public sealed class UpdateService
     private IUpdateChannel? GetChannel()
     {
         if (_channel != null) return _channel;
-        if (_veloUnavailable) return null;
-        if (IsRunningPackaged) return null;   // 商店渠道占位：未来接 StoreContext 实现
-        try
-        {
-            // UpdateManager.IsInstalled 是实例属性：先建渠道再判定（开发目录运行=未安装）。
-            var channel = new VelopackChannel(CreateSource());
-            if (!channel.IsInstalled) { _veloUnavailable = true; return null; }
-            _channel = channel;
-            return _channel;
-        }
-        catch
-        {
-            _veloUnavailable = true;          // 定位器异常（极端环境）视同不支持
-            return null;
-        }
-    }
-
-    private static IUpdateSource CreateSource()
-    {
-        var o = SourceOverride;
-        if (!string.IsNullOrWhiteSpace(o))
-        {
-            if (Directory.Exists(o)) return new SimpleFileSource(new DirectoryInfo(o));
-            if (o.Contains("github.com", StringComparison.OrdinalIgnoreCase))
-                return new GithubSource(o, null, false);
-            return new SimpleWebSource(o);
-        }
-        return new GithubSource(DefaultRepoUrl, null, false);
+        if (IsRunningPackaged) return null;    // 商店渠道占位：未来接 StoreContext 实现
+        if (!IsInstalledBuild) return null;    // 开发目录运行（dotnet run / bin\Debug）
+        _channel = new GitHubSetupChannel();
+        return _channel;
     }
 
     /// <summary>记录检查时间（失败也记）：断网/仓库 404 时避免启动反复撞接口。</summary>
@@ -223,34 +210,94 @@ public sealed class UpdateService
     private static extern int GetCurrentPackageFamilyName(ref uint packageFamilyNameLength, StringBuilder? packageFamilyName);
 }
 
-/// <summary>GitHub Releases 渠道（Velopack）：匿名访问公开仓库，自动增量更新，校验内置。</summary>
-file sealed class VelopackChannel : IUpdateChannel
+/// <summary>
+/// GitHub Releases 渠道：匿名访问公开仓库的 latest release，比较 tag 与当前版本，
+/// 下载固定文件名的 DeskOrder-win-Setup.exe（每次发布覆盖同名资产，latest 永远最新），
+/// 升级时静默运行 Inno 安装器（/SILENT /DIR=原路径，自动重启应用）。
+/// </summary>
+file sealed class GitHubSetupChannel : IUpdateChannel
 {
-    private readonly Velopack.UpdateManager _mgr;
-    private UpdateInfo? _pending;
+    private static readonly HttpClient Http = CreateHttp();
+    private string? _downloadUrl;
+    private string? _pendingVersion;
 
-    public VelopackChannel(IUpdateSource source) => _mgr = new Velopack.UpdateManager(source);
-
-    /// <summary>Velopack 定位到安装信息即视为已安装（exe 旁有 Update.exe / 包元数据）。</summary>
-    public bool IsInstalled => _mgr.IsInstalled;
+    private static HttpClient CreateHttp()
+    {
+        var c = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+        // GitHub API 强制要求 User-Agent
+        c.DefaultRequestHeaders.UserAgent.ParseAdd("DeskOrder-UpdateCheck");
+        c.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+        return c;
+    }
 
     public async Task<UpdateCheckResult?> CheckAsync(CancellationToken ct)
     {
-        var info = await _mgr.CheckForUpdatesAsync();
-        if (info == null) return null;
-        _pending = info;
-        return new UpdateCheckResult(info.TargetFullRelease.Version.ToString(), null);
+        // 本地测试源：--update-source=目录 直接把目录里的安装包当新版本，不触网。
+        var o = UpdateService.SourceOverride;
+        if (!string.IsNullOrWhiteSpace(o) && Directory.Exists(o))
+        {
+            var localSetup = Path.Combine(o, UpdateService.SetupAssetName);
+            if (File.Exists(localSetup))
+                return IsNewer(FileVersionInfo.GetVersionInfo(localSetup).ProductVersion)
+                    ? new UpdateCheckResult(_pendingVersion!, null) : null;
+        }
+
+        using var resp = await Http.GetAsync(UpdateService.ReleasesApiUrl, ct);
+        resp.EnsureSuccessStatusCode();
+        using var doc = await JsonDocument.ParseAsync(await resp.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+        var tag = doc.RootElement.GetProperty("tag_name").GetString() ?? "";
+        if (!IsNewer(tag)) return null;
+
+        foreach (var asset in doc.RootElement.GetProperty("assets").EnumerateArray())
+        {
+            if (asset.GetProperty("name").GetString() != UpdateService.SetupAssetName) continue;
+            _downloadUrl = asset.GetProperty("browser_download_url").GetString();
+            return new UpdateCheckResult(_pendingVersion!, UpdateService.DefaultRepoUrl + "/releases/latest");
+        }
+        throw new InvalidOperationException($"Release {tag} 缺少安装包资产 {UpdateService.SetupAssetName}");
+    }
+
+    /// <summary>远端 tag（v 前缀可带）是否比当前程序集版本新。解析失败视为不更新（保守）。</summary>
+    private bool IsNewer(string? remoteTag)
+    {
+        if (!Version.TryParse(remoteTag?.TrimStart('v', 'V'), out var remote)) return false;
+        var cur = AppVersion.Current.Split('+')[0];
+        if (!Version.TryParse(cur, out var local)) return false;
+        _pendingVersion = remote.ToString();
+        return remote > local;
     }
 
     public async Task DownloadAsync(IProgress<int> progress, CancellationToken ct)
     {
-        var pending = _pending ?? throw new InvalidOperationException("No update checked yet");
-        await _mgr.DownloadUpdatesAsync(pending, p => progress.Report(p), ct);
+        if (_downloadUrl == null) throw new InvalidOperationException("No update checked yet");
+        using var resp = await Http.GetAsync(_downloadUrl, HttpCompletionOption.ResponseHeadersRead, ct);
+        resp.EnsureSuccessStatusCode();
+        var total = resp.Content.Headers.ContentLength ?? -1;
+        await using var src = await resp.Content.ReadAsStreamAsync(ct);
+        await using var dst = new FileStream(UpdateService.TempSetupPath, FileMode.Create, FileAccess.Write, FileShare.None);
+        var buf = new byte[81920];
+        long read = 0;
+        int n;
+        while ((n = await src.ReadAsync(buf, ct)) > 0)
+        {
+            await dst.WriteAsync(buf.AsMemory(0, n), ct);
+            read += n;
+            if (total > 0) progress.Report((int)(read * 100 / total));
+        }
+        progress.Report(100);
     }
 
     public void ApplyAndRestart()
     {
-        var pending = _pending ?? throw new InvalidOperationException("No update downloaded yet");
-        _mgr.ApplyUpdatesAndRestart(pending.TargetFullRelease);
+        if (!File.Exists(UpdateService.TempSetupPath))
+            throw new InvalidOperationException("No installer downloaded yet");
+        // /SILENT：无向导仅进度；/DIR= 原安装路径；Inno CloseApplications+AppMutex
+        // 会等本进程退出后接管；[Run] 的静默项装完自动重启应用。
+        Process.Start(new ProcessStartInfo(UpdateService.TempSetupPath)
+        {
+            Arguments = $"/SILENT /DIR=\"{AppContext.BaseDirectory.TrimEnd('\\')}\"",
+            UseShellExecute = true,
+        });
+        System.Windows.Application.Current.Shutdown();
     }
 }

@@ -45,7 +45,10 @@
     <EmbeddedResource Remove="Resources\Icons\RebuildMultiResIco\**\*" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Velopack" Version="1.2.0" />
+    <!-- About 页大图标：XAML 的 /Resources/... pack URI 只认内嵌 Resource 构建
+         动作，之前该文件仅有 None(CopyToOutputDirectory)，运行时找不到资源，
+         Image 一直空白。保留 None 复制（托盘/文件路径加载方仍要用）。 -->
+    <Resource Include="Resources\Icons\icon-256.png" />
   </ItemGroup>
 
 </Project>

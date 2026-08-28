@@ -1,14 +1,14 @@
-﻿# DeskOrder 打包脚本：dotnet publish → vpk pack 产出 Velopack 安装包 + 更新包。
-# 产物在仓库根 releases\ 下：Setup.exe（分发用）+ *.nupkg（增量更新用，全部要传上 Release）。
-#
-# 首次使用先装 CLI（一次性）: dotnet tool install -g vpk
+﻿# DeskOrder 打包脚本：dotnet publish → 便携 zip → Inno Setup 编译安装包。
+# 产物 releases\ 下：
+#   DeskOrder-win-Setup.exe   —— 文件名固定不带版本号，配合 GitHub
+#                                releases/latest/download/ 链接永远拿到最新版
+#   DeskOrder-win-Portable.zip —— 便携版
+# 依赖: Inno Setup 6 (ISCC.exe)；Push 需要 gh CLI 已登录（gh auth login）。
 #
 # 用法:
 #   ./tools/pack.ps1                 # 用 csproj <Version> 打包到本地
-#   ./tools/pack.ps1 -Version 0.9.1  # 覆盖版本号
-#   ./tools/pack.ps1 -Push           # 打包并发布 GitHub Release（需 GITHUB_TOKEN 环境变量）
-#
-# 注意: Push 需要 repo 权限的 GITHUB_TOKEN 环境变量。
+#   ./tools/pack.ps1 -Version 0.9.2  # 覆盖版本号
+#   ./tools/pack.ps1 -Push           # 打包并发布 GitHub Release（gh 已登录）
 param(
     [string]$Version = "",
     [switch]$Push
@@ -28,22 +28,25 @@ Write-Host "==> dotnet publish (win-x64, self-contained)"
 dotnet publish "$root\DesktopZones.csproj" -c Release -r win-x64 --self-contained -o "$root\publish"
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
-Write-Host "==> vpk pack"
-# dotnet tool 刚装完时当前会话 PATH 可能还没带上 ~/.dotnet/tools，这里兜底解析
-if (-not (Get-Command vpk -ErrorAction SilentlyContinue)) {
-    $vpkLocal = Join-Path $env:USERPROFILE ".dotnet\tools\vpk.exe"
-    if (Test-Path $vpkLocal) { Set-Alias vpk $vpkLocal }
-    else { throw "未找到 vpk，请先执行: dotnet tool install -g vpk" }
-}
-vpk pack -u DeskOrder -v $Version -p "$root\publish" -o "$root\releases"
+Write-Host "==> 便携版 zip"
+New-Item -ItemType Directory -Force -Path "$root\releases" | Out-Null
+Compress-Archive -Path "$root\publish\*" -DestinationPath "$root\releases\DeskOrder-win-Portable.zip" -Force
+
+Write-Host "==> Inno Setup 编译安装包"
+$iscc = @("C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+          "C:\Program Files\Inno Setup 6\ISCC.exe",
+          "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe") |
+        Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $iscc) { throw "未找到 ISCC.exe，请先安装 Inno Setup 6: winget install JRSoftware.InnoSetup" }
+& $iscc /DAppVersion=$Version "$root\tools\DeskOrder.iss"
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
 if ($Push) {
-    if (-not $env:GITHUB_TOKEN) { throw "Push 需要 GITHUB_TOKEN 环境变量（repo 权限的 PAT）" }
-    Write-Host "==> vpk upload github"
-    # vpk 1.2.0 中 GitHub 上传是 `upload github` 子命令(publish 是官方托管服务)。
-    vpk upload github --repoUrl "https://github.com/Three-Freezen/DeskOrder" `
-        --token $env:GITHUB_TOKEN --releaseName "v$Version" --tag "v$Version" --publish True --merge True
+    Write-Host "==> 发布 GitHub Release"
+    # tag 需已推送（git tag v$Version && git push origin v$Version）
+    gh release create "v$Version" --title "v$Version" --generate-notes `
+        "$root\releases\DeskOrder-win-Setup.exe" `
+        "$root\releases\DeskOrder-win-Portable.zip"
     if ($LASTEXITCODE -ne 0) { exit 1 }
 }
 
