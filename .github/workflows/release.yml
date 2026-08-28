@@ -28,12 +28,14 @@ jobs:
           $env:VER = ("${{ github.ref_name }}" -replace '^v','')
           vpk pack -u DeskOrder -v $env:VER -p publish -o releases
 
-      - name: Publish to GitHub Release
+      - name: Upload to GitHub Release
         shell: pwsh
+        # vpk 1.2.0: GitHub 上传是 `upload github` 子命令(publish 是官方托管服务)。
         run: >
-          vpk publish github
+          vpk upload github
           --repoUrl "https://github.com/Three-Freezen/DeskOrder"
           --token "${{ secrets.GITHUB_TOKEN }}"
           --releaseName "${{ github.ref_name }}"
           --tag "${{ github.ref_name }}"
-          --merge
+          --publish True
+          --merge True

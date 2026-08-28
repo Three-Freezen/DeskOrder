@@ -40,10 +40,10 @@ if ($LASTEXITCODE -ne 0) { exit 1 }
 
 if ($Push) {
     if (-not $env:GITHUB_TOKEN) { throw "Push 需要 GITHUB_TOKEN 环境变量（repo 权限的 PAT）" }
-    Write-Host "==> vpk publish github"
-    # 参数名以 `vpk publish github --help` 为准；--merge 表示追加资产到已有 Release。
-    vpk publish github --repoUrl "https://github.com/Three-Freezen/DeskOrder" `
-        --token $env:GITHUB_TOKEN --releaseName "v$Version" --tag "v$Version" --merge
+    Write-Host "==> vpk upload github"
+    # vpk 1.2.0 中 GitHub 上传是 `upload github` 子命令(publish 是官方托管服务)。
+    vpk upload github --repoUrl "https://github.com/Three-Freezen/DeskOrder" `
+        --token $env:GITHUB_TOKEN --releaseName "v$Version" --tag "v$Version" --publish True --merge True
     if ($LASTEXITCODE -ne 0) { exit 1 }
 }
 
