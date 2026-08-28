@@ -62,3 +62,21 @@ function SilentUpgrade: Boolean;
 begin
   Result := WizardSilent;
 end;
+
+// 同一 AppId 已安装过（升级/重装）时，先静默卸载旧版本，避免
+// “电脑中已存在该软件”弹窗打断 /SILENT 的应用内升级流程。
+// 用户数据在 %APPDATA%\DesktopZones，不受卸载影响。
+function InitializeSetup(): Boolean;
+var
+  Uninst: String;
+  Res: Integer;
+begin
+  Result := True;
+  if RegQueryStringValue(HKCU,
+      'Software\Microsoft\Windows\CurrentVersion\Uninstall\{{8D6B4B39-6A21-4E7A-9C33-2D0F1A55E7B1}_is1',
+      'UninstallString', Uninst) then
+  begin
+    Uninst := RemoveQuotes(Uninst);
+    Exec(Uninst, '/SILENT /NORESTART', '', SW_SHOW, ewWaitUntilTerminated, Res);
+  end;
+end;

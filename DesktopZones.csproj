@@ -18,11 +18,16 @@
     <ApplicationIcon>Resources\Icons\DesktopZones.ico</ApplicationIcon>
     <!-- 更新检测与 About 页的唯一版本来源。Directory.Build.props 关闭了
          GenerateAssemblyInfo 及各版本属性生成（CA1416 修复的历史原因），
-         这里逐项重新打开，让 <Version> 真正写进程序集。 -->
+         这里重新打开——注意 GenerateAssemblyInfo 是总开关，只开三个子开关
+         时属性根本不会生成（曾导致全程序集版本 0.0.0、更新检查永远误报新版）。
+         其余属性（Title/Company/Product 等）仍由 props 的 false 单独关闭。 -->
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
     <Version>0.9.1</Version>
     <GenerateAssemblyVersionAttribute>true</GenerateAssemblyVersionAttribute>
     <GenerateAssemblyFileVersionAttribute>true</GenerateAssemblyFileVersionAttribute>
     <GenerateAssemblyInformationalVersionAttribute>true</GenerateAssemblyInformationalVersionAttribute>
+    <!-- 不要把 git 提交哈希拼进 InformationalVersion（否则关于页显示 0.9.1+hash） -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
 
   <ItemGroup>
