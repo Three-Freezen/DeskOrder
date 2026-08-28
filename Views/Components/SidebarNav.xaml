@@ -21,10 +21,11 @@
           <ControlTemplate TargetType="Button">
             <Border x:Name="Root" Background="{TemplateBinding Background}" CornerRadius="6">
               <Grid>
-                <!-- ponytail 2026-08-25: 选中态左侧指示条 = Accent.Solid（深 accent）-->
+                <!-- ponytail 2026-08-28: 选中态左侧指示条 — 锁死深 accent 蓝 #256FC8,
+                     不随管理界面主题(系统/亮/暗)或系统强调色覆盖而变色。 -->
                 <Border x:Name="Bar" Width="3" Height="16" HorizontalAlignment="Left"
                         Margin="0" CornerRadius="2"
-                        Background="{DynamicResource Brush.Accent.Solid}"
+                        Background="#256FC8"
                         Visibility="Collapsed" VerticalAlignment="Center"
                         RenderTransformOrigin="0.5,0.5">
                   <Border.RenderTransform>
@@ -79,10 +80,11 @@
           <ControlTemplate TargetType="Button">
             <Border x:Name="Root" Background="{TemplateBinding Background}" CornerRadius="6">
               <Grid>
-                <!-- ponytail 2026-08-25: 选中态左侧指示条 = Accent.Solid -->
+                <!-- ponytail 2026-08-28: 选中态左侧指示条 — 锁死深 accent 蓝 #256FC8,
+                     不随管理界面主题(系统/亮/暗)或系统强调色覆盖而变色。 -->
                 <Border x:Name="Bar" Width="3" Height="16" HorizontalAlignment="Left"
                         Margin="0" CornerRadius="2"
-                        Background="{DynamicResource Brush.Accent.Solid}"
+                        Background="#256FC8"
                         Visibility="Collapsed" VerticalAlignment="Center"
                         RenderTransformOrigin="0.5,0.5">
                   <Border.RenderTransform>

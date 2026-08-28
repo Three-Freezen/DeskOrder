@@ -248,7 +248,9 @@ public class DesktopCalendar : AppearanceModel
     public string TextColor { get; set; } = "#EEFFFFFF";
     /// <summary>按钮颜色（替代原主体自适应里的按钮分支）— 锁/隐藏/月份导航/今天/添加/恢复按钮。</summary>
     public string ButtonColor { get; set; } = "#AAFFFFFF";
-    public string TodayColor { get; set; } = "#FF6C63FF";
+    /// <summary>预设卡片预览里的今日高亮色（活跃日历直接用 Brush.Accent，不读此字段）。
+    /// ponytail 2026-08-28: 默认从旧紫 #FF6C63FF 换成强调蓝，与日历实机高亮同色系。</summary>
+    public string TodayColor { get; set; } = "#FF2E97F0";
     public double FontSize { get; set; } = 14;
     public double Opacity { get; set; } = 1.0;
     // ── Appearance (most fields inherited from AppearanceModel) ──

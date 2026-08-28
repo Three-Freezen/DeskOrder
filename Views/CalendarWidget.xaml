@@ -152,10 +152,24 @@
                                     Tag="{Binding DateKey}"
                                     Background="Transparent">
                                 <Grid>
-                                    <!-- Today highlight (rounded square, was Ellipse circle) -->
+                                    <!-- Today highlight (rounded square, was Ellipse circle).
+                                         ponytail 2026-08-28: 底色改用 Brush.Accent — 与分区拖拽
+                                         换位蓝色竖条(UpdateDropIndicator)同源同色, 随主题跟随。 -->
                                     <Border x:Name="TodayCircle" Width="26" Height="26"
-                                            CornerRadius="4" Background="#306C63FF" Visibility="Collapsed"
+                                            CornerRadius="4" Opacity="0.35"
+                                            Background="{DynamicResource Brush.Accent}"
+                                            Visibility="Collapsed"
                                             HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    <!-- ponytail 2026-08-28: 选中日期的蓝色圆角边框提示 —
+                                         同 Brush.Accent, IsSelected 由 SelectDate 维护。
+                                         固定 32×32 居中, 比今日高亮方块(26×26)大一圈、紧贴其外。 -->
+                                    <Border x:Name="SelectionBorder"
+                                            Width="32" Height="32"
+                                            CornerRadius="6" BorderThickness="1.5"
+                                            BorderBrush="{DynamicResource Brush.Accent}"
+                                            Background="Transparent" IsHitTestVisible="False"
+                                            HorizontalAlignment="Center" VerticalAlignment="Center"
+                                            Visibility="Collapsed"/>
                                     <StackPanel VerticalAlignment="Center">
                                         <TextBlock Text="{Binding DayNumber}"
                                                    FontSize="12" Foreground="#CCFFFFFF"
@@ -192,6 +206,9 @@
                             <DataTemplate.Triggers>
                                 <DataTrigger Binding="{Binding IsToday}" Value="True">
                                     <Setter TargetName="TodayCircle" Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                    <Setter TargetName="SelectionBorder" Property="Visibility" Value="Visible"/>
                                 </DataTrigger>
                                 <DataTrigger Binding="{Binding InMonth}" Value="False">
                                     <Setter TargetName="CellBorder" Property="Opacity" Value="0.25"/>

@@ -101,7 +101,10 @@ public class CalendarViewModel : INotifyPropertyChanged
                 InMonth = inMonth,
                 IsToday = isToday,
                 HasNotes = hasNotes,
-                NotePriority = notePriority
+                NotePriority = notePriority,
+                // ponytail 2026-08-28: 翻月/加备注等触发的重建会生成全新 cell 对象,
+                // 选中态必须在这里回放, 否则选中边框翻一圈月份后消失。
+                IsSelected = dateKey == _selectedDate
             });
         }
     }
@@ -110,6 +113,10 @@ public class CalendarViewModel : INotifyPropertyChanged
     {
         _selectedDate = dateKey;
         OnPropertyChanged(nameof(SelectedDate));
+        // ponytail 2026-08-28: 同步日格选中态 — 驱动模板里的蓝色圆角边框。
+        // cell 的 IsSelected 带 INPC 通知, 无需 RebuildCells 即可实时刷新。
+        foreach (var cell in Cells)
+            cell.IsSelected = cell.DateKey == dateKey;
         SelectedNotes.Clear();
         if (_calendar.Notes.TryGetValue(dateKey, out var notes))
         {
@@ -215,6 +222,15 @@ public class CalendarCell : INotifyPropertyChanged
     public bool IsToday { get; set; }
     public bool HasNotes { get; set; }
     public int NotePriority { get; set; }
+
+    // ponytail 2026-08-28: 选中态需实时驱动蓝色边框显隐, 所以带变更通知;
+    // 其余属性每次 RebuildCells 都换新对象, 用不上通知。
+    bool _isSelected;
+    public bool IsSelected
+    {
+        get => _isSelected;
+        set { if (_isSelected != value) { _isSelected = value; OnPropertyChanged(); } }
+    }
 
     public event PropertyChangedEventHandler? PropertyChanged;
     protected void OnPropertyChanged([CallerMemberName] string? name = null)
