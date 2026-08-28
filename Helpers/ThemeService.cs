@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using System.Windows.Threading;
@@ -29,7 +31,8 @@ public static class ThemeService
     // registry read + one comparison instead of three brush writes + DynamicResource
     // re-resolve on every tick.
     static Color? _lastAppliedAccent;
-    static DispatcherTimer? _accentPollTimer;
+    static HwndSource? _accentMsgSource;
+    static DispatcherTimer? _accentSafetyPoll;
 
     public static event Action<AppThemeMode>? Changed;
 
@@ -526,17 +529,61 @@ public static class ThemeService
         // ponytail: Win32 broadcasts "ImmersiveColorSet" on accent color changes,
         // but .NET's SystemEvents.UserPreferenceChanged only maps a small fixed
         // set of lParam strings to UserPreferenceCategory — "ImmersiveColorSet"
-        // isn't in that table, so the event never fires for accent changes. Poll
-        // the registry once a second and let ApplySystemAccentIfApplicable's cache
-        // short-circuit the steady-state (one read + one comparison per tick).
-        // 1-second latency is invisible; the alternative (HwndSource + lParam
-        // string parsing) is ~3x the code for the same outcome.
-        _accentPollTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-        _accentPollTimer.Tick += (_, _) =>
+        // isn't in that table, so the event never fires for accent changes.
+        // 2026-08-28 perf pass: 原先每秒轮询注册表一次(常驻 UI 线程唤醒)；改为
+        // 隐藏消息窗口直接收 WM_SETTINGCHANGE("ImmersiveColorSet") 和
+        // WM_DWMCOLORIZATIONCOLORCHANGED。保留 15s 兜底轮询 — 万一广播被吞掉，
+        // 行为退化只是把延迟从 1s 拉长到 15s，不会丢功能。
+        EnsureAccentMessageWindow();
+        _accentSafetyPoll = new DispatcherTimer { Interval = TimeSpan.FromSeconds(15) };
+        _accentSafetyPoll.Tick += (_, _) =>
         {
             if (_current != AppThemeMode.System) return;
             ApplySystemAccentIfApplicable();
         };
-        _accentPollTimer.Start();
+        _accentSafetyPoll.Start();
+    }
+
+    const int WM_SETTINGCHANGE = 0x001A;
+    const int WM_DWMCOLORIZATIONCOLORCHANGED = 0x0320;
+    // WS_POPUP — 建一个从不 Show 的裸顶层 HWND。HWND_BROADCAST 只发顶层窗口
+    // (message-only 窗口收不到广播)，所以不能用 HWND_MESSAGE。
+    const int WS_POPUP = unchecked((int)0x80000000);
+
+    static void EnsureAccentMessageWindow()
+    {
+        if (_accentMsgSource != null) return;
+        try
+        {
+            var p = new HwndSourceParameters("DeskOrder.ThemeWatch", 1, 1)
+            {
+                WindowStyle = WS_POPUP,
+                PositionX = -32000,
+                PositionY = -32000,
+            };
+            var src = new HwndSource(p);
+            src.AddHook(WndProc);
+            _accentMsgSource = src;
+        }
+        catch
+        {
+            // 建窗失败 — 只剩 15s 兜底轮询，功能不丢。
+        }
+    }
+
+    static IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (_current != AppThemeMode.System) return IntPtr.Zero;
+        if (msg == WM_DWMCOLORIZATIONCOLORCHANGED)
+        {
+            ApplySystemAccentIfApplicable();
+        }
+        else if (msg == WM_SETTINGCHANGE)
+        {
+            var section = Marshal.PtrToStringAuto(lParam);
+            if (string.Equals(section, "ImmersiveColorSet", StringComparison.OrdinalIgnoreCase))
+                ApplySystemAccentIfApplicable();
+        }
+        return IntPtr.Zero;
     }
 }

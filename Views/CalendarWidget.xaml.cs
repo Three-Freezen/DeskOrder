@@ -723,7 +723,14 @@ public partial class CalendarWidget : Window
             BorderThickness = new Thickness(1),
             Padding = new Thickness(16)
         };
-        outerBorder.Effect = new DropShadowEffect { BlurRadius = 24, ShadowDepth = 0, Color = Color.FromArgb(0xAA, 0x00, 0x00, 0x00), Opacity = 0.6 };
+        // ponytail 2026-08-28: 阴影拆到独立兄弟 Border(ManagementWindow 同款处理) —
+        // Effect 挂在含 TextBox 的根 Border 上，光标闪烁也会反复触发整窗 CPU 位图卷积。
+        var shadowBorder = new System.Windows.Controls.Border
+        {
+            Background = new SolidColorBrush(Color.FromRgb(0x10, 0x11, 0x1A)),
+            CornerRadius = new CornerRadius(12),
+            Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 24, ShadowDepth = 0, Color = Color.FromArgb(0xAA, 0x00, 0x00, 0x00), Opacity = 0.6 }
+        };
 
         var grid = new Grid();
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });    // 0: title
@@ -899,7 +906,7 @@ public partial class CalendarWidget : Window
         grid.Children.Add(btnPanel);
 
         outerBorder.Child = grid;
-        noteWindow.Content = outerBorder;
+        noteWindow.Content = new Grid { Children = { shadowBorder, outerBorder } };
 
         okBtn.Click += (_, _) =>
         {

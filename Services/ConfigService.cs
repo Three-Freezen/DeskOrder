@@ -28,25 +28,42 @@ public class ConfigService
         NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals
     };
 
-    private readonly object _lock = new();
+    // ponytail 2026-08-28: 进程内缓存最近一次 Load/Save 的 AppConfig。本应用是该
+    // 文件的唯一写者，缓存即真相：SavePreservingPanelSettings 每次都要"全量读盘+
+    // 反序列化→改→序列化→写盘"(72 个调用点，热路径 400ms~1s 防抖)，缓存砍掉其中
+    // 读盘+解析的一半；SnapAlignmentService 等自建 ConfigService 实例的调用方也
+    // 共享同一份。static 锁保证跨实例互斥。
+    private static readonly object _lock = new();
+    private static AppConfig? _cached;
 
     /// <summary>Raised when Save() fails. Subscribers can surface the error in the UI.</summary>
     public event Action<Exception>? SaveFailed;
 
     public AppConfig Load()
     {
+        lock (_lock)
+        {
+            if (_cached != null) return _cached;
+            var (config, cacheable) = LoadFromDiskCore();
+            if (cacheable) _cached = config;
+            return config;
+        }
+    }
+
+    private static (AppConfig Config, bool Cacheable) LoadFromDiskCore()
+    {
         AppConfig config;
         try
         {
             if (!File.Exists(ConfigPath))
-                return new AppConfig();
+                return (new AppConfig(), true);
 
             var json = File.ReadAllText(ConfigPath);
             config = JsonSerializer.Deserialize<AppConfig>(json, JsonOptions) ?? new AppConfig();
         }
         catch (FileNotFoundException)
         {
-            return new AppConfig();
+            return (new AppConfig(), true);
         }
         catch (JsonException ex)
         {
@@ -62,17 +79,19 @@ public class ConfigService
             {
                 Debug.WriteLine($"[ConfigService] Failed to quarantine corrupt config: {moveEx}");
             }
-            return new AppConfig();
+            return (new AppConfig(), true);
         }
         catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
         {
+            // 瞬时 IO 故障(文件被备份/同步软件锁住等) — 返回默认值但不缓存，
+            // 下次 Load 重试磁盘，避免把默认配置固化成本会话的"真相"。
             Debug.WriteLine($"[ConfigService] Load failed (transient IO): {ex}");
-            return new AppConfig();
+            return (new AppConfig(), false);
         }
 
         MigrateOrphanPanelFields(config);
         MigratePanelGlass(config);
-        return config;
+        return (config, true);
     }
 
     // ── One-time migration: AppConfig-level liquid glass → Panel POCO ──
@@ -145,11 +164,17 @@ public class ConfigService
     {
         lock (_lock)
         {
+            // 先推进内存真相再落盘：写盘失败时内存态仍一致，错误经 SaveFailed 通知 UI。
+            _cached = config;
             try
             {
                 Directory.CreateDirectory(ConfigDir);
                 var json = JsonSerializer.Serialize(config, JsonOptions);
-                File.WriteAllText(ConfigPath, json);
+                // temp + Move(overwrite) 原子替换：崩溃/断电不会留下半截 JSON
+                // (旧实现直接 WriteAllText，只能靠 Load 侧 quarantine 兜底)。
+                var tmpPath = ConfigPath + ".tmp";
+                File.WriteAllText(tmpPath, json);
+                File.Move(tmpPath, ConfigPath, overwrite: true);
             }
             catch (Exception ex)
             {

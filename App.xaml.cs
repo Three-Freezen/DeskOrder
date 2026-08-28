@@ -65,16 +65,25 @@ public partial class App : System.Windows.Application
         // ponytail 2026-08-26: fresh diagnostics log per run (ghost-ring regression trace).
         Helpers.DzTrace.Reset();
 #endif
-        // ponytail: capture all Debug.WriteLine output to a file so we can post-mortem
-        // hover-expand behavior without attaching a debugger.
+#if DEBUG
+        // ponytail: capture all Trace.WriteLine output to a file so we can post-mortem
+        // behavior without attaching a debugger. DEBUG-only：Release 原先仍挂着这个
+        // AutoFlush 监听器，每条 Trace.WriteLine 都是同步落盘(旧路径 D:\BS\ 在用户
+        // 机器上还不存在，行为不对称)。>32MB 时本次会话重新开始，防无限膨胀。
         try
         {
-            var tracePath = @"D:\BS\he_debug.log";
-            var tw = new System.IO.StreamWriter(tracePath, append: true) { AutoFlush = true };
+            var traceDir = System.IO.Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "DeskOrder", "logs");
+            System.IO.Directory.CreateDirectory(traceDir);
+            var tracePath = System.IO.Path.Combine(traceDir, "debug.log");
+            var fresh = System.IO.File.Exists(tracePath) && new System.IO.FileInfo(tracePath).Length > 32 * 1024 * 1024;
+            var tw = new System.IO.StreamWriter(tracePath, append: !fresh) { AutoFlush = true };
             System.Diagnostics.Trace.Listeners.Add(new System.Diagnostics.TextWriterTraceListener(tw));
             System.Diagnostics.Trace.AutoFlush = true;
         }
         catch { }
+#endif
 
         // Single-instance check (session-local). The mutex is only an existence
         // marker; a second launch signals the activation event so the running
@@ -297,10 +306,12 @@ public partial class App : System.Windows.Application
 
         // ── Debug: --diag-menu opens a synthetic ContextMenu offscreen and logs
         //    style/template resolution for ContextMenu / MenuItem / Separator. ──
+#if DEBUG
         if (e.Args.Any(a => a == "--diag-menu"))
         {
             Dispatcher.BeginInvoke(new Action(RunContextMenuDiagnostic), DispatcherPriority.ApplicationIdle);
         }
+#endif
 
         // ── Debug: --spawn-widget=KIND auto-creates one widget for reference screenshots ──
         var spawnKind = ParseSpawnWidgetArg(e.Args);

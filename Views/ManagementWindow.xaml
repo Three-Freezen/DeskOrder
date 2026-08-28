@@ -8,11 +8,18 @@
         WindowStartupLocation="CenterScreen"
         ResizeMode="CanResizeWithGrip"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent">
-  <Border Background="{DynamicResource Brush.Bg.Base}" CornerRadius="10"
-          BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1">
-    <Border.Effect>
-      <DropShadowEffect BlurRadius="24" ShadowDepth="0" Color="Black" Opacity="0.45"/>
-    </Border.Effect>
+  <Grid>
+    <!-- ponytail 2026-08-28: 阴影拆到独立兄弟 Border。Effect 原本挂在包含全部内容
+         的根 Border 上，任何子元素失效(光标闪烁/行 hover/弹层)都会触发整窗 CPU
+         位图卷积(PropertyWindow 同款坑)；兄弟层自身不变化，只在尺寸/主题切换时
+         重算一次。Brush.Bg.Base 全主题不透明，双层叠加不会加深。 -->
+    <Border Background="{DynamicResource Brush.Bg.Base}" CornerRadius="10">
+      <Border.Effect>
+        <DropShadowEffect BlurRadius="24" ShadowDepth="0" Color="Black" Opacity="0.45"/>
+      </Border.Effect>
+    </Border>
+    <Border Background="{DynamicResource Brush.Bg.Base}" CornerRadius="10"
+            BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1">
     <Grid>
       <Grid.RowDefinitions>
         <RowDefinition Height="40"/>
@@ -122,4 +129,5 @@
       </Border>
     </Grid>
   </Border>
+  </Grid>
 </Window>

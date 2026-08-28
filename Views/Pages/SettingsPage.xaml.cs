@@ -21,6 +21,8 @@ public partial class SettingsPage : UserControl
 {
     readonly ConfigService _configService;
     bool _suppress;
+    // 保存委托引用以便 Unloaded 时退订(LanguageChanged 订阅点需要同一引用才能 -=)。
+    readonly Action<string> _onLangChanged;
 
     // 当前值 TextBlock + 取值委托，改键后/注入 getter 后增量刷新，避免一直停留在「未设置」。
     readonly System.Collections.Generic.List<(TextBlock Value, Func<string> Getter)> _hotkeyValueBindings = new();
@@ -41,7 +43,8 @@ public partial class SettingsPage : UserControl
         InitializeComponent();
         _configService = configService;
         BuildHotkeys();
-        LocalizationService.Instance.LanguageChanged += _ => RebuildHotkeys();
+        _onLangChanged = _ => RebuildHotkeys();
+        LocalizationService.Instance.LanguageChanged += _onLangChanged;
         // ponytail: two-way bind to ThemeService so the title-bar cycle button
         // (ManagementWindow.ThemeBtn_Click) and any other runtime theme flip
         // (System accent change, UserPreferenceChanged → Apply(System)) keeps
@@ -50,6 +53,15 @@ public partial class SettingsPage : UserControl
         // → _suppress guard exits before writing back to cfg.
         ThemeService.Changed += SyncThemeRadios;
         Loaded += (_, _) => SyncFromConfig();
+        // ponytail 2026-08-28: 本页面每次导航都会被 ManagementWindow.BuildSettingsPage
+        // 重建，而上面订阅的 ThemeService.Changed 是 static event、LanguageChanged 是
+        // 单例事件 — 都是 GC Root。不在 Unloaded 退订的话，每进一次设置页就有一棵
+        // 页面树连同 ManagementWindow 闭包被永久钉住（此前实测的内存泄漏）。
+        Unloaded += (_, _) =>
+        {
+            ThemeService.Changed -= SyncThemeRadios;
+            LocalizationService.Instance.LanguageChanged -= _onLangChanged;
+        };
     }
 
     public void ApplyLoc() { /* labels hard-coded CN. */ }
