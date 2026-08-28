@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.ObjectModel;
 using System.Linq;
+using DesktopZones.Helpers;
 using DesktopZones.Models;
 using DesktopZones.Views;
 
@@ -67,7 +68,12 @@ public class WidgetService
     public void DeleteClock(Guid id)
     {
         var c = Clocks.FirstOrDefault(x => x.Id == id);
-        if (c != null) Clocks.Remove(c);
+        if (c != null)
+        {
+            // 同步关闭该时钟的样式设置界面(浮动 + 停靠),避免残留编辑器。
+            PropertyWindowService.CloseEditorsFor(c);
+            Clocks.Remove(c);
+        }
         Save();
         ClocksChanged?.Invoke();
     }
@@ -121,7 +127,12 @@ public class WidgetService
     public void DeleteCalendar(Guid id)
     {
         var c = Calendars.FirstOrDefault(x => x.Id == id);
-        if (c != null) Calendars.Remove(c);
+        if (c != null)
+        {
+            // 同步关闭该日历的样式设置界面(浮动 + 停靠),避免残留编辑器。
+            PropertyWindowService.CloseEditorsFor(c);
+            Calendars.Remove(c);
+        }
         Save();
         CalendarsChanged?.Invoke();
     }

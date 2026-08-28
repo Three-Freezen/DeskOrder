@@ -183,6 +183,8 @@ public class ZoneViewModel : INotifyPropertyChanged
         var vm = FindItemVm(item.Id);
         if (vm != null)
             Items.Remove(vm);
+        // 删除内层组件(含次级文件夹)后同步关闭其样式设置界面,避免残留编辑器。
+        PropertyWindowService.CloseEditorsFor(item);
         _zoneManager.SaveConfig();
         _zoneManager.NotifyChanged();
     }
@@ -256,6 +258,8 @@ public class ZoneViewModel : INotifyPropertyChanged
             ownerZone.Items.Remove(item);
             var vm = FindItemVm(item.Id);
             if (vm != null) Items.Remove(vm);
+            // 删除内层组件(含次级文件夹)后同步关闭其样式设置界面,避免残留编辑器。
+            PropertyWindowService.CloseEditorsFor(item);
             _zoneManager.SaveConfig();
             _zoneManager.NotifyChanged();
         }

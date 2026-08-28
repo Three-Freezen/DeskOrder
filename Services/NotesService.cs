@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using DesktopZones.Helpers;
 using DesktopZones.Models;
 using DesktopZones.Views;
 
@@ -67,7 +68,12 @@ public class NotesService
     public void DeleteNote(Guid id)
     {
         var note = Notes.FirstOrDefault(n => n.Id == id);
-        if (note != null) Notes.Remove(note);
+        if (note != null)
+        {
+            // 同步关闭该便签的样式设置界面(浮动 + 停靠),避免残留编辑器。
+            PropertyWindowService.CloseEditorsFor(note);
+            Notes.Remove(note);
+        }
         Save();
         DeleteNoteFile(id);
         NotesChanged?.Invoke();

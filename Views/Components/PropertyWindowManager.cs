@@ -116,6 +116,35 @@ public class PropertyWindowManager
         }
     }
 
+    /// <summary>Close every floating editor whose target IS <paramref name="target"/>
+    /// or represents the same entity (same stable <see cref="TargetKey"/>) — the
+    /// delete funnels call this right after removing a zone/component so a stale
+    /// editor can't keep the deleted instance alive (further edits on it
+    /// re-create ghost components and throw). Reference equality alone is not
+    /// enough: a docked/floating editor may hold a different wrapper instance
+    /// for the same entity (e.g. <see cref="MergedGroupTarget"/>).</summary>
+    public void CloseAllFor(object target)
+    {
+        if (target == null) return;
+        var key = TargetKey(target);
+        var matches = new List<object>();
+        foreach (var kv in _floating)
+        {
+            if (ReferenceEquals(kv.Key, target)) { matches.Add(kv.Key); continue; }
+            if (string.IsNullOrEmpty(key)) continue;
+            try
+            {
+                if (TargetKey(kv.Key) == key) matches.Add(kv.Key);
+            }
+            catch { /* key derivation failed — not a match */ }
+        }
+        foreach (var m in matches)
+        {
+            if (!_floating.TryGetValue(m, out var w)) continue;
+            try { w.Close(); } catch { /* close animation already running */ }
+        }
+    }
+
     void OpenFloating(object target, ConfigService configService, ManagementWindow main, (double x, double y) pos, Size? initialSize = null)
     {
         var w = new PropertyWindow(target, configService) { Left = pos.x, Top = pos.y };

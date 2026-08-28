@@ -459,6 +459,26 @@ public partial class ManagementWindow : Window
     public void OpenFloatingProperty(object target, Point cursorScreen, Size initialSize) =>
         PropertyWindowManager.Instance.PopOutTarget(target, _configService, this, requester: null, cursorScreen: cursorScreen, initialSize: initialSize);
 
+    /// <summary>Remove the docked tab and clear the docked panel when it shows
+    /// <paramref name="target"/> — the docked half of
+    /// <see cref="PropertyWindowService.CloseEditorsFor"/>, called by the delete
+    /// funnels. Closing the tab fires ActiveTabChanged which re-targets the
+    /// panel at the neighbouring tab (or null), so a deleted entity never
+    /// lingers as a ghost tab/panel.</summary>
+    public void CloseDockedEditorsFor(object target)
+    {
+        if (target == null) return;
+        var key = PropertyWindowManager.TargetKey(target);
+        if (string.IsNullOrEmpty(key)) return;
+        if (DockedPanel?.Target != null && PropertyWindowManager.TargetKey(DockedPanel.Target) == key)
+            DockedPanel.Target = null;
+        DockedTabs?.CloseTab(key);
+        // The deleted target's tab was the last one — fold the right column
+        // (mirrors the header-X flow) so an empty ghost panel doesn't stay open.
+        if (DockedTabs != null && DockedTabs.Tabs.Count == 0 && _propertyPanelVisible)
+            SetPropertyPanelVisible(false, persist: false);
+    }
+
     /// <summary>Make sure the docked property column is visible. Used by the
     /// workspace dock flow so a freshly-clicked list row lights up the right
     /// panel without the user having to manually un-collapse it first.</summary>

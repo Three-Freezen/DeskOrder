@@ -8,6 +8,7 @@ using DesktopZones.Helpers;
 using DesktopZones.Models;
 using DesktopZones.Views;
 using DesktopZones.Views.Components;
+using DesktopZones.ViewModels;
 
 namespace DesktopZones.Services;
 
@@ -240,6 +241,13 @@ public class ZoneManager
     {
         var toDelete = Zones.FirstOrDefault(z => z.Id == zoneId);
         if (toDelete == null) return;
+
+        // ponytail: 删除前先同步关闭该分区与其子文件夹的样式设置界面(浮动 + 停靠),
+        // 否则残留编辑器仍握着已删除实例,后续编辑会造出幽灵组件甚至抛异常。
+        // 组合分区编辑器的关闭由 DisbandMergedGroup / RemoveFromMergedGroup 处理。
+        PropertyWindowService.CloseEditorsFor(toDelete);
+        foreach (var item in toDelete.Items.Where(i => i.Type == ItemType.SubFolder).ToList())
+            PropertyWindowService.CloseEditorsFor(item);
 
         // If this zone is part of a merged group, disband it first
         if (toDelete.MergedGroupMembership.GroupId.HasValue)
@@ -606,6 +614,13 @@ public class ZoneManager
     public void DisbandMergedGroup(Guid groupId)
     {
         var members = Zones.Where(z => z.MergedGroupMembership.GroupId == groupId).ToList();
+        // ponytail: 解散前捕获组合分区编辑器目标 — MergedGroupTarget.GroupId 在
+        // GroupId 清空后会回落成 Master.Id,TargetKey 变掉就关不到已打开的组合
+        // 设置界面了,所以必须在这里(清空字段之前)就执行关闭。
+        var groupTarget = members.FirstOrDefault(z => z.MergedGroupMembership.SubZoneIds.Count > 0)
+            ?? members.FirstOrDefault();
+        if (groupTarget != null)
+            PropertyWindowService.CloseEditorsFor(MergedGroupTarget.For(groupTarget));
         // Close the master window first
         foreach (var z in members)
         {
@@ -648,6 +663,9 @@ public class ZoneManager
             master.MergedGroupMembership.TabOrder.Remove(zoneId);
             if (master.MergedGroupMembership.SubZoneIds.Count == 0)
             {
+                // 组合解散 — 同步关闭组合分区设置界面(必须在清空 GroupId 之前,
+                // 否则 MergedGroupTarget 的 TargetKey 会变掉)。
+                PropertyWindowService.CloseEditorsFor(MergedGroupTarget.For(master));
                 // Only master remains — clear its merge state
                 master.MergedGroupMembership.GroupId = null;
                 master.MergedGroupMembership.DisplayName = "";

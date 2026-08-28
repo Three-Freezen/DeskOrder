@@ -1,6 +1,7 @@
 using System;
 using System.Windows;
 using DesktopZones.Views;
+using DesktopZones.Views.Components;
 
 namespace DesktopZones.Helpers;
 
@@ -58,5 +59,20 @@ public static class PropertyWindowService
         EnsureMain();
         System.Diagnostics.Trace.WriteLine($"[SubFlyout] OpenOrFocus: main={(_main != null)} mainVisible={(_main?.IsVisible ?? false)} → OpenFloatingProperty");
         _main?.OpenFloatingProperty(target, requester);
+    }
+
+    /// <summary>Close every property editor (floating window + docked tab/panel)
+    /// currently showing <paramref name="target"/>. The delete funnels
+    /// (zone / component / note / subfolder removal) call this right after the
+    /// entity is removed so no stale editor lingers — a stale editor keeps the
+    /// deleted instance alive and produces ghost components / crashes on further
+    /// interaction. Deliberately does NOT call <see cref="EnsureMain"/>: if the
+    /// management window is closed, the docked panel is gone with it and there
+    /// is nothing to clear there.</summary>
+    public static void CloseEditorsFor(object target)
+    {
+        if (target == null) return;
+        PropertyWindowManager.Instance.CloseAllFor(target);
+        _main?.CloseDockedEditorsFor(target);
     }
 }
