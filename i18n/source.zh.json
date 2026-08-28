@@ -311,6 +311,7 @@
   "FolderMap.DeleteFailed": "删除失败：{0}",
   "ZoneItem.DeleteMultiConfirm": "确定删除选中的 {0} 个项目？",
   "ZoneProp.TileMode": "磁贴模式",
+  "ZoneProp.TileModeDragHint": "按住 Ctrl 可拖动分区主体移动",
   "ZoneProp.HideAppName": "隐藏应用名",
   "ZoneProp.CustomIcon": "自定义图标",
   "ZoneProp.CustomIconHint": "开启此功能后，整个分区仅可放入一个图标，原有图标自动隐藏，用户双击整个分区即可打开原有图标对应文件",

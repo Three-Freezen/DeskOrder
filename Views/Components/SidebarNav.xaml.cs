@@ -33,6 +33,8 @@ public partial class SidebarNav : UserControl
     public SidebarNav()
     {
         InitializeComponent();
+        // 版本跟随程序集（csproj <Version>），与关于页/设置页同一来源，不再硬编码。
+        VersionText.Text = "v" + DesktopZones.Helpers.AppVersion.Current;
         _sectionKeys[NavZones]    = "zones";
         _sectionKeys[NavMerged]   = "merged";
         _sectionKeys[NavPanel]    = "panel";

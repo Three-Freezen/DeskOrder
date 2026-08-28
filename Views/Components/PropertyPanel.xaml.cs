@@ -1120,7 +1120,7 @@ public partial class PropertyPanel : UserControl
                 Rebuild(z);
                 Save(z);
             });
-        switches.Children.Add(tileModeCb);
+        switches.Children.Add(MakeRowWithHint(tileModeCb, _loc["ZoneProp.TileModeDragHint"]));
         // 隐藏应用名 — 始终可用；磁贴模式下默认勾选（首次切换时自动开启）。
         var hideNameCb = MakeCheckRow(_loc["ZoneProp.HideAppName"], z.HideAppName,
             v => { z.HideAppName = v; Save(z); });

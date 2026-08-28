@@ -311,6 +311,7 @@
   "FolderMap.DeleteFailed": "Delete failed: {0}",
   "ZoneItem.DeleteMultiConfirm": "Delete the {0} selected items?",
   "ZoneProp.TileMode": "Tile mode",
+  "ZoneProp.TileModeDragHint": "Hold Ctrl and drag the zone body to move it",
   "ZoneProp.HideAppName": "Hide app name",
   "ZoneProp.CustomIcon": "Custom icon",
   "ZoneProp.CustomIconHint": "When enabled, the zone holds only one icon; existing icons auto-hide. Double-click the zone to open the original file.",

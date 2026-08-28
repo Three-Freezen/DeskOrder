@@ -255,7 +255,7 @@
       <Border DockPanel.Dock="Bottom"
               BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="0,1,0,0"
               Padding="16,12">
-        <TextBlock Text="v0.9.0" FontSize="11" FontFamily="Cascadia Code, Consolas, monospace"
+        <TextBlock x:Name="VersionText" Text="v0.9.0" FontSize="11" FontFamily="Cascadia Code, Consolas, monospace"
                    Foreground="{DynamicResource Brush.Text.Tertiary}"/>
       </Border>
 
