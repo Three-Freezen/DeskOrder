@@ -209,12 +209,12 @@
                             <!-- Settings + Hide -->
                             <StackPanel Grid.Column="5" Orientation="Horizontal"
                                         VerticalAlignment="Center">
-                                <Border x:Name="SettingsBtn" Width="26" Height="26"
+                                <!-- ponytail 2026-08-28: 去 ToolTip(盖住按钮吃点击)+ 放大命中区 -->
+                                <Border x:Name="SettingsBtn" Width="32" Height="28"
                                         CornerRadius="4" Background="#30FFFFFF"
                                         Cursor="Hand" Margin="0,0,4,0"
-                                        MouseLeftButtonDown="SettingsBtn_Click"
-                                        MouseEnter="Ctrl_Enter" MouseLeave="Ctrl_Leave"
-                                        ToolTip="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Panel.Settings]}">
+                                        MouseLeftButtonUp="SettingsBtn_Click"
+                                        MouseEnter="Ctrl_Enter" MouseLeave="Ctrl_Leave">
                                     <TextBlock Text="⚙" FontSize="12" Foreground="#8080A0"
                                                HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                 </Border>

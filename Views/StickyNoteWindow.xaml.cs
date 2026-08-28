@@ -158,6 +158,10 @@ public partial class StickyNoteWindow : Window
         // 收起完成时重断言关闭全部 OS 层装饰(玻璃/圆角/DWM 框架阴影)。
         _hover.Expanded += ReapplyAcrylic;
         _hover.Collapsed += OnHoverCollapsed;
+        // ponytail 2026-08-28: 恢复按钮态钉在桌面层(见 HideNote),展开(悬停预览或
+        // 点击固定)时把便签本体恢复到浮动策略——与 ShowNote 的 Topmost+PinToDesktop
+        // 一致;锁定便签保持桌面层不浮动。
+        _hover.Expanded += OnNoteExpanded;
         // ponytail: bug fix — see ZoneWindow ctor. ShowNoteFromService / OpenNoteWindow
         // call window.Show() without going through the equivalent of ShowZone, so
         // SnapToExpanded never runs.
@@ -202,7 +206,14 @@ public partial class StickyNoteWindow : Window
         // InvalidOperationException (crash when 全部隐藏 closes note windows).
         if (IsVisible)
         {
-            if (_note.PinnedTop) Topmost = true;
+            // ponytail 2026-08-28: 收起成恢复按钮的便签钉在桌面层(HideNote 同策略),
+            // 任何模型同步都不把它浮回应用窗口之上;展开的便签维持各自浮动策略。
+            if (_hover is { IsExpanded: false } || MainContent.Visibility != Visibility.Visible)
+            {
+                Topmost = false;
+                NativeMethods.PinBelowProgman(this);
+            }
+            else if (_note.PinnedTop) Topmost = true;
             else if (!_note.IsLocked) NativeMethods.PinToDesktop(this);
         }
         if (MainContent.Visibility == Visibility.Visible)
@@ -606,8 +617,12 @@ public partial class StickyNoteWindow : Window
         }
         else
         {
+            // ponytail 2026-08-28: 从恢复按钮态展开走展开动画(与 CollapseAnimated
+            // 对称——关有开也要有);已展开的重复 Show 仍瞬时对齐,不重播。
+            bool fromButton = RestoreButton.Visibility == Visibility.Visible;
             MainContent.Visibility = Visibility.Visible; RestoreButton.Visibility = Visibility.Collapsed;
-            _hover?.SnapToExpanded();
+            if (fromButton) _hover?.ExpandAnimated(permanent: true);
+            else _hover?.SnapToExpanded();
         }
         // ponytail: ghost-glass fix — re-apply acrylic AFTER SnapToExpanded so the
         // expanded-state gate sees IsExpanded == true and re-enables liquid glass when
@@ -624,6 +639,61 @@ public partial class StickyNoteWindow : Window
         if (_vm?.IsLocked != true) Topmost = true;
         Activate();
         OnStateChanged?.Invoke();
+    }
+
+    // ── 快捷键唤出(参考面板 hotkey:聚焦显示器居中 + 展开动画) ──
+
+    /// <summary>当前焦点显示器工作区换算成 DIP(与 Left/Top 同坐标系)。
+    /// MonitorHelper 返回物理像素,按本窗口 DPI 换算(与 PanelWindow 约定一致)。</summary>
+    Rect FocusedWorkAreaDip()
+    {
+        var waPx = MonitorHelper.FocusedWorkArea();
+        double sx = 1, sy = 1;
+        try { var d = VisualTreeHelper.GetDpi(this); sx = d.DpiScaleX; sy = d.DpiScaleY; } catch { }
+        return new Rect(waPx.Left / sx, waPx.Top / sy, waPx.Width / sx, waPx.Height / sy);
+    }
+
+    /// <summary>把便签定位到当前聚焦显示器工作区正中央。同步写回 _note.X/Y ——
+    /// ShowNote 会用模型坐标覆盖 Left/Top,只改窗口属性会被冲掉。</summary>
+    public void CenterOnFocusedScreen()
+    {
+        var wa = FocusedWorkAreaDip();
+        double left = wa.Left + (wa.Width - Width) / 2;
+        double top = wa.Top + (wa.Height - Height) / 2;
+        _note.X = left; _note.Y = top;
+        Left = left; Top = top;
+    }
+
+    /// <summary>快捷键唤出:先聚焦显示器居中,再按便签自己的展开动画(种类/速度/
+    /// 原点=恢复按钮中心或左上角)展开。恢复按钮态从按钮动画展开;整窗隐藏的便签
+    /// 先恢复尺寸再显示;无恢复按钮的便签直接显示。非快捷键路径(托盘/按钮点击)
+    /// 不受影响,仍在历史位置展开。</summary>
+    public void ShowFromHotkey()
+    {
+        bool fromButton = RestoreButton.Visibility == Visibility.Visible;
+
+        // 整窗隐藏的便签先恢复窗口尺寸(HideNote 缩到了 36×36;与 ApplyHidden 同款)
+        if (!IsVisible && !_note.EnableRestoreButton)
+        {
+            MinWidth = 180; MinHeight = 120;
+            Width = _note.Width < 200 ? 260 : _note.Width;
+            Height = _note.Height < 150 ? 200 : NoteWindowHeight();
+        }
+
+        CenterOnFocusedScreen();
+
+        if (fromButton && _hover != null)
+        {
+            // 从恢复按钮态展开:走便签自己的展开动画,原点跟随 HoverExpandOrigin 设置
+            if (!IsVisible) Show();
+            _note.IsVisible = true;
+            _hover.ExpandAnimated(permanent: true);
+            _notesService.UpdateNote(_note);
+            Activate();
+            return;
+        }
+
+        ShowNote();
     }
 
     /// <summary>
@@ -678,8 +748,13 @@ public partial class StickyNoteWindow : Window
         else
         {
             // ponytail: minimized — let HoverExpandBehavior handle visibility/scale
+            // ponytail 2026-08-28: 收起成恢复按钮后钉回桌面层(壁纸上方、应用窗口
+            // 之下) — 此前未锁定便签用 PinToDesktop(HWND_TOP),恢复按钮会浮在
+            // 其它应用窗口上。必须先清 Topmost:带 WS_EX_TOPMOST 的窗口一旦被
+            // 点击激活就会跳回最上层。便签本体展开时由 OnNoteExpanded 恢复浮动。
             AcrylicHelper.DisableBlur(this);
-            if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
+            Topmost = false;
+            if (IsVisible) NativeMethods.PinBelowProgman(this);
             if (waveDelayMs > 0)
                 _hover?.CollapseAfterDelay(waveDelayMs, null);
             else
@@ -691,6 +766,16 @@ public partial class StickyNoteWindow : Window
 #if DEBUG
         DzTrace.Log($"[StickyNoteWindow] HideNote DONE winVisible={IsVisible} content={MainContent.Visibility} btn={RestoreButton.Visibility} hoverExpanded={_hover?.IsExpanded} size={Width}x{Height}");
 #endif
+    }
+
+    /// <summary>ponytail 2026-08-28: 恢复按钮态钉在桌面层(HideNote),展开时便签
+    /// 本体恢复浮动策略(未锁定:Topmost + HWND_TOP,与 ShowNote 一致);
+    /// 锁定便签保持桌面层。悬停预览与点击固定展开共用此入口。</summary>
+    void OnNoteExpanded()
+    {
+        if (_vm?.IsLocked == true) return;
+        Topmost = true;
+        if (IsVisible) NativeMethods.PinToDesktop(this);
     }
 
     void ApplyHidden()
@@ -716,6 +801,13 @@ public partial class StickyNoteWindow : Window
             Height = _note.Height < 150 ? 200 : NoteWindowHeight();
             // ponytail: minimized — window stays at full size, content collapses
             _hover?.SnapToCollapsed();
+            // ponytail 2026-08-28: 会话恢复的隐藏便签,恢复按钮态同样钉桌面层
+            // (与 HideNote 一致)。BeginInvoke 等 Show 之后再钉——PinBelowProgman
+            // 带 SWP_SHOWWINDOW,窗口未显示时提前调用会把窗口提前亮出来。
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (IsVisible) { Topmost = false; NativeMethods.PinBelowProgman(this); }
+            }), System.Windows.Threading.DispatcherPriority.Loaded);
         }
     }
 
@@ -737,7 +829,8 @@ public partial class StickyNoteWindow : Window
             RestoreButton.ReleaseMouseCapture();
             _snapDrag?.Start(e, () =>
             {
-                if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
+                // 恢复按钮态钉在桌面层(与 HideNote 收起路径一致),拖完不浮回应用窗口之上。
+                if (IsVisible) NativeMethods.PinBelowProgman(this);
                 _note.X = Left; _note.Y = Top;
             });
         }

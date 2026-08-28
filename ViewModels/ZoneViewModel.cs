@@ -93,8 +93,14 @@ public class ZoneViewModel : INotifyPropertyChanged
         }
     }
 
-    /// <summary>图标固定 40px(与面板一致),磁贴模式不再放大;80 格子里居中、左右各 20px。</summary>
-    double CurrentIconSize() => Math.Min(40, Math.Max(24, _zone.GridSize - 4));
+    /// <summary>图标随网格大小缩放(ZoneProp.GridSizeHint:"调整网格大小即可调整图标大小")。
+    /// 名字行(FontSize 10 ≈13px 行高 + 图标底部 4px 间距)画在格子内部,须预留;
+    /// 隐藏应用名时无名字行,图标几乎占满整格。不能封顶 — 封顶 40 会让改网格后图标不再跟随缩放。</summary>
+    double CurrentIconSize()
+    {
+        var reserve = _zone.HideAppName ? 6 : 18;
+        return Math.Max(8, _zone.GridSize - reserve);
+    }
 
     public void RefreshItems()
     {

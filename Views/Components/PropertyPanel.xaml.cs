@@ -458,6 +458,22 @@ public partial class PropertyPanel : UserControl
 
     void CloseTabBtn_Click(object sender, RoutedEventArgs e)
     {
+        // ponytail 2026-08-28: 诊断 — 浮窗"开一下就没了"每次都死在这里。记录点击时光标
+        // 相对 ✕ 的位置与鼠标捕获状态,分辨真实误触(光标在按钮上)与输入重放幻影
+        // (光标远离按钮 → staged input 借捕获路由)。
+        if (IsFloating)
+        {
+            try
+            {
+                var btn = (System.Windows.Controls.Button)sender;
+                var rel = System.Windows.Input.Mouse.GetPosition(btn);
+                var screenPx = btn.PointToScreen(rel);
+                System.Diagnostics.Trace.WriteLine(
+                    $"[PropWin] CloseTabBtn_Click: 光标在✕内({rel.X:F0},{rel.Y:F0}) 屏幕({screenPx.X:F0},{screenPx.Y:F0}) " +
+                    $"IsMouseOver={btn.IsMouseOver} Captured={System.Windows.Input.Mouse.Captured?.GetType().Name ?? "null"}");
+            }
+            catch { }
+        }
         // ponytail: one X, two meanings, same placement/style as the docked
         // panel. Docked → close the active tab; floating → close the floating
         // window itself ("点击后浮窗直接关闭").

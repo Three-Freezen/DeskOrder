@@ -77,6 +77,35 @@ public class SubfolderItemViewModel : INotifyPropertyChanged
 
     public int SubItemCount => Source.SubItems.Count;
 
+    // ── 尺寸跟随分区网格 ──
+    // ponytail 2026-08-28: 2×2 盒子曾锁死 56px(面板卡片基线),改网格后不缩放,
+    // 小格子(默认 65)里盒子+名字 72px 超格被裁、大格子里偏小。现由宿主把格子
+    // 边长写入 GridCellSize(ZoneItemViewModel.ItemSize = Zone.GridSize),盒子
+    // 与普通图标等高(GridSize - 隐藏名字?6:18),名字行画在格内余量里。
+    // 面板路径(SetSource)不写该值,默认 74-18 = 56,面板 80×80 卡片观感不变。
+
+    /// <summary>宿主格子边长(DIP)。分区路径由 SubfolderItemView 从外层 VM 同步。</summary>
+    double _gridCellSize = 74;
+    public double GridCellSize
+    {
+        get => _gridCellSize;
+        set { _gridCellSize = value; OnPropertyChanged(); OnPropertyChanged(nameof(BoxSize)); OnPropertyChanged(nameof(NameMaxWidth)); }
+    }
+
+    /// <summary>镜像视图的 HideName(隐藏应用名时名字行收起、盒子几乎占满整格)。</summary>
+    bool _hideName;
+    public bool HideName
+    {
+        get => _hideName;
+        set { _hideName = value; OnPropertyChanged(); OnPropertyChanged(nameof(BoxSize)); }
+    }
+
+    /// <summary>2×2 缩略图盒子边长 — 与同格子普通图标的 Image 等高。</summary>
+    public double BoxSize => Math.Max(8, GridCellSize - (HideName ? 6 : 18));
+
+    /// <summary>名字最大宽度 — 与普通图标 NameMaxWidth 同比例(格子的 90%)。</summary>
+    public double NameMaxWidth => Math.Max(32, GridCellSize * 0.9);
+
     // ── 填充跟随主分区 ──
     // 跟随(默认):图标格填充层为空 → 透明,主分区主体填充(颜色/液态玻璃/背景图)
     // 直接透出 — 这就是"同步主分区主体部分的填充"。不跟随时用 Source 的 override

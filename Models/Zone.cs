@@ -18,7 +18,7 @@ public class Zone : AppearanceModel
     public int CornerRadius { get; set; } = 8;
     public bool IsVisible { get; set; } = true;
     public bool IsLocked { get; set; } = false;
-    public int GridSize { get; set; } = 80;
+    public int GridSize { get; set; } = 65;
     public bool SnapToGrid { get; set; } = true;
     public string TitleBarFillColor { get; set; } = "#10FFFFFF"; // title bar background
     public double ControlOpacity { get; set; } = 40;

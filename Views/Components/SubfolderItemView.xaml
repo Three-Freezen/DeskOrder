@@ -3,13 +3,13 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="clr-namespace:DesktopZones.ViewModels"
              x:Name="Root"
-             Width="{Binding CellLayout, Converter={x:Static vm:GridLayoutToSizeConverter.Instance}, ConverterParameter=W}"
-             Height="{Binding CellLayout, Converter={x:Static vm:GridLayoutToSizeConverter.Instance}, ConverterParameter=TotalH}">
+             Width="{Binding BoxSize}">
     <Grid>
         <Grid.RowDefinitions>
-            <!-- 方框本体:和正常图标的 Image 一样高(锁死 1×1 = 56) -->
-            <RowDefinition Height="{Binding CellLayout, Converter={x:Static vm:GridLayoutToSizeConverter.Instance}, ConverterParameter=H}"/>
-            <!-- 名字 label,挂在方框下方(和 ZoneItemTemplate 的 Icon+Name 布局一致) -->
+            <!-- 方框本体:与普通图标的 Image 等高(BoxSize = 格子边长 - 名字行预留,
+                 由 GridCellSize/HideName 派生,跟随分区网格缩放) -->
+            <RowDefinition Height="{Binding BoxSize}"/>
+            <!-- 名字 label,挂在方框下方;整控件不锁总高,名字隐藏时自动收起 -->
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
@@ -31,7 +31,7 @@
                 <Rectangle Fill="{Binding BgImageBrush}" Opacity="{Binding BgOpacity}"
                            IsHitTestVisible="False"/>
                 <Rectangle Fill="{Binding GlassBrush}" IsHitTestVisible="False"/>
-                <UniformGrid Rows="2" Columns="2" Margin="4">
+                <UniformGrid x:Name="ThumbGrid" Rows="2" Columns="2" Margin="4">
                     <Border Background="#14FFFFFF" CornerRadius="3" Margin="1.5">
                         <Image x:Name="ThumbImg0" Stretch="Uniform" Margin="2"
                                RenderOptions.BitmapScalingMode="HighQuality"/>
@@ -58,7 +58,7 @@
                    Foreground="{Binding ItemTextBrush, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=#E0FFFFFF}"
                    TextAlignment="Center"
                    TextTrimming="CharacterEllipsis"
-                   MaxWidth="{Binding ActualWidth, ElementName=Root}"
+                   MaxWidth="{Binding NameMaxWidth}"
                    Margin="1,2,1,1"
                    FontSize="10"
                    HorizontalAlignment="Center"

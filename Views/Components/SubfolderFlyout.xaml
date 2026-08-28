@@ -39,11 +39,12 @@
 
                 <!-- Header: name + ⚙ style button (Edit Style...) -->
                 <DockPanel Grid.Row="0" LastChildFill="True" Margin="0,0,0,6">
-                    <Border DockPanel.Dock="Right" Width="26" Height="22" CornerRadius="4"
+                    <!-- ponytail 2026-08-28: 去掉 ToolTip(它弹出在光标右下、盖住按钮下半,
+                         点击会被 tooltip 的 HWND 吃掉 → ⚙ 时灵时不灵);命中区放大到 32×26。 -->
+                    <Border DockPanel.Dock="Right" Width="32" Height="26" CornerRadius="4"
                             Background="#30FFFFFF" Cursor="Hand"
-                            MouseLeftButtonDown="StyleBtn_Click"
-                            MouseEnter="StyleBtn_Enter" MouseLeave="StyleBtn_Leave"
-                            ToolTip="{loc:Loc Key=Subfolder.EditStyle}">
+                            MouseLeftButtonUp="StyleBtn_Click"
+                            MouseEnter="StyleBtn_Enter" MouseLeave="StyleBtn_Leave">
                         <TextBlock Text="⚙" FontSize="12" Foreground="#C0FFFFFF"
                                    HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Border>

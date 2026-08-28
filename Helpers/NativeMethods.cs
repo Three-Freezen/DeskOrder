@@ -363,6 +363,36 @@ public static class NativeMethods
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
     }
 
+    // ponytail 2026-08-28: 桌面层层级策略(分区/时钟/日历始终低于应用窗口,与锁定态一致)。
+    // 需要 z 序遍历找"最顶部的兄弟桌面层窗口"作为插入锚点,补充 GetWindow 原语。
+    public const uint GW_HWNDFIRST = 0;
+    public const uint GW_HWNDNEXT = 2;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
+
+    public static IntPtr GetProgmanHandle() => FindWindow("Progman", null);
+
+    // ponytail 2026-08-28: 跨分区拖图标 — 命中检测需要从 WindowFromPoint 的返回值
+    // (可能是子窗口)上溯到顶层窗口再和 ZoneWindow 的 hwnd 对表。
+    public const uint GA_ROOT = 2;
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr WindowFromPoint(POINT point);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetAncestor(IntPtr hwnd, uint gaFlags);
+
+    /// <summary>把窗口插到 anchor 正上方(不激活、不动位置尺寸)。anchor 传 IntPtr.Zero
+    /// 等价 HWND_TOP(整条 z 序顶端)——仅作 Progman 缺失时的兜底。</summary>
+    public static void InsertAbove(Window window, IntPtr anchor)
+    {
+        var helper = new WindowInteropHelper(window);
+        helper.EnsureHandle();
+        SetWindowPos(helper.Handle, anchor, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    }
+
     // Make window click-through in transparent areas
     public static void SetClickThrough(Window window, bool clickThrough)
     {

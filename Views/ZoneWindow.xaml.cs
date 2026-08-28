@@ -67,6 +67,12 @@ public partial class ZoneWindow : Window
     private System.Windows.Shapes.Rectangle? _dropIndicator;
     private const double BarThickness = 3, BarLength = 80;
 
+    // ── 跨分区拖动图标 ──
+    // 源窗口在 Item_MouseMove 里用 WindowFromPoint 命中其它 ZoneWindow 并驱动
+    // 其幽灵预览;Item_MouseUp 提交跨分区移动。_externalTarget 只在源窗口上有意义。
+    ZoneWindow? _externalTarget;
+    System.Windows.Controls.StackPanel? _extGhost;
+
     // ── Marquee multi-select (long-press + drag) ──
     // Zone items: hold 350ms → drag draws the marquee (quick drag stays move).
     // Mapping list: hold 350ms on an entry / plain drag on empty list area.
@@ -171,6 +177,14 @@ public partial class ZoneWindow : Window
         SubfolderFlyoutView.ItemDeleteRequested += OnFlyoutItemDelete;
         SubfolderFlyoutView.ItemsChanged += OnFlyoutItemsChanged;
         SubfolderFlyoutView.ClickOutsideRequested += OnFlyoutClickOutside;
+        // ponytail 2026-08-28: 这 4 个事件原先挂在 XAML 属性上 — 但标记编译器对
+        // 本程序集 UserControl 元素的 XAML 事件属性会整组静默丢弃(g.cs 里不生成
+        // 接线、也无警告),导致 ⚙ 编辑样式/鼠标移出 200ms 自动关闭/内层图标拖出
+        // 回分区从功能加入起就一直没生效。必须在代码里订阅。
+        SubfolderFlyoutView.MouseEnter += SubfolderFlyoutView_MouseEnter;
+        SubfolderFlyoutView.MouseLeave += SubfolderFlyoutView_MouseLeave;
+        SubfolderFlyoutView.EditStyleRequested += SubfolderFlyout_EditStyleRequested;
+        SubfolderFlyoutView.ItemDragOutRequested += SubfolderFlyout_ItemDragOutRequested;
         // ponytail 2026-08-26: 键盘焦点可能落在 Popup 内(主窗口收不到 Ctrl+A/Delete),
         // flyout 侧再挂一份同样的快捷键处理。
         SubfolderFlyoutView.PreviewKeyDown += (_, e) =>
@@ -323,9 +337,19 @@ public partial class ZoneWindow : Window
         FolderMapHintBtn.Content = _loc["FolderMap.ChooseAgain"];
     }
 
+    void Window_Deactivated(object? s, EventArgs e)
+    {
+        // 桌面层策略:与锁定态一致,失去焦点后回落到壁纸上方,不再浮在应用窗口之上。
+        // IsVisible 守卫防关窗 teardown 期间 EnsureHandle 抛异常(时钟/日历同款)。
+        if (IsVisible) NativeMethods.PinBelowProgman(this);
+        // 拖拽中失焦(如 Alt+Tab):清掉目标窗口上的幽灵,避免残留。
+        _externalTarget?.HideExternalDropGhost();
+        _externalTarget = null;
+    }
+
     void OnLoad(object s, RoutedEventArgs e)
     {
-        if ((DataContext as ZoneViewModel)?.IsLocked != true) NativeMethods.PinToDesktop(this); NativeMethods.SetToolWindow(this);
+        DesktopLayer.BringToFront(this); NativeMethods.SetToolWindow(this);
         // ponytail 2026-08-26 ghost-ring fix: kill the DWM frame shadow that hugs the
         // collapsed RestoreButton (visible as a dark ring on the wallpaper).
         NativeMethods.DisableDwmFrameShadow(this);
@@ -1000,7 +1024,12 @@ public partial class ZoneWindow : Window
         // null (startup with StartMinimized + zones shown directly). See App.EnsureManagementWindow.
         System.Diagnostics.Trace.WriteLine("[SubFlyout] EditStyleRequested: ⚙ 点击 → 打开样式设置,Host=" + flyout.ViewModel.HostSubItem.Id);
         (System.Windows.Application.Current as App)?.EnsureManagementWindow();
-        PropertyWindowService.OpenOrFocus(flyout.ViewModel.HostSubItem, this);
+        // ponytail 2026-08-28: 贴 ⚙ 点击点弹出 — 历史位置可能罩住 ⚙(✕ 落在光标下,
+        // 用户下一次点击把窗口关掉,表现为"打不开")。锚点缺失时走旧路径。
+        if (flyout.StyleBtnScreenDip is { } anchor)
+            PropertyWindowService.OpenOrFocus(flyout.ViewModel.HostSubItem, this, anchor);
+        else
+            PropertyWindowService.OpenOrFocus(flyout.ViewModel.HostSubItem, this);
     }
 
     /// <summary>拖出:从 Flyout 里把一个内层图标拖回主分区。以 itemVm 为 payload 发起
@@ -1193,8 +1222,13 @@ public partial class ZoneWindow : Window
         }
         else
         {
+            // ponytail 2026-08-28: 从恢复按钮态展开走展开动画(与 CollapseAnimated
+            // 对称——关有开也要有,样式面板开关窗口从此两向都有动画);已展开的
+            // 重复 Show(如「全部显示」)仍瞬时对齐,不重播。
+            bool fromButton = RestoreButton.Visibility == Visibility.Visible;
             MainContent.Visibility = Visibility.Visible; RestoreButton.Visibility = Visibility.Collapsed;
-            _hover?.SnapToExpanded();
+            if (fromButton) _hover?.ExpandAnimated(permanent: true);
+            else _hover?.SnapToExpanded();
         }
         _zone.IsVisible = true;
         // ponytail: BP-A — Visibility=Visible is processed in the next layout pass, so a
@@ -1205,7 +1239,7 @@ public partial class ZoneWindow : Window
         Dispatcher.BeginInvoke(new Action(ApplyStyle),
             System.Windows.Threading.DispatcherPriority.Loaded);
         RefreshFolderMapping();
-        if ((DataContext as ZoneViewModel)?.IsLocked != true) NativeMethods.PinToDesktop(this);
+        DesktopLayer.BringToFront(this);
         NativeMethods.SetRoundedCorners(this, (int)_zone.CornerRadius);
         _mgr.FireZoneVisibilityChanged(_zone.Id, true);
     }
@@ -1266,7 +1300,7 @@ public partial class ZoneWindow : Window
             // 都在窗口失去焦点的情况下触发,残影最明显。
             NativeMethods.DisableRoundedCorners(this);
             AcrylicHelper.DisableBlur(this);
-            if ((DataContext as ZoneViewModel)?.IsLocked != true) NativeMethods.PinToDesktop(this);
+            DesktopLayer.BringToFront(this);
             if (waveDelayMs > 0)
                 _hover?.CollapseAfterDelay(waveDelayMs, null);
             else
@@ -1458,7 +1492,7 @@ public partial class ZoneWindow : Window
             return;
         }
 
-        if (vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
+        DesktopLayer.BringToFront(this);
         _zone.X = Left; _zone.Y = Top;
         _mgr.SaveConfig();
     }
@@ -1552,7 +1586,7 @@ public partial class ZoneWindow : Window
         bool left = gr == GripTL || gr == GripBL;
         bool top = gr == GripTL || gr == GripTR;
         _snapResize?.Start(e, left, top, !left, !top, 120, 80);
-        if (vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
+        DesktopLayer.BringToFront(this);
         e.Handled = true;
     }
 
@@ -2528,7 +2562,7 @@ public partial class ZoneWindow : Window
             RestoreButton.ReleaseMouseCapture();
             _snapDrag?.Start(e, () =>
             {
-                if ((DataContext as ZoneViewModel)?.IsLocked != true) NativeMethods.PinToDesktop(this);
+                DesktopLayer.BringToFront(this);
                 _zone.X = Left; _zone.Y = Top; _mgr.SaveConfig();
             });
         }
@@ -2615,10 +2649,24 @@ public partial class ZoneWindow : Window
         // see PropertyWindowManager.ResolvePopPosition.
         // ponytail 2026-08-26: a merged window's gear opens the standalone
         // merged-group editor; standalone windows keep the per-zone editor.
-        if (_zone.MergedGroupMembership.SubZoneIds.Count > 0)
-            PropertyWindowService.OpenOrFocus(MergedGroupTarget.For(_zone), this);
-        else
-            PropertyWindowService.OpenOrFocus(_zone, this);
+        // ponytail 2026-08-28: 有 ⚙ 点击点坐标时贴点弹出(同次级文件夹,避免历史
+        // rect 罩住 ⚙ 导致 ✕ 被下一次点击误关)。
+        object target = _zone.MergedGroupMembership.SubZoneIds.Count > 0
+            ? MergedGroupTarget.For(_zone) : _zone;
+        if (s is System.Windows.FrameworkElement fe)
+        {
+            try
+            {
+                var screenPx = fe.PointToScreen(e.GetPosition(fe));
+                var dpi = System.Windows.Media.VisualTreeHelper.GetDpi(fe);
+                var anchor = new Point(screenPx.X / dpi.DpiScaleX, screenPx.Y / dpi.DpiScaleY);
+                PropertyWindowService.OpenOrFocus(target, this, anchor);
+                e.Handled = true;
+                return;
+            }
+            catch { /* 未连接等 — 落回旧路径 */ }
+        }
+        PropertyWindowService.OpenOrFocus(target, this);
         e.Handled = true;
     }
 
@@ -2689,6 +2737,29 @@ public partial class ZoneWindow : Window
             _dragging = true;
             _de.Opacity = 0.7;
         }
+
+        // 跨分区拖动:光标悬停到其它分区窗口 → 幽灵预览落到目标格位,源内指示器
+        // 全部隐藏;移回源分区(或悬停在应用窗口上)则恢复正常预览路径。
+        var extScreen = PointToScreen(e.GetPosition(this));
+        var extTarget = FindZoneWindowAt(extScreen);
+        if (extTarget != null)
+        {
+            if (!ReferenceEquals(extTarget, _externalTarget))
+            {
+                _externalTarget?.HideExternalDropGhost();
+                _externalTarget = extTarget;
+            }
+            HideDropIndicator();
+            ClearSubfolderDragScale();
+            extTarget.ShowExternalDropGhost(_dv, extScreen);
+            return;
+        }
+        if (_externalTarget != null)
+        {
+            _externalTarget.HideExternalDropGhost();
+            _externalTarget = null;
+        }
+
         // live X/Y preview — icon tracks cursor; Item_MouseUp commits reorder/move.
         _dv.X = Math.Max(0, Math.Min(_is.X + d.X, _zone.Width - ItemW));
         _dv.Y = Math.Max(0, Math.Min(_is.Y + d.Y, _zone.Height - ItemH));
@@ -2721,12 +2792,20 @@ public partial class ZoneWindow : Window
         if (_de != null) { _de.ReleaseMouseCapture(); _de.Opacity = 1.0; }
         if (_dragging)
         {
-            // 命中 SubFolder → 移入;否则普通换位/移动(次级文件夹图标与普通图标同规则)。
-            var overSub = FindSubfolderTarget(e.GetPosition(ItemsHost));
-            if (overSub != null && _dv.Type != ItemType.SubFolder)
-                MoveIntoSubfolder(_dv, overSub);
-            else if (_zone.SnapToGrid) ReorderItemInto(_dv, _dv.X, _dv.Y);
-            else { _vm.MoveItem(_dv.Id, _dv.X, _dv.Y, snapToGrid: false); _vm.RefreshMergedItems(); }
+            // 跨分区提交优先:悬停在其它分区上释放 → 移动到该分区;拒收/未悬停
+            // 则回退本地换位/移动(次级文件夹图标与普通图标同规则)。
+            var ext = _externalTarget;
+            _externalTarget = null;
+            ext?.HideExternalDropGhost();
+            if (ext == null || !CommitCrossZoneMove(ext, PointToScreen(e.GetPosition(this))))
+            {
+                // 命中 SubFolder → 移入;否则普通换位/移动(次级文件夹图标与普通图标同规则)。
+                var overSub = FindSubfolderTarget(e.GetPosition(ItemsHost));
+                if (overSub != null && _dv.Type != ItemType.SubFolder)
+                    MoveIntoSubfolder(_dv, overSub);
+                else if (_zone.SnapToGrid) ReorderItemInto(_dv, _dv.X, _dv.Y);
+                else { _vm.MoveItem(_dv.Id, _dv.X, _dv.Y, snapToGrid: false); _vm.RefreshMergedItems(); }
+            }
         }
         else if (_dv.Type == ItemType.SubFolder)
         {
@@ -2737,6 +2816,43 @@ public partial class ZoneWindow : Window
         HideDropIndicator();
         ClearSubfolderDragScale();
         _dv = null; _de = null; _dragging = false;
+    }
+
+    /// <summary>屏幕点下的可接收分区窗口(排除自身;最小化成恢复按钮的分区不可接收)。
+    /// WindowFromPoint 尊重真实 z 序与分层窗口透明像素——覆盖在目标分区上的应用
+    /// 窗口会自然挡住投放。</summary>
+    ZoneWindow? FindZoneWindowAt(Point screenPt)
+    {
+        var hwnd = NativeMethods.WindowFromPoint(new NativeMethods.POINT
+        {
+            x = (int)Math.Round(screenPt.X),
+            y = (int)Math.Round(screenPt.Y)
+        });
+        if (hwnd != IntPtr.Zero) hwnd = NativeMethods.GetAncestor(hwnd, NativeMethods.GA_ROOT);
+        if (hwnd == IntPtr.Zero) return null;
+        foreach (var z in _mgr.Zones)
+        {
+            if (z.Id == _zone.Id) continue;
+            if (_mgr.GetZoneWindow(z.Id) is not ZoneWindow zw || !zw.AcceptsExternalDrop) continue;
+            if (new WindowInteropHelper(zw).Handle == hwnd) return zw;
+        }
+        return null;
+    }
+
+    /// <summary>跨分区移动提交:把拖拽图标从其所属分区(合并时可能是子分区)移除,
+    /// 加入目标窗口当前显示的分区并统一落盘刷新(两个窗口都经 ZonesChanged 重建)。
+    /// 返回 false = 目标拒收,调用方回退本地换位。</summary>
+    bool CommitCrossZoneMove(ZoneWindow target, Point screenPt)
+    {
+        if (_dv == null) return false;
+        var raw = ResolveSourceZoneItem(_dv);
+        if (raw == null) return false;
+        var owner = OwnerZoneOf(_dv) ?? _zone;
+        if (!target.ReceiveExternalItem(raw, screenPt)) return false;
+        owner.Items.Remove(raw);
+        _mgr.SaveConfig();
+        _mgr.NotifyChanged();
+        return true;
     }
 
     // ── SubFolder 图标右键菜单 ──
@@ -3266,6 +3382,112 @@ public partial class ZoneWindow : Window
 
     void HideDropIndicator()
     { if (_dropIndicator != null) _dropIndicator.Visibility = Visibility.Collapsed; }
+
+    // ── 跨分区拖动图标:目标侧 API(由源窗口在拖拽悬停时驱动) ──
+
+    /// <summary>是否可接收来自其它分区的拖放(最小化成恢复按钮时不可)。</summary>
+    public bool AcceptsExternalDrop => IsVisible && MainContent.Visibility == Visibility.Visible;
+
+    /// <summary>当前显示的分区:合并主区 = 选中的子分区页签;普通分区 = 自身。</summary>
+    Zone? CurrentReceiveZone()
+    {
+        var id = _vm.SelectedSubZoneId ?? _zone.Id;
+        return id == _zone.Id ? _zone : _mgr.Zones.FirstOrDefault(z => z.Id == id);
+    }
+
+    /// <summary>拖放幽灵:半透明图标+名称预览,落在悬停点吸附后的格位。
+    /// 每次鼠标移动都会重调以跟随光标。</summary>
+    public void ShowExternalDropGhost(ZoneItemViewModel sourceVm, Point screenPt)
+    {
+        if (!AcceptsExternalDrop) return;
+        var recv = CurrentReceiveZone();
+        if (recv == null) return;
+
+        int gs = recv.GridSize;
+        var local = PointFromScreen(screenPt);
+        double x, y;
+        if (recv.SnapToGrid)
+        {
+            x = ZoneViewModel.SnapToGrid(local.X - ItemW / 2, gs);
+            y = ZoneViewModel.SnapToGridY(local.Y - ItemH / 2, gs);
+        }
+        else { x = local.X - ItemW / 2; y = local.Y - ItemH / 2; }
+        x = Math.Clamp(x, 0, Math.Max(0, _zone.Width - ItemW));
+        y = Math.Clamp(y, 0, Math.Max(0, _zone.Height - ItemH));
+
+        // 幽灵按目标分区的图标尺寸公式预览(与 CurrentIconSize 同式,目标分区私有)
+        double iconSize = Math.Max(8, _zone.GridSize - (_zone.HideAppName ? 6 : 18));
+        if (_extGhost == null)
+        {
+            _extGhost = new StackPanel
+            {
+                IsHitTestVisible = false,
+                Opacity = 0.65,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Top
+            };
+            var img = new Image
+            {
+                Stretch = Stretch.Uniform,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, 0, 0, 4)
+            };
+            RenderOptions.SetBitmapScalingMode(img, BitmapScalingMode.HighQuality);
+            var tb = new TextBlock
+            {
+                FontSize = 10,
+                TextAlignment = TextAlignment.Center,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                Foreground = ItemTextBrush
+            };
+            _extGhost.Children.Add(img);
+            _extGhost.Children.Add(tb);
+            DropIndicatorLayer.Children.Add(_extGhost);
+        }
+        var gImg = (Image)_extGhost.Children[0];
+        var gName = (TextBlock)_extGhost.Children[1];
+        gImg.Source = sourceVm.Icon;
+        gImg.Width = gImg.Height = iconSize;
+        gName.Text = sourceVm.Name;
+        gName.MaxWidth = Math.Max(32, _zone.GridSize * 0.9);
+        Canvas.SetLeft(_extGhost, x);
+        Canvas.SetTop(_extGhost, y);
+    }
+
+    public void HideExternalDropGhost()
+    {
+        if (_extGhost == null) return;
+        DropIndicatorLayer.Children.Remove(_extGhost);
+        _extGhost = null;
+    }
+
+    /// <summary>接收来自其它分区拖来的图标:落到悬停点吸附后的格位(被占时与导入
+    /// 图标同规则找最近空格),加入当前显示的分区。返回 false = 无法接收,源窗口
+    /// 继续走本地换位逻辑。</summary>
+    public bool ReceiveExternalItem(ZoneItem raw, Point screenPt)
+    {
+        var recv = CurrentReceiveZone();
+        if (recv == null || !AcceptsExternalDrop) return false;
+        HideExternalDropGhost();
+
+        var local = PointFromScreen(screenPt);
+        int gs = recv.GridSize;
+        double x, y;
+        if (recv.SnapToGrid)
+        {
+            x = ZoneViewModel.SnapToGrid(local.X - ItemW / 2, gs);
+            y = ZoneViewModel.SnapToGridY(local.Y - ItemH / 2, gs);
+            if (recv.Items.Any(i => i.Id != raw.Id && Math.Abs(i.X - x) < 1 && Math.Abs(i.Y - y) < 1))
+                (x, y) = ZoneLayout.FindFreeSpot(recv.Items.Where(i => i.Id != raw.Id), _zone.Width, _zone.Height, ItemW, ItemH);
+        }
+        else { x = local.X - ItemW / 2; y = local.Y - ItemH / 2; }
+        x = Math.Clamp(x, 0, Math.Max(0, _zone.Width - ItemW));
+        y = Math.Clamp(y, 0, Math.Max(0, _zone.Height - ItemH));
+
+        raw.X = x; raw.Y = y;
+        recv.Items.Add(raw);
+        return true;
+    }
 
     void Item_Enter(object s, MouseEventArgs e)
     {

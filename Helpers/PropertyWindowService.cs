@@ -61,6 +61,15 @@ public static class PropertyWindowService
         _main?.OpenFloatingProperty(target, requester);
     }
 
+    /// <summary>ponytail 2026-08-28: gear 弹出 — anchorDip 为 ⚙ 点击点屏幕 DIP 坐标,
+    /// 浮窗贴着它右下开(跳过历史 rect,避免窗口压住光标导致 ✕ 被下一次点击误关)。</summary>
+    public static void OpenOrFocus(object target, Window? requester, Point anchorDip)
+    {
+        EnsureMain();
+        System.Diagnostics.Trace.WriteLine($"[SubFlyout] OpenOrFocus(anchor): main={(_main != null)} mainVisible={(_main?.IsVisible ?? false)} anchor=({anchorDip.X:F0},{anchorDip.Y:F0})");
+        _main?.OpenFloatingProperty(target, requester, anchorDip);
+    }
+
     /// <summary>Close every property editor (floating window + docked tab/panel)
     /// currently showing <paramref name="target"/>. The delete funnels
     /// (zone / component / note / subfolder removal) call this right after the

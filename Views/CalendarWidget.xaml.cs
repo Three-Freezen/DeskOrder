@@ -35,6 +35,9 @@ public partial class CalendarWidget : Window
     public CalendarWidget(DesktopCalendar calendar, WidgetService widgetService)
     {
         InitializeComponent();
+        // 桌面层策略:失去焦点后回落到壁纸上方(与锁定态一致),不再浮在应用窗口之上。
+        // IsVisible 守卫防关窗 teardown 期间 EnsureHandle 抛异常(时钟同款)。
+        Deactivated += (_, _) => { if (IsVisible) NativeMethods.PinBelowProgman(this); };
         _calendar = calendar;
         _widgetService = widgetService;
         _vm = new CalendarViewModel(calendar);
@@ -143,7 +146,7 @@ public partial class CalendarWidget : Window
 
     void OnLoad(object s, RoutedEventArgs e)
     {
-        if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
+        DesktopLayer.BringToFront(this);
         NativeMethods.SetToolWindow(this);
         NativeMethods.DisableDwmFrameShadow(this);
         ApplyAcrylic();
@@ -619,7 +622,7 @@ public partial class CalendarWidget : Window
         if (_vm?.IsLocked == true) return;
         _snapDrag?.Start(e, () =>
         {
-            if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
+            DesktopLayer.BringToFront(this);
             _calendar.X = Left; _calendar.Y = Top;
         });
     }
@@ -1065,8 +1068,12 @@ public partial class CalendarWidget : Window
         }
         else
         {
+            // ponytail 2026-08-28: 从恢复按钮态展开走展开动画(与 CollapseAnimated
+            // 对称——关有开也要有);已展开的重复 Show 仍瞬时对齐,不重播。
+            bool fromButton = RestoreButton.Visibility == Visibility.Visible;
             MainContent.Visibility = Visibility.Visible; RestoreButton.Visibility = Visibility.Collapsed;
-            _hover?.SnapToExpanded();
+            if (fromButton) _hover?.ExpandAnimated(permanent: true);
+            else _hover?.SnapToExpanded();
         }
         // ponytail: ghost-glass fix — re-apply acrylic AFTER SnapToExpanded so the
         // expanded-state gate sees IsExpanded == true and re-enables liquid glass when
@@ -1076,9 +1083,8 @@ public partial class CalendarWidget : Window
         MinWidth = 260; MinHeight = 460;
         Width = _calendar.Width > 260 ? _calendar.Width : 320;
         Height = _calendar.Height > 340 ? _calendar.Height : 440;
-        if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
+        DesktopLayer.BringToFront(this);
         NativeMethods.SetRoundedCorners(this, 10);
-        if (_vm?.IsLocked != true) Topmost = true;
         // ponytail: 2026-08-23 — persist LAST so a failure in the model/event path can
         // no longer abort the visual expansion (see ShowClock for the full rationale).
         if (!skipResync)
@@ -1147,7 +1153,7 @@ public partial class CalendarWidget : Window
         {
             // ponytail: minimized — let HoverExpandBehavior handle visibility/scale
             AcrylicHelper.DisableBlur(this);
-            if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
+            DesktopLayer.BringToFront(this);
             if (waveDelayMs > 0)
                 _hover?.CollapseAfterDelay(waveDelayMs, null);
             else
@@ -1204,7 +1210,7 @@ public partial class CalendarWidget : Window
             RestoreButton.ReleaseMouseCapture();
             _snapDrag?.Start(e, () =>
             {
-                if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
+                DesktopLayer.BringToFront(this);
                 _calendar.X = Left; _calendar.Y = Top;
             });
         }

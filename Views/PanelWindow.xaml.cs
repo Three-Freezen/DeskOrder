@@ -199,6 +199,21 @@ public partial class PanelWindow : Window
         // window position (offset 24,24) instead of jumping somewhere else.
         // Target is the live PanelConfig POCO (not AppConfig) so the property
         // editor dispatches to the 面板设置 field tree.
+        // ponytail 2026-08-28: 有 ⚙ 点击点坐标时贴点弹出(同分区,避免历史 rect
+        // 罩住 ⚙ 导致 ✕ 被下一次点击误关)。
+        if (s is System.Windows.FrameworkElement fe)
+        {
+            try
+            {
+                var screenPx = fe.PointToScreen(e.GetPosition(fe));
+                var dpi = System.Windows.Media.VisualTreeHelper.GetDpi(fe);
+                var anchor = new System.Windows.Point(screenPx.X / dpi.DpiScaleX, screenPx.Y / dpi.DpiScaleY);
+                PropertyWindowService.OpenOrFocus(_zoneManager.GetConfig().Panel, this, anchor);
+                e?.Handled = true;
+                return;
+            }
+            catch { /* 未连接等 — 落回旧路径 */ }
+        }
         PropertyWindowService.OpenOrFocus(_zoneManager.GetConfig().Panel, this);
         e?.Handled = true;
     }
@@ -1165,7 +1180,11 @@ public partial class PanelWindow : Window
             if (f.ViewModel?.HostSubItem is { } host)
             {
                 (Application.Current as App)?.EnsureManagementWindow();
-                PropertyWindowService.OpenOrFocus(host, this);
+                // ponytail 2026-08-28: 贴 ⚙ 点击点弹出(同分区,避免历史 rect 罩住 ⚙)。
+                if (f.StyleBtnScreenDip is { } anchor)
+                    PropertyWindowService.OpenOrFocus(host, this, anchor);
+                else
+                    PropertyWindowService.OpenOrFocus(host, this);
             }
         };
         flyout.PreviewKeyDown += (_, ke) =>

@@ -329,6 +329,44 @@ public partial class App : System.Windows.Application
         {
             Dispatcher.BeginInvoke(new Action(RunContextMenuDiagnostic), DispatcherPriority.ApplicationIdle);
         }
+
+        // ── Debug: --diag-propwin 程序化打开第一个分区的属性浮窗(5 秒状态自检)──
+        //    定位"快照 Opacity=1 可见但用户看不见"的最终真相:配合截图亲眼确认。
+        if (e.Args.Any(a => a == "--diag-propwin"))
+        {
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                try
+                {
+                    var zone = _zoneManager!.Zones.FirstOrDefault();
+                    if (zone == null) { MessageBox.Show("没有分区"); return; }
+                    Helpers.PropertyWindowService.OpenOrFocus(zone);
+                    var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+                    int n = 0;
+                    t.Tick += (_, _) =>
+                    {
+                        n++;
+                        var w = DesktopZones.Views.Components.PropertyWindowManager.Instance.GetFloating(zone);
+                        if (w == null)
+                        {
+                            System.Diagnostics.Trace.WriteLine($"[PropWin] diag{n}: 窗口已被关闭");
+                            t.Stop();
+                            return;
+                        }
+                        var hwnd = new System.Windows.Interop.WindowInteropHelper(w).Handle;
+                        System.Diagnostics.Trace.WriteLine(
+                            $"[PropWin] diag{n}: '{w.Title}' vis={w.IsVisible} op={w.Opacity:F2} at ({w.Left:F0},{w.Top:F0}) hwnd=0x{hwnd.ToInt64():X}");
+                        if (n >= 5) t.Stop();
+                    };
+                    t.Start();
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(ex.ToString());
+                }
+            }), DispatcherPriority.ApplicationIdle);
+            return;
+        }
 #endif
 
         // ── Debug: --spawn-widget=KIND auto-creates one widget for reference screenshots ──
@@ -479,7 +517,9 @@ public partial class App : System.Windows.Application
             if (window.RestoreButton.Visibility == Visibility.Visible)
             {
                 // Minimized to restore button → show full note
-                window.ShowNote();
+                // ponytail 2026-08-28: 快捷键唤出走"聚焦显示器居中 + 便签自己的展开动画",
+                // 与面板 hotkey 行为一致;托盘/按钮点击仍走 ShowNote 原地展开。
+                window.ShowFromHotkey();
             }
             else if (window.IsVisible)
             {
@@ -496,14 +536,20 @@ public partial class App : System.Windows.Application
             }
             else
             {
-                window.ShowNote();
+                window.ShowFromHotkey();
             }
         }
         else
         {
             var note = _notesService?.Notes.FirstOrDefault(n => n.Id == noteId);
             if (note != null)
+            {
                 OpenNoteWindow(note);
+                // 快捷键新建/唤出的窗口同样落到聚焦显示器中央(窗口已按原位置
+                // 展开,这里只搬位置;展开动画由窗口自身的入场动画负责)
+                if (_notesService.Windows.TryGetValue(noteId, out var w))
+                    w.CenterOnFocusedScreen();
+            }
         }
     }
 

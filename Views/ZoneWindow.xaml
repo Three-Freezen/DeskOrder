@@ -18,6 +18,7 @@
         PreviewKeyDown="Window_PreviewKeyDown"
         MouseMove="Window_MouseMove"
         MouseLeftButtonUp="Window_MouseLeftButtonUp"
+        Deactivated="Window_Deactivated"
         AllowDrop="True"
         DragEnter="Window_DragEnter"
         DragOver="Window_DragOver"
@@ -274,12 +275,11 @@
                                                    Foreground="#80FFFFFF"
                                                    HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                     </Border>
-                                    <Border x:Name="EditBtn" Width="18" Height="16"
+                                    <Border x:Name="EditBtn" Width="22" Height="20"
                                             CornerRadius="3" Background="#30FFFFFF"
                                             Cursor="Hand" Margin="0,0,3,0"
-                                            MouseLeftButtonDown="EditButton_Click"
-                                            MouseEnter="Ctrl_Enter" MouseLeave="Ctrl_Leave"
-                                            ToolTip="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Zone.Edit]}">
+                                            MouseLeftButtonUp="EditButton_Click"
+                                            MouseEnter="Ctrl_Enter" MouseLeave="Ctrl_Leave">
                                         <TextBlock x:Name="EditBtnText" Text="⚙" FontSize="9"
                                                    Foreground="#80FFFFFF"
                                                    HorizontalAlignment="Center" VerticalAlignment="Center"/>
@@ -528,11 +528,11 @@
         <Popup x:Name="SubfolderFlyoutPopup" Placement="AbsolutePoint"
                AllowsTransparency="True" StaysOpen="True"
                Closed="SubfolderFlyoutPopup_Closed">
-            <c:SubfolderFlyout x:Name="SubfolderFlyoutView"
-                               MouseEnter="SubfolderFlyoutView_MouseEnter"
-                               MouseLeave="SubfolderFlyoutView_MouseLeave"
-                               EditStyleRequested="SubfolderFlyout_EditStyleRequested"
-                               ItemDragOutRequested="SubfolderFlyout_ItemDragOutRequested"/>
+            <!-- 事件接线在 code-behind 构造函数里(见 SubfolderFlyoutView 事件订阅处) —
+                 本程序集 UserControl 元素上的 XAML 事件属性会被标记编译器整组静默丢弃
+                 (生成代码里没有任何接线,也无警告),曾是 ⚙ 设置按钮/移出自动关闭/
+                 拖出回分区三个功能同时失效的根因。 -->
+            <c:SubfolderFlyout x:Name="SubfolderFlyoutView"/>
         </Popup>
     </Grid>
 </Window>

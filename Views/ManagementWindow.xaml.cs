@@ -447,6 +447,11 @@ public partial class ManagementWindow : Window
     public void OpenFloatingProperty(object target, Window? requester) =>
         PropertyWindowManager.Instance.PopOutTarget(target, _configService, this, requester: requester);
 
+    /// <summary>ponytail 2026-08-28: gear 弹出 — anchorDip 为 ⚙ 点击点的屏幕 DIP 坐标,
+    /// 浮窗贴着它右下开(不落历史 rect,避免 ✕ 压在光标下被下一次点击误关)。</summary>
+    public void OpenFloatingProperty(object target, Window? requester, Point anchorDip) =>
+        PropertyWindowManager.Instance.PopOutTarget(target, _configService, this, requester: requester, cursorScreen: anchorDip, anchorAtCursor: true);
+
     // ponytail: drag-out entry — caller passes the cursor's screen position so
     // the new floating PropertyWindow opens where the user dropped the tab,
     // instead of falling through to the right-edge fallback in ResolvePopPosition.

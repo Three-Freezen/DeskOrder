@@ -47,8 +47,12 @@ public class PropertyWindowManager
     /// <summary>Pop-out flow — caller is a window outside the workspace (zone
     /// gear button, panel settings button, etc.). Honours the "no duplicate
     /// editor per target" rule by reusing an existing floating or by detaching
-    /// the docked panel's same target before opening a new floating.</summary>
-    public void PopOutTarget(object target, ConfigService configService, ManagementWindow main, Window? requester = null, Point? cursorScreen = null, Size? initialSize = null)
+    /// the docked panel's same target before opening a new floating.
+    /// <paramref name="anchorAtCursor"/>: gear 弹出用 — 窗口贴着 cursorScreen 右下
+    /// 16px 开(无视历史 rect)。历史 rect 常恰好罩住 ⚙ 本身,窗口压着光标弹出时
+    //  staged 残留 down 会命中 ✕,用户下一次点击(再点一次 ⚙)把窗口关掉,
+    /// 表现为"设置界面永远打不开"。</summary>
+    public void PopOutTarget(object target, ConfigService configService, ManagementWindow main, Window? requester = null, Point? cursorScreen = null, Size? initialSize = null, bool anchorAtCursor = false)
     {
         if (target == null) return;
 
@@ -78,7 +82,7 @@ public class PropertyWindowManager
             main.DockedTabs.CloseTab(key);
 
         // 3. Open fresh floating at requester (or persisted / main window) position.
-        var pos = ResolvePopPosition(target, requester, main, configService, cursorScreen);
+        var pos = ResolvePopPosition(target, requester, main, configService, cursorScreen, anchorAtCursor);
         System.Diagnostics.Trace.WriteLine($"[SubFlyout] PopOutTarget: pos=({pos.x:F0},{pos.y:F0}) → OpenFloating");
         OpenFloating(target, configService, main, pos, initialSize);
     }
@@ -153,7 +157,11 @@ public class PropertyWindowManager
         // Window"),EnsureManagementWindow 创建的管理窗口可能从未显示。IsVisible 为 true 时
         // 才挂 Owner,并再包一层 try/catch 兜底:任何异常都不阻断设置面板打开(浮动窗口
         // 本身 Topmost,无 Owner 也能正常显示)。
-        if (main.IsVisible)
+        // ponytail 2026-08-28: 最小化的窗口 IsVisible 仍为 true,但 Win32 会连带隐藏
+        // minimized Owner 的所有 owned 窗口 — 浮窗 Show 完即被系统藏起,用户视角 =
+        // "设置界面根本不出现"(实测 ownerState=Minimized 时 100% 复现)。挂 Owner 前必须
+        // 排除最小化状态;无 Owner 的浮窗自身 Topmost + Activate,显示不受影响。
+        if (main.IsVisible && main.WindowState != WindowState.Minimized)
         {
             try { w.Owner = main; }
             catch (Exception ex)
@@ -207,12 +215,28 @@ public class PropertyWindowManager
                 args.Handled = true;
         };
         _floating[target] = w;
-        System.Diagnostics.Trace.WriteLine($"[SubFlyout] OpenFloating: 即将 Show() — Left={w.Left:F0} Top={w.Top:F0} {w.Width:F0}x{w.Height:F0} Topmost={w.Topmost} State={w.WindowState}");
+        System.Diagnostics.Trace.WriteLine($"[SubFlyout] OpenFloating: 即将 Show() — Left={w.Left:F0} Top={w.Top:F0} {w.Width:F0}x{w.Height:F0} Topmost={w.Topmost} State={w.WindowState} owner={w.Owner?.Title ?? "无"} ownerState={(w.Owner as ManagementWindow)?.WindowState.ToString() ?? "n/a"}");
         w.Show();
         // ponytail 2026-08-26: Show 后显式 Activate — 无 Owner 的浮动窗口也要抢到
         // 前台焦点,避免被分区窗口(桌面挂件)压住看不见。
         w.Activate();
         System.Diagnostics.Trace.WriteLine($"[SubFlyout] OpenFloating: Show 完成 — IsVisible={w.IsVisible} Left={w.Left:F0} Top={w.Top:F0} Opacity={w.Opacity}");
+#if DEBUG
+        // ponytail 2026-08-28: 诊断 — Show 后 500ms 间隔拍 4 次快照,定位
+        // "Show 完成 IsVisible=True 但用户看不见"(淡入未跑 / 被自动关闭 / Owner 最小化连带隐藏)。
+        var snapWin = w;
+        var snapTitle = PropertyWindowManager.TitleOf(target);
+        var snap = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        int ticks = 0;
+        snap.Tick += (_, _) =>
+        {
+            ticks++;
+            System.Diagnostics.Trace.WriteLine(
+                $"[PropWin] 快照{ticks}: '{snapTitle}' IsVisible={snapWin.IsVisible} Opacity={snapWin.Opacity:F2} Visibility={snapWin.Visibility} State={snapWin.WindowState} at ({snapWin.Left:F0},{snapWin.Top:F0}) {snapWin.ActualWidth:F0}x{snapWin.ActualHeight:F0}");
+            if (ticks >= 4) snap.Stop();
+        };
+        snap.Start();
+#endif
     }
 
     /// <summary>夹取窗口左上角到工作区,保证至少有一部分可见(兜底历史遗留的屏幕外坐标)。</summary>
@@ -326,9 +350,15 @@ public class PropertyWindowManager
     /// <summary>Resolve the pop-out position: target's per-Id rect first, then
     /// the requester offset, then a 24-px cascade off the most recently opened
     /// floating (avoid stacking), then a sensible offset from the main
-    /// management window, then the work-area corner.</summary>
-    static (double x, double y) ResolvePopPosition(object target, Window? requester, ManagementWindow main, ConfigService configService, Point? cursorScreen = null)
+    /// management window, then the work-area corner.
+    /// <paramref name="anchorAtCursor"/>: 跳过历史 rect,贴 cursorScreen 右下开
+    /// (gear 弹出专用 — 避免 ✕ 落在光标下被下一次点击误关)。</summary>
+    static (double x, double y) ResolvePopPosition(object target, Window? requester, ManagementWindow main, ConfigService configService, Point? cursorScreen = null, bool anchorAtCursor = false)
     {
+        // 0. Gear 弹出 — 窗口贴着点击点右下 16px 开,光标保持在窗口外。
+        if (anchorAtCursor && cursorScreen.HasValue)
+            return CascadeIfColliding(cursorScreen.Value.X + 16, cursorScreen.Value.Y + 16, main);
+
         // 1. Per-Id persisted rect.
         try
         {

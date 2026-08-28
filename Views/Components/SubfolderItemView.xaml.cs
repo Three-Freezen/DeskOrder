@@ -35,8 +35,12 @@ public partial class SubfolderItemView : UserControl
 
     static void OnHideNameChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
-        if (d is SubfolderItemView v && v.SubNameText != null)
-            v.SubNameText.Visibility = (bool)e.NewValue ? Visibility.Collapsed : Visibility.Visible;
+        if (d is SubfolderItemView v)
+        {
+            if (v._vm != null) v._vm.HideName = (bool)e.NewValue;
+            if (v.SubNameText != null)
+                v.SubNameText.Visibility = (bool)e.NewValue ? Visibility.Collapsed : Visibility.Visible;
+        }
     }
 
     SubfolderItemViewModel? _vm;
@@ -56,10 +60,15 @@ public partial class SubfolderItemView : UserControl
             {
                 if (_vm != null) _vm.PropertyChanged -= OnVmPropertyChanged;
                 _vm = new SubfolderItemViewModel(zvm.Source, svc);
+                // ponytail 2026-08-28: 尺寸跟随分区网格 — 外层 VM 的 ItemSize 就是
+                // Zone.GridSize;HideName 可能先于/晚于 DataContext 到达,两处都镜像。
+                _vm.GridCellSize = zvm.ItemSize;
+                _vm.HideName = HideName;
                 _vm.PropertyChanged += OnVmPropertyChanged;
                 // Replace the VM so the XAML bindings (CellLayout / Source.* / name) resolve.
                 DataContext = _vm;
                 UpdateThumbs();
+                UpdateChrome();
             }
         }
     }
@@ -72,6 +81,9 @@ public partial class SubfolderItemView : UserControl
             or nameof(SubfolderItemViewModel.Thumb2)
             or nameof(SubfolderItemViewModel.Thumb3))
             UpdateThumbs();
+        if (e.PropertyName is nameof(SubfolderItemViewModel.BoxSize)
+            or nameof(SubfolderItemViewModel.HideName))
+            UpdateChrome();
     }
 
     /// <summary>把前 4 个内部图标的 ImageSource 直接写到四个 Image 上(空槽为 null)。</summary>
@@ -84,6 +96,23 @@ public partial class SubfolderItemView : UserControl
         ThumbImg3.Source = _vm.Thumb3;
     }
 
+    /// <summary>盒子缩放后内部留白按比例收紧 — 固定 4/1.5/2 在小格子(如网格 40,
+    /// 盒子仅 22px)里会把四个缩略图挤没。56px → 4/1.5/2(面板基线,与旧观感一致),
+    /// 更大不再放宽(与旧观感一致),更小线性收小并设下限防归零。</summary>
+    void UpdateChrome()
+    {
+        if (ThumbGrid == null) return;
+        double box = _vm?.BoxSize ?? 56;
+        double m = Math.Clamp(box / 14.0, 1.5, 4.0);
+        ThumbGrid.Margin = new Thickness(m);
+        foreach (var cell in ThumbGrid.Children.OfType<Border>())
+        {
+            cell.Margin = new Thickness(Math.Max(0.5, m * 0.375));       // 56 → 1.5
+            if (cell.Child is Image img)
+                img.Margin = new Thickness(Math.Max(0.5, m * 0.5));      // 56 → 2
+        }
+    }
+
     /// <summary>Wire-up helper for direct callers (preset preview, tests)
     /// that already hold the underlying ZoneItem.</summary>
     public void SetSource(ZoneItem item, ShellIconService iconService)
@@ -93,5 +122,6 @@ public partial class SubfolderItemView : UserControl
         _vm.PropertyChanged += OnVmPropertyChanged;
         DataContext = _vm;
         UpdateThumbs();
+        UpdateChrome();
     }
 }

@@ -61,6 +61,18 @@ public partial class SubfolderFlyout : UserControl
     public SubfolderFlyout()
     {
         InitializeComponent();
+        // ponytail 2026-08-28: 诊断 — ⚙ 点击时灵时不灵,看 MouseDown 是否到达浮层/源是什么。
+        this.PreviewMouseDown += (_, e) =>
+        {
+            var src = e.OriginalSource as System.Windows.DependencyObject;
+            string chain = "";
+            while (src != null && chain.Length < 120)
+            {
+                chain += src.GetType().Name + "<";
+                src = System.Windows.Media.VisualTreeHelper.GetParent(src);
+            }
+            System.Diagnostics.Trace.WriteLine($"[SubFlyout] PreviewMouseDown src={e.OriginalSource?.GetType().Name} chain={chain} pos={e.GetPosition(this)} captured={System.Windows.Input.Mouse.Captured is not null}");
+        };
         Loaded += (_, _) => SizeInnerGrid();
         // ponytail 2026-08-26: 长按拖拽批量选择(与主分区 marquee 同款)。
         // 空白处按下 → 立即框选;单元格长按 350ms → 框选(快速拖动仍是换位)。
@@ -573,9 +585,25 @@ public partial class SubfolderFlyout : UserControl
     static ZoneItemViewModel? MenuVm(object s)
         => s is MenuItem mi && mi.DataContext is ZoneItemViewModel vm ? vm : null;
 
+    /// <summary>ponytail 2026-08-28: ⚙ 点击点的屏幕坐标(DIP)— 宿主弹出样式浮窗时
+    /// 用作锚点,让窗口贴着点击点开而非落历史 rect(历史位置可能压住光标,导致
+    /// ✕ 被下一次点击误关)。PointToScreen 失败(未连接)时为 null,宿主走旧路径。</summary>
+    public Point? StyleBtnScreenDip { get; private set; }
+
     void StyleBtn_Click(object sender, MouseButtonEventArgs e)
     {
         e.Handled = true;
+        try
+        {
+            var screenPx = PointToScreen(e.GetPosition(this));
+            var dpi = VisualTreeHelper.GetDpi(this);
+            StyleBtnScreenDip = new Point(screenPx.X / dpi.DpiScaleX, screenPx.Y / dpi.DpiScaleY);
+        }
+        catch
+        {
+            StyleBtnScreenDip = null;
+        }
+        System.Diagnostics.Trace.WriteLine($"[SubFlyout] StyleBtn_Click: EditStyleRequested={(EditStyleRequested != null)} anchor={StyleBtnScreenDip}");
         EditStyleRequested?.Invoke(this);
     }
 
@@ -883,6 +911,56 @@ public partial class SubfolderFlyout : UserControl
         _clickOutsideHooked = true;
         try { System.Windows.Input.Mouse.Capture(this, System.Windows.Input.CaptureMode.SubTree); } catch { }
         System.Windows.Input.Mouse.AddPreviewMouseDownOutsideCapturedElementHandler(this, OnPreviewMouseDownOutsideCapturedElement);
+        // ponytail 2026-08-28: 多屏混合 DPI 下 ⚙ 点击坐标错乱(pos 出现 -1927 这类副屏
+        // 坐标) — 开层即自检:Win32 的 HWND 真实位置 vs WPF 认为的位置 vs 光标。
+        DumpPopupGeometry("开层即检");
+        Dispatcher.BeginInvoke(new Action(() => DumpPopupGeometry("开层+400ms")),
+            System.Windows.Threading.DispatcherPriority.Background);
+    }
+
+    /// <summary>ponytail 2026-08-28: 诊断 — 打印浮层 HWND 的 Win32 物理矩形、WPF 侧
+    /// PointToScreen/PointFromScreen、DPI、光标物理位置与 WPF 相对坐标。若 GetWindowRect
+    /// 与 PointToScreen 不一致,即为 WPF popup 定位/坐标翻译错乱的直接证据。</summary>
+    void DumpPopupGeometry(string tag)
+    {
+        try
+        {
+            var hs = System.Windows.Interop.HwndSource.FromVisual(this) as System.Windows.Interop.HwndSource;
+            string win32 = "无HWND";
+            if (hs != null && hs.Handle != IntPtr.Zero && GetWindowRect(hs.Handle, out var r))
+                win32 = $"({r.Left},{r.Top})-({r.Right},{r.Bottom})";
+            string toScreen = "失败", fromScreen = "失败";
+            try { var p = PointToScreen(new Point(0, 0)); toScreen = $"({p.X:F0},{p.Y:F0})"; } catch { }
+            try { var p = PointFromScreen(new Point(0, 0)); fromScreen = $"({p.X:F0},{p.Y:F0})"; } catch { }
+            var cur = GetCursorPos(out var cpt) ? $"{cpt.X},{cpt.Y}" : "失败";
+            var dpi = System.Windows.Media.VisualTreeHelper.GetDpi(this);
+            var host = ViewModel?.HostSubItem.Name ?? "?";
+            System.Diagnostics.Trace.WriteLine(
+                $"[SubFlyout] 几何[{tag}] host={host}: Win32={win32} PointToScreen(0,0)={toScreen} PointFromScreen(0,0)={fromScreen} " +
+                $"DPI={dpi.DpiScaleX:F2} 光标物理=({cur}) MouseRel={Mouse.GetPosition(this)} 虚拟桌面=({SystemParameters.VirtualScreenLeft:F0},{SystemParameters.VirtualScreenTop:F0} {SystemParameters.VirtualScreenWidth:F0}x{SystemParameters.VirtualScreenHeight:F0})");
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.WriteLine($"[SubFlyout] 几何[{tag}] 失败: {ex.Message}");
+        }
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool GetWindowRect(System.IntPtr hWnd, out Win32Rect rect);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out Win32Point pt);
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct Win32Rect
+    {
+        public int Left, Top, Right, Bottom;
+    }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct Win32Point
+    {
+        public int X, Y;
     }
 
     public void UnhookClickOutside()
