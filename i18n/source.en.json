@@ -644,9 +644,6 @@
   "ZoneMenu.DeleteZone": "Delete zone",
 
   "App.ErrorTitle": "DeskOrder Error",
-  "App.ErrorCreateNote": "Failed to create note:\n{0}",
-  "App.ErrorCreateClock": "Failed to create clock:\n{0}",
-  "App.ErrorCreateCalendar": "Failed to create calendar:\n{0}",
 
   "CalendarPage.ItemCount": "{0} items",
   "CalendarPage.Subtitle": "{0} notes",

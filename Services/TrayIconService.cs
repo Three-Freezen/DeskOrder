@@ -64,12 +64,6 @@ public class TrayIconService : IDisposable
     public event Action? LeftClick;
     public event Action? RightClick;
     public event Action? DoubleClick;
-    public event Action? ShowAllZones;
-    public event Action? HideAllZones;
-    public event Action? NewZone;
-    public event Action? NewNote;
-    public event Action? NewClock;
-    public event Action? NewCalendar;
     public event Action? ManageZones;
     public event Action? Exit;
 

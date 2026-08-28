@@ -1327,7 +1327,7 @@ public static class AcrylicHelper
         popup.Closed += OnSubmenuPopupClosed;
     }
 
-    static void OnSubmenuPopupOpened(object sender, EventArgs e)
+    static void OnSubmenuPopupOpened(object? sender, EventArgs e)
     {
         if (sender is not Popup popup) return;
         try
@@ -1356,7 +1356,7 @@ public static class AcrylicHelper
                     HookMenuItemSubmenuPopup(nested);
     }
 
-    static void OnSubmenuPopupClosed(object sender, EventArgs e)
+    static void OnSubmenuPopupClosed(object? sender, EventArgs e)
     {
         if (sender is not Popup popup) return;
         try

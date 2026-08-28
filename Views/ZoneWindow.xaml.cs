@@ -145,7 +145,6 @@ public partial class ZoneWindow : Window
     // 换位路径不调用本 helper,只有命中 SubFolder 的拖拽路径触发)。
     System.Windows.Threading.DispatcherTimer? _flyoutCloseTimer;
     FrameworkElement? _scaledSubfolderContainer;
-    double _scaledSubfolderFrom = 1.0;
     bool _flyoutClosing;
     // 打开世代 token:关动画的 onComplete 只在 token 未变时才真正关 Popup,防止
     // "关闭动画还没放完就又点开了另一个 SubFolder" 时把新开的 Flyout 误关。
@@ -823,9 +822,9 @@ public partial class ZoneWindow : Window
         SubfolderFlyoutView.SetAnchor(c);
         // ponytail 2026-08-26: 真玻璃 — 与主分区同配方给 Popup HWND 开 DWM 模糊,
         // 视觉上与主分区玻璃一致;失败才显示渐变兜底(ShowGlassFallback)。
-        var fill = SubfolderFlyoutView.ViewModel?.Fill;
-        if (fill != null)
-            SubfolderFlyoutView.ViewModel.ShowGlassFallback = !SubfolderFlyoutView.TryApplyRealGlass(fill);
+        var flyoutVm = SubfolderFlyoutView.ViewModel;
+        if (flyoutVm != null && flyoutVm.Fill != null)
+            flyoutVm.ShowGlassFallback = !SubfolderFlyoutView.TryApplyRealGlass(flyoutVm.Fill);
         SubfolderFlyoutView.AnimateOpen();
     }
 
@@ -2175,7 +2174,7 @@ public partial class ZoneWindow : Window
             else if (Clipboard.ContainsImage())
             {
                 image = Clipboard.GetImage();
-                if (image.CanFreeze) image.Freeze();
+                if (image != null && image.CanFreeze) image.Freeze();
             }
         }
         catch { return false; }
@@ -2571,7 +2570,7 @@ public partial class ZoneWindow : Window
         vm.IsLocked = !vm.IsLocked;
         ApplyLockState();
         _mgr?.SetLocked(vm.Zone.Id.ToString(), vm.IsLocked);
-        _mgr.SaveConfig();
+        _mgr?.SaveConfig();
     }
 
     // ponytail 2026-08-27: 右键菜单专用 — RoutedEventHandler 签名(不能用 MouseButtonEventArgs 版)。

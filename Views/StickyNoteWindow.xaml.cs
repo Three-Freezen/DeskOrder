@@ -621,7 +621,7 @@ public partial class StickyNoteWindow : Window
         Width = savedW; Height = _note.TileMode ? Math.Max(120, savedH - NoteTileTitleBarCut) : savedH;
         // ponytail: locked notes stay below app windows — Topmost would re-pin above them and
         // defeat PinBelowProgman. PinnedTop notes still get Topmost via the constructor branch.
-        if (!_vm.IsLocked) Topmost = true;
+        if (_vm?.IsLocked != true) Topmost = true;
         Activate();
         OnStateChanged?.Invoke();
     }
@@ -1177,7 +1177,7 @@ public partial class StickyNoteWindow : Window
         e.Handled = true;
     }
 
-    static bool IsWithinElement(object src, FrameworkElement target)
+    static bool IsWithinElement(object? src, FrameworkElement target)
     {
         System.Windows.DependencyObject? c = src as System.Windows.DependencyObject;
         while (c != null)
@@ -1800,7 +1800,7 @@ public partial class StickyNoteWindow : Window
     }
 
     /// <summary>单项应用:文档在每次应用后会重排,单项各自 try 防止中途失败丢格式。</summary>
-    static void TryApplyFormat(TextRange range, DependencyProperty prop, object value)
+    static void TryApplyFormat(TextRange range, DependencyProperty prop, object? value)
     {
         try { range.ApplyPropertyValue(prop, value); } catch { }
     }
@@ -1860,15 +1860,15 @@ public partial class StickyNoteWindow : Window
     private int _pendingToken;
     private bool _pendingDeferredQueued;
 
-    void SetPendingFormat(DependencyProperty prop, object value)
+    void SetPendingFormat(DependencyProperty prop, object? value)
     {
         _pendingFormat ??= new PendingFormat(null, null, null, null, null);
-        if (prop == TextElement.FontSizeProperty)
-            _pendingFormat = _pendingFormat with { Size = (double)value };
-        else if (prop == TextElement.FontWeightProperty)
-            _pendingFormat = _pendingFormat with { Weight = (FontWeight)value };
-        else if (prop == TextElement.FontStyleProperty)
-            _pendingFormat = _pendingFormat with { Style = (FontStyle)value };
+        if (prop == TextElement.FontSizeProperty && value is double d)
+            _pendingFormat = _pendingFormat with { Size = d };
+        else if (prop == TextElement.FontWeightProperty && value is FontWeight w)
+            _pendingFormat = _pendingFormat with { Weight = w };
+        else if (prop == TextElement.FontStyleProperty && value is FontStyle st)
+            _pendingFormat = _pendingFormat with { Style = st };
         else if (prop == Inline.TextDecorationsProperty)
             _pendingFormat = _pendingFormat with { Underline = value != null };
         else if (prop == TextElement.ForegroundProperty)
@@ -1935,7 +1935,7 @@ public partial class StickyNoteWindow : Window
     ///    ApplyPropertyValue 会把前后 run 整体刷成新格式,这正是「设置新属性时
     ///    前面内容一起被改」的根源;无选区只走「锚点 + TextChanged 精确应用」。
     /// </summary>
-    void ApplyFormat(DependencyProperty prop, object value)
+    void ApplyFormat(DependencyProperty prop, object? value)
     {
         var sel = ContentBox.Selection;
         if (sel == null) return;
@@ -2009,7 +2009,7 @@ public partial class StickyNoteWindow : Window
         TextElement? el = basePos?.Parent as TextElement;
         while (el != null && el is not Run) el = el.Parent as TextElement;
         var src = el as Run; // 光标前方文字所在 run(无则用框默认)
-        void Set(DependencyProperty prop, object? pendingVal, object fallback)
+        void Set(DependencyProperty prop, object? pendingVal, object? fallback)
         {
             try { anchor.SetValue(prop, pendingVal ?? (src != null ? src.GetValue(prop) : fallback)); } catch { }
         }

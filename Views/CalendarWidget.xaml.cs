@@ -1071,7 +1071,7 @@ public partial class CalendarWidget : Window
         Height = _calendar.Height > 340 ? _calendar.Height : 440;
         if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
         NativeMethods.SetRoundedCorners(this, 10);
-        if (!_vm.IsLocked) Topmost = true;
+        if (_vm?.IsLocked != true) Topmost = true;
         // ponytail: 2026-08-23 — persist LAST so a failure in the model/event path can
         // no longer abort the visual expansion (see ShowClock for the full rationale).
         if (!skipResync)

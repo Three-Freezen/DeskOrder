@@ -976,7 +976,7 @@ public partial class ClockWidget : Window
         Width = showW; Height = showH;
         if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
         NativeMethods.SetRoundedCorners(this, 10);
-        if (!_vm.IsLocked) Topmost = true;
+        if (_vm?.IsLocked != true) Topmost = true;
         // ponytail: 2026-08-23 — persist LAST so a failure in the model/event path can
         // no longer abort the visual expansion (which used to leave the clock stuck as
         // a RestoreButton while the model already said visible — "Show All needs an

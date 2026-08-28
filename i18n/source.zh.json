@@ -644,9 +644,6 @@
   "ZoneMenu.DeleteZone": "删除分区",
 
   "App.ErrorTitle": "DeskOrder 错误",
-  "App.ErrorCreateNote": "创建便签失败：\n{0}",
-  "App.ErrorCreateClock": "创建时钟失败：\n{0}",
-  "App.ErrorCreateCalendar": "创建日历失败：\n{0}",
 
   "CalendarPage.ItemCount": "{0} 项",
   "CalendarPage.Subtitle": "{0} 备注",

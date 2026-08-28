@@ -59,13 +59,6 @@ public partial class App : System.Windows.Application
     private readonly Dictionary<Guid, int> _noteIdToHotkeyId = new();
     private IntPtr _mainHwnd;
 
-    // ponytail 2026-08-27: 桌面双击切换 — LowLevel 鼠标钩子 + 上次点击时间/位置。
-    private IntPtr _mouseHook = IntPtr.Zero;
-    private DesktopHook.LowLevelMouseProc? _mouseProc;
-    private DateTime _lastLeftDownUtc = DateTime.MinValue;
-    private NativeMethods.POINT _lastLeftDownPoint;
-    private bool _doubleClickEnabled;
-
     private void Application_Startup(object sender, StartupEventArgs e)
     {
 #if DEBUG
@@ -448,6 +441,7 @@ public partial class App : System.Windows.Application
 
     private void ToggleNoteByHotkey(Guid noteId)
     {
+        if (_notesService == null) return;
         if (_notesService.Windows.TryGetValue(noteId, out var window))
         {
             // NotesService.Windows is typed Dictionary<Guid, StickyNoteWindow>, so every
@@ -488,6 +482,7 @@ public partial class App : System.Windows.Application
 
     public void ToggleNoteWindow(Models.StickyNote note)
     {
+        if (_notesService == null) return;
         if (_notesService.Windows.TryGetValue(note.Id, out var window))
         {
             // ponytail: 2026-08-26 — single source of truth: the RestoreButton (the
@@ -513,12 +508,13 @@ public partial class App : System.Windows.Application
 
     public void OpenNoteWindowFromManager(Models.StickyNote note)
     {
+        if (_notesService == null) return;
         if (_notesService.Windows.ContainsKey(note.Id)) return;
         note.IsVisible = true;
         OpenNoteWindow(note);
     }
 
-    public bool IsNoteWindowOpen(Guid noteId) => _notesService.Windows.ContainsKey(noteId);
+    public bool IsNoteWindowOpen(Guid noteId) => _notesService?.Windows.ContainsKey(noteId) ?? false;
 
     public void RefreshNoteHotkeys()
     {
@@ -662,12 +658,6 @@ public partial class App : System.Windows.Application
 
         _trayIcon.LeftClick -= TrayLeftClick;
         _trayIcon.DoubleClick -= TrayDoubleClick;
-        _trayIcon.ShowAllZones -= TrayShowAll;
-        _trayIcon.HideAllZones -= TrayHideAll;
-        _trayIcon.NewZone -= TrayNewZone;
-        _trayIcon.NewNote -= TrayNewNote;
-        _trayIcon.NewClock -= TrayNewClock;
-        _trayIcon.NewCalendar -= TrayNewCalendar;
         _trayIcon.ManageZones -= TrayManage;
         _trayIcon.Exit -= TrayExit;
 
@@ -677,12 +667,6 @@ public partial class App : System.Windows.Application
         // 避免 SettingsPage 还要反射 / 强转才能拿到 _trayIcon。失败时静默 return。
         App.Notify = (title, body) => _trayIcon?.ShowBalloonTip(title, body);
         _trayIcon.DoubleClick += TrayDoubleClick;
-        _trayIcon.ShowAllZones += TrayShowAll;
-        _trayIcon.HideAllZones += TrayHideAll;
-        _trayIcon.NewZone += TrayNewZone;
-        _trayIcon.NewNote += TrayNewNote;
-        _trayIcon.NewClock += TrayNewClock;
-        _trayIcon.NewCalendar += TrayNewCalendar;
         _trayIcon.ManageZones += TrayManage;
         _trayIcon.Exit += TrayExit;
     }
@@ -737,8 +721,6 @@ public partial class App : System.Windows.Application
             catch { }
         }
     }
-    private void TrayNewZone() { _zoneManager?.CreateZone(); ShowManagementWindow(); }
-
     // ponytail 2026-08-27: 双击桌面逻辑依据 — 用模型 IsVisible 判断。
     // 全隐藏(FullHideAll)会把窗口全部关闭，不能再靠窗口可见性判断；
     // 模型 IsVisible 与 FullHideAll/ShowAll 的持久化一致。
@@ -794,51 +776,6 @@ public partial class App : System.Windows.Application
             System.Diagnostics.Debug.WriteLine($"[DeskOrder] Hotkey id=0x{id:X} (mods=0x{modifiers:X}, key=0x{vk:X}) register failed");
     }
 
-    private void TrayNewNote()
-    {
-        try
-        {
-            if (_notesService == null) return;
-            var wa = System.Windows.SystemParameters.WorkArea;
-            var note = _notesService.CreateNote(wa.Left + (wa.Width - 260) / 2, wa.Top + (wa.Height - 200) / 2);
-            OpenNoteWindow(note);
-        }
-        catch (Exception ex)
-        {
-            System.Windows.MessageBox.Show(string.Format(LocalizationService.Instance["App.ErrorCreateNote"], ex.Message), "DeskOrder");
-        }
-    }
-
-    private void TrayNewClock()
-    {
-        try
-        {
-            if (_widgetService == null) return;
-            var wa = System.Windows.SystemParameters.WorkArea;
-            _widgetService.CreateClock(wa.Left + 300, wa.Top + 80);
-            ShowManagementWindow();
-        }
-        catch (Exception ex)
-        {
-            System.Windows.MessageBox.Show(string.Format(LocalizationService.Instance["App.ErrorCreateClock"], ex.Message), "DeskOrder");
-        }
-    }
-
-    private void TrayNewCalendar()
-    {
-        try
-        {
-            if (_widgetService == null) return;
-            var wa = System.Windows.SystemParameters.WorkArea;
-            _widgetService.CreateCalendar(wa.Left + 400, wa.Top + 80);
-            ShowManagementWindow();
-        }
-        catch (Exception ex)
-        {
-            System.Windows.MessageBox.Show(string.Format(LocalizationService.Instance["App.ErrorCreateCalendar"], ex.Message), "DeskOrder");
-        }
-    }
-
     private void TrayManage() => ShowManagementWindow();
     private void TrayExit() => ShutdownApplication();
 
@@ -846,8 +783,9 @@ public partial class App : System.Windows.Application
 
     private void OpenNoteWindow(Models.StickyNote note)
     {
+        if (_notesService == null) return;
         if (_notesService.Windows.ContainsKey(note.Id)) return;
-        var window = new StickyNoteWindow(note, _notesService!);
+        var window = new StickyNoteWindow(note, _notesService);
         window.Closed += (_, _) => _notesService.Windows.Remove(note.Id);
         _notesService.Windows[note.Id] = window;
         window.Show();

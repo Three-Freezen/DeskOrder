@@ -534,7 +534,7 @@ public class LiquidGlassBrushConverter : IValueConverter
         ["MorandiSage"]   = Color.FromArgb(0xFF, 0x87, 0xA9, 0x6B),
     };
 
-    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+    public object Convert(object value, Type targetType, object? parameter, CultureInfo culture)
     {
         string mode = (value as string) ?? "Default";
         if (!BaseColors.TryGetValue(mode, out var baseColor) &&

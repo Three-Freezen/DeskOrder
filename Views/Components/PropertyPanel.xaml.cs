@@ -2762,7 +2762,7 @@ public partial class PropertyPanel : UserControl
         row.Children.Add(left);
         row.Children.Add(right);
 
-        void RefreshPreview(string icon)
+        void RefreshPreview(string? icon)
             => IconGlyph.Apply(previewText, previewPath, string.IsNullOrEmpty(icon) ? defaultIcon : icon, (Brush)FindResource("Brush.Accent"), 16);
 
         void Commit(string icon)

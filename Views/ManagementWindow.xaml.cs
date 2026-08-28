@@ -727,8 +727,9 @@ public partial class ManagementWindow : Window
             _loc.Get("Merge.ConfirmDisband", masterZone.MergedGroupMembership.DisplayName),
             _loc["Merge.DisbandTitle"],
             MessageBoxButton.YesNo, MessageBoxImage.Question);
-        if (result == MessageBoxResult.Yes)
-            _zoneManager.DisbandMergedGroup(masterZone.MergedGroupMembership.GroupId.Value);
+        if (result != MessageBoxResult.Yes) return;
+        if (masterZone.MergedGroupMembership.GroupId is not Guid groupId) return;
+        _zoneManager.DisbandMergedGroup(groupId);
     }
     public void MergeWithAnotherGroup(Zone sourceMaster) => MergeWithAnotherGroupImpl(sourceMaster);
     public void DisbandSingleZone(Zone masterZone) => DisbandSingleZoneImpl(masterZone);
@@ -1952,7 +1953,7 @@ public partial class ManagementWindow : Window
         try { DockedTabs?.CloseAllPreviewTabs(); } catch { }
     }
 
-    private void SideNav_SectionChanged(object sender, string section)
+    private void SideNav_SectionChanged(object? sender, string section)
     {
         ShowSection(section);
     }
