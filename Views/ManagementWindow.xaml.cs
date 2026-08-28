@@ -1984,7 +1984,7 @@ public partial class ManagementWindow : Window
     // ponytail 2026-08-27: 构造 SettingsPage 并注入热键编辑/双击开关回调。
     SettingsPage BuildSettingsPage()
     {
-        var page = new SettingsPage(_configService);
+        var page = new SettingsPage(_configService, App.UpdateService);
         var loc = LocalizationService.Instance;
 
         page.GetShowAllHotkeyLabel = () => HotkeyText(LiveConfig.ShowAllHotkey.Modifiers, LiveConfig.ShowAllHotkey.Key);

@@ -18,6 +18,9 @@ public partial class App : System.Windows.Application
     // ponytail 2026-08-24: 全局托盘气泡通知入口。委托由 InitializeTrayIcon 注入（在那之前调用会静默 no-op）。
     public static Action<string, string>? Notify { get; internal set; }
 
+    // ponytail 2026-08-28: 更新服务（设置页更新卡片 + 启动后台检查共用同一实例状态）。
+    public static UpdateService? UpdateService { get; private set; }
+
     private TrayIconService? _trayIcon;
     private ZoneManager? _zoneManager;
     private ConfigService? _configService;
@@ -61,6 +64,11 @@ public partial class App : System.Windows.Application
 
     private void Application_Startup(object sender, StartupEventArgs e)
     {
+        // ponytail 2026-08-28: Velopack 启动钩子必须最先跑——安装/卸载/更新场景下
+        // 进程是以 hook 参数被拉起的，这里处理完参数会自行退出；其余场景 no-op。
+        // 未打包运行（dotnet run）时 Velopack 定位器失败，同样是 no-op。
+        Velopack.VelopackApp.Build().Run();
+
 #if DEBUG
         // ponytail 2026-08-26: fresh diagnostics log per run (ghost-ring regression trace).
         Helpers.DzTrace.Reset();
@@ -138,6 +146,14 @@ public partial class App : System.Windows.Application
         // over the OS default on startup. Without this the user picks Dark, restarts,
         // and the window reverts to whatever the OS happens to be set to.
         _configService = new ConfigService();
+        // ponytail 2026-08-28: 预设从 exe 旁旧目录迁到 AppData（Velopack 更新会替换
+        // 整个应用目录，BaseDirectory 里的预设会被冲掉；幂等，详见 PresetService）。
+        PresetService.MigrateFromBaseDirectory();
+        // 更新服务：--update-source=本地目录|URL 覆盖更新源（本地端到端测试 / 镜像加速）。
+        UpdateService = new UpdateService(_configService);
+        const string srcPrefix = "--update-source=";
+        var srcArg = e.Args.FirstOrDefault(a => a.StartsWith(srcPrefix, StringComparison.OrdinalIgnoreCase));
+        if (srcArg != null) UpdateService.SourceOverride = srcArg[srcPrefix.Length..];
         ThemeService.Apply(ParseThemeMode(_configService.Load().ThemeMode));
         ThemeService.StartListeningToSystem();
         // 右键菜单调色板:跟随 Windows 系统主题(与应用主题无关,管理界面不受影响)。
@@ -251,6 +267,13 @@ public partial class App : System.Windows.Application
             _reminderService.CheckMissedReminders();
             _reminderService.Start();
         }
+
+        // ponytail 2026-08-28: 后台更新检查（24h 节流，设置里可关）。延迟到空闲优先级，
+        // 不占启动路径；发现新版本只发托盘气泡，不自动下载（交互定为「提示后更新」）。
+        Dispatcher.BeginInvoke(new Action(async () =>
+        {
+            try { await UpdateService!.AutoCheckIfDueAsync(); } catch { }
+        }), DispatcherPriority.ApplicationIdle);
 
         // Notes, clocks, and calendars are managed by ManagementWindow — no need to open here
 

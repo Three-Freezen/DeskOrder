@@ -16,6 +16,13 @@
          DesktopZones.ico 是 16+32+48+256 多分辨率（Resources/Icons/RebuildMultiResIco 打包），
          不带这个 tag 时 taskbar 走 Windows 默认空图标。 -->
     <ApplicationIcon>Resources\Icons\DesktopZones.ico</ApplicationIcon>
+    <!-- 更新检测与 About 页的唯一版本来源。Directory.Build.props 关闭了
+         GenerateAssemblyInfo 及各版本属性生成（CA1416 修复的历史原因），
+         这里逐项重新打开，让 <Version> 真正写进程序集。 -->
+    <Version>0.9.0</Version>
+    <GenerateAssemblyVersionAttribute>true</GenerateAssemblyVersionAttribute>
+    <GenerateAssemblyFileVersionAttribute>true</GenerateAssemblyFileVersionAttribute>
+    <GenerateAssemblyInformationalVersionAttribute>true</GenerateAssemblyInformationalVersionAttribute>
   </PropertyGroup>
 
   <ItemGroup>
@@ -36,6 +43,9 @@
     <None Remove="Resources\Icons\RebuildMultiResIco\**\*" />
     <Content Remove="Resources\Icons\RebuildMultiResIco\**\*" />
     <EmbeddedResource Remove="Resources\Icons\RebuildMultiResIco\**\*" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Velopack" Version="1.2.0" />
   </ItemGroup>
 
 </Project>

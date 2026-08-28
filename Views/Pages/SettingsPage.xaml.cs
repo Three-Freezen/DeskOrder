@@ -20,7 +20,10 @@ namespace DesktopZones.Views.Pages;
 public partial class SettingsPage : UserControl
 {
     readonly ConfigService _configService;
+    // ponytail 2026-08-28: 更新服务（App 启动创建，页面每次导航重建 → 状态存服务不放页面）。
+    readonly UpdateService? _updates;
     bool _suppress;
+    bool _updateSubscribed;
     // 保存委托引用以便 Unloaded 时退订(LanguageChanged 订阅点需要同一引用才能 -=)。
     readonly Action<string> _onLangChanged;
 
@@ -38,10 +41,11 @@ public partial class SettingsPage : UserControl
     public Func<string>? GetHideAllHotkeyLabel { get; set; }
     public Func<string>? GetMinimizeAllHotkeyLabel { get; set; }
 
-    public SettingsPage(ConfigService configService)
+    public SettingsPage(ConfigService configService, UpdateService? updateService = null)
     {
         InitializeComponent();
         _configService = configService;
+        _updates = updateService;
         BuildHotkeys();
         _onLangChanged = _ => RebuildHotkeys();
         LocalizationService.Instance.LanguageChanged += _onLangChanged;
@@ -52,15 +56,32 @@ public partial class SettingsPage : UserControl
         // Apply → Changed → SyncThemeRadios → IsChecked setter → ThemeRb_Changed
         // → _suppress guard exits before writing back to cfg.
         ThemeService.Changed += SyncThemeRadios;
-        Loaded += (_, _) => SyncFromConfig();
+        Loaded += (_, _) =>
+        {
+            SyncFromConfig();
+            // 更新卡片初挂载：订阅服务状态（防御性 _updateSubscribed 防重复订阅），
+            // 并按服务当前状态渲染（后台检查可能已在启动时跑过）。
+            if (_updates != null && !_updateSubscribed)
+            {
+                _updates.StateChanged += OnUpdateStateChanged;
+                _updateSubscribed = true;
+            }
+            SyncUpdateUi();
+        };
         // ponytail 2026-08-28: 本页面每次导航都会被 ManagementWindow.BuildSettingsPage
         // 重建，而上面订阅的 ThemeService.Changed 是 static event、LanguageChanged 是
-        // 单例事件 — 都是 GC Root。不在 Unloaded 退订的话，每进一次设置页就有一棵
-        // 页面树连同 ManagementWindow 闭包被永久钉住（此前实测的内存泄漏）。
+        // 单例事件、UpdateService.StateChanged 是长生命周期实例事件 — 都是 GC Root。
+        // 不在 Unloaded 退订的话，每进一次设置页就有一棵页面树连同 ManagementWindow
+        // 闭包被永久钉住（此前实测的内存泄漏）。
         Unloaded += (_, _) =>
         {
             ThemeService.Changed -= SyncThemeRadios;
             LocalizationService.Instance.LanguageChanged -= _onLangChanged;
+            if (_updates != null && _updateSubscribed)
+            {
+                _updates.StateChanged -= OnUpdateStateChanged;
+                _updateSubscribed = false;
+            }
         };
     }
 
@@ -166,6 +187,7 @@ public partial class SettingsPage : UserControl
             AutoAlignBox.IsChecked = cfg.AutoAlign;
             ReverseSyncBox.IsChecked = cfg.ReverseSyncEnabled;
             ImagePreviewBox.IsChecked = cfg.ImagePreviewEnabled;
+            AutoCheckUpdateBox.IsChecked = cfg.AutoCheckUpdate;
             SelectComboByTag(LanguageCombo, cfg.Language);
             SyncThemeRadios(cfg.ThemeMode switch
             {
@@ -283,11 +305,93 @@ public partial class SettingsPage : UserControl
         });
     }
 
-    void CheckUpdate_Click(object sender, RoutedEventArgs e)
+    void AutoCheckUpdate_Changed(object sender, RoutedEventArgs e)
     {
+        if (_suppress) return;
+        var cfg = _configService.Load();
+        cfg.AutoCheckUpdate = AutoCheckUpdateBox.IsChecked == true;
+        _configService.Save(cfg);
+    }
+
+    // ── 更新卡片（状态机渲染，状态源在 UpdateService，页面只读） ──
+
+    void OnUpdateStateChanged() => SyncUpdateUi();
+
+    void SyncUpdateUi()
+    {
+        var svc = _updates;
+        if (svc == null) return;
         var loc = LocalizationService.Instance;
-        MessageBox.Show(loc["Settings.UpToDate"], loc["Settings.CheckUpdate"],
-            MessageBoxButton.OK, MessageBoxImage.Information);
+
+        UpdateProgress.Visibility = svc.State == UpdateState.Downloading ? Visibility.Visible : Visibility.Collapsed;
+        if (svc.State == UpdateState.Downloading) UpdateProgress.Value = svc.ProgressPercent;
+
+        UpdateStatusText.Text = svc.State switch
+        {
+            UpdateState.Idle => loc.Get("Settings.CurrentVersion", AppVersion.Current),
+            UpdateState.Checking => loc["Settings.Checking"],
+            UpdateState.UpToDate => loc["Settings.UpToDate"],
+            UpdateState.Available => loc.Get("Settings.NewVersionFound", svc.NewVersion ?? ""),
+            UpdateState.Downloading => loc.Get("Settings.Downloading", svc.ProgressPercent),
+            UpdateState.Ready => loc["Settings.ReadyRestart"],
+            UpdateState.Failed => loc.Get("Settings.UpdateFailed", svc.ErrorText ?? ""),
+            UpdateState.Unavailable => UpdateService.IsRunningPackaged
+                ? loc["Settings.StoreChannel"]
+                : loc["Settings.DevNoUpdate"],
+            _ => "",
+        };
+
+        UpdateButton.IsEnabled = svc.State is UpdateState.Idle or UpdateState.UpToDate
+            or UpdateState.Available or UpdateState.Ready;
+        UpdateButton.Content = svc.State switch
+        {
+            UpdateState.Available => loc["Settings.DownloadUpdate"],
+            UpdateState.Ready => loc["Settings.RestartUpdate"],
+            _ => loc["Settings.CheckUpdate"],
+        };
+
+        ReleaseLink.Visibility = (svc.State == UpdateState.Available || svc.State == UpdateState.Ready)
+            ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    async void UpdateButton_Click(object sender, RoutedEventArgs e)
+    {
+        var svc = _updates;
+        if (svc == null) return;
+        try
+        {
+            if (svc.State == UpdateState.Ready)
+            {
+                var loc = LocalizationService.Instance;
+                var choice = MessageBox.Show(
+                    loc.Get("Settings.RestartConfirm", svc.NewVersion ?? ""),
+                    loc["Settings.CheckUpdate"],
+                    MessageBoxButton.YesNo, MessageBoxImage.Question);
+                if (choice == MessageBoxResult.Yes)
+                    svc.ApplyAndRestart(); // Velopack 拉起安装器并退出本进程；失败抛异常 → Failed 状态
+                return;
+            }
+            if (svc.State == UpdateState.Available)
+            {
+                await svc.DownloadAsync();
+                return;
+            }
+            await svc.CheckForUpdatesAsync();
+        }
+        catch { /* 服务已把失败转成 Failed 状态渲染 */ }
+    }
+
+    void ReleaseLink_Click(object sender, RoutedEventArgs e)
+    {
+        if (_updates?.ReleaseUrl is not string url) return;
+        try
+        {
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[UpdateCard] open release url failed: {ex}");
+        }
     }
 
     void UpdateStartupShortcut(bool create)

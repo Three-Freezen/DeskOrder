@@ -9,7 +9,7 @@
       <TextBlock Text="DeskOrder" FontSize="20" FontWeight="SemiBold"
                  HorizontalAlignment="Center"
                  Foreground="{DynamicResource Brush.Text.Primary}"/>
-      <TextBlock Text="v0.9.0" FontSize="12" FontFamily="Cascadia Code, Consolas, monospace"
+      <TextBlock x:Name="VersionText" Text="v0.9.0" FontSize="12" FontFamily="Cascadia Code, Consolas, monospace"
                  HorizontalAlignment="Center" Margin="0,4,0,16"
                  Foreground="{DynamicResource Brush.Text.Tertiary}"/>
       <TextBlock Text="{loc:Loc Key=About.Description}"

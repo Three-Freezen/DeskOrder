@@ -20,6 +20,13 @@ public class PresetService
 {
     private static readonly JsonSerializerOptions Opts = new() { WriteIndented = true };
 
+    // ponytail 2026-08-28: 预设目录从 exe 旁迁到 %APPDATA%\DesktopZones\Presets。
+    // Velopack/MSIX 更新会替换整个应用目录，写在 BaseDirectory 的预设会被更新冲掉；
+    // AppData 与 config.json 同级，任何更新方式都不触碰。目录结构不变 {子类型}\{guid}.json。
+    private static readonly string PresetsRoot = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "DesktopZones", "Presets");
+
     private readonly string _folder;
     private readonly PresetKind _kind;
 
@@ -29,8 +36,35 @@ public class PresetService
     public PresetService(PresetKind kind)
     {
         _kind = kind;
-        var baseDir = AppDomain.CurrentDomain.BaseDirectory;
-        _folder = Path.Combine(baseDir, "Presets", PresetRecord.SubFolderFor(kind));
+        _folder = Path.Combine(PresetsRoot, PresetRecord.SubFolderFor(kind));
+    }
+
+    /// <summary>
+    /// 一次性把 exe 旁旧 Presets 目录迁到 AppData。幂等：目标已有同名文件则跳过
+    /// （不覆盖新数据）；旧目录保留不动，失败也只放弃迁移、不阻塞启动。
+    /// 由 App 启动在构造任何 PresetService 之前调用一次。
+    /// </summary>
+    public static void MigrateFromBaseDirectory()
+    {
+        try
+        {
+            var legacyRoot = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Presets");
+            if (!Directory.Exists(legacyRoot)) return;
+            foreach (var subDir in Directory.GetDirectories(legacyRoot))
+            {
+                var targetDir = Path.Combine(PresetsRoot, Path.GetFileName(subDir));
+                Directory.CreateDirectory(targetDir);
+                foreach (var file in Directory.GetFiles(subDir, "*.json"))
+                {
+                    var targetFile = Path.Combine(targetDir, Path.GetFileName(file));
+                    if (!File.Exists(targetFile)) File.Move(file, targetFile);
+                }
+            }
+        }
+        catch
+        {
+            // 迁移失败（权限/占用/跨盘）不致命：旧目录仍在，可手动恢复。
+        }
     }
 
     /// <summary>Convenience factory — returns the service for a given kind.</summary>

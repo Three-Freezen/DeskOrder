@@ -26,6 +26,12 @@ public class AppConfig
     // ── 分区图片预览：导入的图片文件显示内容缩略图而非默认图标 ──
     public bool ImagePreviewEnabled { get; set; } = true;
 
+    // ── 更新 ──
+    // 启动后台检查更新（24h 节流，UpdateService.AutoCheckIfDueAsync 消费）。
+    public bool AutoCheckUpdate { get; set; } = true;
+    /// <summary>上次更新检查时间（UTC）；default = 从未检查。失败也记录，避免断网时反复撞接口。</summary>
+    public DateTime LastUpdateCheckUtc { get; set; }
+
     // ── Theme selection (three-valued; replaces ambiguous single `Theme`) ──
     /// <summary>"System" / "Light" / "Dark". Defaults to "System" so existing configs fall back to OS preference.</summary>
     public string ThemeMode { get; set; } = "System";

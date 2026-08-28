@@ -5,3 +5,7 @@ obj/
 *.suo
 debug_clock.log
 *.log
+
+# Velopack 打包产物
+publish/
+releases/

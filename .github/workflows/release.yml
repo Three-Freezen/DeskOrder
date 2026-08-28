@@ -1,0 +1,40 @@
+# 推 tag（v*）自动构建并发布 GitHub Release。
+# 首次发布前把下面两处 <OWNER>/<REPO> 替换为真实仓库。
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Publish (win-x64, self-contained)
+        run: dotnet publish DesktopZones.csproj -c Release -r win-x64 --self-contained -o publish
+
+      - name: Pack (Velopack)
+        shell: pwsh
+        run: |
+          dotnet tool install -g vpk
+          $env:VER = ("${{ github.ref_name }}" -replace '^v','')
+          vpk pack -u DeskOrder -v $env:VER -p publish -o releases
+
+      - name: Publish to GitHub Release
+        shell: pwsh
+        run: >
+          vpk publish github
+          --repoUrl "https://github.com/<OWNER>/<REPO>"
+          --token "${{ secrets.GITHUB_TOKEN }}"
+          --releaseName "${{ github.ref_name }}"
+          --tag "${{ github.ref_name }}"
+          --merge

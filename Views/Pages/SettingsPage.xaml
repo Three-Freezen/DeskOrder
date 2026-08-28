@@ -83,20 +83,34 @@
       <Border Background="{DynamicResource Brush.Bg.Surface}"
               BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1"
               CornerRadius="6" Padding="14,8" Margin="0,0,0,16">
-        <Grid>
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="*"/>
-            <ColumnDefinition Width="Auto"/>
-          </Grid.ColumnDefinitions>
-          <StackPanel VerticalAlignment="Center">
-            <TextBlock Text="{loc:Loc Key=Settings.CheckUpdate}" Foreground="{DynamicResource Brush.Text.Primary}"/>
-            <TextBlock Text="{loc:Loc Key=Settings.UpToDate}" FontSize="11" Margin="0,2,0,0"
-                       Foreground="{DynamicResource Brush.Text.Tertiary}"/>
-          </StackPanel>
-          <Button Grid.Column="1" Content="{loc:Loc Key=Settings.CheckUpdate}" Click="CheckUpdate_Click" Cursor="Hand"
-                  FontWeight="SemiBold" Padding="14,6"
-                  Style="{DynamicResource FillBtn}"/>
-        </Grid>
+        <StackPanel>
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel VerticalAlignment="Center">
+              <TextBlock Text="{loc:Loc Key=Settings.CheckUpdate}" Foreground="{DynamicResource Brush.Text.Primary}"/>
+              <TextBlock x:Name="UpdateStatusText" Text="{loc:Loc Key=Settings.UpToDate}" FontSize="11" Margin="0,2,0,0"
+                         Foreground="{DynamicResource Brush.Text.Tertiary}"/>
+            </StackPanel>
+            <Button x:Name="UpdateButton" Grid.Column="1" Content="{loc:Loc Key=Settings.CheckUpdate}"
+                    Click="UpdateButton_Click" Cursor="Hand"
+                    FontWeight="SemiBold" Padding="14,6" MinWidth="96"
+                    Style="{DynamicResource FillBtn}"/>
+          </Grid>
+          <ProgressBar x:Name="UpdateProgress" Height="3" Minimum="0" Maximum="100"
+                       Visibility="Collapsed" Margin="0,8,0,0"/>
+          <TextBlock x:Name="ReleaseLink" Visibility="Collapsed" FontSize="11" Margin="0,6,0,0">
+            <Hyperlink Click="ReleaseLink_Click" Cursor="Hand"
+                       Foreground="{DynamicResource Brush.Text.Secondary}" TextDecorations="Underline">
+              <Run Text="{loc:Loc Key=Settings.ViewRelease}"/>
+            </Hyperlink>
+          </TextBlock>
+          <CheckBox x:Name="AutoCheckUpdateBox" Content="{loc:Loc Key=Settings.AutoCheckUpdate}" Margin="0,8,0,2"
+                    Foreground="{DynamicResource Brush.Text.Primary}"
+                    Checked="AutoCheckUpdate_Changed" Unchecked="AutoCheckUpdate_Changed"/>
+        </StackPanel>
       </Border>
     </StackPanel>
   </ScrollViewer>
