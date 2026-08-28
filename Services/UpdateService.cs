@@ -43,8 +43,7 @@ public interface IUpdateChannel
 
 public sealed class UpdateService
 {
-    // TODO: 首次发布前替换为真实仓库地址（owner/repo）。
-    public const string DefaultRepoUrl = "https://github.com/StarLeaf/DeskOrder";
+    public const string DefaultRepoUrl = "https://github.com/Three-Freezen/DeskOrder";
     private const string ReleasesUrl = DefaultRepoUrl + "/releases/latest";
 
     /// <summary>运行时覆盖更新源（--update-source=本地目录|URL）。

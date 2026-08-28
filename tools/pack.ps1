@@ -8,7 +8,7 @@
 #   ./tools/pack.ps1 -Version 0.9.1  # 覆盖版本号
 #   ./tools/pack.ps1 -Push           # 打包并发布 GitHub Release（需 GITHUB_TOKEN 环境变量）
 #
-# 注意: <OWNER>/<REPO> 替换为真实仓库；Push 需要 repo 权限的 PAT。
+# 注意: Push 需要 repo 权限的 GITHUB_TOKEN 环境变量。
 param(
     [string]$Version = "",
     [switch]$Push
@@ -42,7 +42,7 @@ if ($Push) {
     if (-not $env:GITHUB_TOKEN) { throw "Push 需要 GITHUB_TOKEN 环境变量（repo 权限的 PAT）" }
     Write-Host "==> vpk publish github"
     # 参数名以 `vpk publish github --help` 为准；--merge 表示追加资产到已有 Release。
-    vpk publish github --repoUrl "https://github.com/<OWNER>/<REPO>" `
+    vpk publish github --repoUrl "https://github.com/Three-Freezen/DeskOrder" `
         --token $env:GITHUB_TOKEN --releaseName "v$Version" --tag "v$Version" --merge
     if ($LASTEXITCODE -ne 0) { exit 1 }
 }
