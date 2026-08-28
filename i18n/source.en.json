@@ -357,7 +357,8 @@
   "MergedGroupProp.UnifiedFill": "Unified fill",
   "MergedGroupProp.KeepOriginalFill": "Keep original fill",
 
-  "About.Description": "Lightweight Windows desktop zone tool. Use hotkeys to snap windows into fixed screen regions in seconds.",
+  "About.Description": "A lightweight Windows desktop icon manager and beautifier.",
+  "About.GitHub": "GitHub Repository",
 
   "Calendar.Weekday.0": "Sun",
   "Calendar.Weekday.1": "Mon",

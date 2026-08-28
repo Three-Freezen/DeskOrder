@@ -357,7 +357,8 @@
   "MergedGroupProp.UnifiedFill": "统一填充",
   "MergedGroupProp.KeepOriginalFill": "保留原有填充",
 
-  "About.Description": "轻量级 Windows 桌面分区工具，帮助你用快捷键快速将窗口对齐到屏幕的固定区域。",
+  "About.Description": "轻量级 Windows 桌面图标管理和美化工具。",
+  "About.GitHub": "GitHub 仓库",
 
   "Calendar.Weekday.0": "日",
   "Calendar.Weekday.1": "一",

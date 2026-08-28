@@ -4,13 +4,19 @@
              xmlns:loc="clr-namespace:DesktopZones.Helpers">
   <Grid>
     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-      <Image Source="/Resources/Icons/icon-256.png" Width="96" Height="96"
+      <Image Source="/Resources/Icons/icon-256.png" Width="128" Height="128"
              HorizontalAlignment="Center" Margin="0,0,0,16"/>
       <TextBlock Text="DeskOrder" FontSize="20" FontWeight="SemiBold"
                  HorizontalAlignment="Center"
                  Foreground="{DynamicResource Brush.Text.Primary}"/>
-      <TextBlock x:Name="VersionText" Text="v0.9.0" FontSize="12" FontFamily="Cascadia Code, Consolas, monospace"
-                 HorizontalAlignment="Center" Margin="0,4,0,16"
+      <TextBlock FontSize="12" HorizontalAlignment="Center" Margin="0,4,0,12">
+        <Hyperlink Click="GitHubLink_Click" Cursor="Hand"
+                   Foreground="{DynamicResource Brush.Text.Secondary}" TextDecorations="Underline">
+          <Run Text="{loc:Loc Key=About.GitHub}"/>
+        </Hyperlink>
+      </TextBlock>
+      <TextBlock x:Name="VersionText" FontSize="12" FontFamily="Cascadia Code, Consolas, monospace"
+                 HorizontalAlignment="Center" Margin="0,0,0,16"
                  Foreground="{DynamicResource Brush.Text.Tertiary}"/>
       <TextBlock Text="{loc:Loc Key=About.Description}"
                  FontSize="13" TextWrapping="Wrap" MaxWidth="420" TextAlignment="Center"
