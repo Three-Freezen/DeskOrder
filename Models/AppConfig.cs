@@ -33,8 +33,9 @@ public class AppConfig
     public DateTime LastUpdateCheckUtc { get; set; }
 
     // ── Theme selection (three-valued; replaces ambiguous single `Theme`) ──
-    /// <summary>"System" / "Light" / "Dark". Defaults to "System" so existing configs fall back to OS preference.</summary>
-    public string ThemeMode { get; set; } = "System";
+    /// <summary>"System" / "Light" / "Dark". Defaults to "Light" — 新用户首启给浅色
+    /// 管理界面（分区主体深浅不受此影响）；已有配置保留用户自己的选择。</summary>
+    public string ThemeMode { get; set; } = "Light";
 
     // Legacy single-value theme field — kept [Obsolete] + [JsonIgnore] so old
     // config files still parse (the value lands in ExtensionData and is dropped

@@ -22,7 +22,7 @@
          时属性根本不会生成（曾导致全程序集版本 0.0.0、更新检查永远误报新版）。
          其余属性（Title/Company/Product 等）仍由 props 的 false 单独关闭。 -->
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
-    <Version>0.9.3</Version>
+    <Version>1.0.0</Version>
     <GenerateAssemblyVersionAttribute>true</GenerateAssemblyVersionAttribute>
     <GenerateAssemblyFileVersionAttribute>true</GenerateAssemblyFileVersionAttribute>
     <GenerateAssemblyInformationalVersionAttribute>true</GenerateAssemblyInformationalVersionAttribute>
