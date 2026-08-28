@@ -77,7 +77,7 @@ public partial class PropertyWindow : Window
 
         // ponytail 2026-08-28: 浮窗打开后数秒内被自动关闭(用户看到的是"设置界面点不开")
         // — 打印外部 Close 请求的调用栈定位关窗者。
-        System.Diagnostics.Trace.WriteLine("[PropWin] OnClosing(外部关闭请求) 调用栈:\n" + Environment.StackTrace);
+        DzTrace.Log("[PropWin] OnClosing(外部关闭请求) 调用栈:\n" + Environment.StackTrace);
         e.Cancel = true;
         _isClosing = true;
         Opacity = 1;
@@ -111,18 +111,16 @@ public partial class PropertyWindow : Window
         };
         Target = target;
         Title = PropertyWindowManager.TitleOf(target);
-#if DEBUG
         // ponytail 2026-08-28: 诊断 — 浮窗"打开了但看不见"。跟踪 Loaded/可见性翻转/关闭,
         // IsVisibleChanged 带调用栈:若 Visibility 被(Owner 最小化等)外部翻转,栈里能看到。
         Loaded += (_, _) =>
-            System.Diagnostics.Trace.WriteLine(
+            DzTrace.Log(
                 $"[PropWin] Loaded: '{Title}' Opacity={Opacity:F2} IsVisible={IsVisible} State={WindowState} at ({Left:F0},{Top:F0})");
         IsVisibleChanged += (_, e) =>
-            System.Diagnostics.Trace.WriteLine(
+            DzTrace.Log(
                 $"[PropWin] IsVisibleChanged: '{Title}' {e.OldValue}→{e.NewValue} State={WindowState}\n{Environment.StackTrace}");
         Closed += (_, _) =>
-            System.Diagnostics.Trace.WriteLine($"[PropWin] Closed: '{Title}'");
-#endif
+            DzTrace.Log($"[PropWin] Closed: '{Title}'");
     }
 
     public PropertyWindow()

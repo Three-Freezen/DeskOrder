@@ -199,23 +199,17 @@ public partial class PanelWindow : Window
         // window position (offset 24,24) instead of jumping somewhere else.
         // Target is the live PanelConfig POCO (not AppConfig) so the property
         // editor dispatches to the 面板设置 field tree.
-        // ponytail 2026-08-28: 有 ⚙ 点击点坐标时贴点弹出(同分区,避免历史 rect
-        // 罩住 ⚙ 导致 ✕ 被下一次点击误关)。
-        if (s is System.Windows.FrameworkElement fe)
-        {
-            try
-            {
-                var screenPx = fe.PointToScreen(e.GetPosition(fe));
-                var dpi = System.Windows.Media.VisualTreeHelper.GetDpi(fe);
-                var anchor = new System.Windows.Point(screenPx.X / dpi.DpiScaleX, screenPx.Y / dpi.DpiScaleY);
-                PropertyWindowService.OpenOrFocus(_zoneManager.GetConfig().Panel, this, anchor);
-                e?.Handled = true;
-                return;
-            }
-            catch { /* 未连接等 — 落回旧路径 */ }
-        }
-        PropertyWindowService.OpenOrFocus(_zoneManager.GetConfig().Panel, this);
-        e?.Handled = true;
+        // ponytail 2026-08-28: 按钮改按下触发 — 原来挂 MouseLeftButtonUp,按下冒泡到
+        // TopBar 的 TitleBar_Drag → DragMove() 模态循环吞掉抬起,Up 事件永远不来,
+        // 设置界面"点了没反应"。e.Handled=true 阻断冒泡,DragMove 不再抢这次交互。
+        // 锚点走 MonitorHelper(物理光标 + 所在显示器 DPI),多屏混合 DPI 下不依赖
+        // WPF PointToScreen 的错误坐标,贴 ⚙ 点击点弹出(避免历史 rect 罩住 ⚙)。
+        var anchor = MonitorHelper.CursorDip();
+        if (anchor is { } a)
+            PropertyWindowService.OpenOrFocus(_zoneManager.GetConfig().Panel, this, a);
+        else
+            PropertyWindowService.OpenOrFocus(_zoneManager.GetConfig().Panel, this);
+        e.Handled = true;
     }
 
     void OnLoad(object s, RoutedEventArgs e)

@@ -42,10 +42,10 @@ public static class PropertyWindowService
     static void EnsureMain()
     {
         if (_main != null) return;
-        System.Diagnostics.Trace.WriteLine("[SubFlyout] PropertyWindowService: _main 为空,重建 ManagementWindow");
+        DzTrace.Log("[SubFlyout] PropertyWindowService: _main 为空,重建 ManagementWindow");
         (System.Windows.Application.Current as App)?.EnsureManagementWindow();
         if (_main == null)
-            System.Diagnostics.Trace.WriteLine("[SubFlyout] PropertyWindowService: EnsureManagementWindow 后 _main 仍为空(Init 未生效)");
+            DzTrace.Log("[SubFlyout] PropertyWindowService: EnsureManagementWindow 后 _main 仍为空(Init 未生效)");
     }
 
     public static void OpenOrFocus(object target)
@@ -57,7 +57,7 @@ public static class PropertyWindowService
     public static void OpenOrFocus(object target, Window? requester)
     {
         EnsureMain();
-        System.Diagnostics.Trace.WriteLine($"[SubFlyout] OpenOrFocus: main={(_main != null)} mainVisible={(_main?.IsVisible ?? false)} → OpenFloatingProperty");
+        DzTrace.Log($"[SubFlyout] OpenOrFocus: main={(_main != null)} mainVisible={(_main?.IsVisible ?? false)} → OpenFloatingProperty");
         _main?.OpenFloatingProperty(target, requester);
     }
 
@@ -66,7 +66,7 @@ public static class PropertyWindowService
     public static void OpenOrFocus(object target, Window? requester, Point anchorDip)
     {
         EnsureMain();
-        System.Diagnostics.Trace.WriteLine($"[SubFlyout] OpenOrFocus(anchor): main={(_main != null)} mainVisible={(_main?.IsVisible ?? false)} anchor=({anchorDip.X:F0},{anchorDip.Y:F0})");
+        DzTrace.Log($"[SubFlyout] OpenOrFocus(anchor): main={(_main != null)} mainVisible={(_main?.IsVisible ?? false)} anchor=({anchorDip.X:F0},{anchorDip.Y:F0}) target={PropertyWindowManager.TargetKey(target)}");
         _main?.OpenFloatingProperty(target, requester, anchorDip);
     }
 

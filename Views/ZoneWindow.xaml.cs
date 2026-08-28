@@ -345,6 +345,15 @@ public partial class ZoneWindow : Window
         // 拖拽中失焦(如 Alt+Tab):清掉目标窗口上的幽灵,避免残留。
         _externalTarget?.HideExternalDropGhost();
         _externalTarget = null;
+        // ponytail 2026-08-28: 失活 + 光标在浮层之外 → 关浮层(点击桌面/其他分区/其他
+        // 应用时它们夺走激活)。光标守卫防误伤:Popup 已设 WS_EX_NOACTIVATE,层内点击
+        // 不应再失活,但即便残余路径触发,只要光标还在层内就不关(否则又回到
+        // "点层内任意位置浮层自动回收"的回归)。
+        if (SubfolderFlyoutPopup.IsOpen && !_flyoutClosing && !SubfolderFlyoutView.ContainsScreenCursor())
+        {
+            DzTrace.Log($"[SubFlyout] ZoneWindow.Window_Deactivated: 光标在浮层外 → CloseSubfolderFlyout (popupOpen={SubfolderFlyoutPopup.IsOpen})");
+            CloseSubfolderFlyout();
+        }
     }
 
     void OnLoad(object s, RoutedEventArgs e)
@@ -1016,13 +1025,13 @@ public partial class ZoneWindow : Window
     {
         if (flyout.ViewModel == null)
         {
-            System.Diagnostics.Trace.WriteLine("[SubFlyout] EditStyleRequested: ViewModel 为空,中止");
+            DzTrace.Log("[SubFlyout] ZoneWindow.EditStyleRequested: ViewModel 为空,中止");
             return;
         }
+        DzTrace.Log($"[SubFlyout] ZoneWindow.EditStyleRequested: host={flyout.ViewModel.HostSubItem.Id} name={flyout.ViewModel.HostSubItem.Name} anchor={flyout.StyleBtnScreenDip?.ToString() ?? "null"} popupOpen={SubfolderFlyoutPopup.IsOpen} flyoutClosing={_flyoutClosing}");
         // ponytail 2026-08-26: ensure the management window exists before routing the
         // property editor — PropertyWindowService is a no-op while ManagementWindow is
         // null (startup with StartMinimized + zones shown directly). See App.EnsureManagementWindow.
-        System.Diagnostics.Trace.WriteLine("[SubFlyout] EditStyleRequested: ⚙ 点击 → 打开样式设置,Host=" + flyout.ViewModel.HostSubItem.Id);
         (System.Windows.Application.Current as App)?.EnsureManagementWindow();
         // ponytail 2026-08-28: 贴 ⚙ 点击点弹出 — 历史位置可能罩住 ⚙(✕ 落在光标下,
         // 用户下一次点击把窗口关掉,表现为"打不开")。锚点缺失时走旧路径。

@@ -56,9 +56,12 @@ public class PropertyWindowManager
     {
         if (target == null) return;
 
+        DzTrace.Log($"[PropWin] PopOutTarget: target={TargetKey(target)} floatingCount={_floating.Count} anchorAtCursor={anchorAtCursor} cursorScreen={cursorScreen?.ToString() ?? "null"}");
+
         // 1. Already floating — just activate.
         if (_floating.TryGetValue(target, out var existing))
         {
+            DzTrace.Log($"[PropWin] PopOutTarget: 已有浮动窗口 IsVisible={existing.IsVisible} State={existing.WindowState} → {(existing.IsVisible ? "RestoreAndActivate" : "丢弃重开")}");
             if (existing.IsVisible)
             {
                 RestoreAndActivate(existing);
@@ -83,7 +86,7 @@ public class PropertyWindowManager
 
         // 3. Open fresh floating at requester (or persisted / main window) position.
         var pos = ResolvePopPosition(target, requester, main, configService, cursorScreen, anchorAtCursor);
-        System.Diagnostics.Trace.WriteLine($"[SubFlyout] PopOutTarget: pos=({pos.x:F0},{pos.y:F0}) → OpenFloating");
+        DzTrace.Log($"[SubFlyout] PopOutTarget: pos=({pos.x:F0},{pos.y:F0}) → OpenFloating");
         OpenFloating(target, configService, main, pos, initialSize);
     }
 
@@ -215,13 +218,12 @@ public class PropertyWindowManager
                 args.Handled = true;
         };
         _floating[target] = w;
-        System.Diagnostics.Trace.WriteLine($"[SubFlyout] OpenFloating: 即将 Show() — Left={w.Left:F0} Top={w.Top:F0} {w.Width:F0}x{w.Height:F0} Topmost={w.Topmost} State={w.WindowState} owner={w.Owner?.Title ?? "无"} ownerState={(w.Owner as ManagementWindow)?.WindowState.ToString() ?? "n/a"}");
+        DzTrace.Log($"[SubFlyout] OpenFloating: 即将 Show() — Left={w.Left:F0} Top={w.Top:F0} {w.Width:F0}x{w.Height:F0} Topmost={w.Topmost} State={w.WindowState} owner={w.Owner?.Title ?? "无"} ownerState={(w.Owner as ManagementWindow)?.WindowState.ToString() ?? "n/a"}");
         w.Show();
         // ponytail 2026-08-26: Show 后显式 Activate — 无 Owner 的浮动窗口也要抢到
         // 前台焦点,避免被分区窗口(桌面挂件)压住看不见。
         w.Activate();
-        System.Diagnostics.Trace.WriteLine($"[SubFlyout] OpenFloating: Show 完成 — IsVisible={w.IsVisible} Left={w.Left:F0} Top={w.Top:F0} Opacity={w.Opacity}");
-#if DEBUG
+        DzTrace.Log($"[SubFlyout] OpenFloating: Show 完成 — IsVisible={w.IsVisible} Left={w.Left:F0} Top={w.Top:F0} Opacity={w.Opacity}");
         // ponytail 2026-08-28: 诊断 — Show 后 500ms 间隔拍 4 次快照,定位
         // "Show 完成 IsVisible=True 但用户看不见"(淡入未跑 / 被自动关闭 / Owner 最小化连带隐藏)。
         var snapWin = w;
@@ -231,18 +233,20 @@ public class PropertyWindowManager
         snap.Tick += (_, _) =>
         {
             ticks++;
-            System.Diagnostics.Trace.WriteLine(
+            DzTrace.Log(
                 $"[PropWin] 快照{ticks}: '{snapTitle}' IsVisible={snapWin.IsVisible} Opacity={snapWin.Opacity:F2} Visibility={snapWin.Visibility} State={snapWin.WindowState} at ({snapWin.Left:F0},{snapWin.Top:F0}) {snapWin.ActualWidth:F0}x{snapWin.ActualHeight:F0}");
             if (ticks >= 4) snap.Stop();
         };
         snap.Start();
-#endif
     }
 
-    /// <summary>夹取窗口左上角到工作区,保证至少有一部分可见(兜底历史遗留的屏幕外坐标)。</summary>
+    /// <summary>夹取窗口左上角到工作区,保证至少有一部分可见(兜底历史遗留的屏幕外坐标)。
+    /// ponytail 2026-08-28: 用"候选点所在显示器"的工作区 — SystemParameters.WorkArea 只覆盖
+    /// 主显示器,多屏混合 DPI 下副屏的 DIP 坐标会被错误拉回主屏(设置窗口"打不开/跑错屏"
+    /// 的根源之一)。MonitorHelper 按各显示器 DPI 换算成与 Window.Left/Top 同空间的 DIP。</summary>
     static (double x, double y) ClampToWorkArea(double x, double y)
     {
-        var wa = SystemParameters.WorkArea;
+        var wa = MonitorHelper.WorkAreaDipContaining(new Point(x, y));
         const double minVisible = 120;
         if (x + minVisible < wa.Left) x = wa.Left + 8;
         if (x > wa.Right - minVisible) x = Math.Max(wa.Left + 8, wa.Right - 400);

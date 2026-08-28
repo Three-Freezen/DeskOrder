@@ -62,6 +62,12 @@ public partial class SubfolderFlyout : UserControl
     {
         InitializeComponent();
         // ponytail 2026-08-28: 诊断 — ⚙ 点击时灵时不灵,看 MouseDown 是否到达浮层/源是什么。
+        // 2026-08-28 修复:分区侧(桌面层窗口托管的 Popup)在混合 DPI 下,WPF 的输入坐标
+        // 映射与真实几何矛盾(Win32 rect 与 PointToScreen/PointFromScreen 互相矛盾)——
+        // 用户肉眼点 ⚙,命中测试却算到标题名字区域,⚙ 的 MouseLeftButtonDown 永远不触发
+        // (实测分区侧按下 pos=(112.8,22.4) 落在名字区,面板侧同款 Popup 映射正常)。
+        // 不再依赖 WPF 命中测试:用 GetCursorPos(物理光标)+ GetWindowRect(浮层真实矩形)
+        // + ActualWidth/Height 比例把点击点反算成布局坐标,落在 ⚙ 区域内即触发打开。
         this.PreviewMouseDown += (_, e) =>
         {
             var src = e.OriginalSource as System.Windows.DependencyObject;
@@ -72,6 +78,13 @@ public partial class SubfolderFlyout : UserControl
                 src = System.Windows.Media.VisualTreeHelper.GetParent(src);
             }
             System.Diagnostics.Trace.WriteLine($"[SubFlyout] PreviewMouseDown src={e.OriginalSource?.GetType().Name} chain={chain} pos={e.GetPosition(this)} captured={System.Windows.Input.Mouse.Captured is not null}");
+            DzTrace.Log($"[SubFlyout] PreviewMouseDown src={e.OriginalSource?.GetType().Name} pos={e.GetPosition(this)} captured={System.Windows.Input.Mouse.Captured is not null} host={ViewModel?.HostSubItem.Name}");
+            if (e.ChangedButton == System.Windows.Input.MouseButton.Left && TryHandleGearPress())
+            {
+                DzTrace.Log($"[SubFlyout] PreviewMouseDown: 物理命中 ⚙ → 打开样式设置(绕过 WPF 命中测试)");
+                e.Handled = true; // 阻断冒泡,StyleBtn_Click 兜底路径不再重复触发
+                OpenStyleEditor();
+            }
         };
         Loaded += (_, _) => SizeInnerGrid();
         // ponytail 2026-08-26: 长按拖拽批量选择(与主分区 marquee 同款)。
@@ -83,6 +96,37 @@ public partial class SubfolderFlyout : UserControl
         // WM_MOUSELEAVE。ZoneWindow 的"移出 200ms 自动关闭"必须被抑制,否则右键后
         // 200ms flyout 就开始播关闭动画(右键图标层"触发关闭动画"的根源)。
         ContextMenuOpening += OnContextMenuOpening;
+    }
+
+    /// <summary>ponytail 2026-08-28: 用 Win32 物理真相判断本次按下是否落在 ⚙ 按钮上。
+    /// 分区侧(桌面层窗口托管的 Popup)混合 DPI 下 WPF 的输入坐标映射与真实几何矛盾,
+    /// 路由命中测试点不中 ⚙ — 这里把物理光标位置按 HWND 真实矩形比例反算成布局坐标,
+    /// 再按 RenderTransform(打开动画的 scale + 锚点)反解,与 ⚙ 的布局矩形比对。
+    /// ⚙ 布局矩形:内容 Margin=8,DockPanel 行高 26(Dock=Right,宽 32)→
+    /// [ActualWidth-40, ActualWidth-8] × [8, 34](外扩 2px 容差)。</summary>
+    bool TryHandleGearPress()
+    {
+        try
+        {
+            var hs = System.Windows.Interop.HwndSource.FromVisual(this) as System.Windows.Interop.HwndSource;
+            if (hs == null || hs.Handle == IntPtr.Zero) return false;
+            if (!GetWindowRect(hs.Handle, out var r)) return false;
+            if (!GetCursorPos(out var cur)) return false;
+            double wpx = r.Right - r.Left, hpx = r.Bottom - r.Top;
+            if (wpx <= 0 || hpx <= 0 || ActualWidth <= 0 || ActualHeight <= 0) return false;
+            // 物理偏移 → 布局空间(HWND 尺寸与布局尺寸的比值)。
+            double kx = ActualWidth / wpx, ky = ActualHeight / hpx;
+            double px = (cur.X - r.Left) * kx, py = (cur.Y - r.Top) * ky;
+            // RenderTransform = [平移(-c), scale(s), 平移(+c)] → p' = c + s·(p − c);
+            // 反解 p = c + (p' − c) / s(打开动画进行中按下也精确)。
+            double sx = Math.Max(0.01, FlyoutScale.ScaleX), sy = Math.Max(0.01, FlyoutScale.ScaleY);
+            double cx = FlyoutTranslateBack.X, cy = FlyoutTranslateBack.Y;
+            double lx = cx + (px - cx) / sx;
+            double ly = cy + (py - cy) / sy;
+            var gear = new Rect(Math.Max(0, ActualWidth - 42), 6, 34, 30);
+            return gear.Contains(new Point(lx, ly));
+        }
+        catch { return false; }
     }
 
     bool _ctxMenuOpen;
@@ -585,26 +629,33 @@ public partial class SubfolderFlyout : UserControl
     static ZoneItemViewModel? MenuVm(object s)
         => s is MenuItem mi && mi.DataContext is ZoneItemViewModel vm ? vm : null;
 
-    /// <summary>ponytail 2026-08-28: ⚙ 点击点的屏幕坐标(DIP)— 宿主弹出样式浮窗时
+    /// <summary>ponytail 2026-08-28: ⚙ 点击点的屏幕 DIP 坐标 — 宿主弹出样式浮窗时
     /// 用作锚点,让窗口贴着点击点开而非落历史 rect(历史位置可能压住光标,导致
-    /// ✕ 被下一次点击误关)。PointToScreen 失败(未连接)时为 null,宿主走旧路径。</summary>
+    /// ✕ 被下一次点击误关)。多屏混合 DPI 下 WPF Popup 的 PointToScreen 会给出与
+    /// Win32 真实几何矛盾的坐标(实测 -1927 这类副屏错值),锚点因此只走
+    /// GetCursorPos + 所在显示器 DPI 换算;失败(取光标失败)时为 null,宿主走旧路径。</summary>
     public Point? StyleBtnScreenDip { get; private set; }
 
+    /// <summary>⚙ 打开样式设置的唯一入口 — PreviewMouseDown 物理命中检测与
+    /// StyleBtn_Click 兜底路径共用。</summary>
+    void OpenStyleEditor()
+    {
+        // 按下瞬间光标位置 == ⚙ 点击位置 — 用物理光标坐标,不再读 Popup 自身的
+        // PointToScreen(那正是混合 DPI 下坐标错乱的来源)。
+        StyleBtnScreenDip = MonitorHelper.CursorDip();
+        DzTrace.Log($"[SubFlyout] OpenStyleEditor: host={ViewModel?.HostSubItem.Name} anchor={StyleBtnScreenDip?.ToString() ?? "null"} subscribers={(EditStyleRequested != null)}");
+        EditStyleRequested?.Invoke(this);
+    }
+
+    /// <summary>兜底路径:WPF 路由命中测试正常时(面板侧等),预览层未拦截,气泡到
+    /// ⚙ Border 的 MouseLeftButtonDown 才到这里。预览层已处理时 e.Handled=true,
+    /// 这里直接返回避免重复打开。</summary>
     void StyleBtn_Click(object sender, MouseButtonEventArgs e)
     {
+        if (e.Handled) return;
         e.Handled = true;
-        try
-        {
-            var screenPx = PointToScreen(e.GetPosition(this));
-            var dpi = VisualTreeHelper.GetDpi(this);
-            StyleBtnScreenDip = new Point(screenPx.X / dpi.DpiScaleX, screenPx.Y / dpi.DpiScaleY);
-        }
-        catch
-        {
-            StyleBtnScreenDip = null;
-        }
-        System.Diagnostics.Trace.WriteLine($"[SubFlyout] StyleBtn_Click: EditStyleRequested={(EditStyleRequested != null)} anchor={StyleBtnScreenDip}");
-        EditStyleRequested?.Invoke(this);
+        DzTrace.Log($"[SubFlyout] StyleBtn_Click(兜底): host={ViewModel?.HostSubItem.Name}");
+        OpenStyleEditor();
     }
 
     void StyleBtn_Enter(object sender, MouseEventArgs e)
@@ -909,6 +960,8 @@ public partial class SubfolderFlyout : UserControl
     {
         if (_clickOutsideHooked) return;
         _clickOutsideHooked = true;
+        PreventActivation();
+        DzTrace.Log($"[SubFlyout] HookClickOutside: host={ViewModel?.HostSubItem.Name} hwnd={PopupHwndText()}");
         try { System.Windows.Input.Mouse.Capture(this, System.Windows.Input.CaptureMode.SubTree); } catch { }
         System.Windows.Input.Mouse.AddPreviewMouseDownOutsideCapturedElementHandler(this, OnPreviewMouseDownOutsideCapturedElement);
         // ponytail 2026-08-28: 多屏混合 DPI 下 ⚙ 点击坐标错乱(pos 出现 -1927 这类副屏
@@ -916,6 +969,50 @@ public partial class SubfolderFlyout : UserControl
         DumpPopupGeometry("开层即检");
         Dispatcher.BeginInvoke(new Action(() => DumpPopupGeometry("开层+400ms")),
             System.Windows.Threading.DispatcherPriority.Background);
+    }
+
+    string PopupHwndText()
+    {
+        var hs = System.Windows.Interop.HwndSource.FromVisual(this) as System.Windows.Interop.HwndSource;
+        return hs != null && hs.Handle != IntPtr.Zero ? $"0x{hs.Handle.ToInt64():X}" : "无HWND";
+    }
+
+    /// <summary>ponytail 2026-08-28: 给 Popup 根 HWND 加 WS_EX_NOACTIVATE。实测点击浮层
+    /// 内部会把宿主分区窗口顶到失活(WPF Popup 默认可激活),失活又触发宿主的层级回落
+    /// (SetWindowPos)与整套输入状态翻搅 — ⚙ 按下命中后,抬起在翻搅中重新命中失败,
+    /// 表现为"⚙ 时灵时不灵"。NOACTIVATE 后层内点击不再惊动宿主,按下/抬起走同一份
+    /// 安静的输入状态。幂等,每次开层调用。</summary>
+    public void PreventActivation()
+    {
+        try
+        {
+            var hs = System.Windows.Interop.HwndSource.FromVisual(this) as System.Windows.Interop.HwndSource;
+            if (hs == null || hs.Handle == System.IntPtr.Zero) { DzTrace.Log("[SubFlyout] PreventActivation: 无HWND"); return; }
+            int ex = DesktopZones.Helpers.NativeMethods.GetWindowLong(hs.Handle, DesktopZones.Helpers.NativeMethods.GWL_EXSTYLE);
+            DesktopZones.Helpers.NativeMethods.SetWindowLong(hs.Handle,
+                DesktopZones.Helpers.NativeMethods.GWL_EXSTYLE,
+                ex | DesktopZones.Helpers.NativeMethods.WS_EX_NOACTIVATE);
+            DzTrace.Log($"[SubFlyout] PreventActivation: hwnd=0x{hs.Handle.ToInt64():X} exStyle=0x{ex:X8} → 0x{(ex | DesktopZones.Helpers.NativeMethods.WS_EX_NOACTIVATE):X8}");
+        }
+        catch (Exception ex) { DzTrace.Log($"[SubFlyout] PreventActivation 异常: {ex.Message}"); }
+    }
+
+    /// <summary>物理光标当前是否落在浮层屏幕矩形内(含 24px 玻璃边距)。
+    /// 判定失败一律返回 true(保守:调用方"光标在层外才关层"的逻辑不误关)。
+    /// ponytail 2026-08-28: 矩形走 Win32 GetWindowRect(物理像素,真实几何)而非
+    /// PointToScreen — 混合 DPI 下 Popup 的 PointToScreen 与 Win32 几何矛盾,会误判。</summary>
+    public bool ContainsScreenCursor()
+    {
+        try
+        {
+            if (!GetCursorPos(out var p)) return true;
+            var hs = System.Windows.Interop.HwndSource.FromVisual(this) as System.Windows.Interop.HwndSource;
+            if (hs == null || hs.Handle == IntPtr.Zero || !GetWindowRect(hs.Handle, out var r)) return true;
+            const double margin = 24;
+            return p.X >= r.Left - margin && p.X <= r.Right + margin
+                && p.Y >= r.Top - margin && p.Y <= r.Bottom + margin;
+        }
+        catch { return true; }
     }
 
     /// <summary>ponytail 2026-08-28: 诊断 — 打印浮层 HWND 的 Win32 物理矩形、WPF 侧
@@ -935,13 +1032,13 @@ public partial class SubfolderFlyout : UserControl
             var cur = GetCursorPos(out var cpt) ? $"{cpt.X},{cpt.Y}" : "失败";
             var dpi = System.Windows.Media.VisualTreeHelper.GetDpi(this);
             var host = ViewModel?.HostSubItem.Name ?? "?";
-            System.Diagnostics.Trace.WriteLine(
+            DzTrace.Log(
                 $"[SubFlyout] 几何[{tag}] host={host}: Win32={win32} PointToScreen(0,0)={toScreen} PointFromScreen(0,0)={fromScreen} " +
                 $"DPI={dpi.DpiScaleX:F2} 光标物理=({cur}) MouseRel={Mouse.GetPosition(this)} 虚拟桌面=({SystemParameters.VirtualScreenLeft:F0},{SystemParameters.VirtualScreenTop:F0} {SystemParameters.VirtualScreenWidth:F0}x{SystemParameters.VirtualScreenHeight:F0})");
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Trace.WriteLine($"[SubFlyout] 几何[{tag}] 失败: {ex.Message}");
+            DzTrace.Log($"[SubFlyout] 几何[{tag}] 失败: {ex.Message}");
         }
     }
 
