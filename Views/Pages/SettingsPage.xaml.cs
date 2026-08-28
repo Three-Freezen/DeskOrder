@@ -341,8 +341,10 @@ public partial class SettingsPage : UserControl
             _ => "",
         };
 
+        // Failed 也可重试：否则一次网络抖动/限流就把按钮永久锁死（状态在服务里，
+        // 页面重建也不复位），用户只能重启应用。
         UpdateButton.IsEnabled = svc.State is UpdateState.Idle or UpdateState.UpToDate
-            or UpdateState.Available or UpdateState.Ready;
+            or UpdateState.Available or UpdateState.Ready or UpdateState.Failed;
         UpdateButton.Content = svc.State switch
         {
             UpdateState.Available => loc["Settings.DownloadUpdate"],

@@ -102,7 +102,7 @@ public sealed class UpdateService
         catch (Exception ex)
         {
             TouchLastCheckTime();
-            ErrorText = ex.Message;
+            ErrorText = FriendlyError(ex);
             SetState(UpdateState.Failed);
             return null;
         }
@@ -127,7 +127,7 @@ public sealed class UpdateService
         }
         catch (Exception ex)
         {
-            ErrorText = ex.Message;
+            ErrorText = FriendlyError(ex);
             SetState(UpdateState.Failed);
         }
     }
@@ -186,6 +186,24 @@ public sealed class UpdateService
     {
         State = state;
         RaiseStateChanged();
+    }
+
+    /// <summary>把底层网络异常翻译成用户能看懂的提示（GitHub API 直连被墙 /
+    /// 共享代理出口限流是国内最常见的两种失败，必须单独说明而不是甩英文异常）。</summary>
+    private static string FriendlyError(Exception ex)
+    {
+        var loc = LocalizationService.Instance;
+        if (ex is HttpRequestException hre)
+        {
+            var code = hre.StatusCode;
+            if (code == System.Net.HttpStatusCode.Forbidden) return loc["Settings.UpdateErr.RateLimit"];
+            if (code == System.Net.HttpStatusCode.ProxyAuthenticationRequired) return loc["Settings.UpdateErr.Proxy"];
+            if (code != null && (int)code >= 400)
+                return loc.Get("Settings.UpdateErr.Http", (int)code);
+            return loc["Settings.UpdateErr.Network"];
+        }
+        if (ex is TaskCanceledException) return loc["Settings.UpdateErr.Timeout"];
+        return ex.Message;
     }
 
     private void RaiseStateChanged()
