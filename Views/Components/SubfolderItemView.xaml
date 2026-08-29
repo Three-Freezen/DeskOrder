@@ -27,16 +27,14 @@
                 ClipToBounds="True">
             <Grid>
                 <!-- ponytail 2026-08-29: 填充/背景/玻璃矩形带与边框同款的圆角 —
-                     否则正方形填充会从圆角边框四角戳出来,视觉生硬。 -->
+                     否则正方形填充会从圆角边框四角戳出来,视觉生硬。
+                     ponytail 2026-08-30: 一体化 — 填充与玻璃合成一个背景画刷(玻璃已并入)。 -->
                 <Rectangle Fill="{Binding BoxFill}" IsHitTestVisible="False"
                            RadiusX="{Binding Source.CornerRounded, Converter={x:Static vm:BoolToRoundedRadiusConverter.Instance}}"
                            RadiusY="{Binding Source.CornerRounded, Converter={x:Static vm:BoolToRoundedRadiusConverter.Instance}}"/>
                 <!-- 背景图走 ImageBrush:自动裁剪适应格子,不参与布局测量(防撑大) -->
                 <Rectangle Fill="{Binding BgImageBrush}" Opacity="{Binding BgOpacity}"
                            IsHitTestVisible="False"
-                           RadiusX="{Binding Source.CornerRounded, Converter={x:Static vm:BoolToRoundedRadiusConverter.Instance}}"
-                           RadiusY="{Binding Source.CornerRounded, Converter={x:Static vm:BoolToRoundedRadiusConverter.Instance}}"/>
-                <Rectangle Fill="{Binding GlassBrush}" IsHitTestVisible="False"
                            RadiusX="{Binding Source.CornerRounded, Converter={x:Static vm:BoolToRoundedRadiusConverter.Instance}}"
                            RadiusY="{Binding Source.CornerRounded, Converter={x:Static vm:BoolToRoundedRadiusConverter.Instance}}"/>
                 <UniformGrid x:Name="ThumbGrid" Rows="2" Columns="2" Margin="4">

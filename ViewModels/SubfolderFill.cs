@@ -59,6 +59,22 @@ public sealed record SubfolderFill(
     /// Flyout 上的真玻璃(DWM)失败时用它兜底。</summary>
     public Brush? GlassBrush => string.IsNullOrEmpty(GlassMode) ? null : AcrylicHelper.MakePreviewGlassBrush(GlassMode);
 
+    /// <summary>ponytail 2026-08-30: 一体化背景画刷 — 玻璃开时 = 填充 over 玻璃渐变
+    /// (单画刷);无玻璃时 = 纯填充。放在填充层位置(背景图之下),与真玻璃(DWM accent
+    /// 也在背景图之下)层序一致。FillHex 为空且无玻璃 → null(完全透明)。</summary>
+    public Brush? UnifiedBackgroundBrush
+    {
+        get
+        {
+            if (string.IsNullOrEmpty(GlassMode))
+                return FillBrush;
+            var glass = AcrylicHelper.MakePreviewGlassBrush(GlassMode);
+            if (string.IsNullOrEmpty(FillHex))
+                return glass;
+            return AcrylicHelper.CompositeFillOverBrush(FillHex, FillOpacity / 100.0, glass);
+        }
+    }
+
     /// <summary>背景图(文件不存在/路径为空时 null)。</summary>
     public ImageSource? BgImage
     {

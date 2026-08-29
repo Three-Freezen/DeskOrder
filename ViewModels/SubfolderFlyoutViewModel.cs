@@ -71,11 +71,25 @@ public class SubfolderFlyoutViewModel : INotifyPropertyChanged
             _showGlassFallback = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(GlassBrush));
+            OnPropertyChanged(nameof(UnifiedBackgroundBrush));
         }
     }
 
-    /// <summary>液态玻璃渐变画刷(真玻璃成功时 null,失败时渐变兜底)。</summary>
-    public System.Windows.Media.Brush? GlassBrush => _showGlassFallback ? Fill.GlassBrush : null;
+    /// <summary>ponytail 2026-08-30: 一体化后玻璃渐变已并入背景,此层恒为空 —
+    /// 真玻璃成功时玻璃在 DWM accent,失败时玻璃已合成进 UnifiedBackgroundBrush。</summary>
+    public System.Windows.Media.Brush? GlassBrush => null;
+
+    /// <summary>一体化背景画刷:真玻璃成功时 null(DWM accent 已含填充);否则 =
+    /// 填充 over 玻璃渐变(或纯填充),放在背景图之下。</summary>
+    public System.Windows.Media.Brush? UnifiedBackgroundBrush
+    {
+        get
+        {
+            bool realGlass = Fill.HasGlass && !_showGlassFallback;
+            if (realGlass) return null;
+            return Fill.UnifiedBackgroundBrush;
+        }
+    }
 
     /// <summary>ZoneItemViewModels for each entry in HostSubItem.SubItems.
     /// ponytail 2026-08-25: exposed as ItemVms (ZoneItemViewModel OC) instead of

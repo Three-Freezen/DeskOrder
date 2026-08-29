@@ -28,15 +28,14 @@
             ClipToBounds="True">
         <Grid>
             <!-- ponytail 2026-08-29: 填充/背景/玻璃矩形带与浮层边框同款圆角 —
-                 否则正方形填充会从圆角四角戳出来,视觉生硬。 -->
-            <Rectangle Fill="{Binding FillBrush}" IsHitTestVisible="False"
+                 否则正方形填充会从圆角四角戳出来,视觉生硬。
+                 ponytail 2026-08-30: 一体化 — 填充与玻璃合成一个背景画刷(玻璃已并入),
+                 真玻璃(DWM accent)成功时该层为 null;背景图仍画在背景之上。 -->
+            <Rectangle Fill="{Binding UnifiedBackgroundBrush}" IsHitTestVisible="False"
                        RadiusX="{Binding HostSubItem.CornerRounded, Converter={x:Static vm:BoolToRoundedRadiusConverter.Instance}}"
                        RadiusY="{Binding HostSubItem.CornerRounded, Converter={x:Static vm:BoolToRoundedRadiusConverter.Instance}}"/>
             <Rectangle Fill="{Binding BgImageBrush}" Opacity="{Binding BgOpacity}"
                        IsHitTestVisible="False"
-                       RadiusX="{Binding HostSubItem.CornerRounded, Converter={x:Static vm:BoolToRoundedRadiusConverter.Instance}}"
-                       RadiusY="{Binding HostSubItem.CornerRounded, Converter={x:Static vm:BoolToRoundedRadiusConverter.Instance}}"/>
-            <Rectangle Fill="{Binding GlassBrush}" IsHitTestVisible="False"
                        RadiusX="{Binding HostSubItem.CornerRounded, Converter={x:Static vm:BoolToRoundedRadiusConverter.Instance}}"
                        RadiusY="{Binding HostSubItem.CornerRounded, Converter={x:Static vm:BoolToRoundedRadiusConverter.Instance}}"/>
             <Grid Margin="8">

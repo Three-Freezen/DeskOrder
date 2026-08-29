@@ -115,7 +115,7 @@ public class SubfolderItemViewModel : INotifyPropertyChanged
     /// <summary>不跟随时解析出的自身填充;跟随主分区时为 null(透出主分区)。</summary>
     public SubfolderFill? OverrideFill => Source.FillFollowsZone ? null : SubfolderFill.FromOverride(Source);
 
-    public System.Windows.Media.Brush? BoxFill => OverrideFill?.FillBrush;
+    public System.Windows.Media.Brush? BoxFill => OverrideFill?.UnifiedBackgroundBrush;
 
     public System.Windows.Media.ImageSource? BgImage => OverrideFill?.BgImage;
 
@@ -124,15 +124,9 @@ public class SubfolderItemViewModel : INotifyPropertyChanged
 
     public double BgOpacity => OverrideFill?.BgOpacity01 ?? 0;
 
-    public System.Windows.Media.Brush? GlassBrush
-    {
-        get
-        {
-            var b = OverrideFill?.GlassBrush;
-            DzTrace.Log($"[SubEdit] Icon.GlassBrush: name={Source.Name} follow={Source.FillFollowsZone} glassOn={Source.EnableLiquidGlass} mode={Source.GlassColorMode} brush={(b != null ? "gradient" : "null")}");
-            return b;
-        }
-    }
+    /// <summary>ponytail 2026-08-30: 一体化后玻璃渐变已并入 BoxFill,此层恒为空 —
+    /// 保留属性避免模板/绑定破坏。</summary>
+    public System.Windows.Media.Brush? GlassBrush => null;
 
     public event PropertyChangedEventHandler? PropertyChanged;
     void OnPropertyChanged([CallerMemberName] string? name = null)

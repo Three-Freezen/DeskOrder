@@ -501,7 +501,15 @@ public static class AcrylicHelper
         string? fillHex, double fillOpacity01, string glassMode, int tintOpacity, int tintLuminosity)
     {
         _registered[window] = (blurAmount, tintOpacity, tintLuminosity, glassMode, fillHex, fillOpacity01);
-        var hwnd = new WindowInteropHelper(window).Handle;
+        return EnableBlurComposite(new WindowInteropHelper(window).Handle, blurAmount,
+            fillHex, fillOpacity01, glassMode, tintOpacity, tintLuminosity, skipClassicBlur: false);
+    }
+
+    /// <summary>HWND 版一体化开玻璃(次级分区浮层用,不注册 _registered)。
+    /// skipClassicBlur=true 时只设 accent(与浮层现配方一致),否则经典 blurbehind + accent。</summary>
+    public static BlurResult EnableBlurComposite(IntPtr hwnd, int blurAmount,
+        string? fillHex, double fillOpacity01, string glassMode, int tintOpacity, int tintLuminosity, bool skipClassicBlur)
+    {
         if (hwnd == IntPtr.Zero) return BlurResult.Fail("Window handle not created yet");
 
         bool dwmOn = true;
@@ -517,10 +525,45 @@ public static class AcrylicHelper
         var tint = CompositeFillOverGlass(fillHex, fillOpacity01, glassMode, tintOpacity, tintLuminosity);
         int abgr = ArgbToAbgr(tint);
         int accentFlags = (Math.Clamp(blurAmount, 1, 60) << 8) | 0x100;
-        var primary = TryBlurBehind(hwnd, true);
+        var primary = skipClassicBlur ? BlurResult.Fail("skipped by caller") : TryBlurBehind(hwnd, true);
         var secondary = TrySetAccent(hwnd, ACCENT_ENABLE_ACRYLICBLURBEHIND, accentFlags, abgr);
         if (primary.Success || secondary.Success) return BlurResult.Ok;
         return BlurResult.Fail(primary.Error ?? secondary.Error ?? "unknown");
+    }
+
+    /// <summary>把「填充 over 玻璃渐变」合成一个单画刷 — 纯 WPF 表面用(次级分区图标格 /
+    /// 浮层渐变兜底,无 DWM 玻璃)。glassBrush 非渐变时退回纯填充画刷。</summary>
+    public static Brush? CompositeFillOverBrush(string? fillHex, double fillOpacity01, Brush? glassBrush)
+    {
+        Color f = Color.FromArgb(0, 0, 0, 0);
+        bool hasFill = false;
+        if (!string.IsNullOrEmpty(fillHex) && TryParseGlassColor(fillHex, out var parsed))
+        {
+            f = parsed;
+            f.A = (byte)Math.Max(0, Math.Min(255, f.A * Math.Max(0.0, Math.Min(1.0, fillOpacity01))));
+            hasFill = true;
+        }
+
+        if (glassBrush is not LinearGradientBrush grad)
+        {
+            if (!hasFill) return null;
+            var sb = new SolidColorBrush(f);
+            sb.Freeze();
+            return sb;
+        }
+
+        var lg = new LinearGradientBrush
+        {
+            StartPoint = grad.StartPoint,
+            EndPoint = grad.EndPoint,
+            SpreadMethod = grad.SpreadMethod,
+            MappingMode = grad.MappingMode,
+            Opacity = grad.Opacity
+        };
+        foreach (var stop in grad.GradientStops)
+            lg.GradientStops.Add(new GradientStop(hasFill ? Over(f, stop.Color) : stop.Color, stop.Offset));
+        lg.Freeze();
+        return lg;
     }
 
     static Color AbgrToColor(int abgr) => Color.FromArgb(

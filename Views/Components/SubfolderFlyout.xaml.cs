@@ -214,7 +214,9 @@ public partial class SubfolderFlyout : UserControl
     /// <summary>尝试给 Popup 子窗口开真玻璃。成功返回 true(调用方隐藏渐变兜底)。
     /// ponytail 2026-08-29: 只走 accent、跳过经典 blurbehind — 经典 blur 在 Popup 上
     /// 会把背景压暗 30%("浮层比分区深"的根源),accent 成功 = 与分区同款着色玻璃,
-    /// 失败则由调用方显示渐变兜底。</summary>
+    /// 失败则由调用方显示渐变兜底。
+    /// ponytail 2026-08-30: 一体化 — 填充并入玻璃 tint(EnableBlurComposite),成功时
+    /// 背景层(UnifiedBackgroundBrush)为 null,DWM accent 统一携带填充+玻璃。</summary>
     public bool TryApplyRealGlass(SubfolderFill fill)
     {
         if (!fill.HasGlass) return false;
@@ -222,9 +224,10 @@ public partial class SubfolderFlyout : UserControl
         {
             var src = PresentationSource.FromVisual(this) as System.Windows.Interop.HwndSource;
             if (src == null || src.Handle == IntPtr.Zero) return false;
-            var r = AcrylicHelper.EnableBlur(src.Handle, fill.GlassBlur, fill.GlassTintOpacity,
-                fill.GlassTintLuminosity, fill.GlassMode!, skipClassicBlur: true);
-            DzTrace.Log($"[SubFlyout] TryApplyRealGlass(accent-only): host={ViewModel?.HostSubItem.Name} success={r.Success} err={r.Error} mode={fill.GlassMode}");
+            var r = AcrylicHelper.EnableBlurComposite(src.Handle, fill.GlassBlur,
+                fill.FillHex, fill.FillOpacity / 100.0, fill.GlassMode!,
+                fill.GlassTintOpacity, fill.GlassTintLuminosity, skipClassicBlur: true);
+            DzTrace.Log($"[SubFlyout] TryApplyRealGlass(composite accent-only): host={ViewModel?.HostSubItem.Name} success={r.Success} err={r.Error} mode={fill.GlassMode}");
             return r.Success;
         }
         catch (Exception ex)
