@@ -374,7 +374,9 @@ public static class AcrylicHelper
     // ponytail: registry of windows that called EnableBlur, so OnSystemAccentChanged
     // can re-apply blur to the windows that actually use the "Accent" preset. Keyed
     // by window instance; entries get removed in DisableBlur.
-    private static readonly Dictionary<Window, (int blur, int opacity, int lum, string mode)> _registered = new();
+    // fillHex/fillOpacity:分区本体一体化时填充并入玻璃 tint,重算"Accent"需要回填原始
+    // 填充输入;普通玻璃窗口为 null/0。
+    private static readonly Dictionary<Window, (int blur, int opacity, int lum, string mode, string? fillHex, double fillOpacity)> _registered = new();
 
     /// <summary>
     /// Build the GradientColor (ABGR format) from color mode + tint opacity + tint luminosity.
@@ -440,7 +442,12 @@ public static class AcrylicHelper
             if (!window.IsLoaded) continue;
             try
             {
-                EnableBlur(window, settings.blur, settings.opacity, settings.lum, settings.mode);
+                // ponytail 2026-08-30: 分区本体一体化路径按原始填充+玻璃输入重算合成 tint。
+                if (settings.fillHex is null)
+                    EnableBlur(window, settings.blur, settings.opacity, settings.lum, settings.mode);
+                else
+                    EnableBlurComposite(window, settings.blur, settings.fillHex, settings.fillOpacity,
+                        settings.mode, settings.opacity, settings.lum);
             }
             catch (Exception ex)
             {
@@ -462,8 +469,80 @@ public static class AcrylicHelper
         // ponytail: remember (window → settings) so OnSystemAccentChanged can re-apply
         // when the system accent changes. Override existing entry if EnableBlur is
         // called again with different params (e.g. user edited settings live).
-        _registered[window] = (blurAmount, tintOpacity, tintLuminosity, colorMode);
+        _registered[window] = (blurAmount, tintOpacity, tintLuminosity, colorMode, null, 0);
         return EnableBlur(new WindowInteropHelper(window).Handle, blurAmount, tintOpacity, tintLuminosity, colorMode);
+    }
+
+    // ── 分区本体一体化:内部填充 + 液态玻璃合成 ──
+    // ponytail 2026-08-30: 分区背景现在是「壁纸 → DWM 玻璃(模糊+玻璃着色) → WPF 填充
+    // (FillColor)」两个独立图层。这里把两者在计算层合成一个有效着色 T = 填充 over
+    // 玻璃着色(alpha 合成),玻璃开时填充并入玻璃 tint、FillRect 透明 — 实际渲染算
+    // 一层;填充色与玻璃配色作为两个独立输入「本质上还是两层」。
+
+    /// <summary>把「内部填充 over 玻璃着色」合成一个有效 ARGB 着色。
+    /// fillOpacity01 = 填充色 alpha 的额外乘数(分区本体恒为 1.0,alpha 已含在 FillColor)。</summary>
+    public static Color CompositeFillOverGlass(string? fillHex, double fillOpacity01,
+        string glassMode, int tintOpacity, int tintLuminosity)
+    {
+        Color f = Color.FromArgb(0, 0, 0, 0);
+        if (!string.IsNullOrEmpty(fillHex) && TryParseGlassColor(fillHex, out var parsed))
+        {
+            f = parsed;
+            f.A = (byte)Math.Max(0, Math.Min(255, f.A * Math.Max(0.0, Math.Min(1.0, fillOpacity01))));
+        }
+        Color g = AbgrToColor(ResolveGlassTintColor(glassMode, tintOpacity, tintLuminosity));
+        return Over(f, g);
+    }
+
+    /// <summary>分区本体一体化开玻璃:填充并入玻璃 tint 后走与 EnableBlur 同款 DWM 配方
+    /// (经典 blurbehind + accent),只是 accent 的着色换成合成值。注册原始填充输入,
+    /// 系统强调色(Accent)变化时能按原始输入重算。</summary>
+    public static BlurResult EnableBlurComposite(Window window, int blurAmount,
+        string? fillHex, double fillOpacity01, string glassMode, int tintOpacity, int tintLuminosity)
+    {
+        _registered[window] = (blurAmount, tintOpacity, tintLuminosity, glassMode, fillHex, fillOpacity01);
+        var hwnd = new WindowInteropHelper(window).Handle;
+        if (hwnd == IntPtr.Zero) return BlurResult.Fail("Window handle not created yet");
+
+        bool dwmOn = true;
+        try { DwmIsCompositionEnabled(out dwmOn); }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[AcrylicHelper] DwmIsCompositionEnabled: {ex}");
+            return BlurResult.Fail(ex.Message);
+        }
+        if (!dwmOn) return BlurResult.Fail("DWM composition is disabled");
+        if (blurAmount <= 0) { DisableBlur(hwnd); return BlurResult.Ok; }
+
+        var tint = CompositeFillOverGlass(fillHex, fillOpacity01, glassMode, tintOpacity, tintLuminosity);
+        int abgr = ArgbToAbgr(tint);
+        int accentFlags = (Math.Clamp(blurAmount, 1, 60) << 8) | 0x100;
+        var primary = TryBlurBehind(hwnd, true);
+        var secondary = TrySetAccent(hwnd, ACCENT_ENABLE_ACRYLICBLURBEHIND, accentFlags, abgr);
+        if (primary.Success || secondary.Success) return BlurResult.Ok;
+        return BlurResult.Fail(primary.Error ?? secondary.Error ?? "unknown");
+    }
+
+    static Color AbgrToColor(int abgr) => Color.FromArgb(
+        (byte)((uint)abgr >> 24),
+        (byte)(abgr & 0xFF),
+        (byte)((abgr >> 8) & 0xFF),
+        (byte)((abgr >> 16) & 0xFF));
+
+    static int ArgbToAbgr(Color c)
+        => ArgbToAbgr((uint)((c.A << 24) | (c.R << 16) | (c.G << 8) | c.B));
+
+    /// <summary>f over g 的标准 alpha 合成(前后均为不透明背景上的预乘语义)。</summary>
+    static Color Over(Color f, Color g)
+    {
+        double fa = f.A / 255.0, ga = g.A / 255.0;
+        double a = fa + ga * (1.0 - fa);
+        if (a <= 0.0001) return Color.FromArgb(0, 0, 0, 0);
+        return Color.FromArgb(
+            (byte)Math.Round(a * 255.0),
+            (byte)Math.Round((f.R * fa + g.R * ga * (1.0 - fa)) / a),
+            (byte)Math.Round((f.G * fa + g.G * ga * (1.0 - fa)) / a),
+            (byte)Math.Round((f.B * fa + g.B * ga * (1.0 - fa)) / a));
     }
 
     /// <summary>

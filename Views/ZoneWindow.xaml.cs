@@ -3958,8 +3958,10 @@ public partial class ZoneWindow : Window
         if (PresentationSource.FromVisual(this) != null && !collapsed)
             NativeMethods.SetRoundedCorners(this, s.CornerRadius);
 
-        // Body fill
-        try { FillRect.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.FillColor)!); } catch { }
+        // Body fill — 分区本体一体化:玻璃开时填充已并入玻璃 tint,此处透明;
+        // 玻璃关(或收起)时保持纯填充照旧。
+        bool glassCarriesFill = _zone.EnableLiquidGlass && (_hover?.IsExpanded ?? false);
+        try { FillRect.Fill = glassCarriesFill ? Brushes.Transparent : new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.FillColor)!); } catch { }
         bool fillIndependent = s.TitleBarFillIndependent && !s.TileMode;
         FillRect.RadiusX = FillRect.RadiusY = fillIndependent ? 0 : s.CornerRadius;
         // ponytail 2026-08-26: the merged master's title bar is TWO layers — the
@@ -4266,21 +4268,16 @@ public partial class ZoneWindow : Window
         bool expanded = _hover?.IsExpanded ?? false;
         if (_zone.EnableLiquidGlass && expanded)
         {
-            var blurResult = AcrylicHelper.EnableBlur(this, _zone.GlassBlurAmount, _zone.GlassTintOpacity, _zone.GlassTintLuminosity, _zone.GlassColorMode);
+            // ponytail 2026-08-30: 分区本体一体化 — 内部填充并入玻璃 tint(算一层),
+            // FillRect 透明;填充色与玻璃配色作为两个输入本质上仍是两层。
+            var blurResult = AcrylicHelper.EnableBlurComposite(this, _zone.GlassBlurAmount,
+                fillColor, 1.0, _zone.GlassColorMode, _zone.GlassTintOpacity, _zone.GlassTintLuminosity);
             if (!blurResult.Success)
                 System.Diagnostics.Debug.WriteLine($"[ZoneWindow] EnableBlur failed: {blurResult.Error}");
-            try
-            {
-                var tint = (Color)ColorConverter.ConvertFromString(fillColor)!;
-                FillRect.Fill = new SolidColorBrush(tint);
-                FillRect.Opacity = 1.0; // Brush alpha from FillColor controls transparency
-                if (TitleBarBg != null && !string.IsNullOrEmpty(titleBarFillColor))
-                    ApplyTitleBarBandFill(titleBarFillColor);
-            }
-            catch
-            {
-                if (FillRect != null) FillRect.Fill = new SolidColorBrush(Color.FromArgb(0x04, 0x00, 0x00, 0x00));
-            }
+            FillRect.Fill = Brushes.Transparent;
+            FillRect.Opacity = 1.0;
+            if (TitleBarBg != null && !string.IsNullOrEmpty(titleBarFillColor))
+                ApplyTitleBarBandFill(titleBarFillColor);
         }
         else
         {

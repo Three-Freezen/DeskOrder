@@ -261,9 +261,11 @@ public partial class PanelWindow : Window
 
         if (config.Panel.PanelEnableLiquidGlass)
         {
-            var blurResult = AcrylicHelper.EnableBlur(this, config.Panel.PanelGlassBlurAmount,
-                config.Panel.PanelGlassTintOpacity, config.Panel.PanelGlassTintLuminosity,
-                config.Panel.PanelGlassColorMode);
+            // ponytail 2026-08-30: 一体化 — 填充并入玻璃 tint(算一层),FillRect 由
+            // ApplyStyle 置透明;填充色与玻璃配色作为两个输入本质上仍是两层。
+            var blurResult = AcrylicHelper.EnableBlurComposite(this, config.Panel.PanelGlassBlurAmount,
+                fillColorStr, 1.0, config.Panel.PanelGlassColorMode,
+                config.Panel.PanelGlassTintOpacity, config.Panel.PanelGlassTintLuminosity);
             if (!blurResult.Success)
                 System.Diagnostics.Debug.WriteLine($"[PanelWindow] EnableBlur failed: {blurResult.Error}");
         }
@@ -281,10 +283,13 @@ public partial class PanelWindow : Window
         string borderColorStr = config.Panel.PanelBorderColor;
         double borderThickness = config.Panel.PanelBorderThickness;
 
-        // Fill
+        // Fill — 一体化:玻璃开时填充已并入玻璃 tint,此处透明;玻璃关时纯填充照旧。
         try
         {
-            var fill = (Color)ColorConverter.ConvertFromString(fillColorStr)!;
+            bool glassCarriesFill = config.Panel.PanelEnableLiquidGlass;
+            var fill = glassCarriesFill
+                ? Colors.Transparent
+                : (Color)ColorConverter.ConvertFromString(fillColorStr)!;
             FillRect.Fill = new SolidColorBrush(fill);
             FillRect.Opacity = 1.0; // Brush alpha from FillColor controls transparency
         }

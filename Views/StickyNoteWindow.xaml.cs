@@ -866,8 +866,10 @@ public partial class StickyNoteWindow : Window
         bool expanded = _hover?.IsExpanded ?? false;
         if (_note.EnableLiquidGlass && expanded)
         {
-            var blurResult = AcrylicHelper.EnableBlur(this, _note.GlassBlurAmount, _note.GlassTintOpacity,
-                _note.GlassTintLuminosity, _note.GlassColorMode);
+            // ponytail 2026-08-30: 一体化 — 填充并入玻璃 tint(算一层),BodyFillRect 透明;
+            // 填充色与玻璃配色作为两个输入本质上仍是两层。
+            var blurResult = AcrylicHelper.EnableBlurComposite(this, _note.GlassBlurAmount,
+                fillColorStr, 1.0, _note.GlassColorMode, _note.GlassTintOpacity, _note.GlassTintLuminosity);
             if (!blurResult.Success)
                 System.Diagnostics.Debug.WriteLine($"[StickyNoteWindow] EnableBlur failed: {blurResult.Error}");
             // ponytail: additive liquid-glass overlay — the chromatic border rides a
@@ -878,13 +880,7 @@ public partial class StickyNoteWindow : Window
                 NoteGlassBorder.BorderThickness = new Thickness(Math.Max(1.0, borderThickness));
                 NoteGlassBorder.CornerRadius = new CornerRadius(_note.CornerRadius);
             }
-            try
-            {
-                // Use fillColor directly — its ARGB alpha controls transparency
-                var fillColor = (Color)ColorConverter.ConvertFromString(fillColorStr)!;
-                BodyFillRect.Fill = new SolidColorBrush(fillColor);
-            }
-            catch { }
+            BodyFillRect.Fill = Brushes.Transparent;
         }
         else
         {

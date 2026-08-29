@@ -340,10 +340,14 @@ public partial class ClockWidget : Window
     void SyncFillRect()
     {
         string fillColorStr = ResolveEffectiveFill();
+        // ponytail 2026-08-30: 一体化 — 玻璃开时填充并入玻璃 tint,FillRect 透明;
+        // 玻璃关/收起时 FillRect 保持纯填充。
+        bool glassCarriesFill = _clock.EnableLiquidGlass && (_hover?.IsExpanded ?? false);
         try
         {
-            FillRect.Fill = new SolidColorBrush(
-                (Color)ColorConverter.ConvertFromString(fillColorStr)!);
+            FillRect.Fill = glassCarriesFill
+                ? Brushes.Transparent
+                : new SolidColorBrush((Color)ColorConverter.ConvertFromString(fillColorStr)!);
         }
         catch { }
         // ponytail: force re-render — FillRect as a child paints more reliably than
@@ -445,8 +449,10 @@ public partial class ClockWidget : Window
         bool expanded = _hover?.IsExpanded ?? false;
         if (_clock.EnableLiquidGlass && expanded)
         {
-            var blurResult = AcrylicHelper.EnableBlur(this, _clock.GlassBlurAmount, _clock.GlassTintOpacity,
-                _clock.GlassTintLuminosity, _clock.GlassColorMode);
+            // ponytail 2026-08-30: 一体化 — 填充并入玻璃 tint(算一层),FillRect 已由
+            // SyncFillRect 置透明;填充色与玻璃配色作为两个输入本质上仍是两层。
+            var blurResult = AcrylicHelper.EnableBlurComposite(this, _clock.GlassBlurAmount,
+                ResolveEffectiveFill(), 1.0, _clock.GlassColorMode, _clock.GlassTintOpacity, _clock.GlassTintLuminosity);
             if (!blurResult.Success)
                 System.Diagnostics.Debug.WriteLine($"[ClockWidget] EnableBlur failed: {blurResult.Error}");
             if (ClockGlassBorder != null)
