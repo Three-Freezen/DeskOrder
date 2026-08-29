@@ -10,11 +10,11 @@ namespace DesktopZones.Services;
 
 public class ConfigService
 {
-    private static readonly string ConfigDir = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "DesktopZones");
+    // ponytail 2026-08-29: 落点交给 DataLocator — 安装器可选 AppData 或安装目录 Data
+    // (便携模式),属性化保证 IsPortable 首判(启动最早处 Initialize 之后)已定型。
+    private static string ConfigDir => DataLocator.Root;
 
-    private static readonly string ConfigPath = Path.Combine(ConfigDir, "config.json");
+    private static string ConfigPath => Path.Combine(ConfigDir, "config.json");
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {

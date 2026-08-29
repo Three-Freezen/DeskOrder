@@ -20,12 +20,10 @@ public class PresetService
 {
     private static readonly JsonSerializerOptions Opts = new() { WriteIndented = true };
 
-    // ponytail 2026-08-28: 预设目录从 exe 旁迁到 %APPDATA%\DesktopZones\Presets。
-    // Velopack/MSIX 更新会替换整个应用目录，写在 BaseDirectory 的预设会被更新冲掉；
-    // AppData 与 config.json 同级，任何更新方式都不触碰。目录结构不变 {子类型}\{guid}.json。
-    private static readonly string PresetsRoot = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "DesktopZones", "Presets");
+    // ponytail 2026-08-28: 预设目录从 exe 旁迁到 AppData 与 config.json 同级。
+    // ponytail 2026-08-29: 落点随 DataLocator — 安装器可选 AppData(推荐,更新不触碰)
+    // 或安装目录 Data(便携模式);目录结构不变 {子类型}\{guid}.json。
+    private static string PresetsRoot => Path.Combine(DataLocator.Root, "Presets");
 
     private readonly string _folder;
     private readonly PresetKind _kind;

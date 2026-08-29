@@ -64,6 +64,10 @@ public partial class App : System.Windows.Application
 
     private void Application_Startup(object sender, StartupEventArgs e)
     {
+        // ponytail 2026-08-29: 数据落点定位必须先于一切 DataLocator.Root 消费者
+        // (Trace 监听器 / ConfigService / LocalizationService):建根目录 + 便携模式
+        // 首启接管 AppData 既有数据。
+        Services.DataLocator.Initialize();
 #if DEBUG
         // ponytail 2026-08-26: fresh diagnostics log per run (ghost-ring regression trace).
         Helpers.DzTrace.Reset();
@@ -75,9 +79,9 @@ public partial class App : System.Windows.Application
         // 机器上还不存在，行为不对称)。>32MB 时本次会话重新开始，防无限膨胀。
         try
         {
-            var traceDir = System.IO.Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "DeskOrder", "logs");
+            // ponytail 2026-08-29: 落点随 DataLocator — 标准 %LOCALAPPDATA%\DeskOrder\logs,
+            // 便携模式进 安装目录\Data\logs。
+            var traceDir = Services.DataLocator.LogsRoot;
             System.IO.Directory.CreateDirectory(traceDir);
             var tracePath = System.IO.Path.Combine(traceDir, "debug.log");
             var fresh = System.IO.File.Exists(tracePath) && new System.IO.FileInfo(tracePath).Length > 32 * 1024 * 1024;

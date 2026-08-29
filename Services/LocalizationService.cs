@@ -134,9 +134,8 @@ public sealed class LocalizationService : INotifyPropertyChanged
     private static Dictionary<string, string> LoadAppDataOverrides()
     {
         var dict = new Dictionary<string, string>();
-        var langDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "DesktopZones", "lang");
+        // ponytail 2026-08-29: 落点随 DataLocator(AppData / 便携 Data)。
+        var langDir = Path.Combine(DataLocator.Root, "lang");
         if (!Directory.Exists(langDir)) return dict;
         foreach (var file in Directory.EnumerateFiles(langDir, "*.json"))
         {

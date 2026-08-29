@@ -18,9 +18,9 @@ public static class DzTrace
     static StreamWriter? _writer;
     static bool _createBroken;
 
-    static string TraceDir => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "DeskOrder", "logs");
+    // ponytail 2026-08-29: 落点随 DataLocator(标准 %LOCALAPPDATA%\DeskOrder\logs /
+    // 便携 安装目录 Data\logs)。
+    static string TraceDir => Services.DataLocator.LogsRoot;
 
     static string TracePath => Path.Combine(TraceDir, "dz_trace.log");
 

@@ -105,9 +105,8 @@ public class NotesService
 
     // ── 便签富文本独立 JSON 文件 ──
 
-    private static readonly string NotesDir = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "DesktopZones", "Notes");
+    // ponytail 2026-08-29: 落点随 DataLocator(安装器可选 AppData / 便携 Data)。
+    private static string NotesDir => Path.Combine(DataLocator.Root, "Notes");
 
     private static readonly JsonSerializerOptions NoteFileJsonOptions = new()
     {
