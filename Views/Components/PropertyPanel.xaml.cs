@@ -3323,8 +3323,11 @@ public partial class PropertyPanel : UserControl
         try { Preview?.Invoke(target); }
         catch (Exception ex)
         {
+            DzTrace.Log($"[SubEdit] Preview 异常: {ex}");
             System.Diagnostics.Debug.WriteLine($"[PropertyPanel] Preview failed: {ex}");
         }
+        if (target is ZoneItem sub && sub.Type == ItemType.SubFolder)
+            DzTrace.Log($"[SubEdit] Save: id={sub.Id.ToString("N")[..8]} FillFollows={sub.FillFollowsZone} Corner={sub.CornerRounded} Hover={sub.HoverAutoExpand} Fill={sub.FillColorOverride} Opacity={sub.FillOpacityOverride}");
     }
 
     /// <summary>Commit the current preview state to disk via the host's Persist

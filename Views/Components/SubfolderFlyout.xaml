@@ -27,10 +27,18 @@
             Background="Transparent"
             ClipToBounds="True">
         <Grid>
-            <Rectangle Fill="{Binding FillBrush}" IsHitTestVisible="False"/>
+            <!-- ponytail 2026-08-29: 填充/背景/玻璃矩形带与浮层边框同款圆角 —
+                 否则正方形填充会从圆角四角戳出来,视觉生硬。 -->
+            <Rectangle Fill="{Binding FillBrush}" IsHitTestVisible="False"
+                       RadiusX="{Binding HostSubItem.CornerRounded, Converter={x:Static vm:BoolToRoundedRadiusConverter.Instance}}"
+                       RadiusY="{Binding HostSubItem.CornerRounded, Converter={x:Static vm:BoolToRoundedRadiusConverter.Instance}}"/>
             <Rectangle Fill="{Binding BgImageBrush}" Opacity="{Binding BgOpacity}"
-                       IsHitTestVisible="False"/>
-            <Rectangle Fill="{Binding GlassBrush}" IsHitTestVisible="False"/>
+                       IsHitTestVisible="False"
+                       RadiusX="{Binding HostSubItem.CornerRounded, Converter={x:Static vm:BoolToRoundedRadiusConverter.Instance}}"
+                       RadiusY="{Binding HostSubItem.CornerRounded, Converter={x:Static vm:BoolToRoundedRadiusConverter.Instance}}"/>
+            <Rectangle Fill="{Binding GlassBrush}" IsHitTestVisible="False"
+                       RadiusX="{Binding HostSubItem.CornerRounded, Converter={x:Static vm:BoolToRoundedRadiusConverter.Instance}}"
+                       RadiusY="{Binding HostSubItem.CornerRounded, Converter={x:Static vm:BoolToRoundedRadiusConverter.Instance}}"/>
             <Grid Margin="8">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>

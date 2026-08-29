@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Windows.Media;
+using DesktopZones.Helpers;
 using DesktopZones.Models;
 using DesktopZones.Services;
 
@@ -123,7 +124,15 @@ public class SubfolderItemViewModel : INotifyPropertyChanged
 
     public double BgOpacity => OverrideFill?.BgOpacity01 ?? 0;
 
-    public System.Windows.Media.Brush? GlassBrush => OverrideFill?.GlassBrush;
+    public System.Windows.Media.Brush? GlassBrush
+    {
+        get
+        {
+            var b = OverrideFill?.GlassBrush;
+            DzTrace.Log($"[SubEdit] Icon.GlassBrush: name={Source.Name} follow={Source.FillFollowsZone} glassOn={Source.EnableLiquidGlass} mode={Source.GlassColorMode} brush={(b != null ? "gradient" : "null")}");
+            return b;
+        }
+    }
 
     public event PropertyChangedEventHandler? PropertyChanged;
     void OnPropertyChanged([CallerMemberName] string? name = null)

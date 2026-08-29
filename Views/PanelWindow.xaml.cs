@@ -1244,6 +1244,8 @@ public partial class PanelWindow : Window
         popup.VerticalOffset = pos.Y;
         flyout.SetAnchor(c);
         flyout.HookClickOutside();
+        // ponytail 2026-08-29: 圆角偏好同步到 Popup HWND(与 ZoneWindow 打开路径一致)。
+        flyout.ApplyCornerPref();
         flyout.AnimateOpen();
     }
 
@@ -1283,7 +1285,14 @@ public partial class PanelWindow : Window
     SubfolderFill ResolvePanelSubfolderFill(Zone zone, ZoneItem sub)
     {
         if (!sub.FillFollowsZone)
-            return SubfolderFill.FromOverride(sub);
+        {
+            var f = SubfolderFill.FromOverride(sub);
+            // ponytail 2026-08-29: 未设置 override 填充色时沿用主分区填充,避免 3% 默认
+            // 透明让浮层"隐形"(与 ZoneWindow.ResolveSubfolderFill 一致)。
+            if (string.IsNullOrEmpty(sub.FillColorOverride) && !string.IsNullOrEmpty(zone.FillColor))
+                return f with { FillHex = zone.FillColor };
+            return f;
+        }
         return new SubfolderFill(
             zone.FillColor, 100,
             zone.BackgroundImagePath, zone.BackgroundImageOpacity,

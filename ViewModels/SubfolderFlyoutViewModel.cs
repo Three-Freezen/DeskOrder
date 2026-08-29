@@ -121,6 +121,7 @@ public class SubfolderFlyoutViewModel : INotifyPropertyChanged
 
     private void OnHostPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        DzTrace.Log($"[SubEdit] FlyoutVM.HostChanged: prop={e.PropertyName} FillFollows={_hostSubItem.FillFollowsZone} Corner={_hostSubItem.CornerRounded} Hover={_hostSubItem.HoverAutoExpand}");
         if (e.PropertyName == nameof(ZoneItem.SubItems))
             RebuildItemVms();
         else if (e.PropertyName == nameof(ZoneItem.GridSize))

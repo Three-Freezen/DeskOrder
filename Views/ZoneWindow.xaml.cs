@@ -239,6 +239,19 @@ public partial class ZoneWindow : Window
             {
                 ApplyItemTextColor();
                 ReapplyTileItemVisuals();
+                // ponytail 2026-08-29: 次级分区图标悬停自动展开 — 容器每次生成都
+                // 重挂(先摘后挂,幂等):悬停 350ms 且 HostSubItem.HoverAutoExpand=true
+                // 时自动打开浮层,移出取消。
+                for (int i = 0; i < ItemsHost.Items.Count; i++)
+                {
+                    if (ItemsHost.ItemContainerGenerator.ContainerFromIndex(i) is FrameworkElement fe)
+                    {
+                        fe.MouseEnter -= ItemContainer_MouseEnter;
+                        fe.MouseEnter += ItemContainer_MouseEnter;
+                        fe.MouseLeave -= ItemContainer_MouseLeave;
+                        fe.MouseLeave += ItemContainer_MouseLeave;
+                    }
+                }
             }
         };
         ItemsHost.ItemContainerGenerator.StatusChanged += _itemsHostStatusChangedHandler;
@@ -781,7 +794,14 @@ public partial class ZoneWindow : Window
     SubfolderFill ResolveSubfolderFill(ZoneItem sub)
     {
         if (!sub.FillFollowsZone)
-            return SubfolderFill.FromOverride(sub);
+        {
+            var f = SubfolderFill.FromOverride(sub);
+            // ponytail 2026-08-29: 未设置 override 填充色时沿用主分区解析填充 — 纯默认
+            // 3% 透明会让浮层"隐形"(圆角/内容都看不清),用户体验为"设置不生效"。
+            if (string.IsNullOrEmpty(sub.FillColorOverride))
+                return f with { FillHex = ResolveStyle().FillColor };
+            return f;
+        }
         var s = ResolveStyle();
         return new SubfolderFill(
             s.FillColor, 100,
@@ -792,6 +812,10 @@ public partial class ZoneWindow : Window
 
     void OpenSubfolderFlyout(ZoneItem sub)
     {
+        DzTrace.Log($"[SubEdit] OpenSubfolderFlyout: id={sub.Id.ToString("N")[..8]} FillFollows={sub.FillFollowsZone} Corner={sub.CornerRounded} Hover={sub.HoverAutoExpand} Fill={sub.FillColorOverride}");
+        // 默认按"点击/菜单打开"处理 — 不参与自动收回;悬停打开在 OnFlyoutHoverTick
+        // 打开后置 true 并启动轮询。
+        _flyoutOpenedByHover = false;
         // ponytail 2026-08-26: 左键/双击/菜单"打开"已开启的同一个 SubFolder → 直接播
         // 关闭动画,绝不重播打开动画。注意:点击图标时,鼠标按下已触发"点击外部"的
         // 关闭动画(_flyoutClosing=true),此时松手的再次打开必须直接 return —
@@ -835,6 +859,9 @@ public partial class ZoneWindow : Window
             TryOpenFlyoutAnimated(sub);
         }), System.Windows.Threading.DispatcherPriority.Loaded);
         vm.IsOpen = true;
+        // ponytail 2026-08-29: 悬停自动展开开关打开时启动"自动收回"轮询(光标离开
+        // 浮层 450ms 收回,不受浮层鼠标捕获饿死容器事件的影响)。
+        StartFlyoutAutoClosePoll();
     }
 
     void TryOpenFlyoutAnimated(ZoneItem sub)
@@ -858,12 +885,16 @@ public partial class ZoneWindow : Window
         var flyoutVm = SubfolderFlyoutView.ViewModel;
         if (flyoutVm != null && flyoutVm.Fill != null)
             flyoutVm.ShowGlassFallback = !SubfolderFlyoutView.TryApplyRealGlass(flyoutVm.Fill);
+        // ponytail 2026-08-29: Popup HWND 的 Win11 DWM 圆角偏好跟随宿主 SubFolder
+        // 的圆角/尖角设置(内容 CornerRadius 之外的第二道保险)。
+        SubfolderFlyoutView.ApplyCornerPref();
         SubfolderFlyoutView.AnimateOpen();
     }
 
     void CloseSubfolderFlyout()
     {
         if (!SubfolderFlyoutPopup.IsOpen || _flyoutClosing) return;
+        StopFlyoutAutoClosePoll();
         _flyoutClosing = true;
         _flyoutCloseTimer?.Stop();
         _flyoutCloseTimer = null;
@@ -925,17 +956,18 @@ public partial class ZoneWindow : Window
         _flyoutCloseTimer = null;
     }
 
-    // ponytail 2026-08-26: 鼠标离开 Flyout 200ms 后自动关闭 — Win11 风格。
-    // 给用户 200ms 时间决定要不要移回去(避免在 Flyout 边缘反复进出闪烁)。
+    // ponytail 2026-08-26: 鼠标离开 Flyout 后自动关闭。
+    // ponytail 2026-08-29: 自动收回跟随"鼠标悬停自动展开"开关(开关关闭时移出不自动
+    // 收回,点击外部仍可关);收回时长与分区 HoverExpandBehavior 的 2s 一致。
     void SubfolderFlyoutView_MouseLeave(object sender, System.Windows.Input.MouseEventArgs e)
     {
         if (!SubfolderFlyoutPopup.IsOpen) return;
         // 框选拖拽中(可能把鼠标拖出 Flyout 范围)不自动关闭。
         if (SubfolderFlyoutView.IsMarqueeActive) return;
-        // 右键菜单打开中(菜单 Popup 抢走鼠标 → Flyout 收到 MouseLeave)不自动关闭 —
-        // 否则右键一开菜单 200ms 后 flyout 就开始播关闭动画(右键图标层误关的根源)。
+        // 右键菜单打开中(菜单 Popup 抢走鼠标 → Flyout 收到 MouseLeave)不自动关闭。
         if (SubfolderFlyoutView.IsContextMenuOpen) return;
-        _flyoutCloseTimer ??= new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
+        if (SubfolderFlyoutView.ViewModel?.HostSubItem.HoverAutoExpand != true) return;
+        _flyoutCloseTimer ??= new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(2000) };
         _flyoutCloseTimer.Tick -= OnFlyoutCloseTick;
         _flyoutCloseTimer.Tick += OnFlyoutCloseTick;
         _flyoutCloseTimer.Stop();
@@ -967,6 +999,118 @@ public partial class ZoneWindow : Window
                 && p.X <= SubfolderFlyoutView.ActualWidth && p.Y <= SubfolderFlyoutView.ActualHeight;
         }
         catch { return false; }
+    }
+
+    // ── 次级分区图标悬停自动展开(ponytail 2026-08-29) ──
+    // "鼠标悬停自动展开"开关打开时:悬停次级分区图标 350ms → 自动打开浮层;移出图标
+    // 取消。与点击打开/点击再关、移出浮层 200ms 自动收回共用同一套开合路径。
+
+    System.Windows.Threading.DispatcherTimer? _flyoutHoverTimer;
+    ZoneItem? _flyoutHoverTarget;
+
+    // ── 悬停自动展开语义的「自动收回」轮询(ponytail 2026-08-29) ──
+    // 浮层 HookClickOutside 会持有鼠标捕获,分区窗口里图标容器的 MouseEnter/Leave
+    // 在捕获期间收不到消息 — "离开图标→收回" 依赖容器事件会静默失效(实测悬停展开
+    // 后移出光标浮层不收回)。改为轮询物理光标:打开浮层且 HostSubItem.HoverAutoExpand
+    // 时启动 150ms 定时器,光标不在浮层内(GetWindowRect 真实矩形)累计 3 次 ≈450ms
+    // 即收回;光标进入浮层清零计数,未进入则持续累计。
+
+    System.Windows.Threading.DispatcherTimer? _flyoutAutoClosePoll;
+    int _flyoutAutoCloseOutsideTicks;
+    /// <summary>本次浮层是否由悬停自动展开打开 — 只有悬停打开的才参与"离开即收回";
+    /// 点击打开的与分区"点击总是展开"语义一致,不被自动收回。</summary>
+    bool _flyoutOpenedByHover;
+
+    void StartFlyoutAutoClosePoll()
+    {
+        StopFlyoutAutoClosePoll();
+        if (!_flyoutOpenedByHover) return;
+        if (SubfolderFlyoutView.ViewModel?.HostSubItem.HoverAutoExpand != true) return;
+        _flyoutAutoCloseOutsideTicks = 0;
+        _flyoutAutoClosePoll ??= new System.Windows.Threading.DispatcherTimer
+        {
+            // ponytail 2026-08-29: 与分区 HoverExpandBehavior._exitTimer 一致的 2 秒收回 —
+            // 200ms × 10 次(光标持续在浮层外)。分区用的是"光标出窗 2s 后收起"。
+            Interval = TimeSpan.FromMilliseconds(200)
+        };
+        _flyoutAutoClosePoll.Tick -= OnFlyoutAutoClosePollTick;
+        _flyoutAutoClosePoll.Tick += OnFlyoutAutoClosePollTick;
+        _flyoutAutoClosePoll.Start();
+    }
+
+    void StopFlyoutAutoClosePoll()
+    {
+        _flyoutAutoClosePoll?.Stop();
+        _flyoutAutoCloseOutsideTicks = 0;
+    }
+
+    void OnFlyoutAutoClosePollTick(object? s, EventArgs e)
+    {
+        if (!SubfolderFlyoutPopup.IsOpen || _flyoutClosing)
+        {
+            StopFlyoutAutoClosePoll();
+            return;
+        }
+        if (SubfolderFlyoutView.ViewModel?.HostSubItem.HoverAutoExpand != true)
+        {
+            StopFlyoutAutoClosePoll();
+            return;
+        }
+        // 严格 0px 判定:光标真正在浮层矩形内才清零;停在图标上(浮层右 8px 外)算在层外。
+        if (SubfolderFlyoutView.ContainsScreenCursor(0))
+        {
+            _flyoutAutoCloseOutsideTicks = 0;
+            return;
+        }
+        _flyoutAutoCloseOutsideTicks++;
+        if (_flyoutAutoCloseOutsideTicks >= 10)
+        {
+            DzTrace.Log("[SubFlyout] 自动收回轮询: 光标在浮层外 2s → CloseSubfolderFlyout");
+            StopFlyoutAutoClosePoll();
+            CloseSubfolderFlyout();
+        }
+    }
+
+    void ItemContainer_MouseEnter(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        // ponytail 2026-08-29: 拖动图标/框选进行中禁用悬停自动展开 — 拖动时光标扫过
+        // 其他次级分区图标会不断触发浮层打开(Popup 激活 + 鼠标捕获导致拖动卡顿)。
+        if (_dragging || _selectMode != SelectMode.None) return;
+        if (sender is not FrameworkElement fe) return;
+        if (fe.DataContext is not ZoneItemViewModel vm || vm.Type != ItemType.SubFolder) return;
+        var sub = ResolveSourceZoneItem(vm);
+        if (sub == null || !sub.HoverAutoExpand) return;
+        // 已在开合动画中的同一浮层 → 不重复调度。
+        if (SubfolderFlyoutPopup.IsOpen && SubfolderFlyoutView.ViewModel?.HostSubItem.Id == sub.Id) return;
+        _flyoutHoverTarget = sub;
+        _flyoutHoverTimer ??= new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(350) };
+        _flyoutHoverTimer.Tick -= OnFlyoutHoverTick;
+        _flyoutHoverTimer.Tick += OnFlyoutHoverTick;
+        _flyoutHoverTimer.Stop();
+        _flyoutHoverTimer.Start();
+    }
+
+    void ItemContainer_MouseLeave(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        // 只取消悬停展开计时;自动收回交给轮询(浮层持捕获时容器 event 收不到,
+        // 这里做收回判定不可靠)。
+        _flyoutHoverTimer?.Stop();
+        _flyoutHoverTarget = null;
+    }
+
+    void OnFlyoutHoverTick(object? s, EventArgs e)
+    {
+        _flyoutHoverTimer?.Stop();
+        var sub = _flyoutHoverTarget;
+        _flyoutHoverTarget = null;
+        if (sub == null) return;
+        // ponytail 2026-08-29: 计时期间开始拖动/框选 → 放弃本次悬停展开。
+        if (_dragging || _selectMode != SelectMode.None) return;
+        // 浮层已开(点击打开等)→ 交给既有交互,不重复开关。
+        if (SubfolderFlyoutPopup.IsOpen && SubfolderFlyoutView.ViewModel?.HostSubItem.Id == sub.Id) return;
+        OpenSubfolderFlyout(sub);
+        _flyoutOpenedByHover = true;
+        StartFlyoutAutoClosePoll();
     }
 
     // ponytail 2026-08-26: 拖动到 SubFolder 上时给目标容器一个 1.06× 放大反馈。
@@ -1140,6 +1284,7 @@ public partial class ZoneWindow : Window
     {
         // ponytail 2026-08-26: 关闭 Popup 子窗口上的真玻璃(失败无害)。
         SubfolderFlyoutView.DisableGlass();
+        StopFlyoutAutoClosePoll();
         // 断开 host SubFolder 的 SubItems 订阅,避免 handler 泄漏到已关闭的 flyout。
         if (_subItemsChangedHandler != null && _subItemsHost != null)
             _subItemsHost.PropertyChanged -= _subItemsChangedHandler;

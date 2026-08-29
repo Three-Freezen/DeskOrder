@@ -20,14 +20,45 @@ public partial class SubfolderFlyout : UserControl
         get => DataContext as SubfolderFlyoutViewModel;
         set
         {
+            if (ReferenceEquals(DataContext, value)) return;
+            if (DataContext is SubfolderFlyoutViewModel oldVm && oldVm.HostSubItem != null)
+                oldVm.HostSubItem.PropertyChanged -= OnHostItemChanged;
             DataContext = value;
             if (value != null)
             {
+                value.HostSubItem.PropertyChanged += OnHostItemChanged;
                 // ItemsControl 用新的 ItemsSource 重建 ItemsPanel 后才设 Rows/Columns
                 // (Loaded 只触发一次,后续 reopen 不会重跑,所以这里每次赋值都延后重排)。
                 Dispatcher.BeginInvoke(RefreshGrid, System.Windows.Threading.DispatcherPriority.Loaded);
             }
         }
+    }
+
+    /// <summary>ponytail 2026-08-29: 宿主 SubFolder 模型变化 — 圆角/尖角切换时同步
+    /// Popup HWND 的 Win11 DWM 圆角偏好。只改内容 CornerRadius 不够:Popup 是独立
+    /// 顶层窗口,Win11 DWM 会给它自己的窗口形状(默认圆角),与内容裁剪叠加后
+    /// "尖角不生效"。DWM 偏好与内容裁剪一起改,窗口形状才真正跟随设置。</summary>
+    void OnHostItemChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ZoneItem.CornerRounded))
+            ApplyCornerPref();
+    }
+
+    /// <summary>把宿主 SubFolder 的圆角偏好写到 Popup HWND(DWMWCP_ROUND/DONOTROUND)。
+    /// 幂等,可在打开后任意时刻调用;句柄未就绪时无害跳过。</summary>
+    public void ApplyCornerPref()
+    {
+        try
+        {
+            var hs = System.Windows.Interop.HwndSource.FromVisual(this) as System.Windows.Interop.HwndSource;
+            if (hs == null || hs.Handle == IntPtr.Zero) return;
+            bool rounded = ViewModel?.HostSubItem.CornerRounded ?? true;
+            int pref = rounded ? DesktopZones.Helpers.NativeMethods.DWMWCP_ROUND
+                               : DesktopZones.Helpers.NativeMethods.DWMWCP_DONOTROUND;
+            DesktopZones.Helpers.NativeMethods.DwmSetWindowAttribute(hs.Handle,
+                DesktopZones.Helpers.NativeMethods.DWMWA_WINDOW_CORNER_PREFERENCE, ref pref, sizeof(int));
+        }
+        catch { /* 老系统/句柄未就绪 — 不阻断开层 */ }
     }
 
     public event Action<SubfolderFlyout>? EditStyleRequested;
@@ -180,7 +211,10 @@ public partial class SubfolderFlyout : UserControl
 
     // ── 真玻璃(DWM) — 与主分区同配方:优先给 Popup HWND 开模糊,失败才用渐变兜底 ──
 
-    /// <summary>尝试给 Popup 子窗口开真玻璃。成功返回 true(调用方隐藏渐变兜底)。</summary>
+    /// <summary>尝试给 Popup 子窗口开真玻璃。成功返回 true(调用方隐藏渐变兜底)。
+    /// ponytail 2026-08-29: 只走 accent、跳过经典 blurbehind — 经典 blur 在 Popup 上
+    /// 会把背景压暗 30%("浮层比分区深"的根源),accent 成功 = 与分区同款着色玻璃,
+    /// 失败则由调用方显示渐变兜底。</summary>
     public bool TryApplyRealGlass(SubfolderFill fill)
     {
         if (!fill.HasGlass) return false;
@@ -189,10 +223,15 @@ public partial class SubfolderFlyout : UserControl
             var src = PresentationSource.FromVisual(this) as System.Windows.Interop.HwndSource;
             if (src == null || src.Handle == IntPtr.Zero) return false;
             var r = AcrylicHelper.EnableBlur(src.Handle, fill.GlassBlur, fill.GlassTintOpacity,
-                fill.GlassTintLuminosity, fill.GlassMode!);
+                fill.GlassTintLuminosity, fill.GlassMode!, skipClassicBlur: true);
+            DzTrace.Log($"[SubFlyout] TryApplyRealGlass(accent-only): host={ViewModel?.HostSubItem.Name} success={r.Success} err={r.Error} mode={fill.GlassMode}");
             return r.Success;
         }
-        catch { return false; }
+        catch (Exception ex)
+        {
+            DzTrace.Log($"[SubFlyout] TryApplyRealGlass 异常: {ex.Message}");
+            return false;
+        }
     }
 
     /// <summary>关闭 Popup 子窗口上的玻璃(Closed 时调用,失败无害)。</summary>
@@ -997,18 +1036,22 @@ public partial class SubfolderFlyout : UserControl
         catch (Exception ex) { DzTrace.Log($"[SubFlyout] PreventActivation 异常: {ex.Message}"); }
     }
 
-    /// <summary>物理光标当前是否落在浮层屏幕矩形内(含 24px 玻璃边距)。
-    /// 判定失败一律返回 true(保守:调用方"光标在层外才关层"的逻辑不误关)。
+    /// <summary>物理光标当前是否落在浮层屏幕矩形内。判定失败一律返回 true
+    /// (保守:调用方"光标在层外才关层"的逻辑不误关)。
     /// ponytail 2026-08-28: 矩形走 Win32 GetWindowRect(物理像素,真实几何)而非
-    /// PointToScreen — 混合 DPI 下 Popup 的 PointToScreen 与 Win32 几何矛盾,会误判。</summary>
-    public bool ContainsScreenCursor()
+    /// PointToScreen — 混合 DPI 下 Popup 的 PointToScreen 与 Win32 几何矛盾,会误判。
+    /// ponytail 2026-08-29: margin 默认 24px 只用于"失活且光标在层外才关层"的防误伤
+    /// 场景;悬停自动收回轮询必须用 0px(浮层就开在图标右 8px,24px 会把光标停在
+    /// 图标上误判成"在层内",计时永不启动 → 不自动收回)。</summary>
+    public bool ContainsScreenCursor() => ContainsScreenCursor(24);
+
+    public bool ContainsScreenCursor(double margin)
     {
         try
         {
             if (!GetCursorPos(out var p)) return true;
             var hs = System.Windows.Interop.HwndSource.FromVisual(this) as System.Windows.Interop.HwndSource;
             if (hs == null || hs.Handle == IntPtr.Zero || !GetWindowRect(hs.Handle, out var r)) return true;
-            const double margin = 24;
             return p.X >= r.Left - margin && p.X <= r.Right + margin
                 && p.Y >= r.Top - margin && p.Y <= r.Bottom + margin;
         }

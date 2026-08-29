@@ -146,31 +146,9 @@ public class ManagementViewModel : INotifyPropertyChanged
 
     private void UpdateStartupShortcut(bool create)
     {
-        var startupPath = System.IO.Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.Startup),
-            "DeskOrder.lnk");
-        if (create)
-        {
-            try
-            {
-                var exePath = Environment.ProcessPath;
-                if (exePath == null) return;
-                Type? shellType = Type.GetTypeFromProgID("WScript.Shell");
-                if (shellType == null) return;
-                dynamic? shell = Activator.CreateInstance(shellType);
-                if (shell == null) return;
-                dynamic? shortcut = shell.CreateShortcut(startupPath);
-                shortcut.TargetPath = exePath;
-                shortcut.WorkingDirectory = System.IO.Path.GetDirectoryName(exePath);
-                shortcut.Description = "DeskOrder";
-                shortcut.Save();
-            }
-            catch { }
-        }
-        else if (System.IO.File.Exists(startupPath))
-        {
-            try { System.IO.File.Delete(startupPath); } catch { }
-        }
+        // ponytail 2026-08-28: 收敛到 StartupShortcut.Sync（App 启动自愈共用同一实现）。
+        // 已是最新则不重写（Sync 内部 IsUpToDate 短路）。
+        Helpers.StartupShortcut.Sync(create);
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;

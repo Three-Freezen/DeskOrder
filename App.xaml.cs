@@ -144,6 +144,16 @@ public partial class App : System.Windows.Application
         // ponytail 2026-08-28: 预设从 exe 旁旧目录迁到 AppData（Velopack 更新会替换
         // 整个应用目录，BaseDirectory 里的预设会被冲掉；幂等，详见 PresetService）。
         PresetService.MigrateFromBaseDirectory();
+        // ponytail 2026-08-28: 开机自启自愈 — lnk 被升级/清理工具等外力删掉后配置仍
+        // 显示「已开启」，此前不自愈，自启动静默失效（实测复现）。启动时按配置同步
+        // 一次：开 → lnk 缺失/指向旧路径就重建；关 → 清除。失败静默（Debug 可见）。
+        try
+        {
+            var syncErr = Helpers.StartupShortcut.Sync(_configService.Load().StartWithWindows);
+            if (syncErr != null)
+                System.Diagnostics.Debug.WriteLine($"[StartupShortcut] 自愈失败: {syncErr}");
+        }
+        catch { }
         // 更新服务：--update-source=本地目录|URL 覆盖更新源（本地端到端测试 / 镜像加速）。
         UpdateService = new UpdateService(_configService);
         const string srcPrefix = "--update-source=";

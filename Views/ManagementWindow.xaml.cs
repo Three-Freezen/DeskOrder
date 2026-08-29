@@ -588,9 +588,10 @@ public partial class ManagementWindow : Window
                     _panelService?.RefreshAppearance();
                     break;
                 case ZoneItem sub when sub.Type == ItemType.SubFolder:
-                    var parent = _zoneManager.Zones.FirstOrDefault(z => z.Items.Contains(sub));
-                    if (parent != null)
-                        _zoneManager.GetZoneWindow(parent.Id)?.RefreshZone(parent);
+                    var parentP = _zoneManager.Zones.FirstOrDefault(z => z.Items.Contains(sub));
+                    DzTrace.Log($"[SubEdit] Preview(SubFolder): id={sub.Id.ToString("N")[..8]} parent={(parentP != null ? "找到" : "NULL!")}");
+                    if (parentP != null)
+                        _zoneManager.GetZoneWindow(parentP.Id)?.RefreshZone(parentP);
                     break;
             }
             // 预览编辑同样视为「想保留这个 docked tab」。

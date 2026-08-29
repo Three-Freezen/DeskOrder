@@ -190,6 +190,7 @@ public static class AcrylicHelper
         brush.GradientStops.Add(new GradientStop(baseColor, 0.5));
         brush.GradientStops.Add(new GradientStop(DarkenGlass(baseColor, 0.30), 1.0));
         brush.Freeze();
+        DzTrace.Log($"[SubEdit] MakePreviewGlassBrush: mode={m} baseColor=#{baseColor.R:X2}{baseColor.G:X2}{baseColor.B:X2} (alpha={stopAlpha:X2})");
         return brush;
     }
 
@@ -471,6 +472,15 @@ public static class AcrylicHelper
     /// 系统强调色变化的批量重刷)。
     /// </summary>
     public static BlurResult EnableBlur(IntPtr hwnd, int blurAmount, int tintOpacity, int tintLuminosity, string colorMode)
+        => EnableBlur(hwnd, blurAmount, tintOpacity, tintLuminosity, colorMode, skipClassicBlur: false);
+
+    /// <summary>
+    /// ponytail 2026-08-29: <paramref name="skipClassicBlur"/>=true 时只设 WCA_ACCENT_POLICY
+    /// (accent 着色+模糊),跳过 DwmEnableBlurBehindWindow 经典 blur。实测 Popup 子窗口上
+    /// 经典 blur 生效而 accent 被静默忽略时,浮层会显示成"压暗 ~30% 的灰底"(对比分区
+    /// 的明亮着色玻璃)"浮层更深"的根源。去掉经典 blur 后:accent 成功 = 与分区同款
+    /// 着色玻璃;accent 无效果 = 调用方走渐变兜底,两者都不再变暗。</summary>
+    public static BlurResult EnableBlur(IntPtr hwnd, int blurAmount, int tintOpacity, int tintLuminosity, string colorMode, bool skipClassicBlur)
     {
         if (hwnd == IntPtr.Zero) return BlurResult.Fail("Window handle not created yet");
 
@@ -496,8 +506,11 @@ public static class AcrylicHelper
         // AccentFlags encodes blur radius: bits 8-15 carry the radius, bits 0-7 carry style flags
         int accentFlags = (Math.Clamp(blurAmount, 1, 60) << 8) | 0x100;
 
-        // Primary: DWM Blur Behind (works with AllowsTransparency)
-        var primary = TryBlurBehind(hwnd, true);
+        // Primary: DWM Blur Behind (works with AllowsTransparency) — 对 Popup 子窗口会
+        // 把背景压暗(经典 blur 无着色),仅"可能挡刀"的路径不再使用。
+        var primary = skipClassicBlur
+            ? BlurResult.Fail("skipped by caller")
+            : TryBlurBehind(hwnd, true);
 
         // Secondary: Win10+ acrylic accent for stronger / varied effect
         var secondary = TrySetAccent(hwnd, ACCENT_ENABLE_ACRYLICBLURBEHIND, accentFlags, gradientColor);
