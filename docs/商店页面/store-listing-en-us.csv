@@ -1,0 +1,30 @@
+﻿"Language","Display name","Description","Product features","What's new in this version","Keywords","Copyright and trademark","Website","Support contact info","Privacy policy URL"
+"en-us","DeskOrder-桌面秩序","Desktop organizing and tile beautification, all in one app
+
+DeskOrder reorganizes your desktop with ""zones"": drag files, folders and shortcuts into translucent floating zones to sort them, then turn zones into tiles with liquid glass and widgets — a desktop that is both tidy and beautiful.
+
+[Zone organization — a tidy desktop at last]
+Any number of translucent floating zones: drop files in to sort them. Folder mapping keeps zone operations in sync with the original folder; auto-organize routes new files into zones by extension or filename keyword. Three-state switches (show / minimize / fully hide), and double-clicking the desktop toggles everything at once.
+
+[Tile mode — the centerpiece of your desktop]
+Turn a zone into a large tile: a single icon, double-click to launch, styled with liquid glass, a background image and rounded corners — build a tile wall of your own.
+
+[Style it your way, one-click presets]
+Borders, fills, title bars, background images, materials, animations, layout — everything is adjustable. Save a style you like as a preset card and apply it to other zones, the panel or widgets with one click.
+
+[Clock, calendar and sticky note widgets]
+An analog/digital clock, a calendar with to-do reminders, and a sticky note summoned by a global hotkey — your desktop becomes a workspace.
+
+[Quick panel]
+Summon it with a hotkey: all zone cards, file search, and quick new-document / new-folder actions in one panel.
+
+[Files stay where they are]
+Icons in a zone are just references to the original files: files are never copied, moved or renamed. Removing an icon only removes the reference — the original file stays untouched.
+
+[Thoughtful details]
+Zones live on the desktop layer and never cover app windows; system tray, auto-start, English/Chinese UI, light/dark themes, in-app updates.","Translucent floating zones with folder mapping and auto-organize
+Tile mode: single-icon launcher with liquid glass styling
+One-click style presets — borders, backgrounds, animations
+Desktop widgets: clock, calendar with reminders, sticky notes
+Quick panel: zone cards, file search, quick create
+Icons are references — original files are never moved or modified","Fixed theme following in the sticky note editor; fixed tile-mode height persistence; Show All now appears instantly via desktop double-click.","desktop organizer,zones,desktop enhancement,tile launcher,icon manager,sticky notes,clock widget","Copyright (c) Three-Freeze. Open source under the MIT License.","https://three-freezen.github.io/DeskOrder/","https://github.com/Three-Freezen/DeskOrder/issues","https://github.com/Three-Freezen/DeskOrder/blob/main/docs/privacy-policy.md"
