@@ -1,0 +1,91 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <!-- ═══════════════════════════════════════════════════════════
+       CheckBox (Menu 调色板) — 跟随系统深浅色，不跟随管理界面主题。
+       与 Resources/Controls/CheckBox.xaml 同款模板，只是把 Brush.*
+       换成 Menu.*（由 MenuThemeService 随 Windows 深浅色实时改写）。
+       供日历备注弹窗等「非管理界面」勾选框使用。
+       ═══════════════════════════════════════════════════════════ -->
+
+  <Style x:Key="Menu.CheckBox" TargetType="CheckBox">
+    <Setter Property="Foreground" Value="{DynamicResource Menu.Text.Primary}"/>
+    <Setter Property="Background" Value="Transparent"/>
+    <Setter Property="FontSize" Value="12"/>
+    <Setter Property="Height" Value="24"/>
+    <Setter Property="VerticalContentAlignment" Value="Center"/>
+    <Setter Property="HorizontalContentAlignment" Value="Left"/>
+    <Setter Property="Padding" Value="0"/>
+    <Setter Property="Cursor" Value="Hand"/>
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="CheckBox">
+          <Grid Background="{TemplateBinding Background}"
+                VerticalAlignment="Center"
+                SnapsToDevicePixels="True">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto"/>
+              <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- 16x16 checkbox box：未选中态与弹窗输入框同款 Menu.Bg.Hover 底 + 细边。 -->
+            <Border x:Name="Box"
+                    Grid.Column="0"
+                    Width="16" Height="16"
+                    CornerRadius="3"
+                    Background="{DynamicResource Menu.Bg.Hover}"
+                    BorderBrush="{DynamicResource Menu.Border.Subtle}"
+                    BorderThickness="1"
+                    VerticalAlignment="Center">
+              <Path x:Name="Check"
+                    Width="12" Height="12"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Stretch="Uniform"
+                    Stroke="{DynamicResource Menu.Accent.On}"
+                    StrokeThickness="2"
+                    StrokeEndLineCap="Round"
+                    StrokeStartLineCap="Round"
+                    StrokeLineJoin="Round"
+                    Data="{StaticResource Icon.Check}"
+                    Visibility="Collapsed"/>
+            </Border>
+
+            <ContentPresenter Grid.Column="1"
+                              Margin="8,0,0,0"
+                              VerticalAlignment="Center"
+                              HorizontalAlignment="Left"
+                              TextElement.Foreground="{TemplateBinding Foreground}"
+                              RecognizesAccessKey="True"/>
+          </Grid>
+
+          <ControlTemplate.Triggers>
+            <!-- 选中态：系统强调色填充 + 同色边框 + 强调色上的对勾（与 Menu.ComboBox 一致）。 -->
+            <Trigger Property="IsChecked" Value="True">
+              <Setter TargetName="Box" Property="Background" Value="{DynamicResource Menu.Accent.Solid}"/>
+              <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource Menu.Accent.Solid}"/>
+              <Setter TargetName="Check" Property="Stroke" Value="{DynamicResource Menu.Accent.On}"/>
+              <Setter TargetName="Check" Property="Visibility" Value="Visible"/>
+            </Trigger>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource Menu.Text.Secondary}"/>
+            </Trigger>
+            <MultiTrigger>
+              <MultiTrigger.Conditions>
+                <Condition Property="IsChecked" Value="True"/>
+                <Condition Property="IsMouseOver" Value="True"/>
+              </MultiTrigger.Conditions>
+              <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource Menu.Accent.Solid}"/>
+            </MultiTrigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter TargetName="Box" Property="Background" Value="{DynamicResource Menu.Bg.Surface}"/>
+              <Setter Property="Foreground" Value="{DynamicResource Menu.Text.Disabled}"/>
+              <Setter Property="Cursor" Value="Arrow"/>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+</ResourceDictionary>

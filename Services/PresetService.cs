@@ -375,14 +375,13 @@ public class PresetService
     }
 
     /// <summary>Apply a saved SubFolder preset onto a target SubFolder. Copies the 14 SubFolder
-    /// style fields + Name; SubItems and positional fields (X/Y/TargetPath/IconPath/Id/Type) are
-    /// intentionally NOT touched (Q8).</summary>
+    /// style fields only; Name, SubItems and positional fields (X/Y/TargetPath/IconPath/Id/Type)
+    /// are intentionally NOT touched (Q8) — a style preset must not rename the target.</summary>
     public bool ApplySubfolderPreset(Guid presetId, ZoneItem target)
     {
         var preset = LoadAll().OfType<SubfolderPreset>().FirstOrDefault(p => p.Id == presetId);
         if (preset == null) return false;
         var src = preset.Subfolder;
-        target.Name = src.Name;
         target.IconSizeAutoGrow = src.IconSizeAutoGrow;
         target.CornerRounded = src.CornerRounded;
         target.FillFollowsZone = src.FillFollowsZone;

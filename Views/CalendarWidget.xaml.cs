@@ -796,6 +796,9 @@ public partial class CalendarWidget : Window
         var priorityPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
         Grid.SetRow(priorityPanel, 3);
         var cmb = ComboBoxHelper.Create(width: 120);
+        // 跟随系统深浅色（Menu.* 调色板），与弹窗其它控件一致，不跟随管理界面主题。
+        cmb.Style = (Style)FindResource("Menu.ComboBox");
+        cmb.ItemContainerStyle = (Style)FindResource("Menu.ComboBoxItem");
         cmb.Items.Add(_loc["Calendar.Priority.None"]);
         cmb.Items.Add(_loc["Calendar.Priority.Low"]);
         cmb.Items.Add(_loc["Calendar.Priority.Normal"]);
@@ -827,7 +830,9 @@ public partial class CalendarWidget : Window
             FontSize = 11,
             IsChecked = existingReminder.HasValue,
             VerticalContentAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(0, 0, 6, 0)
+            Margin = new Thickness(0, 0, 6, 0),
+            // 跟随系统深浅色（Menu.CheckBox 调色板），与弹窗其它控件一致。
+            Style = (Style)FindResource("Menu.CheckBox")
         };
         reminderCheck.SetResourceReference(System.Windows.Controls.CheckBox.ForegroundProperty, "Menu.Text.Secondary");
         var dateHint = "yyyy-MM-dd";

@@ -464,7 +464,7 @@ public partial class PanelWindow : Window
                     {
                         foreach (var item in zone.Items.ToList())
                         {
-                            if (hasSearch && !FuzzySearchHelper.MatchFuzzy(item.Name, search))
+                            if (hasSearch && !ItemMatchesSearch(item, search))
                                 continue;
                             var card = CreateItemCard(item, zone, isGrid: true, bodyBrush: bodyBrush);
                             wrapPanel.Children.Add(card);
@@ -479,7 +479,7 @@ public partial class PanelWindow : Window
                     {
                         foreach (var item in zone.Items.ToList())
                         {
-                            if (hasSearch && !FuzzySearchHelper.MatchFuzzy(item.Name, search))
+                            if (hasSearch && !ItemMatchesSearch(item, search))
                                 continue;
                             var card = CreateItemCard(item, zone, isGrid: false, bodyBrush: bodyBrush);
                             ContentStack.Children.Add(card);
@@ -489,6 +489,20 @@ public partial class PanelWindow : Window
             }
             catch { }
         }), System.Windows.Threading.DispatcherPriority.Normal);
+    }
+
+    /// <summary>
+    /// 面板搜索匹配：普通项按名称匹配；次级分区（SubFolder）除自身名称外，
+    /// 还递归匹配其内部项目（SubItems，禁止嵌套，一层即可）——搜索「内部项目名」
+    /// 时对应的次级分区卡片也能出现在结果里。
+    /// </summary>
+    bool ItemMatchesSearch(ZoneItem item, string query)
+    {
+        if (string.IsNullOrEmpty(query)) return true;
+        if (FuzzySearchHelper.MatchFuzzy(item.Name, query)) return true;
+        if (item.Type == ItemType.SubFolder)
+            return item.SubItems.Any(si => FuzzySearchHelper.MatchFuzzy(si.Name, query));
+        return false;
     }
 
     Border CreateZoneHeader(Zone zone, Brush? titleBarBrush)

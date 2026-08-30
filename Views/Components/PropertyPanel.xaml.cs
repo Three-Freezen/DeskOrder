@@ -398,31 +398,61 @@ public partial class PropertyPanel : UserControl
         switch (Target)
         {
             case Zone z when record is ZonePreset zp:
+            {
+                // 样式预设只套用外观，不覆盖目标分区的「名称 / 图标」。
+                var zoneName = z.Name;
+                var zoneIcon = z.IconChar;
                 CopyZoneFields(zp.Zone, z);
+                z.Name = zoneName;
+                z.IconChar = zoneIcon;
                 // ponytail: real-time preset preview — repaint the live desktop
                 // zone window (no disk write; Apply commits later).
                 app?.ZoneManager?.GetZoneWindow(z.Id)?.RefreshZone(z);
                 break;
+            }
             case MergedGroupTarget g when record is ZonePreset zp:
+            {
+                // 组合分区样式预设：套用组样式，但保留组合「名称/图标」（membership 本就不拷贝）
+                // 以及 master 自身的名称/图标，避免解散组合后名称图标被预设覆盖。
+                var masterName = g.Master.Name;
+                var masterIcon = g.Master.IconChar;
                 CopyZoneFields(zp.Zone, g.Master);
+                g.Master.Name = masterName;
+                g.Master.IconChar = masterIcon;
                 // ponytail: preset zone's group style rides along; the group's
                 // identity (name/icon/membership) is never overwritten.
                 CloneHelper.CopyBaseProperties<MergedGroupStyle>(zp.Zone.MergedGroupStyle, g.Master.MergedGroupStyle);
                 app?.ZoneManager?.GetZoneWindow(g.Master.Id)?.RefreshZone(g.Master);
                 break;
+            }
             case DesktopClock c when record is ClockPreset cp:
+            {
+                // 时钟没有名称，只保留「图标」不被预设覆盖。
+                var clockIcon = c.IconChar;
                 CopyClockFields(cp.Clock, c);
+                c.IconChar = clockIcon;
                 app?.GetClockWindow(c.Id)?.RefreshAppearance(c);
                 break;
+            }
             case DesktopCalendar cal when record is CalendarPreset cap:
+            {
+                // 日历没有名称，只保留「图标」不被预设覆盖。
+                var calendarIcon = cal.IconChar;
                 CopyCalendarFields(cap.Calendar, cal);
+                cal.IconChar = calendarIcon;
                 app?.GetCalendarWindow(cal.Id)?.RefreshAppearance(cal);
                 break;
+            }
             case StickyNote n when record is StickyNotePreset snp:
+            {
+                // 便签「标题」已由 _noteExcluded 排除，这里再保留「图标」。
+                var noteIcon = n.IconChar;
                 CopyNoteFields(snp.Note, n);
+                n.IconChar = noteIcon;
                 if (app?.NotesService?.Windows.TryGetValue(n.Id, out var nw) == true && nw is StickyNoteWindow snw)
                     snw.RefreshAppearance(n);
                 break;
+            }
             case PanelConfig p when record is PanelPreset pp:
                 CopyPanelConfigFields(pp.Config, p);
                 // ponytail: repaint the live panel window from the mutated live
@@ -432,13 +462,18 @@ public partial class PropertyPanel : UserControl
             // ponytail 2026-08-26: SubFolder preset — 镜像 preset.Subfolder 的字段到当前 ZoneItem,
             // SubItems 内容不动 (SubfolderPreset.Clone 不含 SubItems,符合 spec §4.5)。
             case ZoneItem sub when sub.Type == ItemType.SubFolder && record is SubfolderPreset sp:
+            {
+                // 次级分区没有图标，只保留「名称」不被预设覆盖。
+                var subName = sub.Name;
                 CopySubfolderFields(sp.Subfolder, sub);
+                sub.Name = subName;
                 // ponytail: repaint the parent zone window so the subfolder's
                 // icon/fill/glass change shows on the desktop (no disk write).
                 var parentZone = app?.ZoneManager?.Zones.FirstOrDefault(z => z.Items.Contains(sub));
                 if (parentZone != null)
                     app?.ZoneManager?.GetZoneWindow(parentZone.Id)?.RefreshZone(parentZone);
                 break;
+            }
         }
         _suppressSwitchAnimation = true;
         try { OnTargetChanged(); }

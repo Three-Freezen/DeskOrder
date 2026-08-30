@@ -1597,11 +1597,17 @@ public partial class ZoneWindow : Window
         {
             _vm.RefreshItems();
             UpdateCanvasSize();
+            // ponytail: keep the title NAME in sync on every ZonesChanged, not just on the
+            // style-panel's direct RefreshZone preview. Rename/merge paths that only fire
+            // ZonesChanged used to leave the title bar showing the old name (ApplyStyle
+            // below refreshes the icon/colors but never the title text).
+            ZoneTitleText.Text = _zone.Name;
             // ponytail: Fix C — re-apply body content color after RefreshItems wipes the
             // brush via the XAML default `#E0FFFFFF` foreground on freshly-generated item
             // containers. Without this, any OnZonesChanged trigger (rename, delete, etc.)
             // would silently revert the previously-applied brush on all items.
             ApplyStyle();
+            UpdateMergedTitle();
             RefreshFolderMapping();
         }), System.Windows.Threading.DispatcherPriority.Normal);
     }

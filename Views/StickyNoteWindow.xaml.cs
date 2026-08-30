@@ -1126,6 +1126,14 @@ public partial class StickyNoteWindow : Window
     public void RefreshAppearance(StickyNote? note = null)
     {
         if (note != null) _note = note;
+        // ponytail: live-preview the title name too — RefreshAppearance re-applies the
+        // chrome (icon/colors/glass) but previously never re-wrote the title TextBox, so
+        // renaming a note in the style panel left the on-screen title stale until Apply.
+        // Keep the VM in sync as well so a later inline title edit compares against the
+        // current name rather than the stale constructor-time value.
+        _vm.Note = _note;
+        _vm.Title = _note.Title;
+        if (TitleBox != null) TitleBox.Text = _note.Title;
         // ponytail: ApplyAcrylic guards on IntPtr.Zero internally — safe to run regardless
         // of MainContent visibility so live preview reaches the widget even when hidden.
         ApplyAcrylic();

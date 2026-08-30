@@ -23,6 +23,7 @@
                 <ResourceDictionary Source="Resources/Controls/ComboBox.xaml"/>
                 <ResourceDictionary Source="Resources/Controls/ContextMenu.xaml"/>
                 <ResourceDictionary Source="Resources/Controls/ComboBox.Menu.xaml"/>
+                <ResourceDictionary Source="Resources/Controls/CheckBox.Menu.xaml"/>
                 <ResourceDictionary Source="Resources/Controls/ToolTip.xaml"/>
                 <ResourceDictionary Source="Resources/Controls/ScrollBar.xaml"/>
                 <ResourceDictionary Source="Resources/Controls/SegmentedControl.xaml"/>
