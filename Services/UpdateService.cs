@@ -171,6 +171,10 @@ public sealed class UpdateService
                 ProgressPercent = p;
                 RaiseStateChanged();
             }), CancellationToken.None);
+            // 下载完成即写待清理标记,不等用户点「重启并更新」:Ready 之后用户完全
+            // 可能自己手动跑安装包(实测 1.0.13 升级就漏了一种),装完的新版首启
+            // 只认标记,不关心安装动作是静默还是手动。
+            TryWritePendingSetupCleanup();
             SetState(UpdateState.Ready);
         }
         catch (Exception ex)
@@ -180,24 +184,32 @@ public sealed class UpdateService
         }
     }
 
+    /// <summary>按当前勾选状态维护待清理标记(勾选=写入,取消=撤除)。任何失败静默
+    /// — 清理是锦上添花,绝不干扰更新主流程。</summary>
+    private void TryWritePendingSetupCleanup()
+    {
+        try
+        {
+            // MSIX 渠道没有"安装包"概念(App Installer 管下载与旧版清理),跳过标记。
+            if (IsRunningPackaged || !_configService.Load().DeleteSetupAfterUpdate) return;
+            // 只写纯版本号 — InformationalVersion 在 Git 仓库构建时会带 "+提交哈希"
+            // (1.0.5+abc123),版本比较用的 Version.TryParse 不认它。
+            var ver = AppVersion.Current.Split('+')[0];
+            File.WriteAllText(PendingSetupCleanupPath, $"{SetupDownloadPath}\n{ver}");
+        }
+        catch { }
+    }
+
     /// <summary>启动已下载的安装器静默升级到原路径（/SILENT /DIR=当前目录），
     /// 随后退出本进程让 Inno 接管；装完由安装器自动重启应用。失败抛异常。</summary>
     public void ApplyAndRestart()
     {
-        // ponytail 2026-08-30: 勾选"更新完成后自动删除安装包"时留下待清理标记 —
-        // 新版本首次启动消费它(安装器运行期间删不了自己,只有新版真正跑起来才算
-        // "更新完毕");标记里记录旧版本号,只有真的升上去了才删,避免误删可手动
-        // 重试的安装包。标记存在本身即"用户已勾选",新实例无需再读配置。
+        // 标记已在下载完成时写入;这里按当下的勾选状态做最后一次校正 — 下载后
+        // 反悔取消勾选的用户,装完也不该被删安装包。
         try
         {
-            // MSIX 渠道没有"安装包"概念(App Installer 管下载与旧版清理),跳过标记。
-            if (!IsRunningPackaged && _configService.Load().DeleteSetupAfterUpdate)
-            {
-                // ponytail 2026-08-30: 只写纯版本号 — InformationalVersion 在 Git 仓库构建
-                // 时会带 "+提交哈希"(1.0.5+abc123),版本比较用的 Version.TryParse 不认它。
-                var ver = AppVersion.Current.Split('+')[0];
-                File.WriteAllText(PendingSetupCleanupPath, $"{SetupDownloadPath}\n{ver}");
-            }
+            if (!IsRunningPackaged && !_configService.Load().DeleteSetupAfterUpdate)
+                File.Delete(PendingSetupCleanupPath);
         }
         catch { }
         GetChannel()?.ApplyAndRestart();
@@ -206,14 +218,18 @@ public sealed class UpdateService
     // ── 更新后安装包自动清理(设置页"更新完成后自动删除安装包") ──
 
     /// <summary>待清理标记:数据根目录下,内容两行 = 安装包绝对路径 \n 旧版本号。
-    /// 由 ApplyAndRestart(勾选时)写入,新版首启 ConsumePendingSetupCleanup 消费。</summary>
+    /// 由 DownloadAsync 成功后(勾选时)写入,新版首启 ConsumePendingSetupCleanup
+    /// 消费;ApplyAndRestart 按当下勾选状态做撤除校正。</summary>
     internal static string PendingSetupCleanupPath => Path.Combine(DataLocator.Root, "pending-setup-cleanup.txt");
 
     /// <summary>
-    /// 新版本首次启动消费待清理标记:安装包路径与名称校验通过、且当前版本确实
-    /// 大于标记里的旧版本(= 升级成功)时,删除下载文件夹里的安装包。任何一步失败
-    /// 都只放弃,绝不阻塞启动;同版本(更新没完成/被取消)保留安装包给用户手动处理。
-    /// 标记读到一个字节就先删 — 只会消费一次,不因反复启动反复尝试。
+    /// 新版本首次启动消费待清理标记:安装包名称校验通过、且当前版本确实大于标记里
+    /// 的旧版本(= 升级成功)时,删除下载文件夹里的安装包。无效标记 / 同版本(更新
+    /// 没完成或被取消) / 安装包已不在 → 只作废标记,安装包留给用户手动处理;用户
+    /// 手动从浏览器下载的同名安装包没有标记,永远不会被这条链路碰。
+    /// 标记只在安装包真删掉了之后才消费 — 1.0.13 实测教训:Inno 引导器要等整个
+    /// 安装结束才退出,新版首启时下载的安装包还是运行态,删一次失败就被吞而标记
+    /// 已一次性消费 → 安装包永久残留。现在失败保留标记,后台短重试 + 下次启动再试。
     /// </summary>
     public static void ConsumePendingSetupCleanup()
     {
@@ -221,24 +237,58 @@ public sealed class UpdateService
         {
             if (!File.Exists(PendingSetupCleanupPath)) return;
             var lines = File.ReadAllLines(PendingSetupCleanupPath);
-            File.Delete(PendingSetupCleanupPath);
             var setupPath = lines.Length > 0 ? lines[0].Trim() : "";
             // 双侧剥 "+哈希" 后缀(写入侧已剥,这里再剥一次兼容旧标记):CI 在 Git 仓库
             // 构建出的 InformationalVersion 形如 1.0.5+abc123,直接 TryParse 会失败,
             // 静默不删 — v1.0.6 实测「开了自动删除却没删」的根源。
             var oldVer = (lines.Length > 1 ? lines[1].Trim() : "").Split('+')[0];
-            // 双保险:只删"名字对得上 + 路径存在 + 版本真的升上去了"的那个文件,
-            // 用户手动从浏览器下载的同名安装包没有标记,永远不会被这条链路碰。
-            if (Path.GetFileName(setupPath) != SetupAssetName || !File.Exists(setupPath)) return;
-            if (!Version.TryParse(oldVer.TrimStart('v', 'V'), out var oldV)) return;
-            if (!Version.TryParse(AppVersion.Current.Split('+')[0], out var curV)) return;
-            if (curV > oldV)
+            if (Path.GetFileName(setupPath) != SetupAssetName
+                || !Version.TryParse(oldVer.TrimStart('v', 'V'), out var oldV)
+                || !Version.TryParse(AppVersion.Current.Split('+')[0], out var curV)
+                || curV <= oldV
+                || !File.Exists(setupPath))
+            {
+                File.Delete(PendingSetupCleanupPath);
+                return;
+            }
+            try
+            {
                 File.Delete(setupPath);
+                File.Delete(PendingSetupCleanupPath);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                RetryPendingSetupCleanup(setupPath);
+            }
         }
         catch
         {
-            // 清理失败(占用/权限)无关紧要 — 下次更新的标记会覆盖同名文件。
+            // 读取/解析类失败无关紧要 — 标记保留,下次启动重走一遍。
         }
+    }
+
+    /// <summary>安装包被占用(Inno 引导器还没退 / 杀软扫描)时的后台重试:每 5 秒
+    /// 一次至多 12 次,锁是瞬态的,通常几十秒内就能删掉。成功后只清理仍指向同一
+    /// 安装包的标记,避免误删新一轮更新刚写的;始终删不掉则保留标记,下次启动再试。</summary>
+    private static void RetryPendingSetupCleanup(string setupPath)
+    {
+        _ = Task.Run(async () =>
+        {
+            for (var i = 0; i < 12; i++)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(5));
+                try
+                {
+                    File.Delete(setupPath);
+                    if (File.Exists(PendingSetupCleanupPath)
+                        && File.ReadAllLines(PendingSetupCleanupPath) is { Length: > 0 } check
+                        && check[0].Trim() == setupPath)
+                        File.Delete(PendingSetupCleanupPath);
+                    return;
+                }
+                catch { /* 还在占用,等下一轮 */ }
+            }
+        });
     }
 
     /// <summary>启动后台检查：环境不支持 / 开关关闭 / 24 小时内查过 → 直接返回。
