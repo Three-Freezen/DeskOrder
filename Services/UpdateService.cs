@@ -177,8 +177,12 @@ public sealed class UpdateService
         try
         {
             if (_configService.Load().DeleteSetupAfterUpdate)
-                File.WriteAllText(PendingSetupCleanupPath,
-                    $"{SetupDownloadPath}\n{AppVersion.Current}");
+            {
+                // ponytail 2026-08-30: 只写纯版本号 — InformationalVersion 在 Git 仓库构建
+                // 时会带 "+提交哈希"(1.0.5+abc123),版本比较用的 Version.TryParse 不认它。
+                var ver = AppVersion.Current.Split('+')[0];
+                File.WriteAllText(PendingSetupCleanupPath, $"{SetupDownloadPath}\n{ver}");
+            }
         }
         catch { }
         GetChannel()?.ApplyAndRestart();
@@ -204,7 +208,10 @@ public sealed class UpdateService
             var lines = File.ReadAllLines(PendingSetupCleanupPath);
             File.Delete(PendingSetupCleanupPath);
             var setupPath = lines.Length > 0 ? lines[0].Trim() : "";
-            var oldVer = lines.Length > 1 ? lines[1].Trim() : "";
+            // 双侧剥 "+哈希" 后缀(写入侧已剥,这里再剥一次兼容旧标记):CI 在 Git 仓库
+            // 构建出的 InformationalVersion 形如 1.0.5+abc123,直接 TryParse 会失败,
+            // 静默不删 — v1.0.6 实测「开了自动删除却没删」的根源。
+            var oldVer = (lines.Length > 1 ? lines[1].Trim() : "").Split('+')[0];
             // 双保险:只删"名字对得上 + 路径存在 + 版本真的升上去了"的那个文件,
             // 用户手动从浏览器下载的同名安装包没有标记,永远不会被这条链路碰。
             if (Path.GetFileName(setupPath) != SetupAssetName || !File.Exists(setupPath)) return;
