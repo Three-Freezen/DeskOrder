@@ -95,14 +95,23 @@ public sealed class UpdateService
     /// 判定,DataLocator 的便携模式判定也用它,避免两处 P/Invoke 各自为政)。</summary>
     public static bool IsRunningPackaged => DataLocator.IsPackaged;
 
+    // Partner Center 分配的商店包身份(make-msix.ps1 -ForStore 写进清单,两者必须一致)。
+    // 注意:身份名以连字符结尾是 Partner Center 的原样分配值,不是笔误。
+    internal const string StoreIdentityName = "Three-Freezen.DeskOrder-";
+
+    /// <summary>本进程是否商店渠道安装(包身份 = StoreIdentityName)。商店版的检查、
+    /// 下载、安装全部由 Microsoft Store 负责;GitHub 侧载 MSIX 是占位身份,走 MSIX 渠道。</summary>
+    public static bool IsStorePackage => IsRunningPackaged && DataLocator.PackageIdentityName == StoreIdentityName;
+
     /// <summary>本进程是否由安装器安装而来：Inno 安装必然在 {app} 落一个 unins000.exe。
     /// 开发目录运行（dotnet run / bin\Debug）没有 → 不支持应用内更新。</summary>
     public static bool IsInstalledBuild =>
         File.Exists(Path.Combine(AppContext.BaseDirectory, "unins000.exe"));
 
     /// <summary>本环境是否支持应用内更新：安装器版走 Setup 渠道，MSIX 打包版走
-    /// MSIX 渠道；只有开发目录运行（dotnet run / bin\Debug）不支持。</summary>
-    public bool InAppUpdateSupported => IsInstalledBuild || IsRunningPackaged;
+    /// MSIX 渠道（商店身份除外——商店版由商店更新）；只有开发目录运行（dotnet run /
+    /// bin\Debug）不支持。</summary>
+    public bool InAppUpdateSupported => (IsInstalledBuild || IsRunningPackaged) && !IsStorePackage;
 
     /// <summary>状态变化通知。已在 UI 线程上触发，订阅方无需自行 marshal。</summary>
     public event Action? StateChanged;
@@ -260,8 +269,13 @@ public sealed class UpdateService
     private IUpdateChannel? GetChannel()
     {
         if (_channel != null) return _channel;
-        // 打包分发版走 MSIX 渠道;真商店分发(StoreContext)未来在此再分一支。
-        if (IsRunningPackaged) return _channel = new GitHubMsixChannel();
+        if (IsRunningPackaged)
+        {
+            // 商店安装返回 null → CheckForUpdatesAsync 走 Unavailable,设置页显示
+            // 「商店版本由微软商店负责更新」;GitHub 侧载的 MSIX(占位身份)继续走 MSIX 渠道。
+            if (IsStorePackage) return null;
+            return _channel = new GitHubMsixChannel();
+        }
         if (!IsInstalledBuild) return null;    // 开发目录运行（dotnet run / bin\Debug）
         _channel = new GitHubSetupChannel();
         return _channel;

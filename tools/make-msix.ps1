@@ -19,10 +19,27 @@ param(
     [string]$OutDir = (Join-Path $PSScriptRoot "..\releases"),
     [string]$IdentityName = "ThreeFreezen.DeskOrder",    # TODO: Partner Center → Package identity → Name
     [string]$Publisher = "CN=Three-Freeze",              # TODO: Partner Center → Package identity → Publisher
+    [string]$DisplayName = "DeskOrder - 秩序桌面",        # 包属性里的产品名;商店构建须为预留的应用名称
     [string]$Version = "",                               # 空 = 读 csproj <Version>,不足四段补 .0
-    [switch]$SignSideload                                # 生成自签证书并签名,供本机侧载
+    [switch]$SignSideload,                               # 生成自签证书并签名,供本机侧载
+    [switch]$ForStore                                    # 商店构建:Partner Center 身份 + 去掉 unvirtualizedResources
 )
 $ErrorActionPreference = "Stop"
+
+# ---- 商店构建:Partner Center「标识详细信息」分配的身份(须与 UpdateService.StoreIdentityName 一致)。
+# 注意包标识名以连字符结尾是 Partner Center 分配的原样值,不是笔误!
+$StoreIdentityName = "Three-Freezen.DeskOrder-"
+$StorePublisher = "CN=B299D33E-35D8-493F-87BD-66AEAEBAB9A6"
+# Properties/DisplayName 必须是商店里预留的应用名称(应用管理 → 管理应用名称)
+$StoreDisplayName = "DeskOrder-桌面秩序"
+if ($ForStore) {
+    if (-not $PSBoundParameters.ContainsKey("IdentityName")) { $IdentityName = $StoreIdentityName }
+    if (-not $PSBoundParameters.ContainsKey("Publisher")) { $Publisher = $StorePublisher }
+    if (-not $PSBoundParameters.ContainsKey("DisplayName")) { $DisplayName = $StoreDisplayName }
+    $OutName = "DeskOrder-win-MSIX-Store.msix"           # 商店上传件,不与 GitHub 侧载包同名互覆
+} else {
+    $OutName = "DeskOrder-win-MSIX.msix"                 # GitHub Release 资产/应用内 MSIX 渠道直链
+}
 
 # ---- 版本号:清单 Identity Version 必须四段(1.0.7 → 1.0.7.0)
 if (-not $Version) {
@@ -62,15 +79,23 @@ New-Item -ItemType Directory -Path $stage | Out-Null
 
 $OutDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutDir)
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-$msix = Join-Path $OutDir "DeskOrder-win-MSIX.msix"
+$msix = Join-Path $OutDir $OutName
 Remove-Item $msix -Force -ErrorAction SilentlyContinue
 
 try {
     Copy-Item -Path (Join-Path $PublishDir "*") -Destination $stage -Recurse -Force
     Copy-Item -Path (Join-Path $pkgRoot "packaging\msix\Assets") -Destination $stage -Recurse -Force
+    # PDB 调试符号不进分发包(商店/侧载都用不到,白占体积)
+    Get-ChildItem $stage -Recurse -Filter *.pdb | Remove-Item -Force
 
     $manifest = Get-Content $manifestTemplate -Raw -Encoding UTF8
-    $manifest = $manifest.Replace("__IDENTITY_NAME__", $IdentityName).Replace("__PUBLISHER__", $Publisher).Replace("__VERSION__", $Version)
+    $manifest = $manifest.Replace("__IDENTITY_NAME__", $IdentityName).Replace("__PUBLISHER__", $Publisher).Replace("__VERSION__", $Version).Replace("__DISPLAY_NAME__", $DisplayName)
+    if ($ForStore) {
+        # 商店构建去掉 unvirtualizedResources(受限能力需 Partner Center 单独审批;
+        # 商店版走 AppData 虚拟化,与安装器版数据天然隔离)。GitHub 侧载版保留,
+        # 数据落真实目录,与安装器版共用。
+        $manifest = ($manifest -split "\r?\n" | Where-Object { $_ -notmatch 'unvirtualizedResources' }) -join "`r`n"
+    }
     # 无 BOM UTF-8:AppxManifest 声明了 encoding=utf-8,MakeAppx 按声明解析
     [System.IO.File]::WriteAllText((Join-Path $stage "AppxManifest.xml"), $manifest, (New-Object System.Text.UTF8Encoding($false)))
 

@@ -20,8 +20,10 @@
             ProcessorArchitecture="x64" />
 
   <Properties>
-    <DisplayName>DeskOrder - 秩序桌面</DisplayName>
-    <PublisherDisplayName>Three-Freeze</PublisherDisplayName>
+    <!-- Properties/DisplayName:商店构建须为预留的应用名称(可被 -DisplayName 覆盖) -->
+    <DisplayName>__DISPLAY_NAME__</DisplayName>
+    <!-- 必须与 Partner Center 的「发布者显示名称」逐字一致,商店入库校验用 -->
+    <PublisherDisplayName>Three-Freezen</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
 
@@ -29,6 +31,12 @@
     <!-- 1809 = ACCENT_ENABLE_ACRYLICBLURBEHIND 液态玻璃的舒适下限,与 Inno 安装器一致 -->
     <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.26100.0" />
   </Dependencies>
+
+  <!-- 商店入库必填:至少声明一种支持语言,否则默认语言为空 → 图片资源解析也随之失败 -->
+  <Resources>
+    <Resource Language="en-us" />
+    <Resource Language="zh-cn" />
+  </Resources>
 
   <Applications>
     <Application Id="DeskOrder"

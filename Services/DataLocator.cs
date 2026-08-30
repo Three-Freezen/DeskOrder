@@ -59,6 +59,38 @@ public static class DataLocator
     [DllImport("kernel32.dll")]
     static extern int GetCurrentPackageFullName(ref uint packageFullNameLength, [Out] StringBuilder? packageFullName);
 
+    static string? _identityName;
+
+    /// <summary>MSIX 包身份 Name(如 Three-Freezen.DeskOrder);未打包返回 null,
+    /// 打包但解析失败返回空串。包全名格式 Name_Version_Arch__PublisherHash,身份名
+    /// 不含下划线(只允许字母/数字/点/连字符),按 '__' 截断再取 '_' 前段。</summary>
+    public static string? PackageIdentityName
+    {
+        get
+        {
+            if (!IsPackaged) return null;
+            if (_identityName != null) return _identityName;
+            try
+            {
+                uint len = 0;
+                if (GetCurrentPackageFullName(ref len, null) != 122)
+                {
+                    _identityName = "";
+                    return _identityName;
+                }
+                var sb = new StringBuilder((int)len);
+                if (GetCurrentPackageFullName(ref len, sb) != 0)
+                {
+                    _identityName = "";
+                    return _identityName;
+                }
+                _identityName = sb.ToString().Split("__")[0].Split('_')[0];
+            }
+            catch { _identityName = ""; }
+            return _identityName;
+        }
+    }
+
     /// <summary>true = 数据存安装目录 Data;false = 存 %APPDATA%\DesktopZones。
     /// 进程内缓存首判结果(运行中安装目录结构不会变化)。MSIX 包内容只读,
     /// 便携标记写不进去,再防御一刀保证打包态恒走 AppData。</summary>
