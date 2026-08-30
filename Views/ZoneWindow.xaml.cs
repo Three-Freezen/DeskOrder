@@ -1739,7 +1739,7 @@ public partial class ZoneWindow : Window
         if (s is not Border gr) return;
         bool left = gr == GripTL || gr == GripBL;
         bool top = gr == GripTL || gr == GripTR;
-        _snapResize?.Start(e, left, top, !left, !top, 120, 80);
+        _snapResize?.Start(e, left, top, !left, !top, 120, 80, OnResizeCompleted);
         DesktopLayer.BringToFront(this);
         e.Handled = true;
     }
@@ -2478,50 +2478,67 @@ public partial class ZoneWindow : Window
 
     (double, double) FindFreeSpot() => ZoneLayout.FindFreeSpot(_vm.GetPlacementItems(), _zone.Width, _zone.Height, _zone.GridSize, _zone.GridSize);
 
-    void RearrangeAll()
+    /// <summary>解析重排目标：合并分区选中子分区标签时用该子分区的图标与网格；否则用主分区。</summary>
+    (List<Models.ZoneItem>? Items, int GridSize) ResolveRearrangeTarget()
     {
-        if (!_zone.AutoArrange) return;
-
-        // Determine which zone's items to rearrange and which grid size to use
-        List<Models.ZoneItem> items;
-        int gridSize;
-
         if (_zone.MergedGroupMembership.SubZoneIds.Count > 0 && _vm.SelectedSubZoneId.HasValue && _vm.SelectedSubZoneId.Value != _zone.Id)
         {
-            // Merged mode with a sub-zone tab selected
             var subZone = _mgr.Zones.FirstOrDefault(z => z.Id == _vm.SelectedSubZoneId.Value);
-            if (subZone == null) return;
-            items = subZone.Items;
-            gridSize = subZone.GridSize;
+            if (subZone != null) return (subZone.Items, subZone.GridSize);
         }
-        else
-        {
-            items = _zone.Items;
-            gridSize = _zone.GridSize;
-        }
+        return (_zone.Items, _zone.GridSize);
+    }
+
+    void RearrangeAll(bool center = true)
+    {
+        if (!_zone.AutoArrange) return;
+        var (items, gridSize) = ResolveRearrangeTarget();
+        if (items == null || items.Count == 0) return;
 
         double pitch = ZoneLayout.Pitch(gridSize);
         double vpitch = ZoneLayout.VPitch(gridSize);
         double pad = ZoneLayout.Pad;
-        // 按窗口宽度计算列数并把整块水平居中 — 左右留白相等（不再出现
-        // 左侧 10px、右侧一大片的偏斜布局；换行临界处的留白跳变也被摊平）。
+        // 按窗口宽度计算列数。center=true(显式「对齐」/加载归一化):整块水平居中;
+        // center=false(拖拽缩放):左对齐 — 放大窗口时图标不往中间漂,只有缩到放不下才换行。
         double avail = Math.Max(0, _zone.Width - 2 * pad);
         int fitCols = Math.Max(1, (int)Math.Floor((avail - gridSize) / pitch) + 1);
-        // 只按实际用到的列数居中(与 ZoneLayout.NormalizeZone 一致)：
-        // 窗口能容纳 7 列但只有 2 个图标时，按 7 列居中会把图标挤到左侧、右侧留一大片。
         int cols = Math.Min(fitCols, items.Count);
         double blockWidth = (cols - 1) * pitch + gridSize;
-        double offsetX = Math.Max(pad, (_zone.Width - blockWidth) / 2);
+        double offsetX = center ? Math.Max(pad, (_zone.Width - blockWidth) / 2) : pad;
+        // 直接写 VM 的 X/Y(VM setter 回写模型 + 触发 Canvas.Left/Top 绑定即时更新),
+        // 不再 RefreshMergedItems 重建 Items 容器 — 否则拖拽缩放每帧都整树销毁重建,
+        // 正是「一拉窗口图标就偏移/闪烁」的根源。
+        var vmById = _vm.Items.ToDictionary(v => v.Id);
         int idx = 0;
         foreach (var item in items.OrderBy(i => i.Y).ThenBy(i => i.X))
         {
             int col = idx % cols;
             int row = idx / cols;
-            item.X = offsetX + col * pitch;
-            item.Y = ZoneViewModel.SnapToGridY(pad + row * vpitch, gridSize);
+            double nx = offsetX + col * pitch;
+            double ny = ZoneViewModel.SnapToGridY(pad + row * vpitch, gridSize);
+            if (vmById.TryGetValue(item.Id, out var vm))
+            {
+                vm.X = nx;
+                vm.Y = ny;
+            }
+            else
+            {
+                item.X = nx;
+                item.Y = ny;
+            }
             idx++;
         }
-        _vm.RefreshMergedItems();
+    }
+
+    /// <summary>当前图标是否已越过右边界 — 只在「缩小到放不下」时为 true,触发换行重排;
+    /// 放大窗口时为 false,图标原地不动(修复「放大分区后图标向中间偏移」)。</summary>
+    bool ShouldReflowForResize()
+    {
+        var (items, gridSize) = ResolveRearrangeTarget();
+        if (items == null || items.Count == 0) return false;
+        double right = 0;
+        foreach (var i in items) right = Math.Max(right, i.X + gridSize);
+        return right > _zone.Width - ZoneLayout.Pad;
     }
 
     // ── Right-click zone ──
@@ -4198,10 +4215,25 @@ public partial class ZoneWindow : Window
         ScheduleSave();
         bool tileSync = !double.IsNaN(_expectedTileHeight) && Math.Abs(Height - _expectedTileHeight) < 0.5;
         if (tileSync) _expectedTileHeight = double.NaN;
-        // ponytail: 窗口拖拽缩放时不再自动重排/居中图标——只更新画布大小，图标保持
-        // 在原网格位置，避免“一拉窗口图标就偏移”。手动对齐仍由 AlignGrid_Click 触发。
+        // 「尺寸变化时自动重排」:只在边框拖拽缩放期间、且图标确实放不下(缩小)时
+        // 左对齐换行重排;放大窗口时不动图标(不再向中间漂)。磁贴切换等程序化尺寸
+        // 同步(_expectedTileHeight 命中)不重排。
+        if (!tileSync && _snapResize?.IsActive == true && ShouldReflowForResize())
+            RearrangeAll(center: false);
         UpdateCanvasSize();
         NativeMethods.UpdateRoundedCorners(this, (int)_zone.CornerRadius);
+    }
+
+    // 拖拽缩放结束的收尾:补齐最后一次(可能晚于 IsActive=false 到达的)尺寸重排,
+    // 保证缩小时按最终宽度落位 + 保存;放大不重排。
+    void OnResizeCompleted()
+    {
+        if (!IsLoaded || MainContent.Visibility != Visibility.Visible) return;
+        _zone.Width = Width;
+        _zone.Height = FullHeightFromWindowHeight();
+        if (ShouldReflowForResize()) RearrangeAll(center: false);
+        UpdateCanvasSize();
+        ScheduleSave();
     }
 
     void ScheduleSave() { _savePending = true; _saveDebounce.Stop(); _saveDebounce.Start(); }
