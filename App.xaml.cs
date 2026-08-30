@@ -267,7 +267,7 @@ public partial class App : System.Windows.Application
             bool anyHidden = AnyWidgetHidden();
             Dispatcher.Invoke(() =>
             {
-                if (anyHidden) TrayShowAll();
+                if (anyHidden) TrayShowAll(staggered: false);
                 else TrayFullHideAll();
             });
         });
@@ -771,12 +771,13 @@ public partial class App : System.Windows.Application
     // route through the management window's batch methods when it exists (those also
     // open never-opened widgets on Show All), otherwise sweep the live app windows
     // directly so the behavior holds even with StartMinimized.
-    private void TrayShowAll()
+    private void TrayShowAll(bool staggered = true)
     {
-        _zoneManager?.ShowAll();
+        _zoneManager?.ShowAll(staggered);
         if (_managementWindow != null)
         {
-            _managementWindow.ShowAllWidgetsFromVm();
+            if (staggered) _managementWindow.ShowAllWidgetsFromVm();
+            else _managementWindow.ShowAllWidgetsInstant();
         }
         else
         {
@@ -999,7 +1000,7 @@ public partial class App : System.Windows.Application
         if (enabled) AppDesktopDoubleClick.Install(true, () =>
         {
             bool anyHidden = AnyWidgetHidden();
-            Dispatcher.Invoke(() => { if (anyHidden) TrayShowAll(); else TrayFullHideAll(); });
+            Dispatcher.Invoke(() => { if (anyHidden) TrayShowAll(staggered: false); else TrayFullHideAll(); });
         });
         else AppDesktopDoubleClick.Uninstall();
     }

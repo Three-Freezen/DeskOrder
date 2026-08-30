@@ -359,7 +359,7 @@ public class ZoneManager
             ShowZone(zone);
     }
 
-    public void ShowAll()
+    public void ShowAll(bool staggered = true)
     {
         if (_isBatchOperation) return;
         _isBatchOperation = true;
@@ -368,7 +368,8 @@ public class ZoneManager
             // ponytail: 2026-08-23 batch wave — sort by screen position (row-major)
             // and stagger each zone by BatchStaggerMs so "Show All" opens as a
             // left-to-right / top-to-bottom cascade; each zone plays its OWN
-            // configured animation kind/speed/origin.
+            // configured animation kind/speed/origin. staggered=false → 即时显示
+            // (双击桌面切换路径用，不走级联动画)。
             int i = 0;
             foreach (var zone in Zones
                          .Where(z => !(z.MergedGroupMembership.GroupId.HasValue
@@ -377,7 +378,7 @@ public class ZoneManager
             {
                 // (i+1) 保证第一个分区也拿到 >0 的 waveDelay，走动画分支；
                 // 旧实现第一个 delay=0 走 SnapToExpanded，导致总有一个分区不播动画。
-                ShowZone(zone, (i + 1) * HoverExpandBehavior.BatchStaggerMs);
+                ShowZone(zone, staggered ? (i + 1) * HoverExpandBehavior.BatchStaggerMs : 0);
                 i++;
             }
         }
@@ -408,7 +409,7 @@ public class ZoneManager
         if (_zoneWindows.TryGetValue(zoneId, out var window))
         {
             var z = Zones.FirstOrDefault(x => x.Id == zoneId);
-            if (z != null) { z.Width = window.Width; z.Height = window.Height; z.X = window.Left; z.Y = window.Top; }
+            if (z != null) { z.Width = window.Width; z.Height = window.FullModelHeight; z.X = window.Left; z.Y = window.Top; }
             window.Close();
             _zoneWindows.Remove(zoneId);
         }
@@ -429,7 +430,7 @@ public class ZoneManager
             foreach (var kv in _zoneWindows.ToList())
             {
                 var z = Zones.FirstOrDefault(x => x.Id == kv.Key);
-                if (z != null) { z.Width = kv.Value.Width; z.Height = kv.Value.Height; z.X = kv.Value.Left; z.Y = kv.Value.Top; }
+                if (z != null) { z.Width = kv.Value.Width; z.Height = kv.Value.FullModelHeight; z.X = kv.Value.Left; z.Y = kv.Value.Top; }
                 kv.Value.Close();
             }
             _zoneWindows.Clear();
@@ -626,7 +627,7 @@ public class ZoneManager
         {
             if (z.MergedGroupMembership.SubZoneIds.Count > 0 && _zoneWindows.TryGetValue(z.Id, out var win))
             {
-                z.Width = win.Width; z.Height = win.Height; z.X = win.Left; z.Y = win.Top;
+                z.Width = win.Width; z.Height = win.FullModelHeight; z.X = win.Left; z.Y = win.Top;
                 win.Close();
                 _zoneWindows.Remove(z.Id);
             }
@@ -908,7 +909,7 @@ public class ZoneManager
         if (window != null)
         {
             host.X = window.Left; host.Y = window.Top;
-            host.Width = window.Width; host.Height = window.Height;
+            host.Width = window.Width; host.Height = window.FullModelHeight;
         }
 
         zone.MergedGroupMembership.GroupId = null;

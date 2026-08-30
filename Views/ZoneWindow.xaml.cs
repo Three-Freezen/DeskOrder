@@ -100,6 +100,11 @@ public partial class ZoneWindow : Window
     double TileWindowHeight() => _tileVisual ? Math.Max(36, _zone.Height - TileTitleBarCut) : _zone.Height;
     double FullHeightFromWindowHeight() => _tileVisual ? Height + TileTitleBarCut : Height;
 
+    /// <summary>回写模型用的完整高度：磁贴模式下窗口高度不含被砍掉的标题栏，必须加回
+    /// TileTitleBarCut，否则 FullHide/解散等路径会把它当成完整高度保存，重新打开时
+    /// 每次再砍一刀 → 磁贴窗口被裁剪/位移。</summary>
+    public double FullModelHeight => FullHeightFromWindowHeight();
+
     // 程序化改高度(切磁贴/恢复)时记录期望值 — OnSize 据此跳过自动重排,避免
     // 切换磁贴或恢复普通模式时把图标重新居中。
     double _expectedTileHeight = double.NaN;

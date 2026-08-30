@@ -804,12 +804,15 @@ public partial class ManagementWindow : Window
 
     public void NewZone() => _viewModel.CreateZoneCommand.Execute(null);
 
-    public void ShowAll()
+    public void ShowAll(bool staggered = true)
     {
         // ponytail: 2026-08-23 batch wave — zones play first (staggered by position),
         // then widgets/notes continue the same cascade after the zone slots.
-        _zoneManager.ShowAll();
-        ShowAllWidgets(baseDelayMs: (_zoneManager?.Zones?.Count ?? 0) * HoverExpandBehavior.BatchStaggerMs);
+        // staggered=false → 即时显示(双击桌面切换路径用)。
+        _zoneManager.ShowAll(staggered);
+        ShowAllWidgets(
+            baseDelayMs: staggered ? (_zoneManager?.Zones?.Count ?? 0) * HoverExpandBehavior.BatchStaggerMs : 0,
+            staggered: staggered);
     }
     public void HideAll()
     {
@@ -863,8 +866,10 @@ public partial class ManagementWindow : Window
     public void ShowAllWidgetsFromVm() => ShowAllWidgets(baseDelayMs: (_zoneManager?.Zones?.Count ?? 0) * HoverExpandBehavior.BatchStaggerMs);
     public void HideAllWidgetsFromVm() => HideAllWidgets(baseDelayMs: (_zoneManager?.Zones?.Count ?? 0) * HoverExpandBehavior.BatchStaggerMs);
     public void FullHideAllWidgetsFromVm() => FullHideAllWidgets();
+    /// <summary>双击桌面切换专用：即时显示所有挂件（不走分批级联动画）。</summary>
+    public void ShowAllWidgetsInstant() => ShowAllWidgets(baseDelayMs: 0, staggered: false);
 
-    void ShowAllWidgets(double baseDelayMs = 0)
+    void ShowAllWidgets(double baseDelayMs = 0, bool staggered = true)
     {
         if (_isBatchWidgetOperation) return;
         _isBatchWidgetOperation = true;
@@ -889,7 +894,7 @@ public partial class ManagementWindow : Window
                 int i = 0;
                 foreach (var note in _notesService.Notes.OrderBy(n => n.Y).ThenBy(n => n.X).ToList())
                 {
-                    double delay = baseDelayMs + i * HoverExpandBehavior.BatchStaggerMs;
+                    double delay = staggered ? baseDelayMs + i * HoverExpandBehavior.BatchStaggerMs : 0;
                     i++;
                     try
                     {
@@ -926,7 +931,7 @@ public partial class ManagementWindow : Window
                 int i = 0;
                 foreach (var clock in _widgetService.Clocks.OrderBy(c => c.Y).ThenBy(c => c.X).ToList())
                 {
-                    double delay = baseDelayMs + i * HoverExpandBehavior.BatchStaggerMs;
+                    double delay = staggered ? baseDelayMs + i * HoverExpandBehavior.BatchStaggerMs : 0;
                     i++;
                     try
                     {
@@ -962,7 +967,7 @@ public partial class ManagementWindow : Window
                 int j = 0;
                 foreach (var cal in _widgetService.Calendars.OrderBy(c => c.Y).ThenBy(c => c.X).ToList())
                 {
-                    double delay = baseDelayMs + j * HoverExpandBehavior.BatchStaggerMs;
+                    double delay = staggered ? baseDelayMs + j * HoverExpandBehavior.BatchStaggerMs : 0;
                     j++;
                     try
                     {
