@@ -811,7 +811,7 @@ public partial class ZoneWindow : Window
         return new SubfolderFill(
             s.FillColor, 100,
             s.BgImagePath, s.BgImageOpacity,
-            _zone.EnableLiquidGlass ? _zone.GlassColorMode : null,
+            s.EnableLiquidGlass ? _zone.GlassColorMode : null,
             _zone.GlassBlurAmount, _zone.GlassTintOpacity, _zone.GlassTintLuminosity);
     }
 
@@ -3814,7 +3814,8 @@ public partial class ZoneWindow : Window
         double BgImageOffsetY,
         double BgImageZoom,
         double BgImageOpacity,
-        bool TitleBarFillIndependent);
+        bool TitleBarFillIndependent,
+        bool EnableLiquidGlass);
 
     /// <summary>
     /// Resolve the visual style for the current mode. This is the ONLY place that knows
@@ -3851,7 +3852,8 @@ public partial class ZoneWindow : Window
             BgImageOffsetY:   _zone.BgImageOffsetY,
             BgImageZoom:      _zone.BgImageZoom,
             BgImageOpacity:   _zone.BackgroundImageOpacity,
-            TitleBarFillIndependent: _zone.TitleBarFillIndependent);
+            TitleBarFillIndependent: _zone.TitleBarFillIndependent,
+            EnableLiquidGlass: _zone.EnableLiquidGlass);
 
         // Step 2: merged-group override.
         bool isMerged = _zone.MergedGroupMembership.SubZoneIds.Count > 0 || _zone.MergedGroupMembership.GroupId.HasValue;
@@ -3920,7 +3922,12 @@ public partial class ZoneWindow : Window
             BgImageOffsetY =   _zone.MergedGroupStyle.BgImageOffsetY,
             BgImageZoom =      _zone.MergedGroupStyle.BgImageZoom,
             BgImageOpacity =   _zone.MergedGroupStyle.BackgroundImageOpacity,
-            TitleBarFillIndependent = _zone.MergedGroupStyle.TitleBarFillIndependent,
+            // 保留原有填充语义上必须让主体填充独立裁剪到标题栏之下，否则统一标题栏
+            // 会盖在保留的原填充上；不依赖配置里是否显式存了 TitleBarFillIndependent。
+            TitleBarFillIndependent = true,
+            // 玻璃属于统一填充表现的一部分 — 保留原有填充时关闭液态玻璃，只保留各子分区
+            // 自己的纯填充，避免统一玻璃层盖在保留的原填充上。
+            EnableLiquidGlass = false,
         };
     }
 
@@ -3950,7 +3957,7 @@ public partial class ZoneWindow : Window
     {
         var s = ResolveStyle();
         // Acrylic
-        ApplyAcrylic(s.FillColor, s.TitleBarFillColor);
+        ApplyAcrylic(s);
 
         // Borders + corners
         try { ZoneBorder.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.BorderColor)!); } catch { }
@@ -3980,11 +3987,13 @@ public partial class ZoneWindow : Window
         if (PresentationSource.FromVisual(this) != null && !collapsed)
             NativeMethods.SetRoundedCorners(this, s.CornerRadius);
 
-        // Body fill — 分区本体一体化:玻璃开时填充已并入玻璃 tint,此处透明;
-        // 玻璃关(或收起)时保持纯填充照旧。
-        bool glassCarriesFill = _zone.EnableLiquidGlass && (_hover?.IsExpanded ?? false);
-        try { FillRect.Fill = glassCarriesFill ? AcrylicHelper.HitTestFill : new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.FillColor)!); } catch { }
+        // Body fill — 分区本体一体化:玻璃开且填充铺满整窗时,填充并入玻璃 tint;
+        // 玻璃关(或收起)时保持纯填充照旧。标题栏独立填充(组合分区「保留原有填充」
+        // 会强制开启)时填充必须留在独立的 WPF 层,才能被裁剪到标题栏之下 — 此时
+        // 只把纯玻璃着色交给 DWM accent,填充仍走 FillRect。
         bool fillIndependent = s.TitleBarFillIndependent && !s.TileMode;
+        bool glassCarriesFill = s.EnableLiquidGlass && (_hover?.IsExpanded ?? false) && !fillIndependent;
+        try { FillRect.Fill = glassCarriesFill ? AcrylicHelper.HitTestFill : new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.FillColor)!); } catch { }
         FillRect.RadiusX = FillRect.RadiusY = fillIndependent ? 0 : s.CornerRadius;
         // ponytail 2026-08-26: the merged master's title bar is TWO layers — the
         // 24px top bar + the 24px sub-zone tab row — so the body fill starts below
@@ -4280,7 +4289,7 @@ public partial class ZoneWindow : Window
         // ponytail 2026-08-28: 展开时把 Win11 圆角偏好一并恢复(收起时
         // OnHoverCollapsed 关掉了它),否则恢复按钮点开的分区会一直保持尖角。
         NativeMethods.SetRoundedCorners(this, (int)_zone.CornerRadius);
-        ApplyAcrylic(s.FillColor, s.TitleBarFillColor);
+        ApplyAcrylic(s);
     }
 
     /// <summary>
@@ -4296,34 +4305,50 @@ public partial class ZoneWindow : Window
         NativeMethods.DisableDwmFrameShadow(this);
     }
 
-    void ApplyAcrylic(string fillColor, string titleBarFillColor)
+    void ApplyAcrylic(ResolvedZoneStyle s)
     {
         // ponytail: ghost-glass fix — a collapsed zone keeps its full-size window (only the
         // RestoreButton is visible), so enabling acrylic here would tint the WHOLE window
         // bounds with a ghost glass rectangle. Only enable blur while the content is
         // expanded; whenever collapsed (or mid-collapse), disable it instead.
         bool expanded = _hover?.IsExpanded ?? false;
-        if (_zone.EnableLiquidGlass && expanded)
+        // 标题栏独立填充(组合分区「保留原有填充」会强制开启)时,填充需要被裁剪到
+        // 标题栏之下,DWM accent 无法按区域裁剪 — 所以只把纯玻璃着色并入 DWM,
+        // 填充保持独立 FillRect 层(见 ApplyStyle 的 FillRect.Margin)。
+        bool fillIndependent = s.TitleBarFillIndependent && !s.TileMode;
+        if (s.EnableLiquidGlass && expanded)
         {
-            // ponytail 2026-08-30: 分区本体一体化 — 内部填充并入玻璃 tint(算一层),
-            // FillRect 透明;填充色与玻璃配色作为两个输入本质上仍是两层。
-            var blurResult = AcrylicHelper.EnableBlurComposite(this, _zone.GlassBlurAmount,
-                fillColor, 1.0, _zone.GlassColorMode, _zone.GlassTintOpacity, _zone.GlassTintLuminosity);
-            if (!blurResult.Success)
-                System.Diagnostics.Debug.WriteLine($"[ZoneWindow] EnableBlur failed: {blurResult.Error}");
-            FillRect.Fill = AcrylicHelper.HitTestFill;
-            FillRect.Opacity = 1.0;
-            if (TitleBarBg != null && !string.IsNullOrEmpty(titleBarFillColor))
-                ApplyTitleBarBandFill(titleBarFillColor);
+            if (fillIndependent)
+            {
+                var blurResult = AcrylicHelper.EnableBlur(this, _zone.GlassBlurAmount,
+                    _zone.GlassTintOpacity, _zone.GlassTintLuminosity, _zone.GlassColorMode);
+                if (!blurResult.Success)
+                    System.Diagnostics.Debug.WriteLine($"[ZoneWindow] EnableBlur failed: {blurResult.Error}");
+                try { FillRect.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.FillColor)!); } catch { }
+                FillRect.Opacity = 1.0;
+            }
+            else
+            {
+                // ponytail 2026-08-30: 分区本体一体化 — 内部填充并入玻璃 tint(算一层),
+                // FillRect 透明;填充色与玻璃配色作为两个输入本质上仍是两层。
+                var blurResult = AcrylicHelper.EnableBlurComposite(this, _zone.GlassBlurAmount,
+                    s.FillColor, 1.0, _zone.GlassColorMode, _zone.GlassTintOpacity, _zone.GlassTintLuminosity);
+                if (!blurResult.Success)
+                    System.Diagnostics.Debug.WriteLine($"[ZoneWindow] EnableBlur failed: {blurResult.Error}");
+                FillRect.Fill = AcrylicHelper.HitTestFill;
+                FillRect.Opacity = 1.0;
+            }
+            if (TitleBarBg != null && !string.IsNullOrEmpty(s.TitleBarFillColor))
+                ApplyTitleBarBandFill(s.TitleBarFillColor);
         }
         else
         {
             AcrylicHelper.DisableBlur(this);
             try
             {
-                FillRect.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(fillColor)!);
+                FillRect.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.FillColor)!);
                 FillRect.Opacity = 1.0;
-                ApplyTitleBarBandFill(titleBarFillColor);
+                ApplyTitleBarBandFill(s.TitleBarFillColor);
             }
             catch { }
         }

@@ -365,6 +365,7 @@
   "MergedGroupProp.IconColor": "Group icon color",
   "MergedGroupProp.UnifiedFill": "Unified fill",
   "MergedGroupProp.KeepOriginalFill": "Keep original fill",
+  "MergedGroupProp.KeepOriginalFillHint": "Enabling this disables liquid glass",
 
   "About.Description": "A lightweight Windows desktop icon manager and beautifier.",
   "About.GitHub": "GitHub Repository",

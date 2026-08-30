@@ -1649,21 +1649,23 @@ public partial class PropertyPanel : UserControl
         switches.Children.Add(MakeCheckRowWithSideBtn(_loc["Motion.HoverAutoExpand"], z.HoverAutoExpand,
             v => { z.HoverAutoExpand = v; SaveGroup(); },
             _loc["Motion.SettingsEllipsis"], _ => OpenMotionDialog(z, () => BuildMergedGroupFields(z))));
-        switches.Children.Add(MakeUnifiedFillRow(gs.UseUnifiedFill, v =>
-        {
-            gs.UseUnifiedFill = v;
-            // 保留原有填充 → 自动开启「标题栏填充单独设置」：两层标题栏的填充
-            // 颜色独立于各子分区自己的主体填充，避免统一标题栏盖在保留的原填充上。
-            if (!v)
+        switches.Children.Add(MakeRowWithHint(
+            MakeUnifiedFillRow(gs.UseUnifiedFill, v =>
             {
-                gs.TitleBarFillIndependent = true;
-                z.TitleBarFillIndependent = true;
-                if (titleBarIndependentCb != null)
-                    titleBarIndependentCb.IsChecked = true; // 触发 onChange 幂等写入并 SaveGroup
-            }
-            SaveGroup();
-            SetUnifiedGating(v, animate: true);
-        }));
+                gs.UseUnifiedFill = v;
+                // 保留原有填充 → 自动开启「标题栏填充单独设置」：两层标题栏的填充
+                // 颜色独立于各子分区自己的主体填充，避免统一标题栏盖在保留的原填充上。
+                if (!v)
+                {
+                    gs.TitleBarFillIndependent = true;
+                    z.TitleBarFillIndependent = true;
+                    if (titleBarIndependentCb != null)
+                        titleBarIndependentCb.IsChecked = true; // 触发 onChange 幂等写入并 SaveGroup
+                }
+                SaveGroup();
+                SetUnifiedGating(v, animate: true);
+            }),
+            _loc["MergedGroupProp.KeepOriginalFillHint"]));
         var cornerRow = MakeCornerStyleRow(gs.CornerRadius > 0, rounded =>
         {
             gs.CornerRadius = rounded ? (gs.CornerRadius > 0 ? gs.CornerRadius : 8) : 0;
