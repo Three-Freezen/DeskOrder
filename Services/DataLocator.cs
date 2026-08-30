@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Runtime.InteropServices;
+using System.Text;
 
 namespace DesktopZones.Services;
 
@@ -22,9 +24,45 @@ public static class DataLocator
     public static string PortableFlagPath => Path.Combine(
         AppContext.BaseDirectory, "Data", "portable.flag");
 
+    static bool? _packaged;
+
+    /// <summary>
+    /// MSIX/Store 打包运行判定(kernel32.GetCurrentPackageFullName:未打包进程
+    /// 返回 APPMODEL_ERROR_NO_PACKAGE=15700;打包进程先回 ERROR_INSUFFICIENT_
+    /// BUFFER=122,再成功取到包全名)。打包进程装在只读 WindowsApps,便携模式
+    /// 与应用内自更新(下载 Setup 覆盖安装)均不适用。
+    /// </summary>
+    public static bool IsPackaged
+    {
+        get
+        {
+            if (_packaged.HasValue) return _packaged.Value;
+            try
+            {
+                uint len = 0;
+                if (GetCurrentPackageFullName(ref len, null) != 122)
+                {
+                    _packaged = false;
+                    return false;
+                }
+                var sb = new StringBuilder((int)len);
+                _packaged = GetCurrentPackageFullName(ref len, sb) == 0;
+            }
+            catch
+            {
+                _packaged = false;
+            }
+            return _packaged.Value;
+        }
+    }
+
+    [DllImport("kernel32.dll")]
+    static extern int GetCurrentPackageFullName(ref uint packageFullNameLength, [Out] StringBuilder? packageFullName);
+
     /// <summary>true = 数据存安装目录 Data;false = 存 %APPDATA%\DesktopZones。
-    /// 进程内缓存首判结果(运行中安装目录结构不会变化)。</summary>
-    public static bool IsPortable => (_portable ??= File.Exists(PortableFlagPath));
+    /// 进程内缓存首判结果(运行中安装目录结构不会变化)。MSIX 包内容只读,
+    /// 便携标记写不进去,再防御一刀保证打包态恒走 AppData。</summary>
+    public static bool IsPortable => !IsPackaged && (_portable ??= File.Exists(PortableFlagPath));
 
     /// <summary>用户数据根目录(config.json / Notes / Presets / lang 的共同父目录)。</summary>
     public static string Root => IsPortable

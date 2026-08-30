@@ -3,7 +3,6 @@ using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
 using System.Runtime.InteropServices;
-using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -28,9 +27,9 @@ public enum UpdateState
 public sealed record UpdateCheckResult(string Version, string? ReleaseUrl);
 
 /// <summary>
-/// 更新渠道抽象。当前实现：GitHub Releases + Inno Setup 安装包。
-/// 微软商店渠道（打包 MSIX 后运行）必须走系统 StoreContext API，
-/// 未来在此接口下补一个实现即可，UI 层零改动。
+/// 更新渠道抽象。实现：GitHub Releases 的 Setup 渠道（Inno 安装版，静默升级）与
+/// MSIX 渠道（打包分发版，下载后交给系统应用安装程序就地更新）。
+/// 微软商店渠道（Store 签名分发）未来走 StoreContext API，再补一个实现即可，UI 层零改动。
 /// </summary>
 public interface IUpdateChannel
 {
@@ -51,13 +50,16 @@ public sealed class UpdateService
     // 网页端点(非 REST API):无匿名 60 次/小时配额,302 Location 即最新 tag。
     internal const string ReleasesLatestWebUrl = "https://github.com/Three-Freezen/DeskOrder/releases/latest";
     internal const string SetupAssetName = "DeskOrder-win-Setup.exe";
+    // MSIX 渠道资产名(与 tools/make-msix.ps1 输出、release.yml 挂载的固定文件名一致)。
+    internal const string MsixAssetName = "DeskOrder-win-MSIX.msix";
 
     // ponytail 2026-08-29: 安装包下载落点 = 用户"下载"文件夹(用户要求:下载完的安装器
     // 要放在电脑的下载里,之前落 %TEMP% 等于藏起来了)。SHGetKnownFolderPath 取真实
     // 下载目录(兼容 OneDrive 重定向);解析/创建失败退回 %TEMP%,不阻塞更新流程。
-    internal static readonly string SetupDownloadPath = ResolveSetupDownloadPath();
+    internal static readonly string SetupDownloadPath = ResolveDownloadPath(SetupAssetName);
+    internal static readonly string MsixDownloadPath = ResolveDownloadPath(MsixAssetName);
 
-    private static string ResolveSetupDownloadPath()
+    private static string ResolveDownloadPath(string assetName)
     {
         try
         {
@@ -67,11 +69,11 @@ public sealed class UpdateService
             if (!string.IsNullOrEmpty(downloads))
             {
                 Directory.CreateDirectory(downloads);
-                return Path.Combine(downloads, SetupAssetName);
+                return Path.Combine(downloads, assetName);
             }
         }
         catch { }
-        return Path.Combine(Path.GetTempPath(), SetupAssetName);
+        return Path.Combine(Path.GetTempPath(), assetName);
     }
 
     [DllImport("shell32.dll")]
@@ -89,15 +91,18 @@ public sealed class UpdateService
     /// 即视为有更新（版本取安装包内嵌 ProductVersion），供本地端到端测试，不触网。</summary>
     public static string? SourceOverride { get; set; }
 
-    public static bool IsRunningPackaged { get; } = DetectPackaged();
+    /// <summary>本进程是否 MSIX 打包运行。统一走 DataLocator.IsPackaged(同一 kernel32
+    /// 判定,DataLocator 的便携模式判定也用它,避免两处 P/Invoke 各自为政)。</summary>
+    public static bool IsRunningPackaged => DataLocator.IsPackaged;
 
     /// <summary>本进程是否由安装器安装而来：Inno 安装必然在 {app} 落一个 unins000.exe。
     /// 开发目录运行（dotnet run / bin\Debug）没有 → 不支持应用内更新。</summary>
     public static bool IsInstalledBuild =>
         File.Exists(Path.Combine(AppContext.BaseDirectory, "unins000.exe"));
 
-    /// <summary>本环境是否支持应用内更新。</summary>
-    public bool InAppUpdateSupported => !IsRunningPackaged && IsInstalledBuild;
+    /// <summary>本环境是否支持应用内更新：安装器版走 Setup 渠道，MSIX 打包版走
+    /// MSIX 渠道；只有开发目录运行（dotnet run / bin\Debug）不支持。</summary>
+    public bool InAppUpdateSupported => IsInstalledBuild || IsRunningPackaged;
 
     /// <summary>状态变化通知。已在 UI 线程上触发，订阅方无需自行 marshal。</summary>
     public event Action? StateChanged;
@@ -176,7 +181,8 @@ public sealed class UpdateService
         // 重试的安装包。标记存在本身即"用户已勾选",新实例无需再读配置。
         try
         {
-            if (_configService.Load().DeleteSetupAfterUpdate)
+            // MSIX 渠道没有"安装包"概念(App Installer 管下载与旧版清理),跳过标记。
+            if (!IsRunningPackaged && _configService.Load().DeleteSetupAfterUpdate)
             {
                 // ponytail 2026-08-30: 只写纯版本号 — InformationalVersion 在 Git 仓库构建
                 // 时会带 "+提交哈希"(1.0.5+abc123),版本比较用的 Version.TryParse 不认它。
@@ -254,7 +260,8 @@ public sealed class UpdateService
     private IUpdateChannel? GetChannel()
     {
         if (_channel != null) return _channel;
-        if (IsRunningPackaged) return null;    // 商店渠道占位：未来接 StoreContext 实现
+        // 打包分发版走 MSIX 渠道;真商店分发(StoreContext)未来在此再分一支。
+        if (IsRunningPackaged) return _channel = new GitHubMsixChannel();
         if (!IsInstalledBuild) return null;    // 开发目录运行（dotnet run / bin\Debug）
         _channel = new GitHubSetupChannel();
         return _channel;
@@ -302,37 +309,21 @@ public sealed class UpdateService
         if (d == null || d.CheckAccess()) StateChanged?.Invoke();
         else d.BeginInvoke(() => StateChanged?.Invoke());
     }
-
-    private static bool DetectPackaged()
-    {
-        try
-        {
-            uint len = 0;
-            // 未打包进程返回 APPMODEL_ERROR_NO_PACKAGE(15700)；打包进程为缓冲区不足(122)。
-            return GetCurrentPackageFamilyName(ref len, null) != 15700;
-        }
-        catch { return false; }
-    }
-
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
-    private static extern int GetCurrentPackageFamilyName(ref uint packageFamilyNameLength, StringBuilder? packageFamilyName);
 }
 
 /// <summary>
-/// GitHub Releases 渠道：匿名访问公开仓库的 latest release，比较 tag 与当前版本，
-/// 下载固定文件名的 DeskOrder-win-Setup.exe（每次发布覆盖同名资产，latest 永远最新），
-/// 升级时静默运行 Inno 安装器（/SILENT /DIR=原路径，自动重启应用）。
+/// GitHub Releases 更新源的共用机制：版本探测（releases/latest 302 重定向为主，
+/// REST API 兜底）、版本比较、流式下载（.part 临时名 + 原子改名）。Setup 与 MSIX
+/// 两个渠道共用，只差资产名与落地动作。
 /// </summary>
-file sealed class GitHubSetupChannel : IUpdateChannel
+file static class GitHubReleaseFeed
 {
-    private static readonly HttpClient Http = CreateHttp();
+    internal static readonly HttpClient Http = CreateHttp();
     // ponytail 2026-08-30: 版本检查用"禁止重定向"的客户端读 302 Location — 默认
     // HttpClient 会静默跟随重定向拿回整个 HTML 页,拿不到 Location 头。
-    private static readonly HttpClient NoRedirectHttp = CreateHttp(allowAutoRedirect: false);
-    private string? _downloadUrl;
-    private string? _pendingVersion;
+    internal static readonly HttpClient NoRedirectHttp = CreateHttp(allowAutoRedirect: false);
 
-    private static HttpClient CreateHttp(bool allowAutoRedirect = true)
+    static HttpClient CreateHttp(bool allowAutoRedirect = true)
     {
         // AllowAutoRedirect 在 handler 上;HttpClientHandler 默认走系统代理(Clash 开着就跟随)。
         var handler = new HttpClientHandler { AllowAutoRedirect = allowAutoRedirect };
@@ -343,27 +334,33 @@ file sealed class GitHubSetupChannel : IUpdateChannel
         return c;
     }
 
-    public async Task<UpdateCheckResult?> CheckAsync(CancellationToken ct)
-    {
-        // 本地测试源：--update-source=目录 直接把目录里的安装包当新版本，不触网。
-        var o = UpdateService.SourceOverride;
-        if (!string.IsNullOrWhiteSpace(o) && Directory.Exists(o))
-        {
-            var localSetup = Path.Combine(o, UpdateService.SetupAssetName);
-            if (File.Exists(localSetup))
-                return IsNewer(FileVersionInfo.GetVersionInfo(localSetup).ProductVersion)
-                    ? new UpdateCheckResult(_pendingVersion!, null) : null;
-        }
+    /// <summary>固定名资产直链（每次发布覆盖同名资产，latest 永远最新）。</summary>
+    internal static string AssetUrl(string assetName) =>
+        $"{UpdateService.DefaultRepoUrl}/releases/latest/download/{assetName}";
 
-        // ponytail 2026-08-30: 版本检查不再走 REST API — 匿名配额只有每 IP 每小时
-        // 60 次,共享代理出口(Clash 节点/NAT)极易被同 IP 的其他用户烧光 → 403 弹
-        // 「GitHub 限流」。改请求网页端点 releases/latest,从 302 的 Location
-        // (.../releases/tag/vX.Y.Z)解析最新版本 — github.com 网页路径无此配额。
-        // API 保留为兜底(重定向被网关拦截等异常时再试一次,限流了也只是维持原状)。
+    /// <summary>
+    /// 最新 tag。ponytail 2026-08-30: 版本检查不走 REST API — 匿名配额只有每 IP 每小时
+    /// 60 次,共享代理出口(Clash 节点/NAT)极易被同 IP 的其他用户烧光 → 403 弹
+    /// 「GitHub 限流」。改请求网页端点 releases/latest,从 302 的 Location
+    /// (.../releases/tag/vX.Y.Z)解析最新版本 — github.com 网页路径无此配额。
+    /// API 保留为兜底(重定向被网关拦截等异常时再试一次,限流了也只是维持原状)。
+    /// </summary>
+    internal static async Task<string> ResolveLatestTagAsync(CancellationToken ct)
+    {
         string tag;
         try
         {
-            tag = await ResolveLatestTagViaRedirect(ct);
+            using var req = new HttpRequestMessage(HttpMethod.Get, UpdateService.ReleasesLatestWebUrl);
+            using var resp = await NoRedirectHttp.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+            var loc = resp.Headers.Location;
+            if (loc == null)
+                throw new HttpRequestException($"releases/latest 未重定向 (HTTP {(int)resp.StatusCode})");
+            var path = loc.IsAbsoluteUri ? loc.AbsolutePath : loc.OriginalString;
+            var parts = path.Split('/');
+            var tagIdx = Array.LastIndexOf(parts, "tag");
+            tag = tagIdx >= 0 && tagIdx + 1 < parts.Length ? parts[tagIdx + 1] : "";
+            if (string.IsNullOrEmpty(tag))
+                throw new HttpRequestException($"重定向地址不含版本 tag: {path}");
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
@@ -372,52 +369,24 @@ file sealed class GitHubSetupChannel : IUpdateChannel
             using var doc = await JsonDocument.ParseAsync(await resp.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
             tag = doc.RootElement.GetProperty("tag_name").GetString() ?? "";
         }
-
-        if (!IsNewer(tag)) return null;
-
-        // 下载走版本无关直链(releases/latest/download/),不再经 API 枚举 assets。
-        _downloadUrl = $"{UpdateService.DefaultRepoUrl}/releases/latest/download/{UpdateService.SetupAssetName}";
-        return new UpdateCheckResult(_pendingVersion!, UpdateService.DefaultRepoUrl + "/releases/latest");
-    }
-
-    /// <summary>
-    /// 从 releases/latest 的 302 Location 头解析最新 tag。Location 可能是绝对 URL
-    /// 或相对路径(/Three-Freezen/DeskOrder/releases/tag/vX.Y.Z),统一取 "tag" 段后
-    /// 的那一段;拿到 Location 却解析不出 tag 视为环境异常,抛出走 API 兜底。
-    /// </summary>
-    private static async Task<string> ResolveLatestTagViaRedirect(CancellationToken ct)
-    {
-        using var req = new HttpRequestMessage(HttpMethod.Get, UpdateService.ReleasesLatestWebUrl);
-        using var resp = await NoRedirectHttp.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
-        var loc = resp.Headers.Location;
-        if (loc == null)
-            throw new HttpRequestException($"releases/latest 未重定向 (HTTP {(int)resp.StatusCode})");
-        var path = loc.IsAbsoluteUri ? loc.AbsolutePath : loc.OriginalString;
-        var parts = path.Split('/');
-        var tagIdx = Array.LastIndexOf(parts, "tag");
-        var tag = tagIdx >= 0 && tagIdx + 1 < parts.Length ? parts[tagIdx + 1] : "";
-        if (string.IsNullOrEmpty(tag))
-            throw new HttpRequestException($"重定向地址不含版本 tag: {path}");
         return tag;
     }
 
-    /// <summary>远端 tag（v 前缀可带）是否比当前程序集版本新。解析失败视为不更新（保守）。</summary>
-    private bool IsNewer(string? remoteTag)
+    /// <summary>远端 tag（v 前缀可带）是否比当前程序集版本新。新则返回纯版本号，
+    /// 否则 null — 解析失败视为不更新（保守）。</summary>
+    internal static string? ParseNewerVersion(string? remoteTag)
     {
-        if (!Version.TryParse(remoteTag?.TrimStart('v', 'V'), out var remote)) return false;
-        var cur = AppVersion.Current.Split('+')[0];
-        if (!Version.TryParse(cur, out var local)) return false;
-        _pendingVersion = remote.ToString();
-        return remote > local;
+        if (!Version.TryParse(remoteTag?.TrimStart('v', 'V'), out var remote)) return null;
+        if (!Version.TryParse(AppVersion.Current.Split('+')[0], out var local)) return null;
+        return remote > local ? remote.ToString() : null;
     }
 
-    public async Task DownloadAsync(IProgress<int> progress, CancellationToken ct)
+    /// <summary>流式下载到 .part 临时名,完成后原子改名 — 中断/崩溃不会在"下载"
+    /// 文件夹里留下半截文件冒充安装包(误点会装坏)。</summary>
+    internal static async Task DownloadToFileAsync(string url, string targetPath, IProgress<int> progress, CancellationToken ct)
     {
-        if (_downloadUrl == null) throw new InvalidOperationException("No update checked yet");
-        // 先写 .part 临时名,完成后再改成正式名 — 中断/崩溃不会在"下载"文件夹里留下
-        // 半截 DeskOrder-win-Setup.exe 冒充安装包(误点会装坏)。
-        var partPath = UpdateService.SetupDownloadPath + ".part";
-        using var resp = await Http.GetAsync(_downloadUrl, HttpCompletionOption.ResponseHeadersRead, ct);
+        var partPath = targetPath + ".part";
+        using var resp = await Http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
         resp.EnsureSuccessStatusCode();
         var total = resp.Content.Headers.ContentLength ?? -1;
         await using (var dst = new FileStream(partPath, FileMode.Create, FileAccess.Write, FileShare.None))
@@ -433,11 +402,53 @@ file sealed class GitHubSetupChannel : IUpdateChannel
                 if (total > 0) progress.Report((int)(read * 100 / total));
             }
         }
-        File.Move(partPath, UpdateService.SetupDownloadPath, overwrite: true);
+        File.Move(partPath, targetPath, overwrite: true);
         progress.Report(100);
     }
+}
 
-    public void ApplyAndRestart()
+/// <summary>
+/// GitHub Releases 渠道基类：匿名访问公开仓库的 latest release，比较 tag 与当前版本，
+/// 下载固定文件名资产到用户"下载"文件夹。子类只决定资产名与落地动作。
+/// </summary>
+file abstract class GitHubReleaseChannelBase : IUpdateChannel
+{
+    protected abstract string AssetName { get; }
+    protected abstract string DownloadPath { get; }
+
+    public async Task<UpdateCheckResult?> CheckAsync(CancellationToken ct)
+    {
+        // 本地测试源：--update-source=目录 直接把目录里的同名资产当新版本，不触网。
+        var o = UpdateService.SourceOverride;
+        if (!string.IsNullOrWhiteSpace(o) && Directory.Exists(o))
+        {
+            var localAsset = Path.Combine(o, AssetName);
+            if (File.Exists(localAsset))
+            {
+                var localVer = GitHubReleaseFeed.ParseNewerVersion(
+                    FileVersionInfo.GetVersionInfo(localAsset).ProductVersion);
+                return localVer == null ? null : new UpdateCheckResult(localVer, null);
+            }
+        }
+
+        var remoteVer = GitHubReleaseFeed.ParseNewerVersion(await GitHubReleaseFeed.ResolveLatestTagAsync(ct));
+        return remoteVer == null ? null : new UpdateCheckResult(remoteVer, UpdateService.DefaultRepoUrl + "/releases/latest");
+    }
+
+    public Task DownloadAsync(IProgress<int> progress, CancellationToken ct) =>
+        GitHubReleaseFeed.DownloadToFileAsync(GitHubReleaseFeed.AssetUrl(AssetName), DownloadPath, progress, ct);
+
+    public abstract void ApplyAndRestart();
+}
+
+/// <summary>Setup 渠道(常规 Inno 安装版)：升级时静默运行安装器
+/// （/SILENT /DIR=原路径，自动重启应用）。</summary>
+file sealed class GitHubSetupChannel : GitHubReleaseChannelBase
+{
+    protected override string AssetName => UpdateService.SetupAssetName;
+    protected override string DownloadPath => UpdateService.SetupDownloadPath;
+
+    public override void ApplyAndRestart()
     {
         if (!File.Exists(UpdateService.SetupDownloadPath))
             throw new InvalidOperationException("No installer downloaded yet");
@@ -448,6 +459,25 @@ file sealed class GitHubSetupChannel : IUpdateChannel
             Arguments = $"/SILENT /DIR=\"{AppContext.BaseDirectory.TrimEnd('\\')}\"",
             UseShellExecute = true,
         });
+        System.Windows.Application.Current.Shutdown();
+    }
+}
+
+/// <summary>MSIX 渠道(打包分发版)：下载 DeskOrder-win-MSIX.msix 后交给系统应用
+/// 安装程序(App Installer)就地更新 — 签名/身份校验与包生命周期由 Windows 管理,
+/// 无需静默参数。真商店分发(StoreContext API)未来另补一个 IUpdateChannel 实现。</summary>
+file sealed class GitHubMsixChannel : GitHubReleaseChannelBase
+{
+    protected override string AssetName => UpdateService.MsixAssetName;
+    protected override string DownloadPath => UpdateService.MsixDownloadPath;
+
+    public override void ApplyAndRestart()
+    {
+        if (!File.Exists(UpdateService.MsixDownloadPath))
+            throw new InvalidOperationException("No MSIX package downloaded yet");
+        // ShellExecute 走 .msix 文件关联拉起 App Installer 展示「更新」;本进程退出
+        // 让更新落位,新版从开始菜单原条目启动(包身份不变,用户数据沿用)。
+        Process.Start(new ProcessStartInfo(UpdateService.MsixDownloadPath) { UseShellExecute = true });
         System.Windows.Application.Current.Shutdown();
     }
 }

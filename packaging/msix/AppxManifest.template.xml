@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  MSIX 清单模板(make-msix.ps1 渲染占位符后进入包根目录)。
+  上架微软商店时,把 -IdentityName / -Publisher 换成 Partner Center
+  (应用 → 程序包管理 → 标识详细信息)给的 Name / Publisher 即可;
+  本地侧载测试用默认占位值 + -SignSideload 自签。
+
+  runFullTrust    : WPF 传统桌面前提(DWM 液态玻璃 / RegisterHotKey / 全桌面行为)。
+  unvirtualizedResources : 关闭 AppData 写入虚拟化,让 %APPDATA%\DesktopZones 与
+                    安装器版共用真实目录(DataLocator 标准/便携模式不受包沙盒影响)。
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities">
+
+  <Identity Name="__IDENTITY_NAME__"
+            Publisher="__PUBLISHER__"
+            Version="__VERSION__"
+            ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>DeskOrder - 秩序桌面</DisplayName>
+    <PublisherDisplayName>Three-Freeze</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <!-- 1809 = ACCENT_ENABLE_ACRYLICBLURBEHIND 液态玻璃的舒适下限,与 Inno 安装器一致 -->
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Applications>
+    <Application Id="DeskOrder"
+                 Executable="DeskOrder.exe"
+                 EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="DeskOrder"
+        Description="轻量级 Windows 桌面图标管理和美化工具"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png">
+      </uap:VisualElements>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+    <rescap:Capability Name="unvirtualizedResources" />
+  </Capabilities>
+</Package>

@@ -34,7 +34,21 @@ jobs:
           $env:VER = ("${{ github.ref_name }}" -replace '^v','')
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=$env:VER tools/DeskOrder.iss
 
-      # 文件名固定不带版本号：releases/latest/download/DeskOrder-win-Setup.exe 永远最新
+      # 未签名 MSIX(runner 自带 Windows SDK 的 makeappx)。占位身份打包,
+      # 上架商店时用 Partner Center 的 Identity Name / Publisher 重打;
+      # MSIX 渠道的应用内更新走 releases/latest/download/DeskOrder-win-MSIX.msix。
+      - name: MSIX package
+        shell: pwsh
+        run: tools/make-msix.ps1 -PublishDir publish
+
+      - name: Upload MSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DeskOrder-win-MSIX-${{ github.ref_name }}
+          path: releases/DeskOrder-win-MSIX.msix
+          if-no-files-found: error
+
+      # 文件名固定不带版本号：releases/latest/download/ 永远最新(Setup/Portable/MSIX)
       - name: Upload to GitHub Release
         shell: pwsh
         env:
@@ -44,3 +58,4 @@ jobs:
           --title "${{ github.ref_name }}" --generate-notes
           "releases/DeskOrder-win-Setup.exe"
           "releases/DeskOrder-win-Portable.zip"
+          "releases/DeskOrder-win-MSIX.msix"

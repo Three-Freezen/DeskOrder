@@ -342,7 +342,8 @@ public partial class SettingsPage : UserControl
             UpdateState.UpToDate => loc["Settings.UpToDate"],
             UpdateState.Available => loc.Get("Settings.NewVersionFound", svc.NewVersion ?? ""),
             UpdateState.Downloading => loc.Get("Settings.Downloading", svc.ProgressPercent),
-            UpdateState.Ready => loc["Settings.ReadyRestart"],
+            UpdateState.Ready => UpdateService.IsRunningPackaged
+                ? loc["Settings.ReadyRestart.Msix"] : loc["Settings.ReadyRestart"],
             UpdateState.Failed => loc.Get("Settings.UpdateFailed", svc.ErrorText ?? ""),
             UpdateState.Unavailable => UpdateService.IsRunningPackaged
                 ? loc["Settings.StoreChannel"]
@@ -357,7 +358,8 @@ public partial class SettingsPage : UserControl
         UpdateButton.Content = svc.State switch
         {
             UpdateState.Available => loc["Settings.DownloadUpdate"],
-            UpdateState.Ready => loc["Settings.RestartUpdate"],
+            UpdateState.Ready => UpdateService.IsRunningPackaged
+                ? loc["Settings.RestartUpdate.Msix"] : loc["Settings.RestartUpdate"],
             _ => loc["Settings.CheckUpdate"],
         };
 
