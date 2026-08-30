@@ -172,8 +172,9 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
             bi.BeginInit();
             bi.UriSource = new Uri(_imagePath);
             bi.CacheOption = BitmapCacheOption.OnLoad;
+            // 只按宽度限幅解码以保持原始宽高比。同时设 DecodePixelHeight 会让 WPF 把图片
+            // 强制解码成 1920×1080（忽视源图比例），长条/竖条图在预览里被拉成 16:9 → 比例失调。
             bi.DecodePixelWidth = 1920;
-            bi.DecodePixelHeight = 1080;
             bi.EndInit();
             bi.Freeze();
             CropImage.Source = bi;
