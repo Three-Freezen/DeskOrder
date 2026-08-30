@@ -13,8 +13,7 @@
     <a href="LICENSE"><img src="https://img.shields.io/github/license/Three-Freezen/DeskOrder" alt="License" /></a>
     <img src="https://img.shields.io/badge/Windows-10%2B%20x64-0078D4" alt="Platform" />
     <img src="https://img.shields.io/badge/.NET-10.0%20self--contained-512BD4" alt=".NET" />
-    <!-- TODO: point this badge to the website once it is live -->
-    <a href="#"><img src="https://img.shields.io/badge/Website-coming%20soon-1E88E5" alt="Website" /></a>
+    <a href="https://three-freezen.github.io/DeskOrder/"><img src="https://img.shields.io/badge/Website-three--freezen.github.io-1E88E5" alt="Website" /></a>
   </p>
 </div>
 

@@ -13,8 +13,7 @@
     <a href="LICENSE"><img src="https://img.shields.io/github/license/Three-Freezen/DeskOrder" alt="License" /></a>
     <img src="https://img.shields.io/badge/Windows-10%2B%20x64-0078D4" alt="平台" />
     <img src="https://img.shields.io/badge/.NET-10.0%20%E8%87%AA%E5%8C%85%E5%90%AB-512BD4" alt=".NET" />
-    <!-- TODO: 官网上线后，把下面徽章的 href="#" 换成官网地址 -->
-    <a href="#"><img src="https://img.shields.io/badge/官网-即将上线-1E88E5" alt="官网" /></a>
+    <a href="https://three-freezen.github.io/DeskOrder/"><img src="https://img.shields.io/badge/官网-three--freezen.github.io-1E88E5" alt="官网" /></a>
   </p>
 </div>
 

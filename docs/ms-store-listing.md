@@ -48,4 +48,4 @@ DeskOrder 用"分区"重新整理你的桌面：把文件、文件夹、快捷�
 ## 相关链接
 
 - GitHub 开源仓库：<https://github.com/Three-Freezen/DeskOrder>
-- 官网：<!-- TODO: 官网上线后替换 --> 待上线
+- 官网：<https://three-freezen.github.io/DeskOrder/>
