@@ -514,16 +514,26 @@ html.lang-fading main{animation:langIn .22s ease}
         <h2 data-i18n="sec_cl_t">更新日志</h2>
       </div>
       <div class="cl-card reveal" data-od-id="changelog-card">
-        <div class="cl-head"><span class="rm-ver">v1.0.11</span></div>
+        <div class="cl-head"><span class="rm-ver">v1.0.14</span></div>
+        <ul class="cl-list">
+          <li><b data-i18n="cl14_i1t"></b><span data-i18n="cl14_i1d"></span></li>
+          <li><b data-i18n="cl14_i2t"></b><span data-i18n="cl14_i2d"></span></li>
+        </ul>
+        <div class="cl-head cl-prev"><span class="rm-ver">v1.0.13</span></div>
+        <ul class="cl-list">
+          <li><b data-i18n="cl13_i1t"></b><span data-i18n="cl13_i1d"></span></li>
+          <li><b data-i18n="cl13_i2t"></b><span data-i18n="cl13_i2d"></span></li>
+          <li><b data-i18n="cl13_i3t"></b><span data-i18n="cl13_i3d"></span></li>
+          <li><b data-i18n="cl13_i4t"></b><span data-i18n="cl13_i4d"></span></li>
+        </ul>
+        <div class="cl-head cl-prev"><span class="rm-ver">v1.0.12</span></div>
+        <ul class="cl-list">
+          <li><b data-i18n="cl12_i1t"></b><span data-i18n="cl12_i1d"></span></li>
+          <li><b data-i18n="cl12_i2t"></b><span data-i18n="cl12_i2d"></span></li>
+        </ul>
+        <div class="cl-head cl-prev"><span class="rm-ver">v1.0.11</span></div>
         <ul class="cl-list">
           <li><b data-i18n="cl11_i1t"></b><span data-i18n="cl11_i1d"></span></li>
-        </ul>
-        <div class="cl-head cl-prev"><span class="rm-ver">v1.0.10</span></div>
-        <ul class="cl-list">
-          <li><b data-i18n="cl_i1t"></b><span data-i18n="cl_i1d"></span></li>
-          <li><b data-i18n="cl_i2t"></b><span data-i18n="cl_i2d"></span></li>
-          <li><b data-i18n="cl_i3t"></b><span data-i18n="cl_i3d"></span></li>
-          <li><b data-i18n="cl_i4t"></b><span data-i18n="cl_i4d"></span></li>
         </ul>
         <div class="cl-foot">
           <a href="https://github.com/Three-Freezen/DeskOrder/releases" target="_blank" rel="noopener" data-od-id="cl-link" data-i18n="cl_link">完整更新记录见 Releases →</a>
@@ -627,11 +637,15 @@ zh:{
   sec_rm_t:"未来展望",rm_note:"计划中的功能，发布顺序可能调整。",
   rm_i1:"媒体播放显示组件",rm_i2:"分区列表模式支持",rm_i3:"性能优化",
   sec_cl_t:"更新日志",
+  cl14_i1t:"修复更新后安装包残留：",cl14_i1d:"安装器在新版首启时仍在运行并锁住安装包，删除失败且标记已被一次性消费。现在删除成功才消费标记，被占用时后台自动重试，下次启动也会再试。",
+  cl14_i2t:"下载完成即登记待清理：",cl14_i2d:"原来只在点「重启并更新」时登记；现在下载完成即写入标记，下载后手动运行安装包装完同样会被自动清理。",
+  cl13_i1t:"备注弹窗深浅色同步：",cl13_i1d:"日历备注弹窗的优先级下拉与提醒勾选框跟随系统深浅色（新增 Menu.CheckBox 样式）。",
+  cl13_i2t:"面板搜索增强：",cl13_i2d:"支持按内部项目名搜到次级分区（子分区）里的图标。",
+  cl13_i3t:"样式预设更聪明：",cl13_i3d:"加载预设只套用外观，不再覆盖目标已有的名称与图标（分区/组合/时钟/日历/便签/次级分区）。",
+  cl13_i4t:"标题栏实时同步：",cl13_i4d:"分区与便签窗口重命名时标题栏即时更新。",
+  cl12_i1t:"组合分区保留原有填充：",cl12_i1d:"组合分区并保留原有填充时，分区表面禁用液态玻璃效果，原有填充样式完整保留、显示正确。",
+  cl12_i2t:"微软商店版就绪：",cl12_i2d:"商店渠道安装的版本由微软商店负责更新，应用内不再重复检查；GitHub 侧载 MSIX 的应用内更新不受影响。",
   cl11_i1t:"日历便签编辑窗口深浅色跟随修复：",cl11_i1d:"便签编辑浮层换用与其他二级窗口一致的表面与配色，彻底跟随系统深浅色，不再残留固定配色。",
-  cl_i1t:"磁贴窗口高度回写修复：",cl_i1d:"完整隐藏、解散组合等路径不再把错误高度写回，窗口不会「每开一次就矮一截」。",
-  cl_i2t:"双击桌面即时呈现：",cl_i2d:"恢复全部组件不再播放级联动画；托盘「显示全部」保留级联动效。",
-  cl_i3t:"日历便签浮层主题化：",cl_i3d:"编辑浮层改用主题资源，跟随系统深浅色切换。",
-  cl_i4t:"MSIX 打包与应用内更新渠道：",cl_i4d:"Release 资产新增 DeskOrder-win-MSIX.msix，支持就地更新。",
   cl_link:"完整更新记录见 Releases →",cl_req:"适用于 Windows 10 1809+ · 自包含运行时，无需安装 .NET",
   sec_au_t:"关于作者",au_d:"DeskOrder 的开发者，项目以 MIT 协议开源。",au_license:"MIT License",
   ft_line:"MIT 开源 · 配置仅存本地",ft_releases:"Releases",ft_license:"LICENSE",
@@ -683,11 +697,15 @@ en:{
   sec_rm_t:"What's next",rm_note:"Planned features; shipping order may change.",
   rm_i1:"Media playback display widget",rm_i2:"List mode for zones",rm_i3:"Performance improvements",
   sec_cl_t:"Changelog",
+  cl14_i1t:"Leftover installer after updates — fixed: ",cl14_i1d:"the setup launcher is still running when the new version first starts, holding a lock on the downloaded installer, so the delete failed after the marker had already been consumed. The marker is now consumed only after a successful delete, with automatic background retries and another attempt on the next launch.",
+  cl14_i2t:"Registered as soon as the download completes: ",cl14_i2d:"the cleanup marker is now written right after downloading (previously only when clicking Restart & Update), so manually running the downloaded installer is also cleaned up after the update.",
+  cl13_i1t:"Note dialog follows light/dark: ",cl13_i1d:"the priority dropdown and reminder checkbox in the calendar note popup now track the system theme (new Menu.CheckBox style).",
+  cl13_i2t:"Better panel search: ",cl13_i2d:"search now matches icons inside secondary zones (sub-zones) by their item names.",
+  cl13_i3t:"Smarter style presets: ",cl13_i3d:"applying a preset only changes appearance — it no longer overwrites the target's existing name and icon (zones, groups, clock, calendar, notes, secondary zones).",
+  cl13_i4t:"Live title bar sync: ",cl13_i4d:"zone and sticky note windows update their title bar instantly on rename.",
+  cl12_i1t:"Combining zones keeps the original fill: ",cl12_i1d:"when merging zones while keeping the original fill, the merged surface disables liquid glass so the preserved fill renders correctly.",
+  cl12_i2t:"Microsoft Store ready: ",cl12_i2d:"Store-installed copies are updated by the Microsoft Store — the in-app checker no longer runs for them; GitHub-sideloaded MSIX keeps in-app updates.",
   cl11_i1t:"Calendar & note editor follows light/dark: ",cl11_i1d:"the note edit overlay now uses the same window surface as other dialogs, fully tracking the system theme with no fixed colors left.",
-  cl_i1t:"Tile-window height write-back fixed: ",cl_i1d:"windows no longer shrink or shift after full-hide, unmerging or disbanding.",
-  cl_i2t:"Instant desktop double-click restore: ",cl_i2d:"restoring all components no longer plays the cascade animation; the tray's Show-all keeps the cascade motion.",
-  cl_i3t:"Calendar & note overlays themed: ",cl_i3d:"edit overlays now use theme resources and follow the light/dark system theme.",
-  cl_i4t:"MSIX packaging & in-app updates: ",cl_i4d:"Release assets now include DeskOrder-win-MSIX.msix with in-place updates.",
   cl_link:"Full history in Releases →",cl_req:"For Windows 10 1809+ · self-contained runtime, no .NET needed",
   sec_au_t:"About",au_d:"Developer of DeskOrder. The project is open source under the MIT license.",au_license:"MIT License",
   ft_line:"MIT open source · config stays local",ft_releases:"Releases",ft_license:"LICENSE",
