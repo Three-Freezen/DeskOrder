@@ -48,6 +48,8 @@ public sealed class UpdateService
 {
     public const string DefaultRepoUrl = "https://github.com/Three-Freezen/DeskOrder";
     internal const string ReleasesApiUrl = "https://api.github.com/repos/Three-Freezen/DeskOrder/releases/latest";
+    // 网页端点(非 REST API):无匿名 60 次/小时配额,302 Location 即最新 tag。
+    internal const string ReleasesLatestWebUrl = "https://github.com/Three-Freezen/DeskOrder/releases/latest";
     internal const string SetupAssetName = "DeskOrder-win-Setup.exe";
 
     // ponytail 2026-08-29: 安装包下载落点 = 用户"下载"文件夹(用户要求:下载完的安装器
@@ -317,12 +319,17 @@ public sealed class UpdateService
 file sealed class GitHubSetupChannel : IUpdateChannel
 {
     private static readonly HttpClient Http = CreateHttp();
+    // ponytail 2026-08-30: 版本检查用"禁止重定向"的客户端读 302 Location — 默认
+    // HttpClient 会静默跟随重定向拿回整个 HTML 页,拿不到 Location 头。
+    private static readonly HttpClient NoRedirectHttp = CreateHttp(allowAutoRedirect: false);
     private string? _downloadUrl;
     private string? _pendingVersion;
 
-    private static HttpClient CreateHttp()
+    private static HttpClient CreateHttp(bool allowAutoRedirect = true)
     {
-        var c = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+        // AllowAutoRedirect 在 handler 上;HttpClientHandler 默认走系统代理(Clash 开着就跟随)。
+        var handler = new HttpClientHandler { AllowAutoRedirect = allowAutoRedirect };
+        var c = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(60) };
         // GitHub API 强制要求 User-Agent
         c.DefaultRequestHeaders.UserAgent.ParseAdd("DeskOrder-UpdateCheck");
         c.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
@@ -341,19 +348,50 @@ file sealed class GitHubSetupChannel : IUpdateChannel
                     ? new UpdateCheckResult(_pendingVersion!, null) : null;
         }
 
-        using var resp = await Http.GetAsync(UpdateService.ReleasesApiUrl, ct);
-        resp.EnsureSuccessStatusCode();
-        using var doc = await JsonDocument.ParseAsync(await resp.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
-        var tag = doc.RootElement.GetProperty("tag_name").GetString() ?? "";
+        // ponytail 2026-08-30: 版本检查不再走 REST API — 匿名配额只有每 IP 每小时
+        // 60 次,共享代理出口(Clash 节点/NAT)极易被同 IP 的其他用户烧光 → 403 弹
+        // 「GitHub 限流」。改请求网页端点 releases/latest,从 302 的 Location
+        // (.../releases/tag/vX.Y.Z)解析最新版本 — github.com 网页路径无此配额。
+        // API 保留为兜底(重定向被网关拦截等异常时再试一次,限流了也只是维持原状)。
+        string tag;
+        try
+        {
+            tag = await ResolveLatestTagViaRedirect(ct);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            using var resp = await Http.GetAsync(UpdateService.ReleasesApiUrl, ct);
+            resp.EnsureSuccessStatusCode();
+            using var doc = await JsonDocument.ParseAsync(await resp.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+            tag = doc.RootElement.GetProperty("tag_name").GetString() ?? "";
+        }
+
         if (!IsNewer(tag)) return null;
 
-        foreach (var asset in doc.RootElement.GetProperty("assets").EnumerateArray())
-        {
-            if (asset.GetProperty("name").GetString() != UpdateService.SetupAssetName) continue;
-            _downloadUrl = asset.GetProperty("browser_download_url").GetString();
-            return new UpdateCheckResult(_pendingVersion!, UpdateService.DefaultRepoUrl + "/releases/latest");
-        }
-        throw new InvalidOperationException($"Release {tag} 缺少安装包资产 {UpdateService.SetupAssetName}");
+        // 下载走版本无关直链(releases/latest/download/),不再经 API 枚举 assets。
+        _downloadUrl = $"{UpdateService.DefaultRepoUrl}/releases/latest/download/{UpdateService.SetupAssetName}";
+        return new UpdateCheckResult(_pendingVersion!, UpdateService.DefaultRepoUrl + "/releases/latest");
+    }
+
+    /// <summary>
+    /// 从 releases/latest 的 302 Location 头解析最新 tag。Location 可能是绝对 URL
+    /// 或相对路径(/Three-Freezen/DeskOrder/releases/tag/vX.Y.Z),统一取 "tag" 段后
+    /// 的那一段;拿到 Location 却解析不出 tag 视为环境异常,抛出走 API 兜底。
+    /// </summary>
+    private static async Task<string> ResolveLatestTagViaRedirect(CancellationToken ct)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Get, UpdateService.ReleasesLatestWebUrl);
+        using var resp = await NoRedirectHttp.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+        var loc = resp.Headers.Location;
+        if (loc == null)
+            throw new HttpRequestException($"releases/latest 未重定向 (HTTP {(int)resp.StatusCode})");
+        var path = loc.IsAbsoluteUri ? loc.AbsolutePath : loc.OriginalString;
+        var parts = path.Split('/');
+        var tagIdx = Array.LastIndexOf(parts, "tag");
+        var tag = tagIdx >= 0 && tagIdx + 1 < parts.Length ? parts[tagIdx + 1] : "";
+        if (string.IsNullOrEmpty(tag))
+            throw new HttpRequestException($"重定向地址不含版本 tag: {path}");
+        return tag;
     }
 
     /// <summary>远端 tag（v 前缀可带）是否比当前程序集版本新。解析失败视为不更新（保守）。</summary>
