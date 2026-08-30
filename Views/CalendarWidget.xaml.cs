@@ -726,20 +726,20 @@ public partial class CalendarWidget : Window
         };
         var outerBorder = new System.Windows.Controls.Border
         {
-            Background = new SolidColorBrush(Color.FromRgb(0x10, 0x11, 0x1A)),
             CornerRadius = new CornerRadius(12),
-            BorderBrush = new SolidColorBrush(Color.FromArgb(0x15, 0xFF, 0xFF, 0xFF)),
             BorderThickness = new Thickness(1),
             Padding = new Thickness(16)
         };
+        outerBorder.SetResourceReference(System.Windows.Controls.Border.BackgroundProperty, "Brush.Bg.Chrome");
+        outerBorder.SetResourceReference(System.Windows.Controls.Border.BorderBrushProperty, "Brush.Border.Subtle");
         // ponytail 2026-08-28: 阴影拆到独立兄弟 Border(ManagementWindow 同款处理) —
         // Effect 挂在含 TextBox 的根 Border 上，光标闪烁也会反复触发整窗 CPU 位图卷积。
         var shadowBorder = new System.Windows.Controls.Border
         {
-            Background = new SolidColorBrush(Color.FromRgb(0x10, 0x11, 0x1A)),
             CornerRadius = new CornerRadius(12),
             Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 24, ShadowDepth = 0, Color = Color.FromArgb(0xAA, 0x00, 0x00, 0x00), Opacity = 0.6 }
         };
+        shadowBorder.SetResourceReference(System.Windows.Controls.Border.BackgroundProperty, "Brush.Bg.Chrome");
 
         var grid = new Grid();
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });    // 0: title
@@ -750,13 +750,14 @@ public partial class CalendarWidget : Window
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });    // 5: buttons
 
         // Title
-        grid.Children.Add(new TextBlock
+        var titleText = new TextBlock
         {
             Text = title,
             FontSize = 14, FontWeight = FontWeights.SemiBold,
-            Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0)),
             Margin = new Thickness(0, 0, 0, 8)
-        });
+        };
+        titleText.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "Brush.Text.Primary");
+        grid.Children.Add(titleText);
         Grid.SetRow(grid.Children[^1], 0);
 
         // Title/content divider (与液态玻璃二级窗口同款,用本窗口自己的半透明白配色)
@@ -776,15 +777,15 @@ public partial class CalendarWidget : Window
             TextWrapping = TextWrapping.Wrap,
             AcceptsReturn = true,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            Background = new SolidColorBrush(Color.FromArgb(0x0A, 0xFF, 0xFF, 0xFF)),
-            Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0)),
-            BorderBrush = new SolidColorBrush(Color.FromArgb(0x15, 0xFF, 0xFF, 0xFF)),
             BorderThickness = new Thickness(1),
             FontSize = 13, Padding = new Thickness(8, 6, 8, 6),
             // ponytail 2026-08-27: 自定义右键菜单 — 默认 WPF ContextMenu 的"剪贴/复制/粘贴"
             // 是 PresentationFramework 内置字符串,切语言不变。改用自定义菜单挂 i18n。
             ContextMenu = BuildTextBoxContextMenu()
         };
+        textBox.SetResourceReference(System.Windows.Controls.TextBox.BackgroundProperty, "Brush.Bg.Input");
+        textBox.SetResourceReference(System.Windows.Controls.TextBox.ForegroundProperty, "Brush.Text.Primary");
+        textBox.SetResourceReference(System.Windows.Controls.TextBox.BorderBrushProperty, "Brush.Border.Subtle");
         Grid.SetRow(textBox, 2);
         grid.Children.Add(textBox);
 
@@ -803,13 +804,14 @@ public partial class CalendarWidget : Window
             NotePriority.High => 3,
             _ => 0
         };
-        priorityPanel.Children.Add(new TextBlock
+        var priorityLabel = new TextBlock
         {
             Text = _loc["Calendar.Priority"],
             VerticalAlignment = VerticalAlignment.Center,
-            Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0xA0)),
             FontSize = 11, Margin = new Thickness(0, 0, 6, 0)
-        });
+        };
+        priorityLabel.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "Brush.Text.Secondary");
+        priorityPanel.Children.Add(priorityLabel);
         priorityPanel.Children.Add(cmb);
         grid.Children.Add(priorityPanel);
 
@@ -819,12 +821,12 @@ public partial class CalendarWidget : Window
         var reminderCheck = new CheckBox
         {
             Content = _loc["Calendar.Reminder"],
-            Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0xA0)),
             FontSize = 11,
             IsChecked = existingReminder.HasValue,
             VerticalContentAlignment = VerticalAlignment.Center,
             Margin = new Thickness(0, 0, 6, 0)
         };
+        reminderCheck.SetResourceReference(System.Windows.Controls.CheckBox.ForegroundProperty, "Brush.Text.Secondary");
         var dateHint = "yyyy-MM-dd";
         var timeHint = "HH:mm";
         var reminderDateBox = new TextBox
@@ -835,11 +837,11 @@ public partial class CalendarWidget : Window
                 : dateHint,
             IsEnabled = existingReminder.HasValue,
             VerticalContentAlignment = VerticalAlignment.Center,
-            Background = new SolidColorBrush(Color.FromArgb(0x0A, 0xFF, 0xFF, 0xFF)),
-            Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0)),
-            BorderBrush = new SolidColorBrush(Color.FromArgb(0x15, 0xFF, 0xFF, 0xFF)),
             BorderThickness = new Thickness(1)
         };
+        reminderDateBox.SetResourceReference(System.Windows.Controls.TextBox.BackgroundProperty, "Brush.Bg.Input");
+        reminderDateBox.SetResourceReference(System.Windows.Controls.TextBox.ForegroundProperty, "Brush.Text.Primary");
+        reminderDateBox.SetResourceReference(System.Windows.Controls.TextBox.BorderBrushProperty, "Brush.Border.Subtle");
         var reminderTimeBox = new TextBox
         {
             Width = 50, Height = 24, FontSize = 11,
@@ -849,15 +851,15 @@ public partial class CalendarWidget : Window
             IsEnabled = existingReminder.HasValue,
             VerticalContentAlignment = VerticalAlignment.Center,
             Margin = new Thickness(4, 0, 0, 0),
-            Background = new SolidColorBrush(Color.FromArgb(0x0A, 0xFF, 0xFF, 0xFF)),
-            Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0)),
-            BorderBrush = new SolidColorBrush(Color.FromArgb(0x15, 0xFF, 0xFF, 0xFF)),
             BorderThickness = new Thickness(1)
         };
+        reminderTimeBox.SetResourceReference(System.Windows.Controls.TextBox.BackgroundProperty, "Brush.Bg.Input");
+        reminderTimeBox.SetResourceReference(System.Windows.Controls.TextBox.ForegroundProperty, "Brush.Text.Primary");
+        reminderTimeBox.SetResourceReference(System.Windows.Controls.TextBox.BorderBrushProperty, "Brush.Border.Subtle");
 
-        // Watermark behavior for date box
-        var hintBrush = new SolidColorBrush(Color.FromRgb(0x60, 0x60, 0x80));
-        var textBrush = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0));
+        // Watermark behavior for date box（主题 brush 的 Color 本身是 DynamicResource，缓存引用也会随深浅色切换）
+        var hintBrush = (System.Windows.Media.Brush)FindResource("Brush.Text.Tertiary");
+        var textBrush = (System.Windows.Media.Brush)FindResource("Brush.Text.Primary");
         reminderDateBox.Foreground = hintBrush;
         reminderDateBox.GotFocus += (_, _) =>
         {
@@ -895,21 +897,17 @@ public partial class CalendarWidget : Window
         Grid.SetRow(btnPanel, 5);
         var cancelBtn = new Button
         {
-            Content = _loc["Settings.Cancel"], Width = 70, Height = 30,
-            Background = new SolidColorBrush(Color.FromArgb(0x15, 0xFF, 0xFF, 0xFF)),
-            Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xF0)),
-            BorderBrush = new SolidColorBrush(Color.FromArgb(0x20, 0xFF, 0xFF, 0xFF)),
-            BorderThickness = new Thickness(1), FontSize = 12, Cursor = Cursors.Hand,
+            Content = _loc["Common.Cancel"], Width = 70, Height = 30,
+            FontSize = 12, Cursor = Cursors.Hand,
             Margin = new Thickness(0, 0, 8, 0)
         };
+        cancelBtn.SetResourceReference(Button.StyleProperty, "OutlineBtn");
         var okBtn = new Button
         {
             Content = _loc["Rename.Ok"], Width = 70, Height = 30,
-            Background = new SolidColorBrush(Color.FromRgb(0x7C, 0x3A, 0xED)),
-            Foreground = System.Windows.Media.Brushes.White,
-            BorderThickness = new Thickness(0), FontSize = 12,
-            FontWeight = FontWeights.SemiBold, Cursor = Cursors.Hand
+            FontSize = 12, FontWeight = FontWeights.SemiBold, Cursor = Cursors.Hand
         };
+        okBtn.SetResourceReference(Button.StyleProperty, "FillBtn");
         btnPanel.Children.Add(cancelBtn);
         btnPanel.Children.Add(okBtn);
         grid.Children.Add(btnPanel);

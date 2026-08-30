@@ -944,9 +944,10 @@ public partial class SubfolderFlyout : UserControl
     /// 全程只用图标容器的 PointToScreen(容器在可见分区/面板窗口里,必然连着
     /// PresentationSource),不再读 flyout 自身的 PointToScreen — 那会因 popup 重排
     /// 时序拿到错误位置,或在 visual 未连接时抛异常回落到 (0,0)。
-    /// ponytail: 全程统一到 DIP。PointToScreen / SystemParameters.WorkArea 返回物理
-    /// 像素,而 Popup 的 AbsolutePoint offset 与 RenderTransform 平移都是 DIP —
-    /// 125%/150% 缩放下直接把物理像素塞给 offset 会被再放大一遍。</summary>
+    /// ponytail: 全程统一到 DIP。PointToScreen 返回物理像素,需除以 DPI 缩放;
+    /// SystemParameters.WorkArea 本身已是 DIP(与 Popup AbsolutePoint offset 同单位),
+    /// 不要再除 — 否则 125%/150% 缩放下工作区被缩小,翻侧判定过早:分区靠屏幕边/
+    /// 靠其他分区时浮层会翻到错误一侧,表现为展开位置偏移很大。</summary>
     public static (Point pos, Point c) ComputePosAndAnchor(FrameworkElement? container, Size flyoutSize)
     {
         const double gap = 8;
@@ -957,8 +958,7 @@ public partial class SubfolderFlyout : UserControl
             sx = d.DpiScaleX; sy = d.DpiScaleY;
         }
         catch { }
-        var waPx = SystemParameters.WorkArea;
-        var wa = new Rect(waPx.Left / sx, waPx.Top / sy, waPx.Width / sx, waPx.Height / sy);
+        var wa = SystemParameters.WorkArea;
         Point iconTL = new(0, 0);
         double iconW = 0, iconH = 0;
         if (container != null)
