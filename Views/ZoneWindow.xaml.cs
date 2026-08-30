@@ -3961,7 +3961,7 @@ public partial class ZoneWindow : Window
         // Body fill — 分区本体一体化:玻璃开时填充已并入玻璃 tint,此处透明;
         // 玻璃关(或收起)时保持纯填充照旧。
         bool glassCarriesFill = _zone.EnableLiquidGlass && (_hover?.IsExpanded ?? false);
-        try { FillRect.Fill = glassCarriesFill ? Brushes.Transparent : new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.FillColor)!); } catch { }
+        try { FillRect.Fill = glassCarriesFill ? AcrylicHelper.HitTestFill : new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.FillColor)!); } catch { }
         bool fillIndependent = s.TitleBarFillIndependent && !s.TileMode;
         FillRect.RadiusX = FillRect.RadiusY = fillIndependent ? 0 : s.CornerRadius;
         // ponytail 2026-08-26: the merged master's title bar is TWO layers — the
@@ -4274,7 +4274,7 @@ public partial class ZoneWindow : Window
                 fillColor, 1.0, _zone.GlassColorMode, _zone.GlassTintOpacity, _zone.GlassTintLuminosity);
             if (!blurResult.Success)
                 System.Diagnostics.Debug.WriteLine($"[ZoneWindow] EnableBlur failed: {blurResult.Error}");
-            FillRect.Fill = Brushes.Transparent;
+            FillRect.Fill = AcrylicHelper.HitTestFill;
             FillRect.Opacity = 1.0;
             if (TitleBarBg != null && !string.IsNullOrEmpty(titleBarFillColor))
                 ApplyTitleBarBandFill(titleBarFillColor);

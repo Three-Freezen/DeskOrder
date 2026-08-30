@@ -589,6 +589,21 @@ public static class AcrylicHelper
     }
 
     /// <summary>
+    /// 分区本体一体化时填充矩形用的「不可见但非全透明」画刷。玻璃开时填充已并入 DWM
+    /// accent(计算层算一层),但 AllowsTransparency 分层窗口的空白区若 alpha=0,系统级
+    /// WindowFromPoint / OLE 拖放命中检测会把它当全透明跳过,表现为「开玻璃时图标拖不进
+    /// 分区」。alpha=1 的黑色(≈0.4%)视觉上不可察觉,但足以让命中检测视该处为实心。
+    /// </summary>
+    public static readonly SolidColorBrush HitTestFill = CreateHitTestFill();
+
+    static SolidColorBrush CreateHitTestFill()
+    {
+        var brush = new SolidColorBrush(Color.FromArgb(0x01, 0x00, 0x00, 0x00));
+        brush.Freeze();
+        return brush;
+    }
+
+    /// <summary>
     /// ponytail 2026-08-26: HWND 版重载 — 给 Popup 子窗口(SubFolder Flyout)开真玻璃。
     /// 与 Window 版同一套 DWM 配方;不注册 _registered(Popup 生命周期短,不参与
     /// 系统强调色变化的批量重刷)。

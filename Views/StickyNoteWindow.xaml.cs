@@ -880,7 +880,7 @@ public partial class StickyNoteWindow : Window
                 NoteGlassBorder.BorderThickness = new Thickness(Math.Max(1.0, borderThickness));
                 NoteGlassBorder.CornerRadius = new CornerRadius(_note.CornerRadius);
             }
-            BodyFillRect.Fill = Brushes.Transparent;
+            BodyFillRect.Fill = AcrylicHelper.HitTestFill;
         }
         else
         {

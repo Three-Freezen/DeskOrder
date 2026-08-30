@@ -68,6 +68,9 @@ public partial class App : System.Windows.Application
         // (Trace 监听器 / ConfigService / LocalizationService):建根目录 + 便携模式
         // 首启接管 AppData 既有数据。
         Services.DataLocator.Initialize();
+        // ponytail 2026-08-30: 勾选"更新完成后自动删除安装包"时,新版首启在此消费
+        // 待清理标记删掉下载文件夹里的安装包(必须先于更新检查,避免旧标记被新周期覆盖)。
+        Services.UpdateService.ConsumePendingSetupCleanup();
 #if DEBUG
         // ponytail 2026-08-26: fresh diagnostics log per run (ghost-ring regression trace).
         Helpers.DzTrace.Reset();

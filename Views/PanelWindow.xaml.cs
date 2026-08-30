@@ -287,10 +287,9 @@ public partial class PanelWindow : Window
         try
         {
             bool glassCarriesFill = config.Panel.PanelEnableLiquidGlass;
-            var fill = glassCarriesFill
-                ? Colors.Transparent
-                : (Color)ColorConverter.ConvertFromString(fillColorStr)!;
-            FillRect.Fill = new SolidColorBrush(fill);
+            FillRect.Fill = glassCarriesFill
+                ? AcrylicHelper.HitTestFill
+                : new SolidColorBrush((Color)ColorConverter.ConvertFromString(fillColorStr)!);
             FillRect.Opacity = 1.0; // Brush alpha from FillColor controls transparency
         }
         catch { }

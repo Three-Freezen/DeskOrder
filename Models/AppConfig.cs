@@ -29,6 +29,8 @@ public class AppConfig
     // ── 更新 ──
     // 启动后台检查更新（24h 节流，UpdateService.AutoCheckIfDueAsync 消费）。
     public bool AutoCheckUpdate { get; set; } = true;
+    /// <summary>更新完成后自动删除下载文件夹里的安装包（UpdateService 待清理标记消费）。</summary>
+    public bool DeleteSetupAfterUpdate { get; set; } = false;
     /// <summary>上次更新检查时间（UTC）；default = 从未检查。失败也记录，避免断网时反复撞接口。</summary>
     public DateTime LastUpdateCheckUtc { get; set; }
 

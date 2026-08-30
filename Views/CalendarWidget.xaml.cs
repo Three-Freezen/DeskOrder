@@ -183,7 +183,7 @@ public partial class CalendarWidget : Window
         try
         {
             FillRect.Fill = glassCarriesFill
-                ? Brushes.Transparent
+                ? AcrylicHelper.HitTestFill
                 : new SolidColorBrush((Color)ColorConverter.ConvertFromString(fillColorStr)!);
         }
         catch { }

@@ -188,6 +188,7 @@ public partial class SettingsPage : UserControl
             ReverseSyncBox.IsChecked = cfg.ReverseSyncEnabled;
             ImagePreviewBox.IsChecked = cfg.ImagePreviewEnabled;
             AutoCheckUpdateBox.IsChecked = cfg.AutoCheckUpdate;
+            DeleteSetupAfterUpdateBox.IsChecked = cfg.DeleteSetupAfterUpdate;
             SelectComboByTag(LanguageCombo, cfg.Language);
             SyncThemeRadios(cfg.ThemeMode switch
             {
@@ -310,6 +311,14 @@ public partial class SettingsPage : UserControl
         if (_suppress) return;
         var cfg = _configService.Load();
         cfg.AutoCheckUpdate = AutoCheckUpdateBox.IsChecked == true;
+        _configService.Save(cfg);
+    }
+
+    void DeleteSetupAfterUpdate_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_suppress) return;
+        var cfg = _configService.Load();
+        cfg.DeleteSetupAfterUpdate = DeleteSetupAfterUpdateBox.IsChecked == true;
         _configService.Save(cfg);
     }
 

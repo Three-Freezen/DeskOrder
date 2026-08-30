@@ -209,6 +209,7 @@
   "Settings.UpdateErr.Proxy": "代理连接失败（HTTP 407），请检查代理设置",
   "Settings.UpdateErr.Http": "GitHub 返回错误（HTTP {0}）",
   "Settings.AutoCheckUpdate": "自动检查更新（每 24 小时）",
+  "Settings.DeleteSetupAfterUpdate": "更新完成后自动删除安装包（下载文件夹）",
   "Settings.ViewRelease": "查看更新内容",
   "Settings.DevNoUpdate": "开发环境不支持应用内更新",
   "Settings.StoreChannel": "商店版本由微软商店负责更新",

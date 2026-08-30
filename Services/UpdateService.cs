@@ -49,7 +49,39 @@ public sealed class UpdateService
     public const string DefaultRepoUrl = "https://github.com/Three-Freezen/DeskOrder";
     internal const string ReleasesApiUrl = "https://api.github.com/repos/Three-Freezen/DeskOrder/releases/latest";
     internal const string SetupAssetName = "DeskOrder-win-Setup.exe";
-    internal static readonly string TempSetupPath = Path.Combine(Path.GetTempPath(), SetupAssetName);
+
+    // ponytail 2026-08-29: 安装包下载落点 = 用户"下载"文件夹(用户要求:下载完的安装器
+    // 要放在电脑的下载里,之前落 %TEMP% 等于藏起来了)。SHGetKnownFolderPath 取真实
+    // 下载目录(兼容 OneDrive 重定向);解析/创建失败退回 %TEMP%,不阻塞更新流程。
+    internal static readonly string SetupDownloadPath = ResolveSetupDownloadPath();
+
+    private static string ResolveSetupDownloadPath()
+    {
+        try
+        {
+            // FOLDERID_Downloads {374DE290-123F-4565-9164-39C4925E467B}
+            var downloads = GetKnownFolderPath(
+                new Guid("374DE290-123F-4565-9164-39C4925E467B"));
+            if (!string.IsNullOrEmpty(downloads))
+            {
+                Directory.CreateDirectory(downloads);
+                return Path.Combine(downloads, SetupAssetName);
+            }
+        }
+        catch { }
+        return Path.Combine(Path.GetTempPath(), SetupAssetName);
+    }
+
+    [DllImport("shell32.dll")]
+    private static extern int SHGetKnownFolderPath(in Guid rfid, uint flags, IntPtr token, out IntPtr path);
+
+    private static string? GetKnownFolderPath(Guid guid)
+    {
+        int hr = SHGetKnownFolderPath(guid, 0, IntPtr.Zero, out var ptr);
+        if (hr != 0 || ptr == IntPtr.Zero) return null;
+        try { return Marshal.PtrToStringUni(ptr); }
+        finally { Marshal.FreeCoTaskMem(ptr); }
+    }
 
     /// <summary>运行时覆盖更新源（--update-source=本地目录）：目录里含 DeskOrder-win-Setup.exe
     /// 即视为有更新（版本取安装包内嵌 ProductVersion），供本地端到端测试，不触网。</summary>
@@ -134,7 +166,56 @@ public sealed class UpdateService
 
     /// <summary>启动已下载的安装器静默升级到原路径（/SILENT /DIR=当前目录），
     /// 随后退出本进程让 Inno 接管；装完由安装器自动重启应用。失败抛异常。</summary>
-    public void ApplyAndRestart() => GetChannel()?.ApplyAndRestart();
+    public void ApplyAndRestart()
+    {
+        // ponytail 2026-08-30: 勾选"更新完成后自动删除安装包"时留下待清理标记 —
+        // 新版本首次启动消费它(安装器运行期间删不了自己,只有新版真正跑起来才算
+        // "更新完毕");标记里记录旧版本号,只有真的升上去了才删,避免误删可手动
+        // 重试的安装包。标记存在本身即"用户已勾选",新实例无需再读配置。
+        try
+        {
+            if (_configService.Load().DeleteSetupAfterUpdate)
+                File.WriteAllText(PendingSetupCleanupPath,
+                    $"{SetupDownloadPath}\n{AppVersion.Current}");
+        }
+        catch { }
+        GetChannel()?.ApplyAndRestart();
+    }
+
+    // ── 更新后安装包自动清理(设置页"更新完成后自动删除安装包") ──
+
+    /// <summary>待清理标记:数据根目录下,内容两行 = 安装包绝对路径 \n 旧版本号。
+    /// 由 ApplyAndRestart(勾选时)写入,新版首启 ConsumePendingSetupCleanup 消费。</summary>
+    internal static string PendingSetupCleanupPath => Path.Combine(DataLocator.Root, "pending-setup-cleanup.txt");
+
+    /// <summary>
+    /// 新版本首次启动消费待清理标记:安装包路径与名称校验通过、且当前版本确实
+    /// 大于标记里的旧版本(= 升级成功)时,删除下载文件夹里的安装包。任何一步失败
+    /// 都只放弃,绝不阻塞启动;同版本(更新没完成/被取消)保留安装包给用户手动处理。
+    /// 标记读到一个字节就先删 — 只会消费一次,不因反复启动反复尝试。
+    /// </summary>
+    public static void ConsumePendingSetupCleanup()
+    {
+        try
+        {
+            if (!File.Exists(PendingSetupCleanupPath)) return;
+            var lines = File.ReadAllLines(PendingSetupCleanupPath);
+            File.Delete(PendingSetupCleanupPath);
+            var setupPath = lines.Length > 0 ? lines[0].Trim() : "";
+            var oldVer = lines.Length > 1 ? lines[1].Trim() : "";
+            // 双保险:只删"名字对得上 + 路径存在 + 版本真的升上去了"的那个文件,
+            // 用户手动从浏览器下载的同名安装包没有标记,永远不会被这条链路碰。
+            if (Path.GetFileName(setupPath) != SetupAssetName || !File.Exists(setupPath)) return;
+            if (!Version.TryParse(oldVer.TrimStart('v', 'V'), out var oldV)) return;
+            if (!Version.TryParse(AppVersion.Current.Split('+')[0], out var curV)) return;
+            if (curV > oldV)
+                File.Delete(setupPath);
+        }
+        catch
+        {
+            // 清理失败(占用/权限)无关紧要 — 下次更新的标记会覆盖同名文件。
+        }
+    }
 
     /// <summary>启动后台检查：环境不支持 / 开关关闭 / 24 小时内查过 → 直接返回。
     /// 发现新版本发托盘气泡；不自动下载（交互定为「提示后更新」）。</summary>
@@ -288,30 +369,36 @@ file sealed class GitHubSetupChannel : IUpdateChannel
     public async Task DownloadAsync(IProgress<int> progress, CancellationToken ct)
     {
         if (_downloadUrl == null) throw new InvalidOperationException("No update checked yet");
+        // 先写 .part 临时名,完成后再改成正式名 — 中断/崩溃不会在"下载"文件夹里留下
+        // 半截 DeskOrder-win-Setup.exe 冒充安装包(误点会装坏)。
+        var partPath = UpdateService.SetupDownloadPath + ".part";
         using var resp = await Http.GetAsync(_downloadUrl, HttpCompletionOption.ResponseHeadersRead, ct);
         resp.EnsureSuccessStatusCode();
         var total = resp.Content.Headers.ContentLength ?? -1;
-        await using var src = await resp.Content.ReadAsStreamAsync(ct);
-        await using var dst = new FileStream(UpdateService.TempSetupPath, FileMode.Create, FileAccess.Write, FileShare.None);
-        var buf = new byte[81920];
-        long read = 0;
-        int n;
-        while ((n = await src.ReadAsync(buf, ct)) > 0)
+        await using (var dst = new FileStream(partPath, FileMode.Create, FileAccess.Write, FileShare.None))
         {
-            await dst.WriteAsync(buf.AsMemory(0, n), ct);
-            read += n;
-            if (total > 0) progress.Report((int)(read * 100 / total));
+            await using var src = await resp.Content.ReadAsStreamAsync(ct);
+            var buf = new byte[81920];
+            long read = 0;
+            int n;
+            while ((n = await src.ReadAsync(buf, ct)) > 0)
+            {
+                await dst.WriteAsync(buf.AsMemory(0, n), ct);
+                read += n;
+                if (total > 0) progress.Report((int)(read * 100 / total));
+            }
         }
+        File.Move(partPath, UpdateService.SetupDownloadPath, overwrite: true);
         progress.Report(100);
     }
 
     public void ApplyAndRestart()
     {
-        if (!File.Exists(UpdateService.TempSetupPath))
+        if (!File.Exists(UpdateService.SetupDownloadPath))
             throw new InvalidOperationException("No installer downloaded yet");
         // /SILENT：无向导仅进度；/DIR= 原安装路径；Inno CloseApplications+AppMutex
         // 会等本进程退出后接管；[Run] 的静默项装完自动重启应用。
-        Process.Start(new ProcessStartInfo(UpdateService.TempSetupPath)
+        Process.Start(new ProcessStartInfo(UpdateService.SetupDownloadPath)
         {
             Arguments = $"/SILENT /DIR=\"{AppContext.BaseDirectory.TrimEnd('\\')}\"",
             UseShellExecute = true,

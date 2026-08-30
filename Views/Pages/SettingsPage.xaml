@@ -110,6 +110,9 @@
           <CheckBox x:Name="AutoCheckUpdateBox" Content="{loc:Loc Key=Settings.AutoCheckUpdate}" Margin="0,8,0,2"
                     Foreground="{DynamicResource Brush.Text.Primary}"
                     Checked="AutoCheckUpdate_Changed" Unchecked="AutoCheckUpdate_Changed"/>
+          <CheckBox x:Name="DeleteSetupAfterUpdateBox" Content="{loc:Loc Key=Settings.DeleteSetupAfterUpdate}" Margin="0,6,0,2"
+                    Foreground="{DynamicResource Brush.Text.Primary}"
+                    Checked="DeleteSetupAfterUpdate_Changed" Unchecked="DeleteSetupAfterUpdate_Changed"/>
         </StackPanel>
       </Border>
     </StackPanel>
