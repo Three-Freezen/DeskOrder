@@ -47,6 +47,12 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
     private Point _cropDragStartCornerVec;
     private double _cropDragStartBoxScale;
     private double _boxVisualScale = 1.0;
+
+    // Fit-zone-to-image state (button visible only when a resize sink is provided).
+    private readonly Action<double, double>? _setZoneSize;
+    private bool _autoFitApplied;
+    private double _zoneSizeBeforeAutoFitW;
+    private double _zoneSizeBeforeAutoFitH;
     
     // Preview scaling (to fit zone in preview area)
     private double _previewScale = 1.0;
@@ -106,7 +112,8 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
         double initialOpacity = 40,
         string cropShape = "Rectangle",
         double titleBarHeight = 0,
-        IReadOnlyList<double>? titleBarInnerDividerHeights = null)
+        IReadOnlyList<double>? titleBarInnerDividerHeights = null,
+        Action<double, double>? setZoneSize = null)
     {
         InitializeComponent();
 
@@ -120,6 +127,7 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
         _cropShape = cropShape;
         _titleBarHeight = titleBarHeight;
         _titleBarInnerDividers = titleBarInnerDividerHeights?.ToList() ?? new List<double>();
+        _setZoneSize = setZoneSize;
 
         // Initialize current state
         _currentOffsetX = initialOffsetX;
@@ -412,6 +420,7 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
         bool hasImage = CropImage?.Source != null;
         CropBoxVisual.Visibility = hasImage ? Visibility.Visible : Visibility.Collapsed;
         CropHandleLayer.Visibility = hasImage ? Visibility.Visible : Visibility.Collapsed;
+        if (FitToImageButton != null) FitToImageButton.IsEnabled = hasImage;
         if (!hasImage) return;
 
         double w = _zonePreviewWidth * _boxVisualScale;
@@ -486,9 +495,66 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
         UpdateImageTransform();
         RedrawCropBoxVisuals();
     }
+
+    private void FitToImageButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (CropImage?.Source is not BitmapSource bmp) return;
+        double imgW = bmp.PixelWidth;
+        double imgH = bmp.PixelHeight;
+        if (imgW <= 0 || imgH <= 0) return;
+
+        // 基于「当前分区大小」等比适配：面积保持不变，只把宽高比改成图片比例。
+        double curW = Math.Max(1, _targetWidth);
+        double curH = Math.Max(1, _targetHeight);
+        double area = curW * curH;
+
+        double newW, newH;
+        if (_cropShape == "Circle")
+        {
+            // 圆形裁剪：保持正方形，按当前面积等比缩放。
+            double side = Math.Sqrt(area);
+            newW = newH = side;
+        }
+        else
+        {
+            double aspect = imgW / imgH;
+            newH = Math.Sqrt(area / aspect);
+            newW = newH * aspect;
+        }
+
+        // 记住自动调整前的分区尺寸，取消时回滚实时预览的尺寸改动。
+        if (!_autoFitApplied)
+        {
+            _zoneSizeBeforeAutoFitW = _targetWidth;
+            _zoneSizeBeforeAutoFitH = _targetHeight;
+        }
+        _autoFitApplied = true;
+
+        _targetWidth = newW;
+        _targetHeight = newH;
+        _setZoneSize?.Invoke(newW, newH);
+
+        // 新宽高比已与图片一致 → 缩放回 1、偏移归零、裁剪框拉满即为 1:1 填满。
+        _currentZoom = 1.0;
+        _currentOffsetX = 0;
+        _currentOffsetY = 0;
+        _boxVisualScale = 1.0;
+
+        CalculatePreviewScale();
+        UpdateZoneGeometry();
+        UpdateImageTransform();
+        UpdateOverlay();
+        DrawGridLines();
+        DrawTitleBarDivider();
+        UpdateCropBoxControls();
+        UpdateDisplays();
+        BgZoom.Value = _currentZoom;
+    }
     
     private void CancelButton_Click(object sender, RoutedEventArgs e)
     {
+        if (_autoFitApplied)
+            _setZoneSize?.Invoke(_zoneSizeBeforeAutoFitW, _zoneSizeBeforeAutoFitH);
         Result = null;
         DialogResult = false;
         Close();
@@ -764,6 +830,10 @@ public partial class ImageCropPreviewWindow : Window, INotifyPropertyChanged
         ConfirmButton.Content = _loc["CropPreview.Confirm"];
         CancelButton.Content = _loc["CropPreview.Cancel"];
         ResetButton.Content = _loc["CropPreview.Reset"];
+        FitToImageButton.Content = _loc["CropPreview.FitToImage"];
+        FitToImageHint.Text = _loc["CropPreview.FitToImageHint"];
+        FitToImageButton.Visibility = _setZoneSize != null ? Visibility.Visible : Visibility.Collapsed;
+        FitToImageHint.Visibility = FitToImageButton.Visibility;
         LabelZoom.Text = _loc["CropPreview.Zoom"];
         LabelOpacity.Text = _loc["CropPreview.Opacity"];
     }

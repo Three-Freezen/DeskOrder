@@ -162,6 +162,19 @@
             <!-- Buttons -->
             <StackPanel Grid.Row="4" Orientation="Horizontal"
                         HorizontalAlignment="Right" Margin="0,12,0,0">
+                <TextBlock x:Name="FitToImageHint" Text="Fit to image"
+                           Foreground="{DynamicResource Brush.Text.Tertiary}" FontSize="10"
+                           VerticalAlignment="Center" Margin="0,0,8,0" Visibility="Collapsed"/>
+                <Button x:Name="FitToImageButton" Content="Fit to image"
+                        Background="{DynamicResource Brush.Bg.Surface}" Foreground="{DynamicResource Brush.Text.Secondary}"
+                        BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1"
+                        Padding="16,8" Cursor="Hand" FontSize="12"
+                        Margin="0,0,8,0" Visibility="Collapsed"
+                        Click="FitToImageButton_Click">
+                    <Button.Resources>
+                        <Style TargetType="Border"><Setter Property="CornerRadius" Value="4"/></Style>
+                    </Button.Resources>
+                </Button>
                 <Button x:Name="ResetButton" Content="Reset"
                         Background="{DynamicResource Brush.Bg.Surface}" Foreground="{DynamicResource Brush.Text.Secondary}"
                         BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1"

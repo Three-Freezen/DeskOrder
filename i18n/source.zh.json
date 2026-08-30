@@ -490,6 +490,8 @@
   "CropPreview.Confirm": "确定",
   "CropPreview.Cancel": "取消",
   "CropPreview.Reset": "重置",
+  "CropPreview.FitToImage": "调整至图片大小",
+  "CropPreview.FitToImageHint": "按图片比例等比适配当前大小",
   "CropPreview.Zoom": "缩放：",
   "CropPreview.Opacity": "透明度：",
 

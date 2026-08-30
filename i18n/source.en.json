@@ -490,6 +490,8 @@
   "CropPreview.Confirm": "OK",
   "CropPreview.Cancel": "Cancel",
   "CropPreview.Reset": "Reset",
+  "CropPreview.FitToImage": "Fit to image",
+  "CropPreview.FitToImageHint": "Match image ratio, keep current size",
   "CropPreview.Zoom": "Zoom:",
   "CropPreview.Opacity": "Opacity:",
 

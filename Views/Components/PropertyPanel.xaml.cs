@@ -1190,6 +1190,8 @@ public partial class PropertyPanel : UserControl
         var heightGrid = MakeNumberSubBlock(_loc["ZoneProp.Height"], z.Height, v => { z.Height = v; Save(z); });
         Grid.SetColumn(heightGrid, 2);
         sizeGrid.Children.Add(heightGrid);
+        var widthBox = (TextBox)widthGrid.Children[1];
+        var heightBox = (TextBox)heightGrid.Children[1];
         basic.Children.Add(sizeGrid);
 
         var gridGrid = new Grid { Margin = new Thickness(0, 6, 0, 0) };
@@ -1280,12 +1282,18 @@ public partial class PropertyPanel : UserControl
             SetOffsetX = v => z.BgImageOffsetX = v,
             GetOffsetY = () => z.BgImageOffsetY,
             SetOffsetY = v => z.BgImageOffsetY = v,
-            Width = z.Width, Height = z.Height,
+            GetWidth = () => z.Width, GetHeight = () => z.Height,
             CropShape = "Rectangle",
             // 文件夹映射头部行(26px)也算进标题栏：分界线 + 内部 24px 分界。
             TitleBarHeight = z.TileMode ? 0 : 24 + (z.FolderMappingEnabled ? 26 : 0),
             TitleBarInnerDividerHeights = !z.TileMode && z.FolderMappingEnabled ? new[] { 24.0 } : Array.Empty<double>(),
             OnSave = () => Save(z),
+            SetZoneSize = (w, h) =>
+            {
+                z.Width = w; z.Height = h; Save(z);
+                widthBox.Text = w.ToString("0.##", CultureInfo.InvariantCulture);
+                heightBox.Text = h.ToString("0.##", CultureInfo.InvariantCulture);
+            },
         }));
         root.Children.Add(bg);
 
@@ -1687,6 +1695,8 @@ public partial class PropertyPanel : UserControl
         var heightGrid = MakeNumberSubBlock(_loc["ZoneProp.Height"], z.Height, v => { z.Height = v; SaveGroup(); });
         Grid.SetColumn(heightGrid, 2);
         sizeGrid.Children.Add(heightGrid);
+        var widthBox = (TextBox)widthGrid.Children[1];
+        var heightBox = (TextBox)heightGrid.Children[1];
         basic.Children.Add(sizeGrid);
 
         var gridGrid = new Grid { Margin = new Thickness(0, 6, 0, 0) };
@@ -1770,7 +1780,7 @@ public partial class PropertyPanel : UserControl
             SetOffsetX = v => gs.BgImageOffsetX = v,
             GetOffsetY = () => gs.BgImageOffsetY,
             SetOffsetY = v => gs.BgImageOffsetY = v,
-            Width = z.Width, Height = z.Height,
+            GetWidth = () => z.Width, GetHeight = () => z.Height,
             CropShape = "Rectangle",
             // 组合分区两层标题栏(24+24) + 文件夹映射头部行(26px)：内部分界线 24/48。
             TitleBarHeight = gs.TileMode ? 0 : 48 + (gs.FolderMappingEnabled ? 26 : 0),
@@ -1778,6 +1788,12 @@ public partial class PropertyPanel : UserControl
                 ? Array.Empty<double>()
                 : gs.FolderMappingEnabled ? new[] { 24.0, 48.0 } : new[] { 24.0 },
             OnSave = SaveGroup,
+            SetZoneSize = (w, h) =>
+            {
+                z.Width = w; z.Height = h; SaveGroup();
+                widthBox.Text = w.ToString("0.##", CultureInfo.InvariantCulture);
+                heightBox.Text = h.ToString("0.##", CultureInfo.InvariantCulture);
+            },
         });
         bg.Children.Add(bgRow);
         _unifiedGated.Add(bgRow);
@@ -1900,8 +1916,8 @@ public partial class PropertyPanel : UserControl
             SetOffsetX = _ => { },
             GetOffsetY = () => 0,
             SetOffsetY = _ => { },
-            Width = 128,
-            Height = 128,
+            GetWidth = () => 128,
+            GetHeight = () => 128,
             CropShape = "Rectangle",
             TitleBarHeight = 0,
             OnSave = () => Save(sub),
@@ -2149,9 +2165,12 @@ public partial class PropertyPanel : UserControl
         basic.Children.Add(MakeColorRow(_loc["ZoneProp.IconColor"],
             string.IsNullOrEmpty(c.IconColor) ? "#FFFFFF" : c.IconColor,
             v => { c.IconColor = v; Save(c); }));
-        basic.Children.Add(MakeSizeGrid(
+        var sizeGrid = MakeSizeGrid(
             c.Width, v => { c.Width = v; Save(c); },
-            c.Height, v => { c.Height = v; Save(c); }));
+            c.Height, v => { c.Height = v; Save(c); });
+        basic.Children.Add(sizeGrid);
+        var widthBox = (TextBox)((Grid)sizeGrid.Children[0]).Children[1];
+        var heightBox = (TextBox)((Grid)sizeGrid.Children[1]).Children[1];
         root.Children.Add(basic);
 
         // 标题栏
@@ -2206,9 +2225,15 @@ public partial class PropertyPanel : UserControl
             SetOffsetX = v => c.DigitalBgImageOffsetX = v,
             GetOffsetY = () => c.DigitalBgImageOffsetY,
             SetOffsetY = v => c.DigitalBgImageOffsetY = v,
-            Width = c.Width, Height = c.Height,
+            GetWidth = () => c.Width, GetHeight = () => c.Height,
             CropShape = "Rectangle",
             OnSave = () => Save(c),
+            SetZoneSize = (w, h) =>
+            {
+                c.Width = w; c.Height = h; Save(c);
+                widthBox.Text = w.ToString("0.##", CultureInfo.InvariantCulture);
+                heightBox.Text = h.ToString("0.##", CultureInfo.InvariantCulture);
+            },
         }));
         bg.Children.Add(MakeBgImageRow(_loc["ClockProp.AnalogBgImage"], new BgImageBinding
         {
@@ -2222,7 +2247,7 @@ public partial class PropertyPanel : UserControl
             SetOffsetX = v => c.BgImageOffsetX = v,
             GetOffsetY = () => c.BgImageOffsetY,
             SetOffsetY = v => c.BgImageOffsetY = v,
-            Width = 200, Height = 200,
+            GetWidth = () => 200, GetHeight = () => 200,
             CropShape = "Circle",
             OnSave = () => Save(c),
         }));
@@ -2285,9 +2310,12 @@ public partial class PropertyPanel : UserControl
         basic.Children.Add(MakeColorRow(_loc["ZoneProp.IconColor"],
             string.IsNullOrEmpty(cal.IconColor) ? "#FFFFFF" : cal.IconColor,
             v => { cal.IconColor = v; Save(cal); }));
-        basic.Children.Add(MakeSizeGrid(
+        var sizeGrid = MakeSizeGrid(
             cal.Width, v => { cal.Width = v; Save(cal); },
-            cal.Height, v => { cal.Height = v; Save(cal); }));
+            cal.Height, v => { cal.Height = v; Save(cal); });
+        basic.Children.Add(sizeGrid);
+        var widthBox = (TextBox)((Grid)sizeGrid.Children[0]).Children[1];
+        var heightBox = (TextBox)((Grid)sizeGrid.Children[1]).Children[1];
         root.Children.Add(basic);
 
         // 标题栏
@@ -2337,9 +2365,15 @@ public partial class PropertyPanel : UserControl
             SetOffsetX = v => cal.BgImageOffsetX = v,
             GetOffsetY = () => cal.BgImageOffsetY,
             SetOffsetY = v => cal.BgImageOffsetY = v,
-            Width = cal.Width, Height = cal.Height,
+            GetWidth = () => cal.Width, GetHeight = () => cal.Height,
             CropShape = "Rectangle",
             OnSave = () => Save(cal),
+            SetZoneSize = (w, h) =>
+            {
+                cal.Width = w; cal.Height = h; Save(cal);
+                widthBox.Text = w.ToString("0.##", CultureInfo.InvariantCulture);
+                heightBox.Text = h.ToString("0.##", CultureInfo.InvariantCulture);
+            },
         }));
         root.Children.Add(bg);
 
@@ -2389,9 +2423,12 @@ public partial class PropertyPanel : UserControl
         basic.Children.Add(MakeColorRow(_loc["ZoneProp.IconColor"],
             string.IsNullOrEmpty(note.IconColor) ? "#FFFFFF" : note.IconColor,
             v => { note.IconColor = v; Save(note); }));
-        basic.Children.Add(MakeSizeGrid(
+        var sizeGrid = MakeSizeGrid(
             note.Width, v => { note.Width = v; Save(note); },
-            note.Height, v => { note.Height = v; Save(note); }));
+            note.Height, v => { note.Height = v; Save(note); });
+        basic.Children.Add(sizeGrid);
+        var widthBox = (TextBox)((Grid)sizeGrid.Children[0]).Children[1];
+        var heightBox = (TextBox)((Grid)sizeGrid.Children[1]).Children[1];
         root.Children.Add(basic);
 
         // 标题栏
@@ -2448,12 +2485,18 @@ public partial class PropertyPanel : UserControl
             SetOffsetX = v => note.BgImageOffsetX = v,
             GetOffsetY = () => note.BgImageOffsetY,
             SetOffsetY = v => note.BgImageOffsetY = v,
-            Width = note.Width, Height = note.Height,
+            GetWidth = () => note.Width, GetHeight = () => note.Height,
             CropShape = "Rectangle",
             // 便签两行标题栏(28 标题行 + 28 字体工具栏)：内部 28px 分界，共 56px。
             TitleBarHeight = 56,
             TitleBarInnerDividerHeights = new[] { 28.0 },
             OnSave = () => Save(note),
+            SetZoneSize = (w, h) =>
+            {
+                note.Width = w; note.Height = h; Save(note);
+                widthBox.Text = w.ToString("0.##", CultureInfo.InvariantCulture);
+                heightBox.Text = h.ToString("0.##", CultureInfo.InvariantCulture);
+            },
         }));
         root.Children.Add(bg);
 
@@ -2490,9 +2533,12 @@ public partial class PropertyPanel : UserControl
 
         // 基本
         var basic = MakeSection(_loc["ZoneProp.Section.Basic"]);
-        basic.Children.Add(MakeSizeGrid(
+        var sizeGrid = MakeSizeGrid(
             p.PanelWidth, v => { p.PanelWidth = v; Save(p); },
-            p.PanelHeight, v => { p.PanelHeight = v; Save(p); }));
+            p.PanelHeight, v => { p.PanelHeight = v; Save(p); });
+        basic.Children.Add(sizeGrid);
+        var widthBox = (TextBox)((Grid)sizeGrid.Children[0]).Children[1];
+        var heightBox = (TextBox)((Grid)sizeGrid.Children[1]).Children[1];
         root.Children.Add(basic);
 
         // 标题栏
@@ -2548,10 +2594,16 @@ public partial class PropertyPanel : UserControl
             SetOffsetX = v => p.PanelBgImageOffsetX = v,
             GetOffsetY = () => p.PanelBgImageOffsetY,
             SetOffsetY = v => p.PanelBgImageOffsetY = v,
-            Width = p.PanelWidth, Height = p.PanelHeight,
+            GetWidth = () => p.PanelWidth, GetHeight = () => p.PanelHeight,
             CropShape = "Rectangle",
             TitleBarHeight = 44,
             OnSave = () => Save(p),
+            SetZoneSize = (w, h) =>
+            {
+                p.PanelWidth = w; p.PanelHeight = h; Save(p);
+                widthBox.Text = w.ToString("0.##", CultureInfo.InvariantCulture);
+                heightBox.Text = h.ToString("0.##", CultureInfo.InvariantCulture);
+            },
         }));
         root.Children.Add(bg);
 
@@ -2971,8 +3023,11 @@ public partial class PropertyPanel : UserControl
         public Action<double> SetOffsetX = _ => { };
         public Func<double> GetOffsetY = () => 0;
         public Action<double> SetOffsetY = _ => { };
-        public double Width = 400;
-        public double Height = 300;
+        public Func<double> GetWidth = () => 400;
+        public Func<double> GetHeight = () => 300;
+        /// <summary>裁剪窗口「调整至图片大小」按钮的尺寸回写回调：(宽, 高)。
+        /// 实现负责改模型 + Save 实时预览；null 表示该目标不支持自动调整，隐藏按钮。</summary>
+        public Action<double, double>? SetZoneSize;
         /// <summary>Crop outline shape for ImageCropPreviewWindow: "Rectangle",
         /// "Circle" (analog clock face) or "Ellipse".</summary>
         public string CropShape = "Rectangle";
@@ -3548,10 +3603,11 @@ public partial class PropertyPanel : UserControl
         // = their live size rect. ImageCropPreviewWindow owns drag/zoom/opacity.
         var crop = new ImageCropPreviewWindow(
             path,
-            b.Width, b.Height,
+            b.GetWidth(), b.GetHeight(),
             b.GetOffsetX(), b.GetOffsetY(),
             b.GetZoom(), b.GetOpacity(),
-            b.CropShape, b.TitleBarHeight, b.TitleBarInnerDividerHeights)
+            b.CropShape, b.TitleBarHeight, b.TitleBarInnerDividerHeights,
+            b.SetZoneSize)
         {
             Owner = owner
         };
