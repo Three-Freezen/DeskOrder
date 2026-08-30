@@ -1,0 +1,813 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DeskOrder 秩序桌面 — 桌面分区与磁贴美化</title>
+<meta name="description" content="DeskOrder 秩序桌面：Windows 桌面分区管理与磁贴美化工具。透明悬浮分区、液态玻璃、磁贴模式、时钟/日历/便签挂件、快捷面板。MIT 开源，Windows 10+，自带运行时。">
+<meta property="og:title" content="DeskOrder 秩序桌面">
+<meta property="og:description" content="桌面分类管理和磁贴美化，一个软件全实现。">
+<meta property="og:image" content="assets/hero.webp">
+<meta name="theme-color" content="#0B0B0C">
+<link rel="icon" type="image/png" href="assets/icon-256.png">
+<style>
+:root{
+  --bg:#0B0B0C;
+  --bg-deep:#060607;
+  --surface:#151517;
+  --surface-2:#101012;
+  --border:rgba(240,234,224,.11);
+  --border-strong:rgba(240,234,224,.24);
+  --fg:#F2F0EC;
+  --muted:#A6A29A;
+  --accent:#FFB454;
+  --accent-ink:#1F1200;
+  --grad:linear-gradient(135deg,#D97A1F 0%,#FFB454 100%);
+  --radius:12px;
+  --radius-lg:16px;
+  --shadow:0 14px 36px rgba(0,0,0,.45);
+  --font-display:"Segoe UI Variable Display","Segoe UI","Microsoft YaHei UI",system-ui,sans-serif;
+  --font-body:"Segoe UI","Microsoft YaHei UI",system-ui,sans-serif;
+  --font-mono:"Cascadia Code","JetBrains Mono",Consolas,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-padding-top:88px}
+@media (prefers-reduced-motion:no-preference){html{scroll-behavior:smooth}}
+body{
+  background:var(--bg);color:var(--fg);
+  font-family:var(--font-body);font-size:16px;line-height:1.7;
+  -webkit-font-smoothing:antialiased;
+}
+img{max-width:100%;display:block}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline;text-underline-offset:3px}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+.container{max-width:1120px;margin:0 auto;padding:0 24px}
+.skip{position:absolute;left:-999px;top:8px;z-index:100;background:var(--surface);border:1px solid var(--border-strong);color:var(--fg);padding:10px 16px;border-radius:8px}
+.skip:focus{left:8px}
+
+/* ---------- buttons ---------- */
+.btn{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:10px 22px;border-radius:10px;
+  font:600 15px/1 var(--font-body);cursor:pointer;border:1px solid transparent;transition:background .18s,border-color .18s,transform .18s,box-shadow .18s}
+.btn:hover{text-decoration:none}
+.btn-primary{background:var(--accent);color:var(--accent-ink)}
+.btn-primary:hover{background:#FFC673;transform:translateY(-1px);box-shadow:0 6px 16px rgba(0,0,0,.35)}
+.btn-ghost{background:transparent;color:var(--fg);border-color:var(--border-strong)}
+.btn-ghost:hover{background:var(--surface-2);border-color:var(--accent);transform:translateY(-1px)}
+.btn svg{flex:none}
+
+/* ---------- nav ---------- */
+.nav{position:fixed;inset:0 0 auto 0;z-index:50;background:#0B0B0C;border-bottom:1px solid var(--border)}
+.nav-inner{display:flex;align-items:center;gap:28px;height:64px}
+.brand{display:flex;align-items:center;gap:10px;color:var(--fg)}
+.brand:hover{text-decoration:none}
+.brand svg{width:26px;height:26px;border-radius:6px}
+.brand-name{font:650 17px/1 var(--font-display);letter-spacing:-.01em}
+.brand-sub{font:400 12px/1 var(--font-body);color:var(--muted);padding-left:10px;border-left:1px solid var(--border-strong)}
+.nav-links{display:flex;gap:4px;margin-left:auto}
+.nav-links a{color:var(--muted);font-size:14.5px;padding:8px 12px;border-radius:8px;position:relative}
+.nav-links a:hover{color:var(--fg);background:var(--surface-2);text-decoration:none}
+.nav-links a.active{color:var(--accent)}
+.nav-links a.active::after{content:"";position:absolute;left:12px;right:12px;bottom:2px;height:2px;border-radius:2px;background:var(--grad)}
+.nav-actions{display:flex;align-items:center;gap:12px;margin-left:auto}
+.nav-links + .nav-actions{margin-left:0}
+.lang{display:flex;background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:3px}
+.lang button{min-height:44px;min-width:52px;border:0;background:transparent;color:var(--muted);
+  font:600 13px/1 var(--font-body);border-radius:8px;cursor:pointer;transition:background .18s,color .18s}
+.lang button:hover{color:var(--fg)}
+.lang button.on{background:var(--surface);color:var(--accent);box-shadow:inset 0 0 0 1px var(--border-strong)}
+.nav-gh{padding:10px 16px}
+.nav-burger{display:none;min-width:44px;min-height:44px;border:1px solid var(--border-strong);border-radius:10px;
+  background:transparent;color:var(--fg);cursor:pointer;align-items:center;justify-content:center}
+
+/* ---------- hero ---------- */
+.hero{position:relative;padding:150px 0 90px;overflow:hidden;text-align:center}
+.hero::before{content:"";position:absolute;inset:0;
+  background-image:linear-gradient(rgba(240,234,224,.045) 1px,transparent 1px),linear-gradient(90deg,rgba(240,234,224,.045) 1px,transparent 1px);
+  background-size:44px 44px;
+  -webkit-mask-image:radial-gradient(ellipse 75% 60% at 50% 0%,#000 30%,transparent 75%);
+  mask-image:radial-gradient(ellipse 75% 60% at 50% 0%,#000 30%,transparent 75%)}
+.hero .container{position:relative;z-index:1}
+.badges{display:flex;flex-wrap:wrap;justify-content:center;gap:10px;margin-bottom:28px}
+.badge{font:500 12.5px/1 var(--font-mono);color:var(--muted);border:1px solid var(--border-strong);
+  padding:8px 14px;border-radius:999px;background:rgba(15,15,17,.6)}
+.badge-accent{color:var(--accent);border-color:rgba(255,180,84,.45)}
+.hero-icon{display:block;width:104px;height:104px;margin:0 auto 26px;border-radius:22px;box-shadow:0 10px 28px rgba(0,0,0,.5)}
+.hero h1{font:650 clamp(46px,7.5vw,84px)/1.05 var(--font-display);letter-spacing:-.03em}
+.hero h1 .grad{color:var(--fg)}
+.tagline{margin:20px auto 0;max-width:760px;font:600 clamp(19px,2.6vw,25px)/1.6 var(--font-display)}
+.hero-sub{margin:14px auto 0;max-width:640px;color:var(--muted);font-size:16.5px}
+.cta{display:flex;justify-content:center;gap:14px;margin-top:34px;flex-wrap:wrap}
+.cta-note{margin-top:16px;font-size:13px;color:var(--muted)}
+.hero-visual{position:relative;max-width:980px;margin:64px auto 0}
+.desk-frame{position:relative;border:1px solid var(--border-strong);border-radius:var(--radius-lg);overflow:hidden;
+  background:var(--surface-2);box-shadow:var(--shadow)}
+.frame-bar{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border);background:rgba(17,17,19,.9)}
+.frame-label{font:500 11.5px/1 var(--font-mono);color:var(--muted);letter-spacing:.04em}
+.frame-controls{display:flex;color:var(--muted)}
+.desk-frame img{width:100%;height:auto}
+
+/* ---------- sections ---------- */
+section{padding:92px 0}
+.section-head{max-width:680px;margin-bottom:48px}
+.section-head.center{margin-left:auto;margin-right:auto;text-align:center}
+.section-head h2{font:650 clamp(28px,4vw,38px)/1.3 var(--font-display)}
+.section-sub{margin-top:12px;color:var(--muted);font-size:16px}
+
+/* screenshots */
+.shot-grid{display:grid;grid-template-columns:1fr 1fr;gap:26px}
+.shot{border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;background:var(--surface-2);
+  transition:transform .2s,border-color .2s,box-shadow .2s}
+.shot:hover{transform:translateY(-4px);border-color:rgba(255,180,84,.4);box-shadow:0 10px 24px rgba(0,0,0,.35)}
+.shot-wide{grid-column:1 / -1}
+.shot img{width:100%;height:auto}
+.shot figcaption{display:flex;align-items:baseline;gap:12px;padding:14px 18px;border-top:1px solid var(--border)}
+.shot-chip{flex:none;font:600 11.5px/1 var(--font-mono);color:var(--muted);border:1px solid var(--border-strong);
+  padding:5px 10px;border-radius:999px;white-space:nowrap}
+.shot-d{color:var(--muted);font-size:14px}
+
+/* feature cards */
+.card-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:22px}
+.feature-card{border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface-2);padding:26px 24px;
+  transition:transform .2s,border-color .2s,box-shadow .2s}
+.feature-card:hover{transform:translateY(-3px);border-color:rgba(255,180,84,.4);box-shadow:0 8px 20px rgba(0,0,0,.3)}
+.f-icon{display:flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:11px;
+  color:var(--fg);background:var(--surface);border:1px solid var(--border-strong);margin-bottom:18px}
+.feature-card h3{font:650 17.5px/1.4 var(--font-display);margin-bottom:8px}
+.feature-card p{color:var(--muted);font-size:14.5px}
+
+/* why cards */
+.why-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;align-items:stretch}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+.chip{font:500 12px/1 var(--font-mono);color:var(--muted);border:1px solid var(--border);padding:6px 10px;border-radius:7px;background:rgba(8,8,10,.5)}
+.num{display:block;font:650 13px/1 var(--font-mono);color:var(--muted);letter-spacing:.08em;margin-bottom:14px}
+
+/* tech */
+.tech-grid{display:grid;grid-template-columns:5fr 7fr;gap:26px;align-items:start}
+.spec{border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface-2);overflow:hidden}
+.spec-row{display:grid;grid-template-columns:150px 1fr;gap:16px;padding:16px 20px;border-bottom:1px solid var(--border);align-items:baseline}
+.spec-row:last-child{border-bottom:0}
+.spec-row dt{font:500 13px/1.5 var(--font-mono);color:var(--muted)}
+.spec-row dd{font:600 14.5px/1.5 var(--font-body)}
+.note-grid{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+.note-card{border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface-2);padding:22px}
+.note-card h3{font:650 15.5px/1.4 var(--font-display);margin-bottom:6px;display:flex;align-items:center;gap:8px}
+.note-card h3::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--accent);flex:none}
+.note-card p{color:var(--muted);font-size:14px}
+
+/* download */
+.store-slot{margin-top:26px;max-width:760px;display:flex;gap:16px;align-items:flex-start;border:1px dashed var(--border-strong);border-radius:var(--radius-lg);padding:20px 24px}
+.store-ic{flex:none;margin-top:2px;color:var(--accent)}
+.store-head{display:flex;align-items:center;gap:12px}
+.store-name{font:650 15.5px/1.3 var(--font-display);color:var(--fg)}
+.store-badge{font:600 11px/1 var(--font-mono);color:var(--accent);border:1px solid rgba(255,180,84,.45);padding:4px 9px;border-radius:999px}
+.store-d{margin-top:6px;color:var(--muted);font-size:13.5px}
+.cmd-block{margin-top:30px;border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;background:var(--bg-deep)}
+.cmd-head{display:flex;align-items:center;gap:10px;padding:9px 16px;border-bottom:1px solid var(--border);background:rgba(17,17,19,.9)}
+.cmd-title{font:500 12.5px/1 var(--font-mono);color:var(--muted)}
+.cmd-lang{font:650 11.5px/1 var(--font-mono);color:var(--muted);border:1px solid var(--border-strong);padding:4px 8px;border-radius:6px}
+.copy-btn{margin-left:auto;display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:6px 13px;
+  border:1px solid var(--border-strong);border-radius:8px;background:transparent;color:var(--muted);
+  font:600 12.5px/1 var(--font-body);cursor:pointer;transition:color .18s,border-color .18s,background .18s}
+.copy-btn:hover{color:var(--fg);border-color:var(--accent);background:var(--surface-2)}
+.copy-btn.ok{color:var(--accent);border-color:rgba(255,180,84,.55)}
+.cmd-pre{padding:18px 20px;overflow-x:auto}
+.cmd-pre code{font:400 13.5px/1.9 var(--font-mono);color:var(--fg);white-space:pre}
+.tok-c{color:#8A857C}
+.tok-u{color:var(--accent);word-break:break-all}
+.dl-foot{margin-top:18px;display:flex;flex-wrap:wrap;gap:8px 24px;color:var(--muted);font-size:13.5px}
+
+/* roadmap */
+.rm-ver{display:inline-block;font:650 12.5px/1 var(--font-mono);color:var(--fg);
+  border:1px solid var(--border-strong);padding:6px 11px;border-radius:999px;margin-bottom:8px}
+
+/* changelog */
+.cl-card{max-width:760px;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface-2);padding:26px 28px}
+.cl-head{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.cl-head .rm-ver{margin:0}
+.cl-prev{margin-top:22px}
+.cl-list{list-style:none}
+.cl-list li{position:relative;padding:7px 0 7px 20px;color:var(--muted);font-size:14.5px}
+.cl-list li::before{content:"";position:absolute;left:2px;top:17px;width:7px;height:7px;border-radius:2px;background:var(--border-strong)}
+.cl-list b{color:var(--fg);font-weight:600}
+.cl-foot{margin-top:16px;padding-top:16px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:8px 24px;font-size:13.5px;color:var(--muted)}
+
+/* author */
+.au-card{display:flex;align-items:center;gap:22px;max-width:640px;border:1px solid var(--border);border-radius:var(--radius-lg);
+  background:var(--surface-2);padding:26px 28px}
+.au-card img{width:72px;height:72px;border-radius:50%;border:1px solid var(--border-strong);object-fit:cover}
+.au-name{font:650 18px/1.3 var(--font-display)}
+.au-role{color:var(--muted);font-size:14.5px;margin-top:4px}
+.au-links{margin-top:10px;display:flex;gap:16px;font-size:13.5px}
+
+/* footer */
+footer{border-top:1px solid var(--border);padding:36px 0 44px;background:var(--bg-deep)}
+.foot-inner{display:flex;flex-wrap:wrap;align-items:center;gap:16px 32px}
+.foot-brand{display:flex;align-items:center;gap:10px;color:var(--fg);font:650 15px/1 var(--font-display)}
+.foot-brand svg{width:20px;height:20px;border-radius:5px}
+.foot-line{color:var(--muted);font-size:13px}
+.foot-links{margin-left:auto;display:flex;flex-wrap:wrap;gap:4px 20px}
+.foot-links a{color:var(--muted);font-size:13.5px}
+.foot-links a:hover{color:var(--fg)}
+.copyright{margin-top:22px;color:rgba(157,180,199,.6);font-size:12.5px}
+
+/* ---------- motion ---------- */
+html.js .reveal{opacity:0;transform:translateY(18px);transition:opacity .48s ease,transform .48s ease}
+html.js .reveal.in{opacity:1;transform:none}
+@keyframes fadeUp{from{opacity:0;transform:translateY(22px)}to{opacity:1;transform:none}}
+html.js [data-anim]{animation:fadeUp .7s cubic-bezier(.2,.7,.3,1) both}
+html.js [data-anim="2"]{animation-delay:.08s}
+html.js [data-anim="3"]{animation-delay:.16s}
+html.js [data-anim="4"]{animation-delay:.24s}
+html.js [data-anim="5"]{animation-delay:.32s}
+html.js [data-anim="6"]{animation-delay:.4s}
+html.js [data-anim="7"]{animation-delay:.48s}
+@keyframes langIn{from{opacity:.3}to{opacity:1}}
+html.lang-fading main{animation:langIn .22s ease}
+@media (prefers-reduced-motion:reduce){
+  html.js .reveal{opacity:1;transform:none;transition:none}
+  html.js [data-anim]{animation:none}
+  html{scroll-behavior:auto}
+  *,*::before,*::after{transition-duration:.01ms !important;animation-duration:.01ms !important}
+}
+
+/* ---------- responsive ---------- */
+@media (max-width:1024px){
+  .card-grid,.why-grid{grid-template-columns:1fr 1fr}
+  .tech-grid{grid-template-columns:1fr}
+}
+@media (max-width:920px){
+  .nav-links{display:none;position:absolute;top:64px;left:0;right:0;flex-direction:column;gap:2px;
+    background:rgba(11,11,12,.97);border-bottom:1px solid var(--border);padding:12px 16px 18px}
+  .nav-links a{padding:12px;font-size:16px}
+  .nav.open .nav-links{display:flex}
+  .nav-burger{display:inline-flex}
+  .brand-sub{display:none}
+  .nav-gh span{display:none}
+  .shot-grid{grid-template-columns:1fr}
+  .note-grid{grid-template-columns:1fr}
+}
+@media (max-width:640px){
+  section{padding:64px 0}
+  .hero{padding:120px 0 64px}
+  .card-grid,.why-grid,.tech-grid{grid-template-columns:1fr}
+  .spec-row{grid-template-columns:1fr;gap:2px}
+  .au-card{flex-direction:column;text-align:center;align-items:center}
+  .au-links{justify-content:center}
+  .foot-links{margin-left:0}
+  .lang button{min-width:44px}
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#main" data-i18n="skip">跳到主内容</a>
+
+<header class="nav" id="site-nav" data-od-id="site-nav">
+  <div class="container nav-inner">
+    <a class="brand" href="#top" aria-label="DeskOrder">
+      <svg viewBox="0 0 256 256" aria-hidden="true"><rect x="16" y="16" width="144" height="128" rx="8" fill="#1565C0"/><rect x="168" y="16" width="72" height="80" rx="8" fill="#1E88E5"/><rect x="16" y="152" width="96" height="88" rx="8" fill="#42A5F5"/><rect x="120" y="104" width="120" height="136" rx="8" fill="#00BCD4"/><line x1="160" y1="16" x2="160" y2="240" stroke="#fff" stroke-width="8" opacity=".9"/><line x1="16" y1="144" x2="240" y2="144" stroke="#fff" stroke-width="8" opacity=".9"/></svg>
+      <span class="brand-name">DeskOrder</span>
+      <span class="brand-sub" data-i18n="brand_sub">秩序桌面</span>
+    </a>
+    <nav class="nav-links" id="nav-links" aria-label="Sections">
+      <a href="#preview" data-i18n="nav_preview">预览</a>
+      <a href="#features" data-i18n="nav_features">功能</a>
+      <a href="#download" data-i18n="nav_download">下载</a>
+      <a href="#roadmap" data-i18n="nav_roadmap">未来展望</a>
+      <a href="#author" data-i18n="nav_author">关于</a>
+    </nav>
+    <div class="nav-actions">
+      <div class="lang" role="group" aria-label="Language" data-od-id="lang-toggle">
+        <button type="button" data-lang="zh">中文</button>
+        <button type="button" data-lang="en">EN</button>
+      </div>
+      <a class="btn btn-ghost nav-gh" href="https://github.com/Three-Freezen/DeskOrder" target="_blank" rel="noopener" data-od-id="nav-github">
+        <svg width="17" height="17" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+        <span>GitHub</span>
+      </a>
+      <button class="nav-burger" id="nav-burger" aria-expanded="false" aria-controls="nav-links" aria-label="Menu" data-od-id="nav-burger">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M2 4.5h14M2 9h14M2 13.5h14"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- ================= HERO ================= -->
+  <section class="hero" id="top" data-od-id="hero">
+    <div class="container">
+      <div class="badges" data-anim="1">
+        <span class="badge badge-accent">v1.0.11</span>
+        <span class="badge" data-i18n="badge_win">Windows 10+ x64</span>
+        <span class="badge" data-i18n="badge_net">.NET 10 自包含</span>
+        <span class="badge" data-i18n="badge_mit">MIT 开源</span>
+      </div>
+      <img class="hero-icon" src="assets/icon-256.png" alt="DeskOrder 应用图标" width="104" height="104" data-anim="2" data-od-id="hero-icon">
+      <h1 data-anim="3"><span class="grad">DeskOrder</span></h1>
+      <p class="tagline" data-anim="4" data-i18n="hero_tagline">桌面分类管理和磁贴美化，一个软件全实现</p>
+      <p class="hero-sub" data-anim="5" data-i18n="hero_sub">用分区把图标收整齐，用磁贴、液态玻璃和挂件，把桌面排成你想要的样子。</p>
+      <div class="cta" data-anim="6">
+        <a class="btn btn-primary" href="#download" data-od-id="hero-cta-download" data-i18n="hero_cta_dl">免费下载</a>
+        <a class="btn btn-ghost" href="https://github.com/Three-Freezen/DeskOrder" target="_blank" rel="noopener" data-od-id="hero-cta-github" data-i18n="hero_cta_gh">GitHub 源码</a>
+      </div>
+      <p class="cta-note" data-anim="7" data-i18n="hero_note">Windows 10 及以上 · 自带运行时，无需安装 .NET</p>
+    </div>
+    <div class="container">
+      <div class="hero-visual reveal" data-od-id="hero-visual">
+        <div class="desk-frame">
+          <div class="frame-bar"><span class="frame-label">桌面 · Desktop</span><span class="frame-controls"><svg width="44" height="12" viewBox="0 0 44 12" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M2 6h10"/><rect x="22" y="1.5" width="9" height="9"/><path d="M34 1.5l9 9M43 1.5l-9 9"/></svg></span></div>
+          <img src="assets/hero.webp" alt="DeskOrder 桌面全景：分区、磁贴、挂件同屏" loading="eager">
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= PREVIEW ================= -->
+  <section id="preview" data-od-id="preview">
+    <div class="container">
+      <div class="section-head center reveal">
+        <h2 data-i18n="sec_preview_t">效果预览</h2>
+        <p class="section-sub" data-i18n="sec_preview_s">全部为软件实际运行截图。</p>
+      </div>
+      <div class="shot-grid" data-stagger>
+        <figure class="shot reveal" data-od-id="shot-zones">
+          <img src="assets/zones.webp" alt="分区特写：子文件夹悬浮展开" loading="lazy">
+          <figcaption><span class="shot-chip" data-i18n="shot_zones_c">分区</span><span class="shot-d" data-i18n="shot_zones_d">子文件夹悬浮展开，不用点进文件夹翻</span></figcaption>
+        </figure>
+        <figure class="shot reveal" data-od-id="shot-tiles">
+          <img src="assets/tiles.webp" alt="磁贴模式：大图标加液态玻璃" loading="lazy">
+          <figcaption><span class="shot-chip" data-i18n="shot_tiles_c">磁贴模式</span><span class="shot-d" data-i18n="shot_tiles_d">大图标加液态玻璃，常用应用双击直达</span></figcaption>
+        </figure>
+        <figure class="shot reveal" data-od-id="shot-widgets">
+          <img src="assets/widgets.webp" alt="时钟、日历、便签挂件" loading="lazy">
+          <figcaption><span class="shot-chip" data-i18n="shot_widgets_c">桌面挂件</span><span class="shot-d" data-i18n="shot_widgets_d">时钟、日历、便签</span></figcaption>
+        </figure>
+        <figure class="shot reveal" data-od-id="shot-panel">
+          <img src="assets/panel.webp" alt="快捷面板" loading="lazy">
+          <figcaption><span class="shot-chip" data-i18n="shot_panel_c">快捷面板</span><span class="shot-d" data-i18n="shot_panel_d">分区卡片、系统项目和搜索收在一处</span></figcaption>
+        </figure>
+        <figure class="shot shot-wide reveal" data-od-id="shot-manager">
+          <img src="assets/manager.png" alt="管理窗口：分区、组件和设置集中管理" loading="lazy">
+          <figcaption><span class="shot-chip" data-i18n="shot_manager_c">管理窗口</span><span class="shot-d" data-i18n="shot_manager_d">分区、组件和设置集中管理</span></figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= FEATURES ================= -->
+  <section id="features" data-od-id="features" style="background:var(--surface-2);border-block:1px solid var(--border)">
+    <div class="container">
+      <div class="section-head center reveal">
+        <h2 data-i18n="sec_features_t">软件功能</h2>
+        <p class="section-sub" data-i18n="sec_features_s">从整理到美化，六大模块。</p>
+      </div>
+      <div class="card-grid" data-stagger>
+        <article class="feature-card reveal" data-od-id="feature-zones">
+          <div class="f-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2.5"/><path d="M9.5 3v18M9.5 12H21"/></svg></div>
+          <h3 data-i18n="f1t">桌面分区</h3>
+          <p data-i18n="f1d">任意数量的透明悬浮分区，文件拖入即归类；网格或自由排列、吸附与自动重排，支持多显示器。</p>
+        </article>
+        <article class="feature-card reveal" data-od-id="feature-tiles">
+          <div class="f-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2.5"/><rect x="8" y="8" width="8" height="8" rx="1.5"/></svg></div>
+          <h3 data-i18n="f2t">磁贴与美化</h3>
+          <p data-i18n="f2d">分区一键变磁贴，液态玻璃与背景图随心调；整套样式存成预设卡，其他分区一键套用。</p>
+        </article>
+        <article class="feature-card reveal" data-od-id="feature-widgets">
+          <div class="f-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg></div>
+          <h3 data-i18n="f3t">桌面挂件</h3>
+          <p data-i18n="f3d">时钟支持指针/数字与 12/24 小时制，日历待办到点托盘提醒，便签可绑定全局热键随时唤起。</p>
+        </article>
+        <article class="feature-card reveal" data-od-id="feature-panel">
+          <div class="f-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="10.5" cy="11" r="3"/><path d="M13 13.5 15.5 16"/></svg></div>
+          <h3 data-i18n="f4t">快捷面板</h3>
+          <p data-i18n="f4d">全局热键呼出，分区卡片、文件搜索、新建文档与文件夹收在一处，弹出位置和动效可调。</p>
+        </article>
+        <article class="feature-card reveal" data-od-id="feature-merge">
+          <div class="f-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="3" width="13" height="13" rx="2"/><rect x="8" y="8" width="13" height="13" rx="2"/></svg></div>
+          <h3 data-i18n="f5t">合并组</h3>
+          <p data-i18n="f5d">多个分区组成一组统一管理，样式一起换。</p>
+        </article>
+        <article class="feature-card reveal" data-od-id="feature-system">
+          <div class="f-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 17.5 12 21l8-3.5M4 12.5 12 16l8-3.5M12 3 4 6.5 12 10l8-3.5L12 3Z"/></svg></div>
+          <h3 data-i18n="f6t">系统集成</h3>
+          <p data-i18n="f6d">分区驻留桌面层不挡应用；托盘、开机自启、中英双语、浅色/深色主题、应用内更新。</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= WHY ================= -->
+  <section id="why" data-od-id="why">
+    <div class="container">
+      <div class="section-head center reveal">
+        <h2 data-i18n="sec_why_t">为什么选 DeskOrder</h2>
+      </div>
+      <div class="why-grid" data-stagger>
+        <article class="feature-card reveal" data-od-id="why-one-app">
+          <span class="num">01</span>
+          <h3 data-i18n="w1t">整理和美化，二合一</h3>
+          <p data-i18n="w1d">不用一边装整理工具、一边装美化工具，也不用来回同步两套配置。</p>
+        </article>
+        <article class="feature-card reveal" data-od-id="why-presets">
+          <span class="num">02</span>
+          <h3 data-i18n="w2t">深度自定义，调一次就够</h3>
+          <p data-i18n="w2d">从边框、填充到材质、动效，每个部分都能改；调满意的整套样式存成预设卡，一键套用到其他分区、面板、挂件。</p>
+          <div class="chips" data-od-id="tunable-chips">
+            <span class="chip" data-i18n="chip_border">边框</span><span class="chip" data-i18n="chip_fill">填充</span><span class="chip" data-i18n="chip_titlebar">标题栏</span><span class="chip" data-i18n="chip_material">材质</span><span class="chip" data-i18n="chip_bg">背景</span><span class="chip" data-i18n="chip_icons">图标</span><span class="chip" data-i18n="chip_content">内容</span><span class="chip" data-i18n="chip_layout">布局</span><span class="chip" data-i18n="chip_shape">形状</span><span class="chip" data-i18n="chip_motion">动效</span><span class="chip" data-i18n="chip_presets">预设</span>
+          </div>
+        </article>
+        <article class="feature-card reveal" data-od-id="why-file-links">
+          <span class="num">03</span>
+          <h3 data-i18n="w3t">图标直连原文件</h3>
+          <p data-i18n="w3d">图标只是文件路径的引用：不复制、不移动、不改名；删图标只是去掉引用，原文件还在原处。所有整理动作都不碰文件本体。</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= TECH ================= -->
+  <section id="tech" data-od-id="tech" style="background:var(--surface-2);border-block:1px solid var(--border)">
+    <div class="container">
+      <div class="section-head center reveal">
+        <h2 data-i18n="sec_tech_t">技术架构</h2>
+      </div>
+      <div class="tech-grid">
+        <dl class="spec reveal" data-od-id="tech-spec">
+          <div class="spec-row"><dt data-i18n="t_l1">语言 / 运行时</dt><dd data-i18n="t_v1">C# · .NET 10（自包含）</dd></div>
+          <div class="spec-row"><dt data-i18n="t_l2">界面框架</dt><dd>WPF</dd></div>
+          <div class="spec-row"><dt data-i18n="t_l3">系统集成</dt><dd>Win32 P/Invoke</dd></div>
+          <div class="spec-row"><dt data-i18n="t_l4">配置存储</dt><dd data-i18n="t_v4">JSON · 仅存本地（%APPDATA%）</dd></div>
+          <div class="spec-row"><dt data-i18n="t_l5">打包 / 发布</dt><dd>Inno Setup · GitHub Actions</dd></div>
+        </dl>
+        <div class="note-grid" data-stagger>
+          <article class="note-card reveal" data-od-id="tech-note-layer"><h3 data-i18n="n1t">桌面层层级</h3><p data-i18n="n1d">分区与挂件固定在壁纸之上、应用窗口之下，拖拽结束后自动回落。</p></article>
+          <article class="note-card reveal" data-od-id="tech-note-shell"><h3 data-i18n="n2t">Shell 集成</h3><p data-i18n="n2d">图标提取、OLE 拖放、快捷方式解析。</p></article>
+          <article class="note-card reveal" data-od-id="tech-note-config"><h3 data-i18n="n3t">可靠的配置读写</h3><p data-i18n="n3d">内存缓存 + 原子写入，避免写坏配置文件。</p></article>
+          <article class="note-card reveal" data-od-id="tech-note-i18n"><h3 data-i18n="n4t">本地化</h3><p data-i18n="n4d">i18n JSON 资源，界面语言切换即时生效。</p></article>
+          <article class="note-card reveal" data-od-id="tech-note-perf"><h3 data-i18n="n5t">性能优化</h3><p data-i18n="n5d">内存与渲染做过专项优化。</p></article>
+          <article class="note-card reveal" data-od-id="tech-note-privacy"><h3 data-i18n="n6t">数据隐私</h3><p data-i18n="n6d">配置全部存本地，不上传数据。</p></article>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= DOWNLOAD ================= -->
+  <section id="download" data-od-id="download">
+    <div class="container">
+      <div class="section-head center reveal">
+        <h2 data-i18n="sec_dl_t">下载与安装</h2>
+        <p class="section-sub" data-i18n="dl_req">系统要求：Windows 10 及以上，64 位；自带运行时，不需要另外安装 .NET。</p>
+      </div>
+      <div class="cmd-block reveal" data-od-id="cmd-block">
+        <div class="cmd-head">
+          <span class="cmd-title" data-i18n="dl_cmd_title">命令行下载</span>
+          <span class="cmd-lang">PowerShell</span>
+          <button type="button" class="copy-btn" id="copy-btn" data-od-id="copy-btn" aria-label="Copy commands">
+            <svg id="copy-ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            <span id="copy-txt" data-i18n="dl_copy">复制</span>
+          </button>
+        </div>
+        <div class="cmd-pre"><code id="cmd-code"><span class="tok-c"><span data-i18n="dl_cmd_c1"># 安装版</span></span>
+<span class="tok-u">irm https://github.com/Three-Freezen/DeskOrder/releases/latest/download/DeskOrder-win-Setup.exe</span> <span class="tok-c">-OutFile</span> DeskOrder-win-Setup.exe
+
+<span class="tok-c"><span data-i18n="dl_cmd_c2"># 或便携版</span></span>
+<span class="tok-u">irm https://github.com/Three-Freezen/DeskOrder/releases/latest/download/DeskOrder-win-Portable.zip</span> <span class="tok-c">-OutFile</span> DeskOrder-win-Portable.zip</code></div>
+      </div>
+
+      <div class="dl-foot reveal">
+        <a href="https://github.com/Three-Freezen/DeskOrder/releases" target="_blank" rel="noopener" data-od-id="dl-link-releases" data-i18n="dl_releases">手动下载请到 Releases 页面 →</a>
+        <span data-i18n="dl_upgrade">升级：打开「设置 → 检查更新」，下载完成后自动重启安装，配置不会丢。</span>
+      </div>
+
+      <div class="store-slot reveal" data-od-id="store-slot">
+        <svg class="store-ic" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 7h16l-1.2 12.2a1.8 1.8 0 0 1-1.8 1.6H7a1.8 1.8 0 0 1-1.8-1.6L4 7Z"/><path d="M8.5 9.5V6a3.5 3.5 0 0 1 7 0v3.5"/></svg>
+        <div>
+          <div class="store-head"><span class="store-name" data-i18n="dl_store_t">Microsoft Store 版</span><span class="store-badge" data-i18n="dl_store_badge">即将上架</span></div>
+          <p class="store-d" data-i18n="dl_store_d">计划上架微软商店，发布后在此提供安装入口。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= FUTURE ================= -->
+  <section id="roadmap" data-od-id="roadmap" style="background:var(--surface-2);border-block:1px solid var(--border)">
+    <div class="container">
+      <div class="section-head center reveal">
+        <h2 data-i18n="sec_rm_t">未来展望</h2>
+        <p class="section-sub" data-i18n="rm_note">计划中的功能，发布顺序可能调整。</p>
+      </div>
+      <div class="cl-card reveal" data-od-id="future-card">
+        <ul class="cl-list">
+          <li data-i18n="rm_i1">媒体播放显示组件</li>
+          <li data-i18n="rm_i2">分区列表模式支持</li>
+          <li data-i18n="rm_i3">性能优化</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= CHANGELOG ================= -->
+  <section id="changelog" data-od-id="changelog">
+    <div class="container">
+      <div class="section-head center reveal">
+        <h2 data-i18n="sec_cl_t">更新日志</h2>
+      </div>
+      <div class="cl-card reveal" data-od-id="changelog-card">
+        <div class="cl-head"><span class="rm-ver">v1.0.11</span></div>
+        <ul class="cl-list">
+          <li><b data-i18n="cl11_i1t"></b><span data-i18n="cl11_i1d"></span></li>
+        </ul>
+        <div class="cl-head cl-prev"><span class="rm-ver">v1.0.10</span></div>
+        <ul class="cl-list">
+          <li><b data-i18n="cl_i1t"></b><span data-i18n="cl_i1d"></span></li>
+          <li><b data-i18n="cl_i2t"></b><span data-i18n="cl_i2d"></span></li>
+          <li><b data-i18n="cl_i3t"></b><span data-i18n="cl_i3d"></span></li>
+          <li><b data-i18n="cl_i4t"></b><span data-i18n="cl_i4d"></span></li>
+        </ul>
+        <div class="cl-foot">
+          <a href="https://github.com/Three-Freezen/DeskOrder/releases" target="_blank" rel="noopener" data-od-id="cl-link" data-i18n="cl_link">完整更新记录见 Releases →</a>
+          <span data-i18n="cl_req">适用于 Windows 10 1809+ · 自包含运行时，无需安装 .NET</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= AUTHOR ================= -->
+  <section id="author" data-od-id="author" style="background:var(--surface-2);border-block:1px solid var(--border)">
+    <div class="container">
+      <div class="section-head center reveal">
+        <h2 data-i18n="sec_au_t">关于作者</h2>
+      </div>
+      <div class="au-card reveal" data-od-id="author-card">
+        <img src="assets/avatar.webp" alt="Three-Freeze 头像" width="72" height="72" loading="lazy">
+        <div>
+          <div class="au-name">Three-Freeze</div>
+          <p class="au-role" data-i18n="au_d">DeskOrder 的开发者，项目以 MIT 协议开源。</p>
+          <div class="au-links">
+            <a href="https://github.com/Three-Freezen" target="_blank" rel="noopener" data-od-id="author-github">GitHub @Three-Freezen</a>
+            <a href="https://github.com/Three-Freezen/DeskOrder/blob/main/LICENSE" target="_blank" rel="noopener" data-od-id="author-license" data-i18n="au_license">MIT License</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer data-od-id="footer">
+  <div class="container">
+    <div class="foot-inner">
+      <div>
+        <div class="foot-brand">
+          <svg viewBox="0 0 256 256" aria-hidden="true"><rect x="16" y="16" width="144" height="128" rx="8" fill="#1565C0"/><rect x="168" y="16" width="72" height="80" rx="8" fill="#1E88E5"/><rect x="16" y="152" width="96" height="88" rx="8" fill="#42A5F5"/><rect x="120" y="104" width="120" height="136" rx="8" fill="#00BCD4"/></svg>
+          DeskOrder
+        </div>
+        <p class="foot-line" data-i18n="ft_line">MIT 开源 · 配置仅存本地</p>
+      </div>
+      <div class="foot-links">
+        <a href="https://github.com/Three-Freezen/DeskOrder" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/Three-Freezen/DeskOrder/releases" target="_blank" rel="noopener" data-i18n="ft_releases">Releases</a>
+        <a href="https://github.com/Three-Freezen/DeskOrder/blob/main/LICENSE" target="_blank" rel="noopener" data-i18n="ft_license">LICENSE</a>
+      </div>
+    </div>
+    <p class="copyright">© 2026 Three-Freeze · DeskOrder</p>
+  </div>
+</footer>
+
+<script>
+(function(){
+"use strict";
+document.documentElement.classList.add("js");
+
+/* ---------- i18n ---------- */
+var I18N={
+zh:{
+  skip:"跳到主内容",brand_sub:"秩序桌面",
+  nav_preview:"预览",nav_features:"功能",nav_download:"下载",nav_roadmap:"未来展望",nav_author:"关于",
+  badge_win:"Windows 10+ x64",badge_net:".NET 10 自包含",badge_mit:"MIT 开源",
+  hero_tagline:"桌面分类管理和磁贴美化，一个软件全实现",
+  hero_sub:"用分区把图标收整齐，用磁贴、液态玻璃和挂件，把桌面排成你想要的样子。",
+  hero_cta_dl:"免费下载",hero_cta_gh:"GitHub 源码",
+  hero_note:"Windows 10 及以上 · 自带运行时，无需安装 .NET",
+  sec_preview_t:"效果预览",sec_preview_s:"全部为软件实际运行截图。",
+  shot_zones_c:"分区",shot_zones_d:"子文件夹悬浮展开，不用点进文件夹翻",
+  shot_tiles_c:"磁贴模式",shot_tiles_d:"大图标加液态玻璃，常用应用双击直达",
+  shot_widgets_c:"桌面挂件",shot_widgets_d:"时钟、日历、便签",
+  shot_panel_c:"快捷面板",shot_panel_d:"分区卡片、系统项目和搜索收在一处",
+  shot_manager_c:"管理窗口",shot_manager_d:"分区、组件和设置集中管理",
+  sec_features_t:"软件功能",sec_features_s:"从整理到美化，六大模块。",
+  f1t:"桌面分区",f1d:"任意数量的透明悬浮分区，文件拖入即归类；网格或自由排列、吸附与自动重排，支持多显示器。",
+  f2t:"磁贴与美化",f2d:"分区一键变磁贴，液态玻璃与背景图随心调；整套样式存成预设卡，其他分区一键套用。",
+  f3t:"桌面挂件",f3d:"时钟支持指针/数字与 12/24 小时制，日历待办到点托盘提醒，便签可绑定全局热键随时唤起。",
+  f4t:"快捷面板",f4d:"全局热键呼出，分区卡片、文件搜索、新建文档与文件夹收在一处，弹出位置和动效可调。",
+  f5t:"合并组",f5d:"多个分区组成一组统一管理，样式一起换。",
+  f6t:"系统集成",f6d:"分区驻留桌面层不挡应用；托盘、开机自启、中英双语、浅色/深色主题、应用内更新。",
+  sec_why_t:"为什么选 DeskOrder",
+  w1t:"整理和美化，二合一",w1d:"不用一边装整理工具、一边装美化工具，也不用来回同步两套配置。",
+  w2t:"深度自定义，调一次就够",w2d:"从边框、填充到材质、动效，每个部分都能改；调满意的整套样式存成预设卡，一键套用到其他分区、面板、挂件。",
+  chip_border:"边框",chip_fill:"填充",chip_titlebar:"标题栏",chip_material:"材质",chip_bg:"背景",chip_icons:"图标",chip_content:"内容",chip_layout:"布局",chip_shape:"形状",chip_motion:"动效",chip_presets:"预设",
+  w3t:"图标直连原文件",w3d:"图标只是文件路径的引用：不复制、不移动、不改名；删图标只是去掉引用，原文件还在原处。所有整理动作都不碰文件本体。",
+  sec_tech_t:"技术架构",
+  t_l1:"语言 / 运行时",t_v1:"C# · .NET 10（自包含）",t_l2:"界面框架",t_l3:"系统集成",t_l4:"配置存储",
+  t_v4:"JSON · 仅存本地（%APPDATA%）",t_l5:"打包 / 发布",
+  n1t:"桌面层层级",n1d:"分区与挂件固定在壁纸之上、应用窗口之下，拖拽结束后自动回落。",
+  n2t:"Shell 集成",n2d:"图标提取、OLE 拖放、快捷方式解析。",
+  n3t:"可靠的配置读写",n3d:"内存缓存 + 原子写入，避免写坏配置文件。",
+  n4t:"本地化",n4d:"i18n JSON 资源，界面语言切换即时生效。",
+  n5t:"性能优化",n5d:"内存与渲染做过专项优化。",
+  n6t:"数据隐私",n6d:"配置全部存本地，不上传数据。",
+  sec_dl_t:"下载与安装",
+  dl_req:"系统要求：Windows 10 及以上，64 位；自带运行时，不需要另外安装 .NET。",
+  dl_store_t:"Microsoft Store 版",dl_store_badge:"即将上架",
+  dl_store_d:"计划上架微软商店，发布后在此提供安装入口。",
+  dl_cmd_title:"命令行下载",dl_cmd_c1:"# 安装版",dl_cmd_c2:"# 或便携版",
+  dl_copy:"复制",dl_copied:"已复制",
+  dl_releases:"手动下载请到 Releases 页面 →",
+  dl_upgrade:"升级：打开「设置 → 检查更新」，下载完成后自动重启安装，配置不会丢。",
+  sec_rm_t:"未来展望",rm_note:"计划中的功能，发布顺序可能调整。",
+  rm_i1:"媒体播放显示组件",rm_i2:"分区列表模式支持",rm_i3:"性能优化",
+  sec_cl_t:"更新日志",
+  cl11_i1t:"日历便签编辑窗口深浅色跟随修复：",cl11_i1d:"便签编辑浮层换用与其他二级窗口一致的表面与配色，彻底跟随系统深浅色，不再残留固定配色。",
+  cl_i1t:"磁贴窗口高度回写修复：",cl_i1d:"完整隐藏、解散组合等路径不再把错误高度写回，窗口不会「每开一次就矮一截」。",
+  cl_i2t:"双击桌面即时呈现：",cl_i2d:"恢复全部组件不再播放级联动画；托盘「显示全部」保留级联动效。",
+  cl_i3t:"日历便签浮层主题化：",cl_i3d:"编辑浮层改用主题资源，跟随系统深浅色切换。",
+  cl_i4t:"MSIX 打包与应用内更新渠道：",cl_i4d:"Release 资产新增 DeskOrder-win-MSIX.msix，支持就地更新。",
+  cl_link:"完整更新记录见 Releases →",cl_req:"适用于 Windows 10 1809+ · 自包含运行时，无需安装 .NET",
+  sec_au_t:"关于作者",au_d:"DeskOrder 的开发者，项目以 MIT 协议开源。",au_license:"MIT License",
+  ft_line:"MIT 开源 · 配置仅存本地",ft_releases:"Releases",ft_license:"LICENSE",
+  doc_title:"DeskOrder 秩序桌面 — 桌面分区与磁贴美化"
+},
+en:{
+  skip:"Skip to content",brand_sub:"Orderly desktop",
+  nav_preview:"Screenshots",nav_features:"Features",nav_download:"Download",nav_roadmap:"Planned",nav_author:"About",
+  badge_win:"Windows 10+ x64",badge_net:".NET 10 self-contained",badge_mit:"MIT open source",
+  hero_tagline:"Desktop organization and tile beautification, in one app",
+  hero_sub:"Zones keep your icons tidy; tiles, liquid glass and widgets make the desktop look the way you want.",
+  hero_cta_dl:"Download free",hero_cta_gh:"View source",
+  hero_note:"Windows 10 or later · Self-contained runtime, no .NET needed",
+  sec_preview_t:"Screenshots",sec_preview_s:"All captured from the actual app.",
+  shot_zones_c:"Zones",shot_zones_d:"Subfolder flyout — peek inside without opening it",
+  shot_tiles_c:"Tile mode",shot_tiles_d:"Large custom icons with liquid glass; double-click to launch",
+  shot_widgets_c:"Widgets",shot_widgets_d:"Clock, calendar and sticky notes",
+  shot_panel_c:"Quick panel",shot_panel_d:"Zone cards, system locations and search in one place",
+  shot_manager_c:"Manager",shot_manager_d:"Zones, widgets and settings in one place",
+  sec_features_t:"Features",sec_features_s:"Six modules, from organizing to beautifying.",
+  f1t:"Desktop zones",f1d:"Any number of transparent floating zones — drop files in to organize them; grid or free layout, snap and auto-arrange, multi-monitor.",
+  f2t:"Tiles & styling",f2d:"Turn a zone into one big tile; tune liquid glass and background images, then save the whole look as a preset card for other zones.",
+  f3t:"Widgets",f3d:"Analog or digital clock with 12/24-hour modes; calendar reminders via tray notifications; sticky notes with global hotkeys.",
+  f4t:"Quick panel",f4d:"Summon with a global hotkey: zone cards, file search and new document/folder in one place; popup position and motion configurable.",
+  f5t:"Merged groups",f5d:"Combine zones into a group and restyle them together.",
+  f6t:"System integration",f6d:"Zones live on the desktop layer; tray, start with Windows, bilingual UI, light/dark themes and in-app updates.",
+  sec_why_t:"Why DeskOrder",
+  w1t:"Two tools in one",w1d:"No second tool to install, no two configs to keep in sync.",
+  w2t:"Set it once, reuse everywhere",w2d:"Every part is tunable. Save the whole look as a preset card and apply it to other zones, panels and widgets with one click.",
+  chip_border:"Border",chip_fill:"Fill",chip_titlebar:"Title bar",chip_material:"Material",chip_bg:"Background",chip_icons:"Icons",chip_content:"Content",chip_layout:"Layout",chip_shape:"Shape",chip_motion:"Motion",chip_presets:"Presets",
+  w3t:"Icons link to real files",w3d:"An icon is only a reference to the file path — nothing is copied or moved. Removing an icon removes only the reference; organizing never touches the files.",
+  sec_tech_t:"Architecture",
+  t_l1:"Language / runtime",t_v1:"C# · .NET 10 (self-contained)",t_l2:"UI framework",t_l3:"System integration",t_l4:"Config storage",
+  t_v4:"JSON · local only (%APPDATA%)",t_l5:"Packaging / release",
+  n1t:"Desktop layer",n1d:"Zones and widgets stay above the wallpaper and below app windows, falling back after drag.",
+  n2t:"Shell integration",n2d:"Icon extraction, OLE drag & drop, shortcut resolution.",
+  n3t:"Reliable config I/O",n3d:"In-memory cache plus atomic writes keep the config file safe.",
+  n4t:"Localization",n4d:"i18n JSON resources; switching the UI language applies instantly.",
+  n5t:"Performance",n5d:"Dedicated memory and rendering optimization.",
+  n6t:"Privacy",n6d:"Configuration stays local; nothing is uploaded.",
+  sec_dl_t:"Download & install",
+  dl_req:"Requirements: Windows 10 or later, 64-bit. Ships with its own runtime — no .NET installation needed.",
+  dl_store_t:"Microsoft Store version",dl_store_badge:"Coming soon",
+  dl_store_d:"Planned for the Microsoft Store — an install link will be added here once it's live.",
+  dl_cmd_title:"Command-line download",dl_cmd_c1:"# Installer",dl_cmd_c2:"# Or portable",
+  dl_copy:"Copy",dl_copied:"Copied",
+  dl_releases:"Grab them manually from the Releases page →",
+  dl_upgrade:"Updating: open Settings → Check for updates. The app downloads, installs and restarts automatically — your configuration is preserved.",
+  sec_rm_t:"What's next",rm_note:"Planned features; shipping order may change.",
+  rm_i1:"Media playback display widget",rm_i2:"List mode for zones",rm_i3:"Performance improvements",
+  sec_cl_t:"Changelog",
+  cl11_i1t:"Calendar & note editor follows light/dark: ",cl11_i1d:"the note edit overlay now uses the same window surface as other dialogs, fully tracking the system theme with no fixed colors left.",
+  cl_i1t:"Tile-window height write-back fixed: ",cl_i1d:"windows no longer shrink or shift after full-hide, unmerging or disbanding.",
+  cl_i2t:"Instant desktop double-click restore: ",cl_i2d:"restoring all components no longer plays the cascade animation; the tray's Show-all keeps the cascade motion.",
+  cl_i3t:"Calendar & note overlays themed: ",cl_i3d:"edit overlays now use theme resources and follow the light/dark system theme.",
+  cl_i4t:"MSIX packaging & in-app updates: ",cl_i4d:"Release assets now include DeskOrder-win-MSIX.msix with in-place updates.",
+  cl_link:"Full history in Releases →",cl_req:"For Windows 10 1809+ · self-contained runtime, no .NET needed",
+  sec_au_t:"About",au_d:"Developer of DeskOrder. The project is open source under the MIT license.",au_license:"MIT License",
+  ft_line:"MIT open source · config stays local",ft_releases:"Releases",ft_license:"LICENSE",
+  doc_title:"DeskOrder — Desktop organization & tile beautification"
+}};
+
+var CMD_TXT="irm https://github.com/Three-Freezen/DeskOrder/releases/latest/download/DeskOrder-win-Setup.exe -OutFile DeskOrder-win-Setup.exe\nirm https://github.com/Three-Freezen/DeskOrder/releases/latest/download/DeskOrder-win-Portable.zip -OutFile DeskOrder-win-Portable.zip";
+
+var stored=null;
+try{stored=localStorage.getItem("deskorder-lang")}catch(e){}
+var lang=stored==="zh"||stored==="en"?stored:((navigator.language||"en").toLowerCase().indexOf("zh")===0?"zh":"en");
+
+function $(s){return document.querySelector(s)}
+function $$(s){return Array.prototype.slice.call(document.querySelectorAll(s))}
+
+function applyLang(l){
+  lang=l;
+  var dict=I18N[l];
+  document.documentElement.lang=l==="zh"?"zh-CN":"en";
+  document.title=dict.doc_title;
+  $$("[data-i18n]").forEach(function(el){
+    var v=dict[el.getAttribute("data-i18n")];
+    if(typeof v==="string")el.textContent=v;
+  });
+  $$(".lang button").forEach(function(b){
+    var on=b.getAttribute("data-lang")===l;
+    b.classList.toggle("on",on);
+    b.setAttribute("aria-pressed",on?"true":"false");
+  });
+  $("#copy-btn").setAttribute("aria-label",l==="zh"?"复制下载命令":"Copy download commands");
+  try{localStorage.setItem("deskorder-lang",l)}catch(e){}
+}
+
+$$(".lang button").forEach(function(b){
+  b.addEventListener("click",function(){
+    if(b.getAttribute("data-lang")===lang)return;
+    document.documentElement.classList.add("lang-fading");
+    setTimeout(function(){
+      applyLang(b.getAttribute("data-lang"));
+      document.documentElement.classList.remove("lang-fading");
+    },180);
+  });
+});
+
+/* ---------- copy ---------- */
+var copyBtn=$("#copy-btn"),copyTxt=$("#copy-txt"),copyTimer=null;
+copyBtn.addEventListener("click",function(){
+  function done(){
+    copyBtn.classList.add("ok");copyTxt.textContent=I18N[lang].dl_copied;
+    clearTimeout(copyTimer);
+    copyTimer=setTimeout(function(){copyBtn.classList.remove("ok");copyTxt.textContent=I18N[lang].dl_copy},1600);
+  }
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(CMD_TXT).then(done,done);
+  }else{
+    var ta=document.createElement("textarea");ta.value=CMD_TXT;document.body.appendChild(ta);
+    ta.select();try{document.execCommand("copy")}catch(e){}document.body.removeChild(ta);done();
+  }
+});
+
+/* ---------- mobile nav ---------- */
+var nav=$("#site-nav"),burger=$("#nav-burger");
+burger.addEventListener("click",function(){
+  var open=nav.classList.toggle("open");
+  burger.setAttribute("aria-expanded",open?"true":"false");
+});
+$$("#nav-links a").forEach(function(a){
+  a.addEventListener("click",function(){nav.classList.remove("open");burger.setAttribute("aria-expanded","false")});
+});
+
+/* ---------- reveal on scroll (replays on re-enter) ---------- */
+var reduced=window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+if("IntersectionObserver" in window&&!reduced){
+  var io=new IntersectionObserver(function(entries){
+    entries.forEach(function(en){
+      if(en.intersectionRatio===0){en.target.classList.remove("in")}
+      else{en.target.classList.add("in")}
+    });
+  },{threshold:[0,.12],rootMargin:"0px 0px -6% 0px"});
+  $$("[data-stagger]").forEach(function(g){
+    Array.prototype.forEach.call(g.children,function(c,i){c.style.transitionDelay=(i*70)+"ms"});
+  });
+  $$(".reveal").forEach(function(el){io.observe(el)});
+}else{
+  $$(".reveal").forEach(function(el){el.classList.add("in")});
+}
+
+/* ---------- scrollspy ---------- */
+var links=$$("#nav-links a");
+var map={};
+links.forEach(function(a){map[a.getAttribute("href").slice(1)]=a});
+if("IntersectionObserver" in window){
+  var spy=new IntersectionObserver(function(entries){
+    entries.forEach(function(en){
+      if(en.isIntersecting){
+        links.forEach(function(a){a.classList.remove("active")});
+        var a=map[en.target.id];
+        if(a)a.classList.add("active");
+      }
+    });
+  },{rootMargin:"-40% 0px -55% 0px"});
+  Object.keys(map).forEach(function(id){var s=document.getElementById(id);if(s)spy.observe(s)});
+}
+
+/* ---------- hero parallax ---------- */
+var hv=$(".hero-visual");
+if(hv&&!reduced){
+  var ticking=false;
+  window.addEventListener("scroll",function(){
+    if(ticking)return;ticking=true;
+    requestAnimationFrame(function(){
+      var y=Math.min(window.scrollY*.08,64);
+      hv.style.transform="translateY("+y+"px)";
+      ticking=false;
+    });
+  },{passive:true});
+}
+
+applyLang(lang);
+})();
+</script>
+</body>
+</html>
