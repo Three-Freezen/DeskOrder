@@ -724,14 +724,17 @@ public partial class CalendarWidget : Window
             AllowsTransparency = true,
             Background = System.Windows.Media.Brushes.Transparent
         };
+        // 跟随系统深浅色的二级窗口同款:毛玻璃表面 + Menu.* 调色板(与「导入系统项目」
+        // ShellLocationPickerWindow / RenameDialog / ColorPickerDialog 一致)。
+        AcrylicHelper.ApplyMenuSurface(noteWindow, 12);
         var outerBorder = new System.Windows.Controls.Border
         {
             CornerRadius = new CornerRadius(12),
             BorderThickness = new Thickness(1),
             Padding = new Thickness(16)
         };
-        outerBorder.SetResourceReference(System.Windows.Controls.Border.BackgroundProperty, "Brush.Bg.Chrome");
-        outerBorder.SetResourceReference(System.Windows.Controls.Border.BorderBrushProperty, "Brush.Border.Subtle");
+        outerBorder.SetResourceReference(System.Windows.Controls.Border.BackgroundProperty, "Menu.Bg.Surface");
+        outerBorder.SetResourceReference(System.Windows.Controls.Border.BorderBrushProperty, "Menu.Border.Subtle");
         // ponytail 2026-08-28: 阴影拆到独立兄弟 Border(ManagementWindow 同款处理) —
         // Effect 挂在含 TextBox 的根 Border 上，光标闪烁也会反复触发整窗 CPU 位图卷积。
         var shadowBorder = new System.Windows.Controls.Border
@@ -739,7 +742,7 @@ public partial class CalendarWidget : Window
             CornerRadius = new CornerRadius(12),
             Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 24, ShadowDepth = 0, Color = Color.FromArgb(0xAA, 0x00, 0x00, 0x00), Opacity = 0.6 }
         };
-        shadowBorder.SetResourceReference(System.Windows.Controls.Border.BackgroundProperty, "Brush.Bg.Chrome");
+        shadowBorder.SetResourceReference(System.Windows.Controls.Border.BackgroundProperty, "Menu.Bg.Surface");
 
         var grid = new Grid();
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });    // 0: title
@@ -756,7 +759,7 @@ public partial class CalendarWidget : Window
             FontSize = 14, FontWeight = FontWeights.SemiBold,
             Margin = new Thickness(0, 0, 0, 8)
         };
-        titleText.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "Brush.Text.Primary");
+        titleText.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "Menu.Text.Primary");
         grid.Children.Add(titleText);
         Grid.SetRow(grid.Children[^1], 0);
 
@@ -783,9 +786,9 @@ public partial class CalendarWidget : Window
             // 是 PresentationFramework 内置字符串,切语言不变。改用自定义菜单挂 i18n。
             ContextMenu = BuildTextBoxContextMenu()
         };
-        textBox.SetResourceReference(System.Windows.Controls.TextBox.BackgroundProperty, "Brush.Bg.Input");
-        textBox.SetResourceReference(System.Windows.Controls.TextBox.ForegroundProperty, "Brush.Text.Primary");
-        textBox.SetResourceReference(System.Windows.Controls.TextBox.BorderBrushProperty, "Brush.Border.Subtle");
+        textBox.SetResourceReference(System.Windows.Controls.TextBox.BackgroundProperty, "Menu.Bg.Hover");
+        textBox.SetResourceReference(System.Windows.Controls.TextBox.ForegroundProperty, "Menu.Text.Primary");
+        textBox.SetResourceReference(System.Windows.Controls.TextBox.BorderBrushProperty, "Menu.Border.Subtle");
         Grid.SetRow(textBox, 2);
         grid.Children.Add(textBox);
 
@@ -810,7 +813,7 @@ public partial class CalendarWidget : Window
             VerticalAlignment = VerticalAlignment.Center,
             FontSize = 11, Margin = new Thickness(0, 0, 6, 0)
         };
-        priorityLabel.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "Brush.Text.Secondary");
+        priorityLabel.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "Menu.Text.Secondary");
         priorityPanel.Children.Add(priorityLabel);
         priorityPanel.Children.Add(cmb);
         grid.Children.Add(priorityPanel);
@@ -826,7 +829,7 @@ public partial class CalendarWidget : Window
             VerticalContentAlignment = VerticalAlignment.Center,
             Margin = new Thickness(0, 0, 6, 0)
         };
-        reminderCheck.SetResourceReference(System.Windows.Controls.CheckBox.ForegroundProperty, "Brush.Text.Secondary");
+        reminderCheck.SetResourceReference(System.Windows.Controls.CheckBox.ForegroundProperty, "Menu.Text.Secondary");
         var dateHint = "yyyy-MM-dd";
         var timeHint = "HH:mm";
         var reminderDateBox = new TextBox
@@ -839,9 +842,9 @@ public partial class CalendarWidget : Window
             VerticalContentAlignment = VerticalAlignment.Center,
             BorderThickness = new Thickness(1)
         };
-        reminderDateBox.SetResourceReference(System.Windows.Controls.TextBox.BackgroundProperty, "Brush.Bg.Input");
-        reminderDateBox.SetResourceReference(System.Windows.Controls.TextBox.ForegroundProperty, "Brush.Text.Primary");
-        reminderDateBox.SetResourceReference(System.Windows.Controls.TextBox.BorderBrushProperty, "Brush.Border.Subtle");
+        reminderDateBox.SetResourceReference(System.Windows.Controls.TextBox.BackgroundProperty, "Menu.Bg.Hover");
+        reminderDateBox.SetResourceReference(System.Windows.Controls.TextBox.ForegroundProperty, "Menu.Text.Primary");
+        reminderDateBox.SetResourceReference(System.Windows.Controls.TextBox.BorderBrushProperty, "Menu.Border.Subtle");
         var reminderTimeBox = new TextBox
         {
             Width = 50, Height = 24, FontSize = 11,
@@ -853,13 +856,13 @@ public partial class CalendarWidget : Window
             Margin = new Thickness(4, 0, 0, 0),
             BorderThickness = new Thickness(1)
         };
-        reminderTimeBox.SetResourceReference(System.Windows.Controls.TextBox.BackgroundProperty, "Brush.Bg.Input");
-        reminderTimeBox.SetResourceReference(System.Windows.Controls.TextBox.ForegroundProperty, "Brush.Text.Primary");
-        reminderTimeBox.SetResourceReference(System.Windows.Controls.TextBox.BorderBrushProperty, "Brush.Border.Subtle");
+        reminderTimeBox.SetResourceReference(System.Windows.Controls.TextBox.BackgroundProperty, "Menu.Bg.Hover");
+        reminderTimeBox.SetResourceReference(System.Windows.Controls.TextBox.ForegroundProperty, "Menu.Text.Primary");
+        reminderTimeBox.SetResourceReference(System.Windows.Controls.TextBox.BorderBrushProperty, "Menu.Border.Subtle");
 
         // Watermark behavior for date box（主题 brush 的 Color 本身是 DynamicResource，缓存引用也会随深浅色切换）
-        var hintBrush = (System.Windows.Media.Brush)FindResource("Brush.Text.Tertiary");
-        var textBrush = (System.Windows.Media.Brush)FindResource("Brush.Text.Primary");
+        var hintBrush = (System.Windows.Media.Brush)FindResource("Menu.Text.Tertiary");
+        var textBrush = (System.Windows.Media.Brush)FindResource("Menu.Text.Primary");
         reminderDateBox.Foreground = hintBrush;
         reminderDateBox.GotFocus += (_, _) =>
         {
