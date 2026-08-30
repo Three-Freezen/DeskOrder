@@ -16,8 +16,7 @@
   </p>
 </div>
 
-> 📷 **待补图 1 · 主视觉**：桌面全景——多个分区、磁贴、时钟/日历挂件同屏。
-> 截图存为 `docs/images/hero.png`，然后把这段提示替换为 `![DeskOrder 桌面全景](docs/images/hero.png)`
+![DeskOrder 桌面全景：分区、磁贴、挂件同屏](docs/images/hero.png)
 
 ---
 
@@ -31,13 +30,15 @@
 
 ## 效果预览
 
-> 📷 **待补图 2 · 分区特写**：图标网格、自由排列、子文件夹悬浮展开 → `docs/images/zones.png`
+![分区特写：子文件夹悬浮展开，不用点进文件夹翻](docs/images/zones.png)
 
-> 📷 **待补图 3 · 磁贴美化**：磁贴模式、液态玻璃、背景图效果 → `docs/images/tiles.png`
+![磁贴模式：大图标加液态玻璃，常用应用双击直达](docs/images/tiles.png)
 
-> 📷 **待补图 4 · 管理窗口**：侧边栏管理界面（浅色主题）→ `docs/images/manager.png`
+![时钟、日历、便签挂件](docs/images/widgets.png)
 
-图片放好后，把上面的提示替换为 `![说明文字](docs/images/文件名)` 即可。
+![快捷面板：分区卡片、系统项目和搜索收在一处](docs/images/panel.png)
+
+![管理窗口：分区、组件和设置集中管理](docs/images/manager.png)
 
 ## 下载与安装
 
