@@ -225,9 +225,13 @@ dotnet publish DesktopZones.csproj -c Release -r win-x64 --self-contained
 
 Use `tools/pack.ps1` to build the installer and portable zip (requires [Inno Setup 6](https://jrsoftware.org/isinfo.php)). Official releases are built automatically by GitHub Actions and uploaded to Releases.
 
-## Roadmap
+## Future Plans
 
-Snap alignment, undo/redo, one-click layout profiles, zone sharing/export and more are planned — see [ROADMAP.md](ROADMAP.md). Release notes: [Releases](https://github.com/Three-Freezen/DeskOrder/releases).
+- Media playback display widget
+- List mode for zones
+- Performance optimizations
+
+Release notes: [Releases](https://github.com/Three-Freezen/DeskOrder/releases).
 
 ## License
 
