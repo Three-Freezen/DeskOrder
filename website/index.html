@@ -298,7 +298,7 @@ html.lang-fading main{animation:langIn .22s ease}
   <section class="hero" id="top" data-od-id="hero">
     <div class="container">
       <div class="badges" data-anim="1">
-        <span class="badge badge-accent">v1.0.15</span>
+        <span class="badge badge-accent">v1.0.16</span>
         <span class="badge" data-i18n="badge_win">Windows 10+ x64</span>
         <span class="badge" data-i18n="badge_net">.NET 10 自包含</span>
         <span class="badge" data-i18n="badge_mit">MIT 开源</span>
@@ -523,7 +523,12 @@ html.lang-fading main{animation:langIn .22s ease}
         <h2 data-i18n="sec_cl_t">更新日志</h2>
       </div>
       <div class="cl-card reveal" data-od-id="changelog-card">
-        <div class="cl-head"><span class="rm-ver">v1.0.15</span></div>
+        <div class="cl-head"><span class="rm-ver">v1.0.16</span></div>
+        <ul class="cl-list">
+          <li><b data-i18n="cl16_i1t"></b><span data-i18n="cl16_i1d"></span></li>
+          <li><b data-i18n="cl16_i2t"></b><span data-i18n="cl16_i2d"></span></li>
+        </ul>
+        <div class="cl-head cl-prev"><span class="rm-ver">v1.0.15</span></div>
         <ul class="cl-list">
           <li><b data-i18n="cl15_i1t"></b><span data-i18n="cl15_i1d"></span></li>
           <li><b data-i18n="cl15_i2t"></b><span data-i18n="cl15_i2d"></span></li>
@@ -542,11 +547,6 @@ html.lang-fading main{animation:langIn .22s ease}
           <li><b data-i18n="cl13_i2t"></b><span data-i18n="cl13_i2d"></span></li>
           <li><b data-i18n="cl13_i3t"></b><span data-i18n="cl13_i3d"></span></li>
           <li><b data-i18n="cl13_i4t"></b><span data-i18n="cl13_i4d"></span></li>
-        </ul>
-        <div class="cl-head cl-prev"><span class="rm-ver">v1.0.12</span></div>
-        <ul class="cl-list">
-          <li><b data-i18n="cl12_i1t"></b><span data-i18n="cl12_i1d"></span></li>
-          <li><b data-i18n="cl12_i2t"></b><span data-i18n="cl12_i2d"></span></li>
         </ul>
         <div class="cl-foot">
           <a href="https://github.com/Three-Freezen/DeskOrder/releases" target="_blank" rel="noopener" data-od-id="cl-link" data-i18n="cl_link">完整更新记录见 Releases →</a>
@@ -652,6 +652,8 @@ zh:{
   sec_rm_t:"未来展望",rm_note:"计划中的功能，发布顺序可能调整。",
   rm_i1:"媒体播放显示组件",rm_i2:"分区列表模式支持",rm_i3:"性能优化",
   sec_cl_t:"更新日志",
+  cl16_i1t:"触屏设备启动崩溃修复：",cl16_i1d:"修复微软商店审核在 Surface 等触屏设备上发现的启动即崩溃问题。本应用不使用墨迹与触控笔势，现已跳过 WPF 笔/触控栈初始化，触屏点按仍作为普通鼠标输入工作。",
+  cl16_i2t:"崩溃日志落盘：",cl16_i2d:"应用未处理异常（含后台线程）现在会写入 logs 目录的 crash-*.log，含版本、运行形态、异常链与堆栈，出问题不再无声无息。",
   cl15_i1t:"液态玻璃材质预设（8 种）：",cl15_i1d:"亚克力、烟雾、毛玻璃、液态玻璃、深色玻璃等一键套用整套背板配方，与颜色预设互不干扰；材质选择改为显式开关并新增「默认」。",
   cl15_i2t:"壁纸采样渲染（新方案）：",cl15_i2d:"背板改为采样当前壁纸自行模糊，模糊半径变成真实像素、材质全部生效；自动适配 Wallpaper Engine 等动态壁纸软件，1:1 物理像素采样，换壁纸后点「重新采样」即可刷新。",
   cl15_i3t:"标题栏改名修复：",cl15_i3d:"窗口标题栏里改名字即时生效并同步到设置界面；点别处、停手、关窗也会提交，不再出现界面新名字、配置旧名字。",
@@ -663,8 +665,6 @@ zh:{
   cl13_i2t:"面板搜索增强：",cl13_i2d:"支持按内部项目名搜到次级分区（子分区）里的图标。",
   cl13_i3t:"样式预设更聪明：",cl13_i3d:"加载预设只套用外观，不再覆盖目标已有的名称与图标（分区/组合/时钟/日历/便签/次级分区）。",
   cl13_i4t:"标题栏实时同步：",cl13_i4d:"分区与便签窗口重命名时标题栏即时更新。",
-  cl12_i1t:"组合分区保留原有填充：",cl12_i1d:"组合分区并保留原有填充时，分区表面禁用液态玻璃效果，原有填充样式完整保留、显示正确。",
-  cl12_i2t:"微软商店版就绪：",cl12_i2d:"商店渠道安装的版本由微软商店负责更新，应用内不再重复检查；GitHub 侧载 MSIX 的应用内更新不受影响。",
   cl_link:"完整更新记录见 Releases →",cl_req:"适用于 Windows 10 1809+ · 自包含运行时，无需安装 .NET",
   sec_au_t:"关于作者",au_d:"DeskOrder 的开发者，项目以 MIT 协议开源。",au_license:"MIT License",
   ft_line:"MIT 开源 · 配置仅存本地",ft_releases:"Releases",ft_license:"LICENSE",
@@ -718,6 +718,8 @@ en:{
   sec_rm_t:"What's next",rm_note:"Planned features; shipping order may change.",
   rm_i1:"Media playback display widget",rm_i2:"List mode for zones",rm_i3:"Performance improvements",
   sec_cl_t:"Changelog",
+  cl16_i1t:"Touch-device launch crash fixed: ",cl16_i1d:"fixes the launch crash that Microsoft Store certification found on touch devices such as the Surface family. The app never uses ink or stylus gestures and now skips WPF's stylus/touch stack initialization entirely; touch taps still work as plain mouse input.",
+  cl16_i2t:"Crash logs on disk: ",cl16_i2d:"unhandled exceptions (including background threads) are now written to crash-*.log in the logs folder, with version, run mode, exception chain and stack traces — no more silent deaths.",
   cl15_i1t:"Liquid glass material presets (8): ",cl15_i1d:"Acrylic, Smoke, Frosted, Liquid Glass, Dark Glass and more apply a whole backdrop recipe in one click, independent of color presets; picking a material is now an explicit toggle with a new \"Default\" entry.",
   cl15_i2t:"Wallpaper sampling rendering (new): ",cl15_i2d:"the backdrop is sampled from the current wallpaper and blurred in-app — the blur radius becomes real pixels and material presets take full effect; auto-adapts to Wallpaper Engine and other dynamic-wallpaper apps at native 1:1 pixels, with a Resample button for wallpaper changes.",
   cl15_i3t:"Title-bar rename fixed: ",cl15_i3d:"renames in window title bars apply instantly and sync across the management UI; clicking elsewhere, pausing or closing the window commits too — no more new name on screen, old name in the config.",
@@ -729,8 +731,6 @@ en:{
   cl13_i2t:"Better panel search: ",cl13_i2d:"search now matches icons inside secondary zones (sub-zones) by their item names.",
   cl13_i3t:"Smarter style presets: ",cl13_i3d:"applying a preset only changes appearance — it no longer overwrites the target's existing name and icon (zones, groups, clock, calendar, notes, secondary zones).",
   cl13_i4t:"Live title bar sync: ",cl13_i4d:"zone and sticky note windows update their title bar instantly on rename.",
-  cl12_i1t:"Combining zones keeps the original fill: ",cl12_i1d:"when merging zones while keeping the original fill, the merged surface disables liquid glass so the preserved fill renders correctly.",
-  cl12_i2t:"Microsoft Store ready: ",cl12_i2d:"Store-installed copies are updated by the Microsoft Store — the in-app checker no longer runs for them; GitHub-sideloaded MSIX keeps in-app updates.",
   cl_link:"Full history in Releases →",cl_req:"For Windows 10 1809+ · self-contained runtime, no .NET needed",
   sec_au_t:"About",au_d:"Developer of DeskOrder. The project is open source under the MIT license.",au_license:"MIT License",
   ft_line:"MIT open source · config stays local",ft_releases:"Releases",ft_license:"LICENSE",
