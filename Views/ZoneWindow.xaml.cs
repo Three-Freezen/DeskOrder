@@ -1259,7 +1259,9 @@ public partial class ZoneWindow : Window
         if (rn.ShowDialog() == true && !string.IsNullOrWhiteSpace(rn.NewName))
         {
             vm.Name = rn.NewName; // ZoneItemViewModel.Name 直写底层 ZoneItem
-            _mgr.SaveConfig();
+            // ponytail 2026-09-26: 原来只 SaveConfig,设置界面收不到通知 —— 次级分区(SubFolder)
+            // 自己的名字就显示在属性面板里,内层图标改名同理;走同一条「落盘 + 通知」收口。
+            OnFlyoutItemsChanged();
         }
     }
 
@@ -4571,40 +4573,56 @@ public partial class ZoneWindow : Window
 
     // ── Inline title editing ──
 
+    /// <summary>组合分区(组长窗口)的标题 = 组显示名 <c>MergedGroupMembership.DisplayName</c>,
+    /// 不是主分区自己的 <c>Zone.Name</c> —— 子分区没有自己的窗口(ShowZone 会重定向到组长),
+    /// 所以"组合分区的名字"在这条标题栏上改的就是 DisplayName。</summary>
+    bool TitleIsMergedGroup => _zone.MergedGroupMembership.SubZoneIds.Count > 0;
+
+    /// <summary>标题栏当前应该显示的名字(组合分区:DisplayName,空则回落主分区名)。</summary>
+    string CurrentTitleText() => TitleIsMergedGroup
+        ? (string.IsNullOrEmpty(_zone.MergedGroupMembership.DisplayName)
+            ? _zone.Name : _zone.MergedGroupMembership.DisplayName)
+        : _zone.Name;
+
+    /// <summary>
+    /// 标题栏内联改名的唯一提交口(Enter 与失焦共用)。改名走
+    /// <see cref="ZoneManager.RenameZone"/>:写模型 + 立即落盘 + ZonesChanged,
+    /// 设置界面实时跟上,不做"二次应用"。提交后把显示文本还原为已保存的值
+    /// (空名 / 未改动时同样回填,避免标题框停在用户敲了一半的文本上)。
+    /// </summary>
+    void CommitTitleRename()
+    {
+        var text = ZoneTitleText.Text?.Trim() ?? "";
+        if (_mgr.RenameZone(_zone, text))
+        {
+            // 设置界面里显示这个名字的地方(停靠标签页 / 该目标的浮动编辑器标签页)跟着改。
+            PropertyWindowManager.Instance.RefreshEditorTitle(
+                TitleIsMergedGroup ? MergedGroupTarget.For(_zone) : _zone);
+        }
+        ZoneTitleText.Text = CurrentTitleText();
+    }
+
     void ZoneTitle_PreviewMouseLeftButtonDown(object s, MouseButtonEventArgs e)
     {
         // Merged: the title text is the master label (above the sub-zone tabs), so a
-        // click switches back to the master view. Not merged: leave the click alone so
-        // the TextBox can start an inline rename.
-        if (_zone.MergedGroupMembership.SubZoneIds.Count > 0)
+        // click switches back to the master view.
+        // ponytail 2026-09-26: 但只在「当前不在主分区视图」时拦截 —— 已经在主视图了,
+        // 这一下点击就该进内联改名(组合分区的名字现在允许在标题栏直接改;旧实现
+        // 无条件拦截 + TextBox 置只读,用户根本改不了,只能去设置界面改)。
+        if (TitleIsMergedGroup && _vm.SelectedSubZoneId != _zone.Id)
         {
             SelectSubZone(_zone.Id);
             e.Handled = true;
         }
     }
 
-    void ZoneTitle_LostFocus(object s, RoutedEventArgs e)
-    {
-        var text = ZoneTitleText.Text?.Trim() ?? "";
-        if (!string.IsNullOrEmpty(text) && text != _zone.Name)
-        {
-            _zone.Name = text;
-            _mgr.SaveConfig();
-        }
-        ZoneTitleText.Text = _zone.Name;
-    }
+    void ZoneTitle_LostFocus(object s, RoutedEventArgs e) => CommitTitleRename();
 
     void ZoneTitle_KeyDown(object s, KeyEventArgs e)
     {
         if (e.Key == Key.Enter)
         {
-            var text = ZoneTitleText.Text?.Trim() ?? "";
-            if (!string.IsNullOrEmpty(text) && text != _zone.Name)
-            {
-                _zone.Name = text;
-                _mgr.SaveConfig();
-            }
-            ZoneTitleText.Text = _zone.Name;
+            CommitTitleRename();
             // Move focus away
             FocusManager.SetFocusedElement(FocusManager.GetFocusScope(ZoneTitleText), this);
             e.Handled = true;
@@ -4622,18 +4640,14 @@ public partial class ZoneWindow : Window
 
     void UpdateMergedTitle()
     {
-        if (_zone.MergedGroupMembership.SubZoneIds.Count > 0)
-        {
-            if (!string.IsNullOrEmpty(_zone.MergedGroupMembership.DisplayName))
-                ZoneTitleText.Text = _zone.MergedGroupMembership.DisplayName;
-            ZoneTitleText.IsReadOnly = true;
-            ZoneTitleText.Cursor = Cursors.Arrow;
-        }
-        else
-        {
-            ZoneTitleText.IsReadOnly = false;
-            ZoneTitleText.Cursor = Cursors.IBeam;
-        }
+        // ponytail 2026-09-26: 标题栏现在**始终可编辑**。组合分区改的是组显示名
+        // (DisplayName),普通分区改的是 Zone.Name —— 都由 CommitTitleRename →
+        // ZoneManager.RenameZone 统一处理(写模型 + 立即落盘 + ZonesChanged),
+        // 所以不再需要"组合分区标题置只读、只能去设置界面改"的老办法。
+        ZoneTitleText.IsReadOnly = false;
+        ZoneTitleText.Cursor = Cursors.IBeam;
+        // 非组合分区不动文本:调用方(RefreshZone / OnZonesChanged)已经写过 _zone.Name。
+        if (TitleIsMergedGroup) ZoneTitleText.Text = CurrentTitleText();
     }
 
     void RebuildSubZoneTabs(string? titleTextColor = null)

@@ -198,6 +198,10 @@ public partial class StickyNoteWindow : Window
         // 置顶 state flow from the property panel through UpdateNote; re-apply
         // them so edits are visible immediately.
         _vm.PinnedTop = _note.PinnedTop;
+        // ponytail 2026-09-26: VM 的 Title 也要跟模型同步 —— 它是 ApplyToModel() 回写
+        // 模型的源(自动保存 / 关窗都会调),只刷新 TitleBox 的话,别处改的名字会在
+        // 下一次自动保存时被 VM 里的旧值写回去。
+        _vm.Title = _note.Title;
         if (TitleBox != null) TitleBox.Text = _note.Title;
         // ponytail 2026-08-26: re-pin / Topmost only while the window is still up.
         // OnClosed → UpdateNote → NotesChanged re-enters this handler while
@@ -1571,33 +1575,36 @@ public partial class StickyNoteWindow : Window
         _notesService.DeleteNote(_note.Id);
         Close();
     }
-    void TitleBox_LostFocus(object s, RoutedEventArgs e)
-    {
-        // ponytail 2026-08-28: 与分区标题对齐 — 去首尾空白;空名回退不保存;
-        // 无变化不保存;提交后把显示文本还原为已保存值。
-        var text = TitleBox.Text?.Trim() ?? "";
-        if (!string.IsNullOrEmpty(text) && text != _vm.Title)
-        {
-            _vm.Title = text;
-            Save();
-        }
-        TitleBox.Text = _vm.Title ?? "";
-    }
+    void TitleBox_LostFocus(object s, RoutedEventArgs e) => CommitTitleRename();
 
     void TitleBox_KeyDown(object s, KeyEventArgs e)
     {
         if (e.Key == Key.Enter)
         {
-            var text = TitleBox.Text?.Trim() ?? "";
-            if (!string.IsNullOrEmpty(text) && text != _vm.Title)
-            {
-                _vm.Title = text;
-                Save();
-            }
-            TitleBox.Text = _vm.Title ?? "";
+            CommitTitleRename();
             ContentBox.Focus();
             e.Handled = true;
         }
+    }
+
+    /// <summary>
+    /// 标题栏内联改名的唯一提交口(Enter 与失焦共用)。
+    /// ponytail 2026-09-26: 走 <see cref="NotesService.RenameNote"/>(模型 + 立即落盘 +
+    /// NotesChanged),设置界面实时跟上,不做"二次应用";空名 / 同名视为放弃。
+    /// <c>_vm.Title</c> 必须一起同步 —— 它是 <c>ApplyToModel()</c>(自动保存 / 关窗)回写
+    /// 模型的源,不同步的话下一次自动保存就会把刚改的名字写回旧值。
+    /// 正文 / 富文本不由改名路径落盘:编辑器自己的 400ms 自动保存 + 关窗兜底本来就在管,
+    /// 改名只碰标题(旧实现借 Save() 顺手刷一次正文,不是必要语义)。
+    /// </summary>
+    void CommitTitleRename()
+    {
+        var text = TitleBox.Text?.Trim() ?? "";
+        if (_notesService.RenameNote(_note, text))
+        {
+            _vm.Title = _note.Title;
+            PropertyWindowManager.Instance.RefreshEditorTitle(_note);
+        }
+        TitleBox.Text = _note.Title ?? "";
     }
 
     void Save()

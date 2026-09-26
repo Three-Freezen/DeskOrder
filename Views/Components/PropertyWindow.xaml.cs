@@ -147,6 +147,17 @@ public partial class PropertyWindow : Window
                 PropertyWindowManager.IconOf(Target));
     }
 
+    /// <summary>目标名变了 → 刷新本窗口的标题(原生 Title 供诊断/任务栏)与标签页文字。
+    /// ponytail 2026-09-26: 组件窗口标题栏内联改名(分区/组合分区/便签)后,设置界面里
+    /// 显示这个名字的地方都要跟着换,浮窗的标签页就是其中一处。</summary>
+    public void RefreshTabTitle()
+    {
+        if (Target == null) return;
+        var title = PropertyWindowManager.TitleOf(Target);
+        Title = title;
+        TabStrip.UpdateTitle(PropertyWindowManager.TargetKey(Target), title);
+    }
+
     public new event CancelEventHandler? Closing
     {
         add => base.Closing += value;

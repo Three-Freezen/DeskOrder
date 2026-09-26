@@ -593,6 +593,45 @@ public class ZoneManager
         ZonesChanged?.Invoke();
     }
 
+    /// <summary>
+    /// 分区的「改名」唯一出口 —— 分区窗口标题栏内联改名(Enter / 失焦)直接调这里。
+    ///
+    /// ponytail 2026-09-26: 旧实现是窗口自己 `_zone.Name = text; SaveConfig();` ——
+    /// 缺了通知(见下),实测后果:
+    ///   ① 设置界面(分区列表 / 属性面板头部 / 名称输入框 / 标签页)全都停在旧名上;
+    ///   ② 用户看面板还显示旧名 → 顺手点「取消」→ PropertyPanel.CancelBtn_Click 会用
+    ///      打开面板时的快照 CopyZoneFields(含 dst.Name = src.Name) 把模型名字**改回旧值**
+    ///      (注释写着"不写盘",但模型已经变了,之后任何一次配置写入都会把旧名落盘)——
+    ///      用户视角就是"标题栏改的名不持久化"。
+    /// 现在:改模型 + 立即落盘 + 抛 ZonesChanged(所有设置界面都挂在这一个事件上),
+    /// 不经过设置界面里的"二次应用"。
+    ///
+    /// 组合分区的标题栏显示的是 <see cref="MergedGroupMembership.DisplayName"/>(空则回落
+    /// 主分区自己的 Name),所以同一个入口按「是不是组合分区」写不同字段 —— 与标题栏看到
+    /// 的东西严格一致。
+    /// </summary>
+    /// <returns>真的改了返回 true(空串 / 与当前显示名相同都返回 false,不写盘不通知)。</returns>
+    public bool RenameZone(Zone? zone, string? newName)
+    {
+        if (zone == null) return false;
+        var name = (newName ?? "").Trim();
+        if (name.Length == 0) return false;   // 空名 = 放弃改名(与窗口标题栏的历史行为一致)
+
+        bool merged = zone.MergedGroupMembership.SubZoneIds.Count > 0;
+        string current = merged
+            ? (string.IsNullOrEmpty(zone.MergedGroupMembership.DisplayName)
+                ? zone.Name : zone.MergedGroupMembership.DisplayName)
+            : zone.Name;
+        if (name == current) return false;
+
+        if (merged) zone.MergedGroupMembership.DisplayName = name;
+        else zone.Name = name;
+
+        SaveConfig();      // 立即落盘
+        NotifyChanged();   // 设置界面实时同步(列表行 / 属性面板头部 + 名称框 / 停靠标签页)
+        return true;
+    }
+
     public void SaveConfig() => ConfigSaver.SavePreservingPanelSettings(_configService, cfg =>
     {
         cfg.Zones = Zones.ToList();

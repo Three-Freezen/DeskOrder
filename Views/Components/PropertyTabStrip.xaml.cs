@@ -587,6 +587,17 @@ public partial class PropertyTabStrip : UserControl
             if (t.Key == key) { t.IsPinned = true; return; }
     }
 
+    /// <summary>
+    /// 目标改名后只换标签文字(不重排、不重开、不动选中态)。PropertyTab.Title 是
+    /// INotifyPropertyChanged 的,赋值即刷新 —— 见 PropertyWindowManager.RefreshEditorTitle。
+    /// </summary>
+    public void UpdateTitle(string key, string title)
+    {
+        if (string.IsNullOrEmpty(key) || string.IsNullOrEmpty(title)) return;
+        foreach (var t in Tabs)
+            if (t.Key == key) { t.Title = title; return; }
+    }
+
     public void CloseTab(string key)
     {
         for (int i = 0; i < Tabs.Count; i++)

@@ -556,6 +556,9 @@ public partial class ManagementWindow : Window
             // survives preview cleanup when navigating to another section.
             if (panel == DockedPanel && DockedTabs != null)
                 DockedTabs.PinTab(Components.PropertyWindowManager.TargetKey(obj));
+            // 名称可能在这次提交里变了(分区/组合分区/便签的名称行)→ 标签页文字跟上,
+            // 与窗口标题栏内联改名的同步路径同源(见 PropertyWindowManager.RefreshEditorTitle)。
+            Components.PropertyWindowManager.Instance.RefreshEditorTitle(obj);
         };
 
         // ── 预览回调（Apply 前实时刷新桌面窗口，不落盘）──

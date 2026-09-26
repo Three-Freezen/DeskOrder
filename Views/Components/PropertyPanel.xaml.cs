@@ -178,6 +178,9 @@ public partial class PropertyPanel : UserControl
             {
                 SyncFolderMappingStateFromManager();
                 RefreshStatusArea();
+                // 名称实时同步:分区/组合分区可以在自己的窗口标题栏里直接改名
+                // (改完立即落盘 + 抛 ZonesChanged),面板这边必须跟上。
+                SyncNameFromModel();
             };
             _zoneVisibilityChangedHandler = (_, _) => RefreshStatusArea();
             _zoneLockChangedHandler = (_, _) => RefreshStatusArea();
@@ -187,7 +190,11 @@ public partial class PropertyPanel : UserControl
         }
         if (Application.Current is App appN && appN.NotesService is NotesService notesService)
         {
-            _notesChangedHandler = RefreshStatusArea;
+            _notesChangedHandler = () =>
+            {
+                RefreshStatusArea();
+                SyncNameFromModel();
+            };
             notesService.NotesChanged += _notesChangedHandler;
         }
         if (Application.Current is App appW && appW.WidgetService is WidgetService widgetService)
@@ -261,6 +268,78 @@ public partial class PropertyPanel : UserControl
         if (_lastFolderMappingState == current) return;
         _lastFolderMappingState = current;
         OnTargetChanged();
+    }
+
+    // ── 名称实时同步:组件自己的窗口标题栏内联改名 → 设置界面 ──
+
+    /// <summary>名称可在别处(分区/组合分区/便签自己的窗口标题栏)被改的目标 ——
+    /// 显示名取值**只能有一处**,否则头部、标签页、列表行迟早各说各话。</summary>
+    static string EditableNameOf(object t) => t switch
+    {
+        Zone z => z.Name,
+        MergedGroupTarget g => string.IsNullOrEmpty(g.Master.MergedGroupMembership.DisplayName)
+            ? g.Master.Name : g.Master.MergedGroupMembership.DisplayName,
+        StickyNote n => n.Title ?? "",
+        ZoneItem si when si.Type == ItemType.SubFolder => si.Name,
+        _ => "",
+    };
+
+    /// <summary>字段树里的「名称输入框」+ 它属于哪个 Target(用于回填时判断是不是同一个)。</summary>
+    TextBox? _nameBox;
+    object? _nameBoxOwner;
+
+    void RegisterNameField(TextBox box, object? owner)
+    {
+        _nameBox = box;
+        _nameBoxOwner = owner;
+    }
+
+    /// <summary>
+    /// 目标名在别处被改(ZonesChanged / NotesChanged)→ 面板头部 + 名称输入框一起跟上。
+    ///
+    /// ponytail 2026-09-26: 这段是"标题栏改名要实时同步到设置界面"的另一半。缺了它会有
+    /// 两个后果:①界面停在旧名(用户以为没改成);②那个旧名字的输入框一旦失焦/回车
+    /// (MakeTextRow 的 onChange)就把旧名写回模型 —— 再点「应用」就真的把改名覆盖掉。
+    /// 正在输入时不打断(IsKeyboardFocusWithin),空名不覆盖回退标题(便签标题为空时
+    /// 头部显示的是"便签"占位)。
+    /// </summary>
+    void SyncNameFromModel()
+    {
+        if (Target == null) return;
+        var live = EditableNameOf(Target);
+        if (live.Length == 0) return;
+        if (InstanceName != live) InstanceName = live;
+        // 「已落盘的名字」不进快照回退:标题栏改名走的是立即落盘语义,不是面板预览,
+        // 点「取消」不该把它退回旧值(那会让用户看着名字又变回去、并且下次写盘时固化)。
+        SyncSnapshotName();
+        if (_nameBox == null || !ReferenceEquals(_nameBoxOwner, Target)) return;
+        if (_nameBox.IsKeyboardFocusWithin) return;
+        if (_nameBox.Text != live) _nameBox.Text = live;
+    }
+
+    /// <summary>
+    /// 把快照里的名字对齐到当前模型 —— 也就是**名称字段不参与「取消」回退**:
+    /// 名字现在有两种"立即生效"来源(组件窗口标题栏内联改名 = 已落盘;面板名称框 = 预览),
+    /// 两者都会改模型,而快照一旦留着旧名,点「取消」就会把用户刚改的名字(甚至已落盘的那个)
+    /// 抹回去并随下一次写盘固化 —— 这正是"标题栏改名不持久化"的成因。
+    /// 其余字段仍按原语义可回退(便签 Title 本来就在 _noteExcluded 里,行为一致)。
+    /// </summary>
+    void SyncSnapshotName()
+    {
+        switch (Target)
+        {
+            case Zone z when _snapshot is Zone sz:
+                sz.Name = z.Name;
+                sz.MergedGroupMembership.DisplayName = z.MergedGroupMembership.DisplayName;
+                break;
+            case MergedGroupTarget g when _snapshot is Zone sg:
+                sg.Name = g.Master.Name;
+                sg.MergedGroupMembership.DisplayName = g.Master.MergedGroupMembership.DisplayName;
+                break;
+            case StickyNote n when _snapshot is StickyNote sn:
+                sn.Title = n.Title;
+                break;
+        }
     }
 
     /// <summary>Sync the 4 footer buttons' IsEnabled to whether we have a snapshot.
@@ -595,7 +674,7 @@ public partial class PropertyPanel : UserControl
         switch (Target)
         {
             case Zone z:
-                InstanceName = z.Name;
+                InstanceName = EditableNameOf(z);
                 SetInstanceIcon("Icon.Zones");
                 BuildZoneFields(z);
                 break;
@@ -632,8 +711,7 @@ public partial class PropertyPanel : UserControl
             // MergedGroupMembership; the master's per-zone editor stays reachable
             // from the Zones page.
             case MergedGroupTarget g:
-                InstanceName = string.IsNullOrEmpty(g.Master.MergedGroupMembership.DisplayName)
-                    ? g.Master.Name : g.Master.MergedGroupMembership.DisplayName;
+                InstanceName = EditableNameOf(g);
                 SetInstanceIcon("Icon.Merged");
                 BuildMergedGroupFields(g.Master);
                 break;
@@ -1205,7 +1283,7 @@ public partial class PropertyPanel : UserControl
 
         // 基本
         var basic = MakeSection(_loc["ZoneProp.Section.Basic"]);
-        basic.Children.Add(MakeTextRow(_loc["ZoneProp.Name"], z.Name,
+        basic.Children.Add(MakeNameRow(_loc["ZoneProp.Name"], z.Name,
             v => { z.Name = v ?? ""; Save(z); }));
         basic.Children.Add(MakeColorRow(_loc["ZoneProp.NameColor"], z.TitleTextColor,
             v => { z.TitleTextColor = v; Save(z); }));
@@ -1712,7 +1790,7 @@ public partial class PropertyPanel : UserControl
 
         // 基本
         var basic = MakeSection(_loc["ZoneProp.Section.Basic"]);
-        basic.Children.Add(MakeTextRow(_loc["MergedGroupProp.Name"], gm.DisplayName,
+        basic.Children.Add(MakeNameRow(_loc["MergedGroupProp.Name"], gm.DisplayName,
             v => { gm.DisplayName = v ?? ""; SaveGroup(); }));
         basic.Children.Add(MakeColorRow(_loc["MergedGroupProp.NameColor"], gs.TitleTextColor,
             v => { gs.TitleTextColor = v; SaveGroup(); }));
@@ -1871,7 +1949,7 @@ public partial class PropertyPanel : UserControl
 
         // A: 基础
         var basic = MakeSection(_loc["SubfolderProp.Section.Basic"]);
-        basic.Children.Add(MakeTextRow(_loc["SubfolderProp.Name"], sub.Name,
+        basic.Children.Add(MakeNameRow(_loc["SubfolderProp.Name"], sub.Name,
             v => { sub.Name = v ?? ""; Save(sub); }));
         // ponytail: 图标锁死 1×1(用户取消尺寸自适应),不再暴露 IconSizeAutoGrow 开关。
         basic.Children.Add(MakeCornerStyleRow(sub.CornerRounded, rounded =>
@@ -2455,7 +2533,7 @@ public partial class PropertyPanel : UserControl
 
         // 基本
         var basic = MakeSection(_loc["ZoneProp.Section.Basic"]);
-        basic.Children.Add(MakeTextRow(_loc["NoteProp.Name"], note.Title,
+        basic.Children.Add(MakeNameRow(_loc["NoteProp.Name"], note.Title,
             v => { note.Title = v ?? ""; Save(note); }));
         basic.Children.Add(MakeColorRow(_loc["NoteProp.NameColor"], note.TitleTextColor,
             v => { note.TitleTextColor = v; Save(note); }));
@@ -2887,6 +2965,20 @@ public partial class PropertyPanel : UserControl
     }
 
     Grid MakeTextRow(string label, string value, Action<string?> onChange, int maxLen = 0)
+        => MakeTextRowCore(label, value, onChange, maxLen, out _);
+
+    /// <summary>
+    /// 「名称」行:与 <see cref="MakeTextRow"/> 同一套外观/提交语义,额外把输入框登记到
+    /// <see cref="_nameBox"/>,这样组件窗口标题栏改名时这里能实时回填(见 SyncNameFromModel)。
+    /// </summary>
+    Grid MakeNameRow(string label, string value, Action<string?> onChange)
+    {
+        var grid = MakeTextRowCore(label, value, onChange, 0, out var box);
+        RegisterNameField(box, Target);
+        return grid;
+    }
+
+    Grid MakeTextRowCore(string label, string value, Action<string?> onChange, int maxLen, out TextBox box)
     {
         var grid = new Grid { Margin = new Thickness(0, 4, 0, 0) };
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -2908,6 +3000,7 @@ public partial class PropertyPanel : UserControl
             Padding = new Thickness(6, 4, 6, 4),
             FontSize = 12,
         };
+        box = tb;
         if (maxLen > 0) tb.MaxLength = maxLen;
         tb.LostFocus += (_, _) => onChange(tb.Text);
         tb.KeyDown += (_, e) => { if (e.Key == Key.Enter) { onChange(tb.Text); Keyboard.ClearFocus(); } };

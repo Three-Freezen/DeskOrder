@@ -44,6 +44,38 @@ public class PropertyWindowManager
     public PropertyWindow? GetFloating(object target)
         => _floating.TryGetValue(target, out var w) ? w : null;
 
+    /// <summary>
+    /// 目标改名后刷新「设置界面里显示这个名字的地方」—— 停靠标签页 + 该目标的浮动编辑器
+    /// (浮窗里的属性面板自己订阅 ZonesChanged/NotesChanged 会回填头部与名称输入框,
+    /// 这里只负责标签页文字)。
+    ///
+    /// ponytail 2026-09-26: 分区/组合分区/便签可以在自己的窗口标题栏里直接改名,改完立即
+    /// 落盘并抛事件 —— 标签页文字是唯一没挂在事件上的显示点,所以由改名方显式调一次。
+    /// 按 TargetKey(稳定身份:Id / GroupId)匹配,而不是实例判等:组合分区的
+    /// <see cref="MergedGroupTarget"/> 虽由 ConditionalWeakTable 缓存,但不同入口拿到的
+    /// 包装实例不保证是同一个引用。
+    /// </summary>
+    public void RefreshEditorTitle(object? target)
+    {
+        if (target == null) return;
+        var key = TargetKey(target);
+        if (string.IsNullOrEmpty(key)) return;
+        var title = TitleOf(target);
+
+        foreach (var kv in _floating)
+        {
+            if (!ReferenceEquals(kv.Key, target))
+            {
+                try { if (TargetKey(kv.Key) != key) continue; }
+                catch { continue; }
+            }
+            try { kv.Value.RefreshTabTitle(); } catch { /* 关窗动画中的残影 */ }
+        }
+
+        var main = Application.Current?.Windows.OfType<ManagementWindow>().FirstOrDefault();
+        main?.DockedTabs?.UpdateTitle(key, title);
+    }
+
     /// <summary>Pop-out flow — caller is a window outside the workspace (zone
     /// gear button, panel settings button, etc.). Honours the "no duplicate
     /// editor per target" rule by reusing an existing floating or by detaching

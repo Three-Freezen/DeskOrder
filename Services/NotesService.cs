@@ -65,6 +65,22 @@ public class NotesService
         NotesChanged?.Invoke();
     }
 
+    /// <summary>
+    /// 便签「改名」唯一出口 —— 便签窗口标题栏内联改名(Enter / 失焦)直接调这里。
+    /// 走 <see cref="UpdateNote"/>(= 落盘 + NotesChanged),设置界面(便签列表 / 属性面板
+    /// 头部 + 名称输入框 / 标签页)全部挂在这一个事件上,不需要"二次应用"。
+    /// </summary>
+    /// <returns>真的改了返回 true(空串 / 同名返回 false)。</returns>
+    public bool RenameNote(StickyNote? note, string? newName)
+    {
+        if (note == null) return false;
+        var name = (newName ?? "").Trim();
+        if (name.Length == 0 || name == note.Title) return false;
+        note.Title = name;
+        UpdateNote(note);   // ModifiedAt + Save + NotesChanged
+        return true;
+    }
+
     public void DeleteNote(Guid id)
     {
         var note = Notes.FirstOrDefault(n => n.Id == id);
