@@ -57,22 +57,32 @@ public static class WallpaperBackdrop
     /// 出来),所以 0..8 逐像素精确,9 以上才按 <see cref="RadiusStep"/> 归档。</summary>
     const int QuantizeBelow = 8;
 
-    /// <summary>**大于**此档位的半径改用「半分辨率预模糊」(见 <see cref="BlurScale"/>)。</summary>
-    const int HalfScaleAbove = QuantizeBelow;
+    /// <summary>**大于等于**此档位改用「半分辨率预模糊」。实测(4960×1600,对比 1:1 逐像素差):
+    /// r=3 时最大差 22/255(看得出),r≥5 起最大差 ≤6/255(看不出)—— 所以 0..4 保持 1:1。</summary>
+    const int HalfScaleFrom = 5;
 
-    /// <summary>某个档位用哪种采样倍率做预模糊:1 = 与屏幕 1:1,2 = 半分辨率(再被放大回窗口)。
+    /// <summary>**大于等于**此档位的半径改用「四分之一分辨率预模糊」。
     ///
-    /// ponytail 2026-09-26(审计修订 B): 预模糊的成本几乎全在"画布多大 × 核多宽"上 ——
-    /// 实测本机 4480×1600:半径 25 要 716ms、60 要 1588ms,而每档还要常驻 27.3MB。
-    /// 高斯核是尺度无关的:在**半分辨率**画布上用一半的半径模糊,再放大回原尺寸,
-    /// 结果与全分辨率模糊在数学上等价(只差一次双线性重采样)。
+    /// ponytail 2026-09-26(用户反馈"拖模糊滑块会卡一下" + 实测):
+    /// 用户拖滑块时真正卡的不是对话框(实测真对话框逐格拖 26 步只花 0.6ms),而是**每跨过
+    /// 一个量化档位就要同步重算一次全桌面预模糊**;而材质预设的半径(25/30/35/45/60)恰好都
+    /// 落在 5px 档位边界上,所以感觉是"拖到材质预设那里就卡一下"。实测(4960×1600):
+    ///   1:1 → 363~1193ms;1/2 → 80~172ms;**1/4 → 20~47ms**
+    /// 保真度(同一窗口区域逐像素差,对比 1:1):1/2 平均 0.22~0.31/255、最大 ≤6/255(r≥5);
+    /// 1/4 在 r=10~15 最大差 19~31/255(**高对比边缘看得出来**),r≥20 才降到 ≤10/255。
+    /// 所以:0..4 用 1:1(接近清晰,必须精确),5..19 用 1/2,≥20 用 1/4。
+    /// 四分之一档每张位图只有约 1.9MB(1:1 是 30.3MB),拖一次滑块落在这一档时每步几十毫秒。</summary>
+    const int QuarterScaleFrom = 20;
+
+    /// <summary>位图相对虚拟桌面的采样倍率:1(1:1)/ 2(半)/ 4(四分之一)。
     ///
-    /// 视觉上安全的原因:这个背板本来就是被糊过的 —— 半径 ≥ 10px 之后图里已经不存在
-    /// 10px 以下的细节,半分辨率的采样格(2px)丢不掉任何看得见的东西。一期"太糊没法看"
-    /// 那次是另一回事:当时是把**清晰**的壁纸按 1/2 采样后直接铺满窗口(等于先砍一半
-    /// 清晰度),而且视频壁纸用的是 1024×1024 的 preview.jpg。
-    /// 所以 0..8 这些"接近清晰"的档位**必须**保持 1:1,只有 ≥10 才降半分辨率。</summary>
-    static int BlurScale(int quantizedRadius) => quantizedRadius > HalfScaleAbove ? 2 : Downscale;
+    /// 高斯核尺度无关:在 1/N 的画布上用 radius/N 模糊、再放大回原尺寸,与全分辨率模糊
+    /// 等价(只差一次重采样)。而这块背板本来就是糊的 —— 半径越大越没细节可丢,
+    /// 所以倍率可以随半径放大,阈值由上面的实测差值定。</summary>
+    static int BlurScale(int quantizedRadius)
+        => quantizedRadius < HalfScaleFrom ? Downscale
+         : quantizedRadius < QuarterScaleFrom ? 2
+         : 4;
 
     /// <summary>位图相对虚拟桌面的采样倍率(1 或 2)—— **从位图自身推导**,不依赖全局常量。
     /// ponytail 2026-09-26(审计修订 B): 这是"两处必须一致"那个隐患的根治办法 ——
@@ -183,10 +193,12 @@ public static class WallpaperBackdrop
         int dh = Math.Max(8, vh / scale);
 
         var visual = new DrawingVisual();
+        // 降采样用高质量滤波:实测与默认线性同价(38 vs 41 ms@1/4),但消掉 1/4 降采样的锯齿
+        if (scale > Downscale) RenderOptions.SetBitmapScalingMode(visual, BitmapScalingMode.HighQuality);
         using (var dc = visual.RenderOpen())
         {
             dc.DrawRectangle(Brushes.Black, null, new Rect(0, 0, dw, dh));
-            dc.DrawImage(img, new Rect(0, 0, dw, dh));   // 半分辨率档位:这里顺带完成降采样
+            dc.DrawImage(img, new Rect(0, 0, dw, dh));   // 降采样档位:这里顺带完成缩放
         }
         double blur = key / (double)scale;
         if (blur > MinBlurPx)

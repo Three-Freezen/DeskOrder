@@ -235,21 +235,8 @@ public static class AcrylicHelper
         string glassMode, int tintOpacity, int tintLuminosity)
         => CompositeFillOverGlass(fillHex, fillOpacity01, glassMode, tintOpacity, tintLuminosity);
 
-    /// <summary>当前参数是否正好等于某个材质 → 返回其 key(不等则返回空串 = 自定义)。
-    /// 用于对话框回显。
-    /// ponytail 2026-09-26: **有意不比较 GlassColorMode** —— 材质只锁定"玻璃参数"
-    /// (模糊/不透明/亮度),颜色是独立的,改颜色预设或自定义色都不该把材质顶成"自定义"
-    /// (用户明确要求)。手改任一玻璃参数才落回自定义。</summary>
-    public static string ResolveMaterialKey(int blur, int tintOpacity, int tintLuminosity)
-    {
-        foreach (var m in Materials)
-        {
-            if (m.BlurAmount == blur && m.TintOpacity == tintOpacity
-                && m.TintLuminosity == tintLuminosity)
-                return m.Key;
-        }
-        return "";
-    }
+    // ponytail 2026-09-26: 原 ResolveMaterialKey(按三个滑块的值反推材质 key)已删 —— 材质现在
+    // 由对话框里的显式复选框决定(见 ShowLiquidGlassDialog 的材质行),不再靠"参数刚好相等"推断。
 
     /// <summary>True when the glass color mode is a custom "#RRGGBB"/"#AARRGGBB" hex
     /// instead of one of the preset names.</summary>
@@ -917,9 +904,7 @@ public static class AcrylicHelper
             Interval = TimeSpan.FromMilliseconds(150)
         };
         blurPreviewTimer.Tick += (_, _) => { blurPreviewTimer.Stop(); FirePreview(); };
-        // 材质下拉的选中项 = 「当前四参数正好等于某配方」,否则显示自定义。
-        // 具体实现在颜色模式区(需要 presetCombo / ApplyColorModeVisuals)之后赋值。
-        Action? refreshMaterialSelection = null;
+        // 程序化改写滑块时压住它们的 onChanged(改一次配方只发一次预览,见 ApplyMaterial)。
         bool syncingMaterial = false;
 
         var dlg = new Window
@@ -1044,7 +1029,7 @@ public static class AcrylicHelper
         // Blur Amount slider (0-60)
         var blurSaved = localBlur;
         var blurRow = BuildSliderRow(_loc["LiquidGlass.BlurRadius"], 0, 60, localBlur,
-            t1, t2, (v, lbl) => { localBlur = (int)v; lbl.Text = $"{(int)v}"; if (!syncingMaterial) refreshMaterialSelection?.Invoke(); blurPreviewTimer.Stop(); blurPreviewTimer.Start(); });
+            t1, t2, (v, lbl) => { localBlur = (int)v; lbl.Text = $"{(int)v}"; if (!syncingMaterial) { blurPreviewTimer.Stop(); blurPreviewTimer.Start(); } });
         var blurSlider = blurRow.Slider;
         var blurValue = blurRow.Value;
         Grid.SetRow(blurRow.Row, row++);
@@ -1053,7 +1038,7 @@ public static class AcrylicHelper
         // Tint Opacity slider (0-100%)
         var opacitySaved = localTintOpacity;
         var opacityRow = BuildSliderRow(_loc["LiquidGlass.TintOpacity"], 0, 100, localTintOpacity,
-            t1, t2, (v, lbl) => { localTintOpacity = (int)v; lbl.Text = $"{localTintOpacity}%"; if (!syncingMaterial) refreshMaterialSelection?.Invoke(); FirePreview(); });
+            t1, t2, (v, lbl) => { localTintOpacity = (int)v; lbl.Text = $"{localTintOpacity}%"; if (!syncingMaterial) FirePreview(); });
         var tintSlider = opacityRow.Slider;
         var tintValue = opacityRow.Value;
         Grid.SetRow(opacityRow.Row, row++);
@@ -1062,33 +1047,45 @@ public static class AcrylicHelper
         // Tint Luminosity slider (0-150%)
         var luminositySaved = localTintLuminosity;
         var luminosityRow = BuildSliderRow(_loc["LiquidGlass.TintLuminosity"], 0, 150, localTintLuminosity,
-            t1, t2, (v, lbl) => { localTintLuminosity = (int)v; lbl.Text = $"{localTintLuminosity}%"; if (!syncingMaterial) refreshMaterialSelection?.Invoke(); FirePreview(); });
+            t1, t2, (v, lbl) => { localTintLuminosity = (int)v; lbl.Text = $"{localTintLuminosity}%"; if (!syncingMaterial) FirePreview(); });
         var lumSlider = luminosityRow.Slider;
         var lumValue = luminosityRow.Value;
         Grid.SetRow(luminosityRow.Row, row++);
         grid.Children.Add(luminosityRow.Row);
 
         // ── 材质预设(在三滑块下方、颜色预设上方) ──
-        // ponytail 2026-09-26: 选中材质 → 立刻把三滑块 + 颜色预设写成该配方的值(实时同步),
-        // 并 FirePreview 让桌面窗口跟着变;之后手动改任一滑块/颜色,下拉自动落回「自定义」,
-        // 但背板通道(localMaterial)保留 —— 微调不该把材质换掉。
-        var materialLabel = new TextBlock
+        // ponytail 2026-09-26(用户反馈"拖模糊滑块碰到材质预设会卡一下,索性参考颜色预设把自定义
+        // 独立出来"): 原来材质是**推断**出来的 —— 三个滑块的值正好等于某配方就自动高亮该材质、
+        // 否则显示"自定义"。两个问题:① 拖模糊滑块穿过某个预设的半径值时下拉在"自定义/材质"之间
+        // 来回跳,用户根本看不出自己的材质还在不在(探针在真对话框里逐格拖 26 步实测:跳变本身
+        // 只花 0.9ms,不是卡顿来源 —— 卡的是每跨一个量化档位要同步重算一次预模糊,而材质预设的
+        // 半径恰好都落在档位边界上);② "自定义"是个推断状态,没法主动选。
+        // 现在与颜色预设同款:**一个显式复选框 + 下拉**。勾选 = 用材质配方(I/O 颗粒/背板类型 +
+        // 四个参数一起套);不勾 = 自定义(不套任何配方,只有滑块参数)。
+        bool useMaterialPreset = FindMaterial(localMaterial) != null;
+        var materialCb = new CheckBox
         {
-            Text = _loc["LiquidGlass.Material"] + ":",
+            Content = _loc["LiquidGlass.MaterialPreset"],
             Foreground = t2, FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center,
             Width = 100,
-            VerticalAlignment = VerticalAlignment.Center
+            Cursor = System.Windows.Input.Cursors.Hand
         };
         var materialCombo = ComboBoxHelper.Create(width: 200, fontSize: 12,
             margin: new Thickness(8, 0, 0, 0));
-        materialCombo.Items.Add(_loc["LiquidGlass.Mat.Custom"]);
-        foreach (var m in Materials) materialCombo.Items.Add(_loc[m.DisplayNameKey]);
+        int materialIdx = 0;
+        for (int i = 0; i < Materials.Count; i++)
+        {
+            materialCombo.Items.Add(_loc[Materials[i].DisplayNameKey]);
+            if (Materials[i].Key == localMaterial) materialIdx = i;
+        }
+        materialCombo.SelectedIndex = materialIdx;
         var materialRow = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Margin = new Thickness(0, 12, 0, 0)
         };
-        materialRow.Children.Add(materialLabel);
+        materialRow.Children.Add(materialCb);
         materialRow.Children.Add(materialCombo);
         Grid.SetRow(materialRow, row++);
         grid.Children.Add(materialRow);
@@ -1125,7 +1122,6 @@ public static class AcrylicHelper
         {
             if (syncingColorMode || !usePreset) return;
             localColorMode = ColorPresetNames[presetCombo.SelectedIndex];
-            if (!syncingMaterial) refreshMaterialSelection?.Invoke();
             FirePreview();
         };
         var colorRow = new StackPanel
@@ -1199,7 +1195,6 @@ public static class AcrylicHelper
             useCustom = !presetOn;
             ApplyColorModeVisuals();
             localColorMode = presetOn ? ColorPresetNames[presetCombo.SelectedIndex] : customColor;
-            if (!syncingMaterial) refreshMaterialSelection?.Invoke();
             FirePreview();
         }
 
@@ -1223,22 +1218,12 @@ public static class AcrylicHelper
                 if (useCustom)
                 {
                     localColorMode = customColor;
-                    if (!syncingMaterial) refreshMaterialSelection?.Invoke();
                     FirePreview();
                 }
             }
         };
 
-        // ── 材质行逻辑(放在颜色模式区之后:回写颜色需要 presetCombo / ApplyColorModeVisuals) ──
-
-        // 下拉选中项:三个滑块 + 颜色的当前组合正好等于某配方 → 高亮该材质,否则「自定义」。
-        int MaterialComboIndex(string key)
-        {
-            if (FindMaterial(key) is not { } m) return 0;
-            for (int i = 0; i < Materials.Count; i++)
-                if (Materials[i].Key == m.Key) return i + 1;
-            return 0;
-        }
+        // ── 材质行逻辑(放在颜色模式区之后:套用配方要回写颜色行) ──
 
         // 把颜色模式(预设名或 #AARRGGBB)写进颜色行 UI —— 材质自带底色,一起切。
         void ApplyColorModeFromMaterial(string mode)
@@ -1263,7 +1248,10 @@ public static class AcrylicHelper
             syncingColorMode = false;
         }
 
-        // 选中材质 → 三滑块 + 颜色预设一起跳到该配方的值(实时同步),并立即预览。
+        // 选中材质 → 三滑块 + 颜色预设一起跳到该配方的值,**只发一次预览**。
+        // ponytail 2026-09-26: 改配方时必须把滑块的 onChanged 一起压住(syncingMaterial)——
+        // 否则"写三个滑块 + 显式一次"会连发 4 次预览(探针实测:选一次材质触发 3 次预览回调),
+        // 每次都是一整轮 ApplyStyle/背板重画。
         void ApplyMaterial(GlassMaterialRecipe m)
         {
             syncingMaterial = true;
@@ -1275,31 +1263,43 @@ public static class AcrylicHelper
             tintSlider.Value = localTintOpacity; tintValue.Text = $"{localTintOpacity}%";
             lumSlider.Value = localTintLuminosity; lumValue.Text = $"{localTintLuminosity}%";
             ApplyColorModeFromMaterial(m.ColorMode);
-            materialCombo.SelectedIndex = MaterialComboIndex(ResolveMaterialKey(
-                localBlur, localTintOpacity, localTintLuminosity));
             syncingMaterial = false;
+            blurPreviewTimer.Stop();   // 显式动作 → 立刻出结果,不走那 150ms 防抖
             FirePreview();
         }
 
-        refreshMaterialSelection = () =>
+        // 勾/取消「材质预设」。勾上 = 套用当前下拉选中的配方;取消 = 自定义(清掉材质 key,
+        // 背板回落成亚克力、无颗粒),三个滑块保持不动。
+        void SetMaterialPreset(bool on)
         {
-            syncingMaterial = true;
-            materialCombo.SelectedIndex = MaterialComboIndex(ResolveMaterialKey(
-                localBlur, localTintOpacity, localTintLuminosity));
-            syncingMaterial = false;
-        };
+            useMaterialPreset = on;
+            materialCb.IsChecked = on;          // 幂等回显(Checked/Unchecked 里挡了重入)
+            materialCombo.IsEnabled = on;
+            if (on)
+            {
+                ApplyMaterial(Materials[Math.Clamp(materialCombo.SelectedIndex, 0, Materials.Count - 1)]);
+            }
+            else
+            {
+                localMaterial = "";
+                blurPreviewTimer.Stop();
+                FirePreview();
+            }
+        }
 
         materialCombo.SelectionChanged += (_, _) =>
         {
-            if (syncingMaterial) return;
+            if (syncingMaterial || !useMaterialPreset) return;
             int i = materialCombo.SelectedIndex;
-            // 索引 0 = 自定义:不动任何参数,背板通道也保持不变(允许「先选材质再手调」)。
-            if (i <= 0 || i > Materials.Count) return;
-            ApplyMaterial(Materials[i - 1]);
+            if (i < 0 || i >= Materials.Count) return;
+            ApplyMaterial(Materials[i]);
         };
+        materialCb.Checked += (_, _) => { if (!useMaterialPreset) SetMaterialPreset(true); };
+        materialCb.Unchecked += (_, _) => { if (useMaterialPreset) SetMaterialPreset(false); };
 
-        // 初次回显:参数与某配方一致才高亮材质,否则显示自定义(老配置没有该字段 → 自定义)。
-        refreshMaterialSelection();
+        // 初次回显:老配置的 key 是真材质 → 勾上并选中它;空串/未知 → 自定义(不套任何配方)。
+        materialCb.IsChecked = useMaterialPreset;
+        materialCombo.IsEnabled = useMaterialPreset;
 
         // Mutual-exclusion note (below both color rows)
         var exclusiveTb = new TextBlock
