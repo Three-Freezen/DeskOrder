@@ -57,6 +57,33 @@ public static class WallpaperBackdrop
     /// 出来),所以 0..8 逐像素精确,9 以上才按 <see cref="RadiusStep"/> 归档。</summary>
     const int QuantizeBelow = 8;
 
+    /// <summary>**大于**此档位的半径改用「半分辨率预模糊」(见 <see cref="BlurScale"/>)。</summary>
+    const int HalfScaleAbove = QuantizeBelow;
+
+    /// <summary>某个档位用哪种采样倍率做预模糊:1 = 与屏幕 1:1,2 = 半分辨率(再被放大回窗口)。
+    ///
+    /// ponytail 2026-09-26(审计修订 B): 预模糊的成本几乎全在"画布多大 × 核多宽"上 ——
+    /// 实测本机 4480×1600:半径 25 要 716ms、60 要 1588ms,而每档还要常驻 27.3MB。
+    /// 高斯核是尺度无关的:在**半分辨率**画布上用一半的半径模糊,再放大回原尺寸,
+    /// 结果与全分辨率模糊在数学上等价(只差一次双线性重采样)。
+    ///
+    /// 视觉上安全的原因:这个背板本来就是被糊过的 —— 半径 ≥ 10px 之后图里已经不存在
+    /// 10px 以下的细节,半分辨率的采样格(2px)丢不掉任何看得见的东西。一期"太糊没法看"
+    /// 那次是另一回事:当时是把**清晰**的壁纸按 1/2 采样后直接铺满窗口(等于先砍一半
+    /// 清晰度),而且视频壁纸用的是 1024×1024 的 preview.jpg。
+    /// 所以 0..8 这些"接近清晰"的档位**必须**保持 1:1,只有 ≥10 才降半分辨率。</summary>
+    static int BlurScale(int quantizedRadius) => quantizedRadius > HalfScaleAbove ? 2 : Downscale;
+
+    /// <summary>位图相对虚拟桌面的采样倍率(1 或 2)—— **从位图自身推导**,不依赖全局常量。
+    /// ponytail 2026-09-26(审计修订 B): 这是"两处必须一致"那个隐患的根治办法 ——
+    /// 裁剪 Viewbox 直接用拿到的这张图算缩放,而不是去问一个可能已经变了的常量。</summary>
+    public static double ScaleOf(BitmapSource desk)
+    {
+        var (_, _, vw, _) = Layout();
+        if (vw <= 0 || desk.PixelWidth <= 0) return Downscale;
+        return Math.Max(1, Math.Round(vw / (double)desk.PixelWidth));
+    }
+
     /// <summary>模型半径(0-60)→ 预模糊档位。0..8 原样,9 以上取最近的 5 的倍数。</summary>
     public static int QuantizeRadius(int screenRadiusPx)
     {
@@ -75,8 +102,7 @@ public static class WallpaperBackdrop
 
     // ── 预模糊缓存(按屏幕半径 → LRU) ──
 
-    static readonly Dictionary<int, (BitmapSource Bitmap, long Used)> _blurCache = new();
-    static readonly object _lock = new();
+    static readonly Dictionary<int, (BitmapSource Bitmap, long Used)> _blurCache = new();    static readonly object _lock = new();
     static long _useTick;
     static int _generation;
 
@@ -112,9 +138,11 @@ public static class WallpaperBackdrop
         return true;
     }
 
-    /// <summary>取得「壁纸铺满虚拟桌面 + 已按半径预模糊」的位图(1/Downscale 分辨率)。
+    /// <summary>取得「壁纸铺满虚拟桌面 + 已按半径预模糊」的位图。
     /// screenRadiusPx = 期望的屏幕模糊半径(物理像素);返回 null = 壁纸不可用。
-    /// 半径先过 <see cref="QuantizeRadius"/> 归档再缓存。
+    /// 半径先过 <see cref="QuantizeRadius"/> 归档再缓存;采样倍率由 <see cref="BlurScale"/>
+    /// 决定(小半径 1:1,大半径半分辨率),**调用方必须用 <see cref="ScaleOf"/> 反推缩放**,
+    /// 不要假设这张图一定是 1:1。
     /// ponytail 2026-09-26(二期): 来源图已由 <see cref="WallpaperSource"/> 统一铺满虚拟桌面
     /// (并已降采样),这里不再自己算适配,直接 1:1 画进模糊画布。</summary>
     public static BitmapSource? GetBlurredDesktop(int screenRadiusPx)
@@ -135,6 +163,12 @@ public static class WallpaperBackdrop
         AcrylicHelper.SelfDrawnAvailable = true;
 
         int key = QuantizeRadius(screenRadiusPx);
+
+        // ponytail 2026-09-26(审计修订 B): 半径 0 = 完全不做模糊 → 这张"模糊图"就是壁纸本身。
+        // 原来还要为此把整块桌面重画进一张 RenderTargetBitmap(实测 116ms、再常驻 27MB),
+        // 纯浪费;直接把来源图交出去(它**已经**是铺满虚拟桌面、按显示器适配好的 1:1 图)。
+        if (key <= 0) return img;
+
         lock (_lock)
         {
             if (_blurCache.TryGetValue(key, out var hit))
@@ -144,16 +178,17 @@ public static class WallpaperBackdrop
             }
         }
 
-        int dw = Math.Max(8, vw / Downscale);
-        int dh = Math.Max(8, vh / Downscale);
+        int scale = BlurScale(key);
+        int dw = Math.Max(8, vw / scale);
+        int dh = Math.Max(8, vh / scale);
 
         var visual = new DrawingVisual();
         using (var dc = visual.RenderOpen())
         {
             dc.DrawRectangle(Brushes.Black, null, new Rect(0, 0, dw, dh));
-            dc.DrawImage(img, new Rect(0, 0, img.PixelWidth, img.PixelHeight));
+            dc.DrawImage(img, new Rect(0, 0, dw, dh));   // 半分辨率档位:这里顺带完成降采样
         }
-        double blur = key / (double)Downscale;
+        double blur = key / (double)scale;
         if (blur > MinBlurPx)
         {
             var effect = new BlurEffect { Radius = blur, KernelType = KernelType.Gaussian, RenderingBias = RenderingBias.Performance };
@@ -196,30 +231,39 @@ public static class WallpaperBackdrop
         WallpaperSource.Invalidate();
     }
 
-    /// <summary>窗口在虚拟桌面里的裁剪 Viewbox(图像像素空间,已含降采样)。
-    /// windowPx = 窗口的屏幕物理矩形(Win32 GetWindowRect 口径)。</summary>
-    public static Rect GetCropViewbox(int screenRadiusPx, Rect windowPx)
+    /// <summary>窗口在虚拟桌面里的裁剪 Viewbox(图像像素空间)。
+    /// windowPx = 窗口的屏幕物理矩形(Win32 GetWindowRect 口径)。
+    ///
+    /// ponytail 2026-09-26(审计修订 B): 缩放倍数**从这张位图自身推导**(见
+    /// <see cref="ScaleOf"/>),不再读全局常量 —— 大半径档位给的是半分辨率图,
+    /// 拿常量算裁剪会整体偏一倍。</summary>
+    public static Rect GetCropViewbox(BitmapSource desk, Rect windowPx)
     {
         var (vx, vy, _, _) = Layout();
+        double scale = ScaleOf(desk);
         return new Rect(
-            (windowPx.X - vx) / Downscale,
-            (windowPx.Y - vy) / Downscale,
-            Math.Max(1, windowPx.Width) / Downscale,
-            Math.Max(1, windowPx.Height) / Downscale);
+            (windowPx.X - vx) / scale,
+            (windowPx.Y - vy) / scale,
+            Math.Max(1, windowPx.Width) / scale,
+            Math.Max(1, windowPx.Height) / scale);
     }
 
     /// <summary>一次性静态背板画刷(裁剪图 + 着色 + 可选噪点) —— 给不移动的表面用(次级分区浮层),
-    /// 避免为它维护"窗口矩形→Viewbox"的绑定。</summary>
+    /// 避免为它维护"窗口矩形→Viewbox"的绑定。
+    /// 裁剪图可能是半分辨率的(大半径),由 DrawingBrush 的 Stretch 放大回浮层尺寸 ——
+    /// 背板本来就是糊的,看不出差别;唯一的副作用是**噪点颗粒**会跟着放大一倍
+    /// (噪点层和裁剪图在同一个坐标系里),在 0.045~0.055 的强度下不可见。</summary>
     public static Brush? CreateStaticBrush(int screenRadiusPx, Rect windowPx, Color tint, double noiseOpacity)
     {
         var desk = GetBlurredDesktop(screenRadiusPx);
         if (desk == null) return null;
         var (vx, vy, _, _) = Layout();
+        double scale = ScaleOf(desk);
 
-        int x = (int)Math.Round((windowPx.X - vx) / Downscale);
-        int y = (int)Math.Round((windowPx.Y - vy) / Downscale);
-        int w = (int)Math.Max(1, Math.Round(Math.Max(1, windowPx.Width) / Downscale));
-        int h = (int)Math.Max(1, Math.Round(Math.Max(1, windowPx.Height) / Downscale));
+        int x = (int)Math.Round((windowPx.X - vx) / scale);
+        int y = (int)Math.Round((windowPx.Y - vy) / scale);
+        int w = (int)Math.Max(1, Math.Round(Math.Max(1, windowPx.Width) / scale));
+        int h = (int)Math.Max(1, Math.Round(Math.Max(1, windowPx.Height) / scale));
         // 夹到图内,避免越界(窗口有一半在虚拟桌面外时)
         x = Math.Clamp(x, 0, Math.Max(0, desk.PixelWidth - 1));
         y = Math.Clamp(y, 0, Math.Max(0, desk.PixelHeight - 1));
@@ -414,10 +458,10 @@ public sealed class WallpaperBackdropLayer
     public void RefreshViewbox()
     {
         if (_host == null || _bound == null) return;
-        if (_wallpaper.Fill is not ImageBrush ib) return;
+        if (_wallpaper.Fill is not ImageBrush ib || ib.ImageSource is not BitmapSource desk) return;
         var rect = WindowPx(_bound);
         if (rect.IsEmpty || rect == _attachedWindow) return;
-        ib.Viewbox = WallpaperBackdrop.GetCropViewbox(_attachedRadius, rect);
+        ib.Viewbox = WallpaperBackdrop.GetCropViewbox(desk, rect);
         _attachedWindow = rect;
     }
 
@@ -461,9 +505,9 @@ public sealed class WallpaperBackdropLayer
             _attachedWindow = Rect.Empty; // 新图 → Viewbox 必须重设
         }
 
-        if (_wallpaper.Fill is ImageBrush ib && rect != _attachedWindow)
+        if (_wallpaper.Fill is ImageBrush ib && ib.ImageSource is BitmapSource deskBmp && rect != _attachedWindow)
         {
-            ib.Viewbox = WallpaperBackdrop.GetCropViewbox(radius, rect);
+            ib.Viewbox = WallpaperBackdrop.GetCropViewbox(deskBmp, rect);
             _attachedWindow = rect;
         }
 
