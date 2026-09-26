@@ -21,6 +21,9 @@ public class ZoneManager
     // Guard flag to prevent re-entrant batch operations
     private bool _isBatchOperation;
 
+    /// <summary>批量期间是否有窗口状态变化需要收尾时统一通知(见 EndBatch)。</summary>
+    private bool _batchNotifyPending;
+
     // ponytail: debounce SaveConfig calls during drag — multiple ScheduleSaveConfig()
     // within 1s coalesce into one disk write. Timer fires on the UI thread (DispatcherTimer
     // contract), so no lock needed; each Tick stops + nulls the timer so the next Schedule
@@ -45,70 +48,97 @@ public class ZoneManager
         _config = configService.Load();
     }
 
+    /// <summary>批量操作收尾:统一写盘 + 统一通知(见 <see cref="ShowZone"/> 里的说明)。</summary>
+    void EndBatch(bool save)
+    {
+        _isBatchOperation = false;
+        if (save) SaveConfig();
+        if (_batchNotifyPending)
+        {
+            _batchNotifyPending = false;
+            ZonesChanged?.Invoke();
+        }
+    }
+
     public void Initialize()
     {
         bool anyNormalized = false;
         bool anyResolved = false;
-        var desktopIconLookup = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
-        foreach (var zone in _config.Zones)
+        bool anyShown = false;
+        // ponytail 2026-09-26(审计修订): 整个初始化只写一次盘、只通知一次。
+        // 原来每个可见分区都会在 ShowZone 里 SaveConfig() + ZonesChanged?.Invoke() ——
+        // N 个分区 = 首帧之前 N 次整份 config 序列化写盘 + N 次 FileSystemWatcher 全量重建
+        // + N 次自动整理扫描,全部压在启动路径上(而本方法末尾本来就还有一次统一保存)。
+        _isBatchOperation = true;
+        try
         {
-            Zones.Add(zone);
-            // 面板对齐迁移：旧默认网格 56 → 新 80×80（间距 88），与面板卡片一致。
-            if (zone.GridSize == 56)
+            var desktopIconLookup = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var zone in _config.Zones)
             {
-                zone.GridSize = 80;
-                anyNormalized = true;
-                // 仅在旧网格迁移时重排到新间距一次；之后每次启动不再自动重排/居中，
-                // 避免重新打开应用后图标又偏移（与 ZoneWindow.OnSize 的修复一致）。
-                if (ZoneLayout.NormalizeZone(zone)) anyNormalized = true;
-            }
-            // Migrate legacy shortcuts: re-associate imported .lnk items with their real
-            // targets AND keep the shortcut's custom icon location, so icons render
-            // without the link-arrow overlay and identical to the desktop (the "二次关联" fix).
-            foreach (var it in zone.Items)
-            {
-                if (it.Type == ItemType.Shortcut && ShortcutResolver.IsShortcut(it.TargetPath))
+                Zones.Add(zone);
+                // 面板对齐迁移：旧默认网格 56 → 新 80×80（间距 88），与面板卡片一致。
+                if (zone.GridSize == 56)
                 {
-                    var (target, type, iconLoc) = ShortcutResolver.NormalizeItem(it.TargetPath, it.Type);
-                    if (!string.Equals(target, it.TargetPath, StringComparison.OrdinalIgnoreCase))
+                    zone.GridSize = 80;
+                    anyNormalized = true;
+                    // 仅在旧网格迁移时重排到新间距一次；之后每次启动不再自动重排/居中，
+                    // 避免重新打开应用后图标又偏移（与 ZoneWindow.OnSize 的修复一致）。
+                    if (ZoneLayout.NormalizeZone(zone)) anyNormalized = true;
+                }
+                // Migrate legacy shortcuts: re-associate imported .lnk items with their real
+                // targets AND keep the shortcut's custom icon location, so icons render
+                // without the link-arrow overlay and identical to the desktop (the "二次关联" fix).
+                foreach (var it in zone.Items)
+                {
+                    if (it.Type == ItemType.Shortcut && ShortcutResolver.IsShortcut(it.TargetPath))
                     {
-                        it.TargetPath = target;
-                        anyResolved = true;
+                        var (target, type, iconLoc) = ShortcutResolver.NormalizeItem(it.TargetPath, it.Type);
+                        if (!string.Equals(target, it.TargetPath, StringComparison.OrdinalIgnoreCase))
+                        {
+                            it.TargetPath = target;
+                            anyResolved = true;
+                        }
+                        if (type != it.Type) { it.Type = type; anyResolved = true; }
+                        if (iconLoc != null && it.IconPath == null) { it.IconPath = iconLoc; anyResolved = true; }
                     }
-                    if (type != it.Type) { it.Type = type; anyResolved = true; }
-                    if (iconLoc != null && it.IconPath == null) { it.IconPath = iconLoc; anyResolved = true; }
-                }
 
-                // 系统项目修复:已知文件夹(文档/图片/音乐/视频等)的 "::{GUID}" 壳
-                // 无法被 shell 解析(打不开/空壳)— 迁移为真实文件夹路径。
-                if (it.Type == ItemType.ShellLocation)
-                {
-                    var kfPath = ShellLocationResolver.ResolveKnownFolderPath(it.TargetPath);
-                    if (kfPath != null)
+                    // 系统项目修复:已知文件夹(文档/图片/音乐/视频等)的 "::{GUID}" 壳
+                    // 无法被 shell 解析(打不开/空壳)— 迁移为真实文件夹路径。
+                    if (it.Type == ItemType.ShellLocation)
                     {
-                        it.TargetPath = kfPath;
-                        it.Type = ItemType.Folder;
-                        anyResolved = true;
+                        var kfPath = ShellLocationResolver.ResolveKnownFolderPath(it.TargetPath);
+                        if (kfPath != null)
+                        {
+                            it.TargetPath = kfPath;
+                            it.Type = ItemType.Folder;
+                            anyResolved = true;
+                        }
+                    }
+
+                    // Recovery: file items already migrated (shortcut path lost) whose icon
+                    // is missing a custom desktop-shortcut icon — e.g. 必剪.lnk points at
+                    // BCUT.exe but renders BCUT_Deskpic.ico. Match the desktop shortcut by
+                    // target path and adopt its icon location.
+                    if (it.IconPath == null
+                        && it.Type is ItemType.Application or ItemType.Shortcut
+                        && !string.IsNullOrEmpty(it.TargetPath)
+                        && File.Exists(it.TargetPath))
+                    {
+                        var iconLoc = FindDesktopIcon(it.TargetPath, desktopIconLookup);
+                        if (iconLoc != null) { it.IconPath = iconLoc; anyResolved = true; }
                     }
                 }
-
-                // Recovery: file items already migrated (shortcut path lost) whose icon
-                // is missing a custom desktop-shortcut icon — e.g. 必剪.lnk points at
-                // BCUT.exe but renders BCUT_Deskpic.ico. Match the desktop shortcut by
-                // target path and adopt its icon location.
-                if (it.IconPath == null
-                    && it.Type is ItemType.Application or ItemType.Shortcut
-                    && !string.IsNullOrEmpty(it.TargetPath)
-                    && File.Exists(it.TargetPath))
+                if (zone.IsVisible)
                 {
-                    var iconLoc = FindDesktopIcon(it.TargetPath, desktopIconLookup);
-                    if (iconLoc != null) { it.IconPath = iconLoc; anyResolved = true; }
+                    ShowZone(zone);
+                    anyShown = true;   // ShowZone 会置 IsVisible=true,批量期间由这里统一落盘
                 }
             }
-            if (zone.IsVisible)
-                ShowZone(zone);
         }
-        if (anyNormalized || anyResolved) SaveConfig();
+        finally
+        {
+            EndBatch(anyNormalized || anyResolved || anyShown);
+        }
     }
 
     /// <summary>
@@ -314,11 +344,19 @@ public class ZoneManager
             // stagger slot so new windows join the cascade.
             if (waveDelayMs > 0) window.PlayEntranceAnimation(waveDelayMs);
         }
-        SaveConfig();
-        ZonesChanged?.Invoke();
+        if (_isBatchOperation)
+        {
+            // 批量期间(ShowAll / HideAll / Initialize)不各自写盘、不各自通知:
+            // 收尾由 EndBatch 统一落盘 + 统一抛一次 ZonesChanged。
+            _batchNotifyPending = true;
+        }
+        else
+        {
+            SaveConfig();
+            ZonesChanged?.Invoke();
+        }
         ZoneVisibilityChanged?.Invoke(zone.Id, true);
     }
-
     public void HideZone(Guid zoneId, double waveDelayMs = 0)
     {
         var zone = Zones.FirstOrDefault(z => z.Id == zoneId);
@@ -343,8 +381,15 @@ public class ZoneManager
         }
         if (zone != null)
             zone.IsVisible = false;
-        SaveConfig();
-        ZonesChanged?.Invoke();
+        if (_isBatchOperation)
+        {
+            _batchNotifyPending = true;   // 见 ShowZone 同款说明
+        }
+        else
+        {
+            SaveConfig();
+            ZonesChanged?.Invoke();
+        }
         ZoneVisibilityChanged?.Invoke(zoneId, false);
     }
 
@@ -382,7 +427,7 @@ public class ZoneManager
                 i++;
             }
         }
-        finally { _isBatchOperation = false; }
+        finally { EndBatch(save: true); }
     }
 
     public void HideAll()
@@ -400,7 +445,7 @@ public class ZoneManager
                 i++;
             }
         }
-        finally { _isBatchOperation = false; }
+        finally { EndBatch(save: true); }
     }
 
     /// <summary>Fully close the zone window (no restore button).</summary>

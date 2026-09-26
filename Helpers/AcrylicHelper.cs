@@ -497,6 +497,30 @@ public static class AcrylicHelper
     // 填充输入;普通玻璃窗口为 null/0。
     private static readonly Dictionary<Window, (int blur, int opacity, int lum, string mode, string? fillHex, double fillOpacity, int accentState, bool useClassicBlur)> _registered = new();
 
+    /// <summary>窗口关闭时自动摘掉注册项。
+    ///
+    /// ponytail 2026-09-26(审计修订): 原来只有 `DisableBlur(Window)` 会移除注册项,而
+    /// `ZoneWindow.OnClosed` / `ClockWidget.OnClosed` / 便签 / 日历 / 面板的关闭路径**都不调**
+    /// `DisableBlur`(`ManagementWindow.FullHideAllWidgets` 更是直接 `w.Close()`)。
+    /// 于是每关一个窗口,这个**静态**字典就永久保留一份强引用:窗口 + 整棵可视化树 + HWND +
+    /// 图标位图全都无法回收 —— 用一次"隐藏全部小组件"就泄漏一批。
+    /// 收口在注册处(而不是去每个 OnClosed 里补一刀):以后新增窗口类型也不会再漏。</summary>
+    static void OnRegisteredWindowClosed(object? sender, EventArgs e)
+    {
+        if (sender is not Window w) return;
+        w.Closed -= OnRegisteredWindowClosed;
+        _registered.Remove(w);
+    }
+
+    /// <summary>登记窗口(幂等)。只在**首次**登记时挂 Closed 回收 —— 玻璃每次重画都会调过来,
+    /// 无脑 `+=` 会让闭包列表随调用次数增长。</summary>
+    static void RegisterWindow(Window window,
+        (int blur, int opacity, int lum, string mode, string? fillHex, double fillOpacity, int accentState, bool useClassicBlur) settings)
+    {
+        if (!_registered.ContainsKey(window)) window.Closed += OnRegisteredWindowClosed;
+        _registered[window] = settings;
+    }
+
     /// <summary>
     /// Build the GradientColor (ABGR format) from color mode + tint opacity + tint luminosity.
     /// </summary>
@@ -594,7 +618,7 @@ public static class AcrylicHelper
         // ponytail: remember (window → settings) so OnSystemAccentChanged can re-apply
         // when the system accent changes. Override existing entry if EnableBlur is
         // called again with different params (e.g. user edited settings live).
-        _registered[window] = (blurAmount, tintOpacity, tintLuminosity, colorMode, null, 0, accentState, useClassicBlur);
+        RegisterWindow(window, (blurAmount, tintOpacity, tintLuminosity, colorMode, null, 0, accentState, useClassicBlur));
         return EnableBlur(new WindowInteropHelper(window).Handle, blurAmount, tintOpacity, tintLuminosity,
             colorMode, skipClassicBlur: !useClassicBlur, accentState: accentState);
     }
@@ -649,7 +673,7 @@ public static class AcrylicHelper
         string? fillHex, double fillOpacity01, string glassMode, int tintOpacity, int tintLuminosity,
         int accentState = AccentStateAcrylic, bool useClassicBlur = true)
     {
-        _registered[window] = (blurAmount, tintOpacity, tintLuminosity, glassMode, fillHex, fillOpacity01, accentState, useClassicBlur);
+        RegisterWindow(window, (blurAmount, tintOpacity, tintLuminosity, glassMode, fillHex, fillOpacity01, accentState, useClassicBlur));
         return EnableBlurComposite(new WindowInteropHelper(window).Handle, blurAmount,
             fillHex, fillOpacity01, glassMode, tintOpacity, tintLuminosity,
             skipClassicBlur: !useClassicBlur, accentState: accentState);
@@ -877,6 +901,22 @@ public static class AcrylicHelper
 
         // Helper to fire live preview
         void FirePreview() => onPreviewChanged?.Invoke(localBlur, localTintOpacity, localTintLuminosity, localColorMode, localMaterial);
+
+        // ponytail 2026-09-26(审计修订): **模糊半径滑块单独防抖**。
+        // 自绘背板是按半径预模糊**整块虚拟桌面**的:每遇到一个没缓存过的半径就要重算一次,
+        // 实测 509ms@24px / 1136ms@60px(@半径 0 也要 94ms 的 RTB 地板价)。而这个滑块是逐
+        // 整数连续触发预览的 —— 拖一次 0→60 会产生几十次重算(实测连拖 40 档 = 23.7 秒的
+        // UI 线程阻塞),手感就是"拖不动、一卡一卡"。这里改成:数字与材质回显**照旧实时**,
+        // 只把真正昂贵的预览推后 150ms(停手就出结果)。
+        // 颜色 / 不透明度 / 亮度三个滑块保持实时 —— 它们只换着色画刷,不重新模糊。
+        // 收尾:对话框关闭后调用方还会用回填的最终值 ApplyAll 一次,所以"最后一发没跑"不丢设置;
+        // 但**取消**必须先 Stop 再 FirePreview(回滚),否则挂起的那一发会在关闭后把用户
+        // 拖到的值又刷回屏幕上。
+        var blurPreviewTimer = new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(150)
+        };
+        blurPreviewTimer.Tick += (_, _) => { blurPreviewTimer.Stop(); FirePreview(); };
         // 材质下拉的选中项 = 「当前四参数正好等于某配方」,否则显示自定义。
         // 具体实现在颜色模式区(需要 presetCombo / ApplyColorModeVisuals)之后赋值。
         Action? refreshMaterialSelection = null;
@@ -1004,7 +1044,7 @@ public static class AcrylicHelper
         // Blur Amount slider (0-60)
         var blurSaved = localBlur;
         var blurRow = BuildSliderRow(_loc["LiquidGlass.BlurRadius"], 0, 60, localBlur,
-            t1, t2, (v, lbl) => { localBlur = (int)v; lbl.Text = $"{(int)v}"; if (!syncingMaterial) refreshMaterialSelection?.Invoke(); FirePreview(); });
+            t1, t2, (v, lbl) => { localBlur = (int)v; lbl.Text = $"{(int)v}"; if (!syncingMaterial) refreshMaterialSelection?.Invoke(); blurPreviewTimer.Stop(); blurPreviewTimer.Start(); });
         var blurSlider = blurRow.Slider;
         var blurValue = blurRow.Value;
         Grid.SetRow(blurRow.Row, row++);
@@ -1340,6 +1380,7 @@ public static class AcrylicHelper
         cancelBtn.Click += (_, _) =>
         {
             // Restore original values
+            blurPreviewTimer.Stop();   // 见上面注释:回滚前必须掐掉挂起的模糊预览
             localBlur = blurSaved;
             localTintOpacity = opacitySaved;
             localTintLuminosity = luminositySaved;
@@ -1348,6 +1389,7 @@ public static class AcrylicHelper
             FirePreview(); // revert preview to original values
             dlg.Close();
         };
+        dlg.Closed += (_, _) => blurPreviewTimer.Stop();   // 保存路径也兜一次(最终值由调用方 ApplyAll 落)
 
         btnRow.Children.Add(cancelBtn);
         btnRow.Children.Add(saveBtn);

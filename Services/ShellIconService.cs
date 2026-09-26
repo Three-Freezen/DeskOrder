@@ -22,6 +22,18 @@ public class ShellIconService
     private static extern bool DeleteObject(IntPtr hObject);
 
     private readonly ConcurrentDictionary<string, ImageSource?> _iconCache = new();
+
+    /// <summary>图标缓存条数上限。
+    ///
+    /// ponytail 2026-09-26(审计修订): 这个缓存原本**没有任何上限**,而它是进程级单例的 ——
+    /// 256px 图标(BGRA)约 100~260 KB/条,几百个条目就是几十 MB 常驻且永不回落;自动整理
+    /// 每导入一批新文件名还会继续涨。现在超限时按**插入顺序**淘汰最老的一条(近似 LRU:
+    /// 精确 LRU 要给每次命中记账,不值得)。
+    /// 淘汰只是丢掉缓存条目 —— 还在界面上显示的 ImageSource 由 UI 元素自己持有,不受影响。</summary>
+    private const int MaxIconCacheEntries = 512;
+
+    /// <summary>插入顺序(超限淘汰用)。只在 TryAdd 成功时入队,所以一个 key 最多一条。</summary>
+    private readonly ConcurrentQueue<string> _iconCacheOrder = new();
     private static readonly ImageSource? _folderIcon = GetSystemIcon(
         Environment.GetFolderPath(Environment.SpecialFolder.Desktop), true);
 
@@ -88,7 +100,7 @@ public class ShellIconService
         // 解析失败（文件刚创建仍在写入/被占用）时不要缓存 null — 否则监听
         // 导入的图标会永久空白；等文件就绪后的重试会再次解析并成功缓存。
         if (src != null)
-            _iconCache.TryAdd(cacheKey, src);
+            CacheIcon(cacheKey, src);
         return src;
     }
 
@@ -144,7 +156,7 @@ public class ShellIconService
         }
 
         if (src != null)
-            _iconCache.TryAdd(cacheKey, src);
+            CacheIcon(cacheKey, src);
         return src;
     }
 
@@ -277,7 +289,7 @@ public class ShellIconService
         string key = RecycleBinSpec + (full ? "|full" : "|empty");
         if (_iconCache.TryGetValue(key, out var cached)) return cached;
         var icon = BuildRecycleBinIcon(full) ?? GetShellLocationIcon(RecycleBinSpec) ?? _folderIcon;
-        if (icon != null) _iconCache.TryAdd(key, icon);
+        if (icon != null) CacheIcon(key, icon);
         return icon;
     }
 
@@ -440,8 +452,18 @@ public class ShellIconService
         }
     }
 
+    /// <summary>统一的入缓存口 —— 所有 add 点都走这里,超限时按插入顺序淘汰。</summary>
+    private void CacheIcon(string key, ImageSource src)
+    {
+        if (!_iconCache.TryAdd(key, src)) return;
+        _iconCacheOrder.Enqueue(key);
+        while (_iconCache.Count > MaxIconCacheEntries && _iconCacheOrder.TryDequeue(out var oldest))
+            _iconCache.TryRemove(oldest, out _);
+    }
+
     public void ClearCache()
     {
         _iconCache.Clear();
+        _iconCacheOrder.Clear();
     }
 }

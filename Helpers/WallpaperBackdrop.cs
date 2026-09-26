@@ -37,9 +37,32 @@ public static class WallpaperBackdrop
     const double MinBlurPx = 0.4;
 
     /// <summary>预模糊缓存档位上限。全分辨率(1:1)下每档约 = 虚拟桌面像素 × 4 字节
-    /// (本机 4480×1600 → 约 29 MB),所以从 12 降到 6:再高就是几百 MB 的位图常驻。
-    /// 关掉渲染方案 / 重新采样时会整块清空。</summary>
+    /// (本机 3968×1280 → 约 19 MB,4480×1600 → 约 29 MB),所以从 12 降到 6:再高就是
+    /// 几百 MB 的位图常驻。关掉渲染方案 / 重新采样时会整块清空。
+    ///
+    /// ponytail 2026-09-26(审计修订): 淘汰策略从"满了就 Clear()"改成 **LRU 淘汰一条**。
+    /// 实测每次未命中要重算一次全桌面预模糊(半径 35 ≈ 690ms、60 ≈ 1136ms),Clear() 会让
+    /// **所有**窗口在下次刷新时同时重算(5 个窗口 ≈ 3 秒顿卡);LRU 只牺牲最久没用过的那一档。
+    /// 同时修掉 `Count > Max` 的差一错误(原来实际能留 7 档)。</summary>
     const int MaxBlurCacheEntries = 6;
+
+    /// <summary>半径量化步长 —— 只在 <see cref="QuantizeBelow"/> 之上生效。
+    /// ponytail 2026-09-26(审计修订): 每遇到一个没缓存过的半径就要重算整块桌面的预模糊
+    /// (实测 509ms@24px、1136ms@60px),而拖一次模糊滑块会**逐个整数**走过去(实测连拖
+    /// 40 档合计 23.7 秒的 UI 线程阻塞)。把大半径归到 5px 一档:档位数从 61 降到 20,
+    /// 拖动时同一档直接命中缓存;而背板本来就是糊的,32px 与 35px 肉眼无法分辨。</summary>
+    const int RadiusStep = 5;
+
+    /// <summary>小于等于此半径**不量化**。小半径是肉眼能分辨的区间(0 → 5px 的差别看得
+    /// 出来),所以 0..8 逐像素精确,9 以上才按 <see cref="RadiusStep"/> 归档。</summary>
+    const int QuantizeBelow = 8;
+
+    /// <summary>模型半径(0-60)→ 预模糊档位。0..8 原样,9 以上取最近的 5 的倍数。</summary>
+    public static int QuantizeRadius(int screenRadiusPx)
+    {
+        int r = Math.Max(0, screenRadiusPx);
+        return r <= QuantizeBelow ? r : (int)Math.Round(r / (double)RadiusStep) * RadiusStep;
+    }
 
     // ── 壁纸来源(二期改为 WallpaperSource:自动识别第三方动态壁纸软件) ──
 
@@ -50,10 +73,11 @@ public static class WallpaperBackdrop
     /// <summary>虚拟桌面在物理像素下的原点/尺寸(与壁纸图的像素空间配套)。</summary>
     static (int vx, int vy, int vw, int vh) Layout() => WallpaperSource.LayoutRect;
 
-    // ── 预模糊缓存(按屏幕半径) ──
+    // ── 预模糊缓存(按屏幕半径 → LRU) ──
 
-    static readonly Dictionary<int, BitmapSource> _blurCache = new();
+    static readonly Dictionary<int, (BitmapSource Bitmap, long Used)> _blurCache = new();
     static readonly object _lock = new();
+    static long _useTick;
     static int _generation;
 
     /// <summary>壁纸图/模糊图的「世代号」,每次 <see cref="Invalidate"/> 自增。
@@ -64,8 +88,33 @@ public static class WallpaperBackdrop
     /// 反应(用户实测反馈的 bug)。图层现在比对这个号,号变了就重取。</summary>
     public static int Generation => _generation;
 
+    /// <summary>壁纸当前是否可用(**不渲染、不模糊、不占缓存档位**)。
+    /// ponytail 2026-09-26(审计修订): `WallpaperBackdropLayer.TryCreate` 原来用
+    /// `GetBlurredDesktop(24)` 探测可用性 —— 冷启动实测 675ms,还往缓存里塞一张半径 24 的
+    /// 位图,而那个窗口自己的半径可能根本不是 24(白占一档,把 LRU 挤掉)。探测只需要
+    /// "壁纸读得到 + 虚拟桌面尺寸正常"这两个条件。</summary>
+    public static bool IsAvailable()
+    {
+        if (LoadWallpaper() == null)
+        {
+            // 宿主在跑 → 只是这一帧没采到,别永久关掉
+            AcrylicHelper.SelfDrawnAvailable = WallpaperSource.HostDetected;
+            DzTrace.Log("[WallpaperBackdrop] 壁纸不可用 → 回退 DWM");
+            return false;
+        }
+        var (_, _, vw, vh) = Layout();
+        if (vw <= 0 || vh <= 0)
+        {
+            DzTrace.Log($"[WallpaperBackdrop] 虚拟桌面尺寸无效 {vw}x{vh} → 回退 DWM");
+            return false;
+        }
+        AcrylicHelper.SelfDrawnAvailable = true;
+        return true;
+    }
+
     /// <summary>取得「壁纸铺满虚拟桌面 + 已按半径预模糊」的位图(1/Downscale 分辨率)。
     /// screenRadiusPx = 期望的屏幕模糊半径(物理像素);返回 null = 壁纸不可用。
+    /// 半径先过 <see cref="QuantizeRadius"/> 归档再缓存。
     /// ponytail 2026-09-26(二期): 来源图已由 <see cref="WallpaperSource"/> 统一铺满虚拟桌面
     /// (并已降采样),这里不再自己算适配,直接 1:1 画进模糊画布。</summary>
     public static BitmapSource? GetBlurredDesktop(int screenRadiusPx)
@@ -85,10 +134,14 @@ public static class WallpaperBackdrop
         }
         AcrylicHelper.SelfDrawnAvailable = true;
 
-        int key = Math.Max(0, screenRadiusPx);
+        int key = QuantizeRadius(screenRadiusPx);
         lock (_lock)
         {
-            if (_blurCache.TryGetValue(key, out var cached)) return cached;
+            if (_blurCache.TryGetValue(key, out var hit))
+            {
+                _blurCache[key] = (hit.Bitmap, ++_useTick);   // 命中 → 刷新 LRU 时间戳
+                return hit.Bitmap;
+            }
         }
 
         int dw = Math.Max(8, vw / Downscale);
@@ -113,14 +166,26 @@ public static class WallpaperBackdrop
         rtb.Freeze();
         lock (_lock)
         {
-            if (_blurCache.Count > MaxBlurCacheEntries) _blurCache.Clear(); // 半径档位很少,清空比 LRU 简单
-            _blurCache[key] = rtb;
+            if (_blurCache.Count >= MaxBlurCacheEntries) EvictLeastRecentlyUsed();
+            _blurCache[key] = (rtb, ++_useTick);
         }
         return rtb;
     }
 
+    /// <summary>淘汰最久未使用的一档(调用方必须持有 <see cref="_lock"/>)。
+    /// 档位最多 6 个,线性找最小即可,不值得上 OrderedDictionary。</summary>
+    static void EvictLeastRecentlyUsed()
+    {
+        int victim = -1;
+        long oldest = long.MaxValue;
+        foreach (var kv in _blurCache)
+            if (kv.Value.Used < oldest) { oldest = kv.Value.Used; victim = kv.Key; }
+        if (victim >= 0) _blurCache.Remove(victim);
+    }
+
     /// <summary>清缓存(壁纸变更/显示器拓扑变化/手动重采时调用)。
-    /// 同时自增 <see cref="Generation"/> —— 已挂载的图层靠它察觉"图换了"。</summary>
+    /// 同时自增 <see cref="Generation"/> —— 已挂载的图层靠它察觉"图换了"。
+    /// 线程安全:`SystemEvents.DisplaySettingsChanged` 会在别的线程上回调到这里。</summary>
     public static void Invalidate()
     {
         lock (_lock)
@@ -265,7 +330,7 @@ public sealed class WallpaperBackdropLayer
     /// <summary>壁纸可用就返回一个层实例(实际元素延迟到 <see cref="Attach"/> 才插进树)。</summary>
     public static WallpaperBackdropLayer? TryCreate()
     {
-        bool ok = WallpaperBackdrop.GetBlurredDesktop(24) != null;
+        bool ok = WallpaperBackdrop.IsAvailable();
         DzTrace.Log($"[WallpaperBackdrop] TryCreate → {(ok ? "可用" : "不可用")}");
         return ok ? new WallpaperBackdropLayer() : null;
     }
@@ -364,7 +429,7 @@ public sealed class WallpaperBackdropLayer
             DzTrace.Log("[WallpaperBackdrop] SetAppearance 跳过: 未挂载");
             return;
         }
-        int radius = Math.Max(0, blurRadiusPx);
+        int radius = WallpaperBackdrop.QuantizeRadius(blurRadiusPx);
         var rect = WindowPx(window);
         if (rect.IsEmpty)
         {
@@ -375,11 +440,13 @@ public sealed class WallpaperBackdropLayer
         // ponytail 2026-09-26(二期修订): 除了"半径变了",**世代号变了也要重取** ——
         // 否则「重新采样」在一模一样的半径下拿不到新图(用户实测反馈的 bug:换壁纸后点
         // 重新采样毫无反应)。
+        // ponytail 2026-09-26(审计修订): 比的是**归档后**的半径,所以拖滑块在同一档内
+        // 来回时连取图/建 ImageBrush 都省掉了(量化见 QuantizeRadius)。
         int gen = WallpaperBackdrop.Generation;
         if (radius != _attachedRadius || gen != _attachedGeneration || _wallpaper.Fill == null)
         {
             var desk = WallpaperBackdrop.GetBlurredDesktop(radius);
-            DzTrace.Log($"[WallpaperBackdrop] SetAppearance r={radius} gen={gen} desk={(desk == null ? "NULL" : $"{desk.PixelWidth}x{desk.PixelHeight}")} rect={rect.X:F0},{rect.Y:F0} {rect.Width:F0}x{rect.Height:F0} tint=#{tint.A:X2}{tint.R:X2}{tint.G:X2}{tint.B:X2} noise={noiseOpacity:F3}");
+            DzTrace.Log($"[WallpaperBackdrop] SetAppearance r={blurRadiusPx}→{radius} gen={gen} desk={(desk == null ? "NULL" : $"{desk.PixelWidth}x{desk.PixelHeight}")} rect={rect.X:F0},{rect.Y:F0} {rect.Width:F0}x{rect.Height:F0} tint=#{tint.A:X2}{tint.R:X2}{tint.G:X2}{tint.B:X2} noise={noiseOpacity:F3}");
             if (desk == null) return;
             var brush = new ImageBrush(desk)
             {

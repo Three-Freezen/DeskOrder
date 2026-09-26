@@ -647,12 +647,12 @@ public partial class PropertyPanel : UserControl
             default:
                 InstanceName = "";
                 SetInstanceIcon(null);
-                FieldScroller.Content = new TextBlock
+                SetFieldRoot(new TextBlock
                 {
                     Margin = new Thickness(16),
                     Text = Target == null ? _loc["PropertyPanel.NoTarget"] : _loc["PropertyPanel.NotImplemented"],
                     Foreground = (Brush)FindResource("Brush.Text.Tertiary"),
-                };
+                });
                 break;
         }
         // Folder-mapping sync baseline: captured after the field tree is built.
@@ -1347,7 +1347,7 @@ public partial class PropertyPanel : UserControl
         // 自动整理 — 样式设置界面最后一项（MergedGroup 不支持）。
         root.Children.Add(BuildAutoOrganizeSection(z));
 
-        FieldScroller.Content = root;
+        SetFieldRoot(root);
         ApplyTileGating(z.TileMode);
     }
 
@@ -1843,7 +1843,7 @@ public partial class PropertyPanel : UserControl
         // 组合分区编辑器不再提供文件夹映射（用户 2026-08-2x：功能与选项一并移除）。
         // 组级映射仍保留在分区窗口层（MergedGroupStyle 字段不动，窗口头部行照常工作）。
 
-        FieldScroller.Content = root;
+        SetFieldRoot(root);
         SetUnifiedGating(gs.UseUnifiedFill, animate: false);
         ApplyTileGating(gs.TileMode);
     }
@@ -1969,7 +1969,7 @@ public partial class PropertyPanel : UserControl
         // (所有 target 共用,已存在)。面板里不再放预设卡列表 — 预设卡挪到加载预设
         // 的二级界面(LoadPresetDialog 新增 SubfolderCardTemplate)。
 
-        FieldScroller.Content = root;
+        SetFieldRoot(root);
         SetFillGating(sub.FillFollowsZone, animate: false);
     }
 
@@ -2304,7 +2304,7 @@ public partial class PropertyPanel : UserControl
             p => { c.SecondHandColor = SetPercent(c.SecondHandColor, p, "FF6666"); Save(c); }));
         root.Children.Add(bodyContent);
 
-        FieldScroller.Content = root;
+        SetFieldRoot(root);
         ApplyTileGating(c.TileMode);
     }
 
@@ -2418,7 +2418,7 @@ public partial class PropertyPanel : UserControl
         root.Children.Add(BuildBodyContentSection(
             () => cal.TextColor, v => cal.TextColor = v, () => Save(cal)));
 
-        FieldScroller.Content = root;
+        SetFieldRoot(root);
         ApplyTileGating(cal.TileMode);
     }
 
@@ -2541,7 +2541,7 @@ public partial class PropertyPanel : UserControl
         }));
         root.Children.Add(bg);
 
-        FieldScroller.Content = root;
+        SetFieldRoot(root);
     }
 
     // ── Field tree for PanelConfig ──
@@ -2652,7 +2652,7 @@ public partial class PropertyPanel : UserControl
         root.Children.Add(BuildBodyContentSection(
             () => p.PanelTextColor, v => p.PanelTextColor = v, () => Save(p)));
 
-        FieldScroller.Content = root;
+        SetFieldRoot(root);
     }
 
     // ── Section + row builders ──
@@ -2941,8 +2941,8 @@ public partial class PropertyPanel : UserControl
         };
         // ponytail: ColorSwatchButton doesn't expose a CLR change event; subscribe via
         // DependencyPropertyDescriptor so popup swatch clicks fire our callback.
-        DependencyPropertyDescriptor.FromProperty(ColorSwatchButton.CurrentColorProperty, typeof(ColorSwatchButton))
-            .AddValueChanged(swatch, (_, _) => onChange(swatch.CurrentColor));
+        HookDpChange(ColorSwatchButton.CurrentColorProperty, typeof(ColorSwatchButton), swatch,
+            () => onChange(swatch.CurrentColor));
         Grid.SetColumn(swatch, 1);
         grid.Children.Add(swatch);
         return grid;
@@ -3001,6 +3001,49 @@ public partial class PropertyPanel : UserControl
         }
     }
 
+    // ── DP 变更订阅的记账(见 HookDpChange / ReleaseDpHooks) ──
+
+    /// <summary>本棵字段树上所有"用 DependencyPropertyDescriptor 订阅的 DP 变更"。
+    ///
+    /// ponytail 2026-09-26(审计修订): **这是必须记账的,否则每重建一次字段树就漏一棵。**
+    /// `DependencyPropertyDescriptor.FromProperty(dp, type)` 返回的描述符被 .NET 缓存在
+    /// 一张**静态**表里(永不淘汰),而 `PropertyDescriptor.AddValueChanged` 把组件当作
+    /// **强键**存进描述符自己的 `_valueChangedHandlers`。于是每个建过的色板 / 滑块都被
+    /// 永久 root:连同闭包(目标模型 z/cal/note + `this.Save`)→ 整个 PropertyPanel →
+    /// CachedOwner(浮动 PropertyWindow),以及那棵已经被丢弃的字段树(WPF 的子→父是强引用)。
+    /// 一次重建 = 7 个色板 + 5 个滑块,切页签 / 切语言 / 切主题 / 切平铺模式都会重建。</summary>
+    readonly List<(DependencyPropertyDescriptor Descriptor, object Component, EventHandler Handler)> _dpHooks = new();
+
+    /// <summary>订阅 DP 变更并记账(替代裸 AddValueChanged)。</summary>
+    void HookDpChange(DependencyProperty dp, Type ownerType, DependencyObject component, Action onChange)
+    {
+        var dpd = DependencyPropertyDescriptor.FromProperty(dp, ownerType);
+        if (dpd == null) return;
+        EventHandler handler = (_, _) => onChange();
+        dpd.AddValueChanged(component, handler);
+        _dpHooks.Add((dpd, component, handler));
+    }
+
+    /// <summary>退订上一棵字段树的记账。**必须**传回同一个委托实例,
+    /// 所以 handler 存在 _dpHooks 里而不是每次 new。</summary>
+    void ReleaseDpHooks()
+    {
+        foreach (var (descriptor, component, handler) in _dpHooks)
+        {
+            try { descriptor.RemoveValueChanged(component, handler); } catch { }
+        }
+        _dpHooks.Clear();
+    }
+
+    /// <summary>换上新的字段树:先退订旧树的 DP 记账,再挂新的。
+    /// 所有 `FieldScroller.Content = root` 都必须走这里 —— 挂在方法里收口,
+    /// 将来新增的构建器就不会漏退订。</summary>
+    void SetFieldRoot(FrameworkElement root)
+    {
+        ReleaseDpHooks();
+        FieldScroller.Content = root;
+    }
+
     Grid MakeSliderRow(string label, double min, double max, double tick, double value, Action<double> onChange)
     {
         var grid = new Grid { Margin = new Thickness(0, 6, 0, 0) };
@@ -3021,8 +3064,8 @@ public partial class PropertyPanel : UserControl
             Value = value,
         };
         // ponytail: SliderWithValue has no ValueChanged event; subscribe via DP descriptor.
-        DependencyPropertyDescriptor.FromProperty(SliderWithValue.ValueProperty, typeof(SliderWithValue))
-            .AddValueChanged(slider, (_, _) => onChange(slider.Value));
+        HookDpChange(SliderWithValue.ValueProperty, typeof(SliderWithValue), slider,
+            () => onChange(slider.Value));
         Grid.SetRow(slider, 1);
         grid.Children.Add(slider);
         return grid;

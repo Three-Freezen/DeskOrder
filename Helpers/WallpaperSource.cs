@@ -74,10 +74,18 @@ public static class WallpaperSource
     static Cache? _cache;
     static readonly object _lock = new();
 
-    /// <summary>清空缓存,下次 <see cref="GetDesktop"/> 重新检测与采集。</summary>
+    static string _sigCache = "";
+    static DateTime _sigAtUtc;
+
+    /// <summary>指纹节流窗口(见 <see cref="QuickSignature"/>)。</summary>
+    static readonly TimeSpan SignatureTtl = TimeSpan.FromMilliseconds(1500);
+
+    /// <summary>清空缓存,下次 <see cref="GetDesktop"/> 重新检测与采集。
+    /// 顺带把虚拟桌面矩形缓存也置零(显示器可能刚变过),并丢掉节流中的指纹。</summary>
     public static void Invalidate()
     {
-        lock (_lock) { _cache = null; Describe = ""; }
+        lock (_lock) { _cache = null; Describe = ""; _sigCache = ""; }
+        _layoutVw = 0;
     }
 
     // ── 对外主入口 ──
@@ -103,7 +111,15 @@ public static class WallpaperSource
             }
 
             var now = Enabled ? Detect() : DetectSystemOnly();
-            _cache = new Cache(now.Origin, now.Kind, now.Stamp, now.Image, now.Display);
+            // ponytail 2026-09-26(审计修订): **一律记「刚刚验过的那串签名」**,不再用
+            // Detect 自己拼的 Origin。两者的口径必须完全一致,而回退路径天生对不上:
+            //   • ①b 抓屏(Origin=hostscreen:进程)时签名可能是 hostfile:进程:0=…(3 屏以上
+            //     且 WPE 的 MonitorN 有空档);
+            //   • 抓屏失败落到 ② 系统壁纸 → Origin=sys:…,签名却是 hostscreen:…;
+            //   • 全部失败 → Origin="none"/"none:off",和任何签名都不等。
+            // 任一条命中,缓存就**永远不命中** → 每次重画玻璃都重跑整次检测(含抓屏 +
+            // 隐藏/cloak 全部窗口),正是下面 Detect 注释里记的那个老坑。存签名则天然一致。
+            _cache = new Cache(sig, now.Kind, now.Stamp, now.Image, now.Display);
             Describe = Summarize(now.Kind, now.Display, cached: false);
             DzTrace.Log($"[WallpaperSource] 来源={now.Kind} 图={(now.Image == null ? "NULL" : $"{now.Image.PixelWidth}x{now.Image.PixelHeight}")} 显示={now.Display}");
             return now.Image;
@@ -113,8 +129,22 @@ public static class WallpaperSource
     /// <summary>轻量指纹:足以判断"壁纸换没换"的最小信息,不碰位图。
     /// 抓屏类来源返回固定串(内容随时变,但我们刻意只采一次,靠用户点「重新采样」刷新)。
     /// ponytail 2026-09-26(二期修订 3): 逐显示器比对(Monitor0..N 各自的文件 + 时间戳),
-    /// 这样任一屏换了壁纸都会让缓存失效。</summary>
+    /// 这样任一屏换了壁纸都会让缓存失效。
+    /// ponytail 2026-09-26(审计修订): 结果节流 1.5 秒。实测这个"轻量"指纹要 **4.1~5.0ms**
+    /// (2 次进程表枚举 + 读并解析 Wallpaper Engine 的 config.json + 注册表读),而它在
+    /// 模糊**命中缓存**时也会被执行(`GetBlurredDesktop` 先取图、后查模糊缓存),于是拖
+    /// 模糊滑块时每次都白付一遍。指纹只回答"壁纸换没换",晚 1.5 秒无感;显式失效
+    /// (`Invalidate()`:重新采样 / 关开关 / 显示器变化)会立刻清掉它,不走节流。</summary>
     static string QuickSignature()
+    {
+        var now = DateTime.UtcNow;
+        if (_sigCache.Length > 0 && now - _sigAtUtc < SignatureTtl) return _sigCache;
+        _sigCache = ComputeSignature();
+        _sigAtUtc = now;
+        return _sigCache;
+    }
+
+    static string ComputeSignature()
     {
         if (!Enabled) return "sys:" + SystemSignature();
         var host = HostLocator.Find();
@@ -151,8 +181,7 @@ public static class WallpaperSource
         return GetDesktop();
     }
 
-    /// <summary>只认系统静态壁纸(开关关闭 / 没检测到宿主时的路径)。
-    /// Origin 与 <see cref="QuickSignature"/> 在 Enabled=false 时的返回值同口径。</summary>
+    /// <summary>只认系统静态壁纸(开关关闭 / 没检测到宿主时的路径)。</summary>
     static Detected DetectSystemOnly()
     {
         HostDetected = false;
@@ -161,10 +190,9 @@ public static class WallpaperSource
         {
             var img = TryComposeSystem(cand.Path, cand.Style, cand.Tile);
             if (img != null)
-                return new Detected(Kind.SystemFile, SystemSig(cand.Path, cand.Stamp), cand.Stamp, img,
-                    ShortName(cand.Path));
+                return new Detected(Kind.SystemFile, cand.Stamp, img, ShortName(cand.Path));
         }
-        return new Detected(Kind.None, "sys:", default, null, "");
+        return new Detected(Kind.None, default, null, "");
     }
 
     /// <summary><paramref name="display"/> = 给人看的来源说明(不含 origin 这种机器指纹)。</summary>
@@ -188,12 +216,13 @@ public static class WallpaperSource
 
     // ── 来源检测 ──
 
-    sealed record Detected(Kind Kind, string Origin, DateTime Stamp, BitmapSource? Image, string Display);
+    sealed record Detected(Kind Kind, DateTime Stamp, BitmapSource? Image, string Display);
 
-    /// <summary>检测来源并采集。<see cref="Detected.Origin"/> **必须**与
-    /// <see cref="QuickSignature"/> 的返回值口径一致 —— 缓存命中就是比这两个串,
-    /// 早期版本一边返回 "screen"、一边返回 "hostscreen:wallpaper32",缓存永远不命中,
-    /// 结果是每次渲染都抓一次屏(实测踩过)。
+    /// <summary>检测来源并采集。
+    ///
+    /// ponytail 2026-09-26(审计修订): 本方法**不再自己拼缓存指纹** —— 指纹一律由
+    /// <see cref="QuickSignature"/> 负责(见 <see cref="GetDesktop"/> 的注释:回退路径拼出的
+    /// 串与签名口径不一致会导致缓存永不命中,每次渲染都重采一次)。
     ///
     /// ponytail 2026-09-26(二期修订 3): 优先级重排 —— **文件类壁纸(图片)优先,读不到就抓屏**,
     /// 抓屏之后再用能读到的那些显示器的文件图**覆盖对应区域**(抓屏给的是合成后的整屏,
@@ -217,9 +246,7 @@ public static class WallpaperSource
             {
                 var composed = ComposeDesktop(null, parts);
                 if (composed != null)
-                    return new Detected(Kind.HostFile,
-                        HostSig(host.Process, string.Join("|", parts.Select(p => p.Path)), parts.Max(p => p.Stamp)),
-                        parts.Max(p => p.Stamp), composed, names);
+                    return new Detected(Kind.HostFile, parts.Max(p => p.Stamp), composed, names);
             }
 
             // ①b 有显示器读不到(场景/视频)→ 抓屏,再用可读的那几个显示器的文件图盖掉对应区域
@@ -227,8 +254,8 @@ public static class WallpaperSource
             if (shot != null)
             {
                 var overlaid = parts.Count > 0 ? ComposeDesktop(shot, parts) : shot;
-                return new Detected(Kind.HostScreen, HostScreenSig(host.Process), DateTime.UtcNow,
-                    overlaid ?? shot, parts.Count > 0 ? names + " + " + LocalizationService.Instance["Settings.Renderer.Source.Screen"] : "");
+                return new Detected(Kind.HostScreen, DateTime.UtcNow, overlaid ?? shot,
+                    parts.Count > 0 ? names + " + " + LocalizationService.Instance["Settings.Renderer.Source.Screen"] : "");
             }
         }
 
@@ -237,11 +264,10 @@ public static class WallpaperSource
         {
             var img = TryComposeSystem(cand.Path, cand.Style, cand.Tile);
             if (img != null)
-                return new Detected(Kind.SystemFile, SystemSig(cand.Path, cand.Stamp), cand.Stamp, img,
-                    ShortName(cand.Path));
+                return new Detected(Kind.SystemFile, cand.Stamp, img, ShortName(cand.Path));
         }
 
-        return new Detected(Kind.None, Enabled ? "none" : "none:off", default, null, "");
+        return new Detected(Kind.None, default, null, "");
     }
 
     sealed record Candidate(string Path, string Style, string Tile, DateTime Stamp);
@@ -427,12 +453,19 @@ public static class WallpaperSource
     }
 
     static int _layoutVx, _layoutVy, _layoutVw, _layoutVh;
+    static bool _displayHookInstalled;
 
-    /// <summary>虚拟桌面原点/尺寸(物理像素)。</summary>
+    /// <summary>虚拟桌面原点/尺寸(物理像素)。
+    ///
+    /// ponytail 2026-09-26(审计修订): 原来这个缓存**一旦算出来就永不失效**,而全仓库也没有
+    /// 任何 DisplaySettingsChanged 处理 —— 插拔显示器 / 改分辨率之后壁纸仍按旧尺寸拼装,
+    /// 采样区域一直错位到下次重启。现在:① <see cref="Invalidate"/> 会置零;
+    /// ② 首次读取时挂一个 SystemEvents.DisplaySettingsChanged,拓扑一变就整体失效。</summary>
     public static (int X, int Y, int W, int H) LayoutRect
     {
         get
         {
+            EnsureDisplayHook();
             if (_layoutVw <= 0)
             {
                 _layoutVx = NativeMethods.GetSystemMetrics(NativeMethods.SM_XVIRTUALSCREEN);
@@ -441,6 +474,24 @@ public static class WallpaperSource
                 _layoutVh = NativeMethods.GetSystemMetrics(NativeMethods.SM_CYVIRTUALSCREEN);
             }
             return (_layoutVx, _layoutVy, _layoutVw, _layoutVh);
+        }
+    }
+
+    /// <summary>只装一次:显示器拓扑变化 → 丢掉壁纸/模糊缓存 + 置零上面的矩形缓存。
+    /// 回调跑在 SystemEvents 自己的线程上,所以这里只做**加锁的失效**,绝不碰 UI。
+    /// 下一次有窗口重画玻璃(重新采样 / 改样式)时就会按新拓扑重新采集。</summary>
+    static void EnsureDisplayHook()
+    {
+        if (_displayHookInstalled) return;
+        _displayHookInstalled = true;
+        try
+        {
+            Microsoft.Win32.SystemEvents.DisplaySettingsChanged += (_, _) => WallpaperBackdrop.Invalidate();
+            DzTrace.Log("[WallpaperSource] 已订阅 DisplaySettingsChanged");
+        }
+        catch (Exception ex)
+        {
+            DzTrace.Log($"[WallpaperSource] 订阅 DisplaySettingsChanged 失败: {ex.Message}");
         }
     }
 
@@ -568,9 +619,14 @@ public static class WallpaperSource
             // ponytail 2026-09-26(二期修订 3): 画面已经拿到手,**立刻**把所有窗口放回去,
             // 后面的缩放/拷贝(全分辨率下要走几十毫秒)不该再让用户盯着空屏。
             RestoreAll();
-            using var small = new Bitmap(dw, dh, PixelFormat.Format32bppArgb);
-            using (var g2 = Graphics.FromImage(small))
+            // ponytail 2026-09-26(审计修订): Downscale == 1 时 small 是 full 的**逐字节复制** ——
+            // 白搭一张整屏 GDI 位图(本机 3968×1280 ≈ 19 MB)+ 一次全图缩放,纯浪费。
+            // 1:1 直接拿 full 当源。
+            using var small = dw == vw && dh == vh ? null : new Bitmap(dw, dh, PixelFormat.Format32bppArgb);
+            var source = (Bitmap?)small ?? full;
+            if (small != null)
             {
+                using var g2 = Graphics.FromImage(small);
                 g2.DrawImage(full, new Rectangle(0, 0, dw, dh), new Rectangle(0, 0, vw, vh), GraphicsUnit.Pixel);
             }
 
@@ -578,7 +634,7 @@ public static class WallpaperSource
             wb.Lock();
             try
             {
-                var d = small.LockBits(new Rectangle(0, 0, dw, dh), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+                var d = source.LockBits(new Rectangle(0, 0, dw, dh), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
                 try
                 {
                     var row = new byte[dw * 4];
@@ -588,7 +644,7 @@ public static class WallpaperSource
                         Marshal.Copy(row, 0, wb.BackBuffer + y * wb.BackBufferStride, row.Length);
                     }
                 }
-                finally { small.UnlockBits(d); }
+                finally { source.UnlockBits(d); }
             }
             finally { wb.Unlock(); }
             wb.Freeze();
@@ -634,7 +690,10 @@ static class HostLocator
     /// (0 = 主屏,见 <see cref="MonitorHelper.Monitors"/> 的排序约定)。</summary>
     public sealed record PickedFile(int MonitorIndex, string Path, DateTime Stamp);
 
-    /// <summary>检测正在运行的第三方壁纸宿主。找不到返回 null。</summary>
+    /// <summary>检测正在运行的第三方壁纸宿主。找不到返回 null。
+    /// ponytail 2026-09-26(审计修订): `Process.GetProcessesByName` 返回的对象带原生句柄
+    /// (`.MainModule` 还会再开一个),必须 Dispose —— 旧写法全靠 SafeHandle 终结器兜,
+    /// 而这个方法每次取背板都会被调一遍。</summary>
     public static Host? Find()
     {
         foreach (var name in new[] { "wallpaper32", "wallpaper64" })
@@ -642,24 +701,31 @@ static class HostLocator
             try
             {
                 var procs = Process.GetProcessesByName(name);
-                if (procs.Length == 0) continue;
-                string dir = "";
-                try { dir = Path.GetDirectoryName(procs[0].MainModule?.FileName ?? "") ?? ""; } catch { }
-                if (string.IsNullOrEmpty(dir))
+                try
                 {
-                    // 主模块读不到(权限)→ 退回注册表里的 installPath
-                    try
+                    if (procs.Length == 0) continue;
+                    string dir = "";
+                    try { dir = Path.GetDirectoryName(procs[0].MainModule?.FileName ?? "") ?? ""; } catch { }
+                    if (string.IsNullOrEmpty(dir))
                     {
-                        using var k = Registry.CurrentUser.OpenSubKey(@"Software\WallpaperEngine");
-                        var ip = k?.GetValue("installPath") as string;
-                        if (!string.IsNullOrEmpty(ip)) dir = Path.GetDirectoryName(ip!) ?? "";
+                        // 主模块读不到(权限)→ 退回注册表里的 installPath
+                        try
+                        {
+                            using var k = Registry.CurrentUser.OpenSubKey(@"Software\WallpaperEngine");
+                            var ip = k?.GetValue("installPath") as string;
+                            if (!string.IsNullOrEmpty(ip)) dir = Path.GetDirectoryName(ip!) ?? "";
+                        }
+                        catch { }
                     }
-                    catch { }
+                    if (string.IsNullOrEmpty(dir)) continue;
+                    var cfg = Path.Combine(dir, "config.json");
+                    DzTrace.Log($"[HostLocator] 检测到 {name} pid={procs[0].Id} dir={dir} cfg={File.Exists(cfg)}");
+                    return new Host(name, dir, cfg);
                 }
-                if (string.IsNullOrEmpty(dir)) continue;
-                var cfg = Path.Combine(dir, "config.json");
-                DzTrace.Log($"[HostLocator] 检测到 {name} pid={procs[0].Id} dir={dir} cfg={File.Exists(cfg)}");
-                return new Host(name, dir, cfg);
+                finally
+                {
+                    foreach (var p in procs) p.Dispose();
+                }
             }
             catch { }
         }

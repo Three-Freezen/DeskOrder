@@ -170,6 +170,11 @@ public class HoverExpandBehavior : IDisposable
         _exitTimer.Tick += (_, _) => { _exitTimer.Stop(); CollapseAnimated(); };
         _pollTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(150) };
         _pollTimer.Tick += (_, _) => CheckMouseState();
+        // ponytail 2026-09-26(审计修订): **不再在构造函数里无条件 Start()**。
+        // 这个 150ms 轮询唯一的作用是"鼠标移出后自动收起",只有"已展开且非永久展开"时才
+        // 有意义;原来它在窗口的整个生命周期里都开着 —— 每个分区/时钟/日历/便签/面板
+        // 每秒 6.7 次 Dispatcher 唤醒,只为在 CheckMouseState 里立刻 return。
+        // 现在由 SyncPollTimer 按状态开关(展开时开、收起/永久展开/被禁用时关)。
 
         // ponytail: IsEnabled gates the entire feature; hoverAutoExpandGetter further
         // disables ONLY the hover trigger. Direct clicks on RestoreButton bypass
@@ -183,7 +188,7 @@ public class HoverExpandBehavior : IDisposable
 
         // ponytail: no ApplyInitialState here — host widget calls SnapToExpanded/
         // SnapToCollapsed from its Show/ApplyHidden paths to avoid double-state.
-        _pollTimer.Start();
+        SyncPollTimer();
     }
 
     /// <summary>
@@ -341,6 +346,7 @@ public class HoverExpandBehavior : IDisposable
                 _collapsedButton.Visibility = IsEnabled ? Visibility.Visible : Visibility.Collapsed;
             if (_expandedModeElement != null) _expandedModeElement.Visibility = Visibility.Collapsed;
         }
+        SyncPollTimer();
     }
 
     /// <summary>
@@ -569,12 +575,33 @@ public class HoverExpandBehavior : IDisposable
 
     void CheckMouseState()
     {
-        if (!IsEnabled || !_isExpanded || _permanent || _window == null) return;
+        if (!IsEnabled || !_isExpanded || _permanent || _window == null)
+        {
+            // 不需要轮询 → 自己停下来,下次展开时由 SyncPollTimer 重新启动。
+            _pollTimer.Stop();
+            return;
+        }
         var pos = Mouse.GetPosition(_window);
         var inside = pos.X >= 0 && pos.Y >= 0
                      && pos.X <= _window.ActualWidth && pos.Y <= _window.ActualHeight;
         if (!inside) _exitTimer.Start();
         else _exitTimer.Stop();
+    }
+
+    /// <summary>按当前状态开关那个 150ms 的"鼠标是否还在窗口里"轮询。
+    /// ponytail 2026-09-26(审计修订): 见构造函数里的说明 —— 只有
+    /// 「已启用 + 已展开 + 非永久展开」这一种状态需要它,别的时候纯属白唤醒。</summary>
+    void SyncPollTimer()
+    {
+        bool needed = IsEnabled && _isExpanded && !_permanent && _window != null;
+        if (needed)
+        {
+            if (!_pollTimer.IsEnabled) _pollTimer.Start();
+        }
+        else if (_pollTimer.IsEnabled)
+        {
+            _pollTimer.Stop();
+        }
     }
 
     /// <summary>
@@ -607,6 +634,7 @@ public class HoverExpandBehavior : IDisposable
         // IsExpanded == true (ghost-glass fix: liquid glass only while expanded).
         Expanded?.Invoke();
         StartAnimation(isExpand: true);
+        SyncPollTimer();   // 自动收起轮询只在"非永久展开"时需要(见构造函数说明)
 #if DEBUG
         DzTrace.Log($"[hover:{Host}] ExpandAnimated(permanent={permanent}, force={force}) -> scale={_scale.ScaleX:0.###} op={_expandedContent.Opacity:0.###}");
 #endif
@@ -624,6 +652,7 @@ public class HoverExpandBehavior : IDisposable
         _permanent = false;
         _enterTimer.Stop();
         _exitTimer.Stop();
+        SyncPollTimer();
         ApplyOrigin();                                    // re-apply in case origin changed
         NormalizeFor(isExpanded: false);                  // snap stable axes BEFORE animation
 #if DEBUG
