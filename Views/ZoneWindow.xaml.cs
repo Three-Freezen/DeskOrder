@@ -115,6 +115,9 @@ public partial class ZoneWindow : Window
     }
     private readonly System.Windows.Threading.DispatcherTimer _saveDebounce = new() { Interval = TimeSpan.FromMilliseconds(500) };
     private bool _savePending;
+    // ponytail 2026-09-26: 标题栏改名的"停手即提交"防抖。见 ZoneTitle_TextChanged 的说明 ——
+    // 只在 Enter / 失焦提交是不够的(点窗口里的空白处不会把焦点移出 TextBox)。
+    private readonly System.Windows.Threading.DispatcherTimer _titleCommitDebounce = new() { Interval = TimeSpan.FromMilliseconds(700) };
     private readonly System.Windows.Threading.DispatcherTimer _recycleTimer = new() { Interval = TimeSpan.FromSeconds(2.5) };
     private bool _recycleStateInit;
     private bool _recycleFullLast;
@@ -228,6 +231,11 @@ public partial class ZoneWindow : Window
         LocationChanged += (_, _) => { _zone.X = Left; _zone.Y = Top; ScheduleSave(); };
         SizeChanged += OnSize;
         _saveDebounce.Tick += (_, _) => { _saveDebounce.Stop(); if (_savePending) { _savePending = false; _mgr.SaveConfig(); } };
+        // 标题栏改名:停手 700ms 自动提交 + 窗口失去激活时提交 —— 用户"改完点别处"
+        // (点窗口内不可聚焦的空白 / 点别的窗口)都必须落盘,不能只有 Enter 才算数。
+        _titleCommitDebounce.Tick += (_, _) => CommitTitleRename();
+        ZoneTitleText.TextChanged += ZoneTitle_TextChanged;
+        Deactivated += (_, _) => CommitTitleRename();
         _recycleTimer.Tick += RecycleTimer_Tick;
         _recycleTimer.Start();
         _langChanged = _ => ApplyLoc();
@@ -1598,7 +1606,16 @@ public partial class ZoneWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        // ponytail 2026-09-26: 先摘订阅再做任何会抛 ZonesChanged 的事 —— 下面的标题提交会
+        // 走 ZoneManager.RenameZone → NotifyChanged,若此时自己还订阅着,OnZonesChanged 会
+        // 排一个 BeginInvoke 到关窗之后再跑(RefreshItems/ApplyStyle/RefreshFolderMapping
+        // 在已关闭的窗口上跑)。顺序与 StickyNoteWindow.OnClosed 同策。
+        _mgr.ZonesChanged -= OnZonesChanged;
+        _mgr.LockChanged -= OnServiceLockChanged;
+        // 关窗前把标题栏里还没提交的改名落盘(用户敲完直接关/隐藏窗口).
+        CommitTitleRename();
         _saveDebounce?.Stop();
+        _titleCommitDebounce.Stop();
         _recycleTimer.Stop();
         _folderLoadCts?.Cancel();
         _folderLoadCts = null;
@@ -1615,8 +1632,6 @@ public partial class ZoneWindow : Window
         _snapResize?.Detach();
         _hover?.Dispose();
         var h = new WindowInteropHelper(this).Handle;
-        _mgr.ZonesChanged -= OnZonesChanged;
-        _mgr.LockChanged -= OnServiceLockChanged;
         if (_src != null) { _src.RemoveHook(WndProc); _src = null; }
         if (_langChanged != null) { _loc.LanguageChanged -= _langChanged; _langChanged = null; }
         if (h != IntPtr.Zero) NativeMethods.DragAcceptFiles(h, false);
@@ -1648,6 +1663,9 @@ public partial class ZoneWindow : Window
 
     void TitleBar_Drag(object s, MouseButtonEventArgs e)
     {
+        // ponytail 2026-09-26: 在标题栏空白处按下 = "改完点别处"最常见的一种 —— 但标题栏
+        // 不可聚焦,TextBox 的 LostFocus 不会触发,所以这里主动提交一次再开始拖动。
+        CommitTitleRename();
         StartBodyDrag(e);
     }
 
@@ -4585,13 +4603,15 @@ public partial class ZoneWindow : Window
         : _zone.Name;
 
     /// <summary>
-    /// 标题栏内联改名的唯一提交口(Enter 与失焦共用)。改名走
-    /// <see cref="ZoneManager.RenameZone"/>:写模型 + 立即落盘 + ZonesChanged,
-    /// 设置界面实时跟上,不做"二次应用"。提交后把显示文本还原为已保存的值
-    /// (空名 / 未改动时同样回填,避免标题框停在用户敲了一半的文本上)。
+    /// 标题栏内联改名的唯一提交口(Enter / 失焦 / 点标题栏 / 窗口失去激活 / 关窗 /
+    /// 停手 700ms 都走这里)。改名走 <see cref="ZoneManager.RenameZone"/>:写模型 +
+    /// 立即落盘 + ZonesChanged,设置界面实时跟上,不做"二次应用"。
+    /// 提交后把显示文本还原为已保存的值(空名 / 未改动时同样回填,避免标题框停在
+    /// 用户敲了一半的文本上)。
     /// </summary>
     void CommitTitleRename()
     {
+        _titleCommitDebounce.Stop();
         var text = ZoneTitleText.Text?.Trim() ?? "";
         if (_mgr.RenameZone(_zone, text))
         {
@@ -4600,6 +4620,29 @@ public partial class ZoneWindow : Window
                 TitleIsMergedGroup ? MergedGroupTarget.For(_zone) : _zone);
         }
         ZoneTitleText.Text = CurrentTitleText();
+    }
+
+    /// <summary>
+    /// 停手 700ms 自动提交。
+    ///
+    /// ponytail 2026-09-26(外部端到端实测):只在 Enter / LostFocus 提交是不够的 ——
+    /// 用户改完名字最自然的动作是"点别处",而在窗口内部点标题栏 / 图标区这类**不可聚焦**
+    /// 的元素,WPF 根本不会把键盘焦点移出 TextBox,LostFocus 永远不触发:于是标题栏里
+    /// 显示着新名字(用户以为改好了),模型 / 磁盘 / 设置界面全是旧名 ——
+    /// 实机复现:UIA 写真名 + 点标题栏空白处 → 磁盘仍是旧名。
+    /// 这里按"停手即提交"补齐:文本与已保存值不同才起表,提交后回填会让 TextChanged
+    /// 再进一次本函数(那时文本 == 已保存值 → 不再起表),不会自激。
+    /// </summary>
+    void ZoneTitle_TextChanged(object s, TextChangedEventArgs e)
+    {
+        var text = ZoneTitleText.Text?.Trim() ?? "";
+        if (text.Length == 0 || text == CurrentTitleText())
+        {
+            _titleCommitDebounce.Stop();
+            return;
+        }
+        _titleCommitDebounce.Stop();
+        _titleCommitDebounce.Start();
     }
 
     void ZoneTitle_PreviewMouseLeftButtonDown(object s, MouseButtonEventArgs e)

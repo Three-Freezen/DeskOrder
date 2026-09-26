@@ -50,6 +50,8 @@ public partial class StickyNoteWindow : Window
 
     // ponytail: 位置防抖保存 — 拖拽移动后持久化 X/Y（与分区 ZoneWindow 一致）。
     private readonly DispatcherTimer _positionSaveDebounce = new() { Interval = TimeSpan.FromMilliseconds(500) };
+    // ponytail 2026-09-26: 标题栏改名的"停手即提交"防抖(同 ZoneWindow)。
+    private readonly DispatcherTimer _titleCommitDebounce = new() { Interval = TimeSpan.FromMilliseconds(700) };
     private bool _positionSavePending;
     void SchedulePositionSave() { _positionSavePending = true; _positionSaveDebounce.Stop(); _positionSaveDebounce.Start(); }
 
@@ -93,6 +95,11 @@ public partial class StickyNoteWindow : Window
 
         Loaded += OnLoad;
         _notesService.NotesChanged += OnNotesChanged;
+        // ponytail 2026-09-26: 便签标题同样"停手即提交" —— 见 ZoneWindow.ZoneTitle_TextChanged
+        // 的说明(在窗口内点不可聚焦处不会触发 LostFocus,只靠 Enter/失焦会丢改名)。
+        _titleCommitDebounce.Tick += (_, _) => CommitTitleRename();
+        TitleBox.TextChanged += TitleBox_TextChanged;
+        Deactivated += (_, _) => CommitTitleRename();
         // ponytail 2026-08-27: 语言变化时刷新右键菜单 — XAML 静态绑定只读一次 i18n,
         // 菜单项 Header 必须手动同步(吸取时钟/日历的教训)。
         _langChanged = _ => ApplyLoc();
@@ -1598,6 +1605,7 @@ public partial class StickyNoteWindow : Window
     /// </summary>
     void CommitTitleRename()
     {
+        _titleCommitDebounce.Stop();
         var text = TitleBox.Text?.Trim() ?? "";
         if (_notesService.RenameNote(_note, text))
         {
@@ -1605,6 +1613,27 @@ public partial class StickyNoteWindow : Window
             PropertyWindowManager.Instance.RefreshEditorTitle(_note);
         }
         TitleBox.Text = _note.Title ?? "";
+    }
+
+    /// <summary>
+    /// 停手 700ms 自动提交(与 <see cref="ZoneWindow"/> 的标题栏同策)。
+    /// ponytail 2026-09-26: 便签标题原来只在 Enter / LostFocus 提交 —— 用户敲完名字点
+    /// 便签空白处(或在窗口内点不可聚焦的元素)时焦点根本不移出 TextBox,LostFocus 不触发,
+    /// 标题框里显示着新名、模型与设置界面却还是旧名;更糟的是关窗时 <c>_vm.ApplyToModel()</c>
+    /// 会用 VM 里的旧值把模型写回去,改名彻底丢失。
+    /// 文本与已保存值不同才起表;提交后的回填会让 TextChanged 再进一次(那时文本 ==
+    /// 已保存值 → 不再起表),不会自激。
+    /// </summary>
+    void TitleBox_TextChanged(object s, TextChangedEventArgs e)
+    {
+        var text = TitleBox.Text?.Trim() ?? "";
+        if (text.Length == 0 || text == (_note.Title ?? ""))
+        {
+            _titleCommitDebounce.Stop();
+            return;
+        }
+        _titleCommitDebounce.Stop();
+        _titleCommitDebounce.Start();
     }
 
     void Save()
@@ -1620,24 +1649,27 @@ public partial class StickyNoteWindow : Window
     {
         _autoSaveTimer?.Stop();
         _autoSaveTimer = null;
+        // ponytail: unsubscribe BEFORE 任何会触发 NotesChanged 的写盘 —— 关窗收尾期间重入
+        // 自己的 OnNotesChanged / OnServiceLockChanged 会撞上 EnsureHandle →
+        // "关闭窗口后，无法设置可见性…" 并让应用在退出时崩溃(见下面 UpdateNote 处的历史说明)。
+        // 2026-09-26:摘订阅提到最前面,因为下面新增的标题提交也会走 UpdateNote。
+        _notesService.LockChanged -= OnServiceLockChanged;
+        _notesService.NotesChanged -= OnNotesChanged;
         // ponytail: 关窗前落盘未保存的位置。
         _positionSaveDebounce.Stop();
         if (_positionSavePending && !_deleted) { _positionSavePending = false; _notesService.Save(); }
+        // ponytail 2026-09-26: 标题栏里还没提交的改名先落盘 —— 必须在 _vm.ApplyToModel()
+        // 之前:VM 的 Title 还停在构造时的旧值,晚一步就会把用户刚敲的名字覆盖回去。
+        _titleCommitDebounce.Stop();
+        if (!_deleted) CommitTitleRename();
         _vm.Content = SaveContent();
         _vm.ApplyToModel();
         if (!_deleted)
         {
             // 关窗前把富文本正文落盘一次(删除便签时不再写回,避免孤儿文件)。
             _notesService.SaveNoteFile(_note.Id, BuildNoteFileData());
-        }
-        // ponytail: unsubscribe BEFORE UpdateNote so this closing window doesn't
-        // re-enter its own NotesChanged / LockChanged handlers while WmDestroy is
-        // tearing the window down (those re-entrant calls hit EnsureHandle →
-        // "关闭窗口后，无法设置可见性…" and crash the app on exit).
-        _notesService.LockChanged -= OnServiceLockChanged;
-        _notesService.NotesChanged -= OnNotesChanged;
-        if (!_deleted)
             _notesService.UpdateNote(_note);
+        }
         _note.HoverExpandSettingsChanged -= OnHoverExpandSettingsChanged;
         if (_langChanged != null) _loc.LanguageChanged -= _langChanged;
         _langChanged = null;
