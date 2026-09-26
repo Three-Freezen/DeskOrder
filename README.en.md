@@ -35,6 +35,8 @@ A messy desktop needs organizing; a plain desktop could look better. That used t
 
 ![Tile mode: large custom icons with liquid glass, double-click to launch](docs/images/tiles.png)
 
+![Liquid glass material presets: eight materials sampled from the same wallpaper](docs/images/glass.png)
+
 ![Clock, calendar and sticky note widgets](docs/images/widgets.png)
 
 ![Quick panel: zone cards, system locations and search in one place](docs/images/panel.png)
@@ -80,7 +82,7 @@ Updates: open Settings → Check for updates. The app downloads, installs and re
 ### Tiles & styling
 
 - Tile mode: turn a zone into one big tile with the title bar hidden; enable a custom icon to make the whole tile a single launcher
-- Liquid glass: adjustable blur, tint opacity and luminosity
+- Liquid glass: eight material presets (acrylic, smoke, frosted, liquid glass, dark glass and more), with adjustable blur, tint opacity and luminosity — saved into preset cards
 - Background image: custom picture with opacity, crop, offset and zoom
 - **Custom preset cards**: save a whole style as a card, then apply it to other zones, panels and widgets — no repeated tweaking
 
@@ -131,6 +133,16 @@ Every part can be tuned:
 | Presets | custom preset cards, 9-color presets, built-in color picker |
 
 Save the whole look as a preset card and apply it to the next zone with one click. Tune it once, reuse it everywhere.
+
+### Rich liquid glass
+
+The glass backdrop ships with two rendering options, switchable in Settings:
+
+**DWM mode (default)**: blurring is delegated to the Windows compositor (DWM). Once a window declares the glass effect, DWM blurs whatever is actually behind it in real time while compositing the desktop. That makes it naturally compatible with any dynamic background — video wallpapers, Wallpaper Engine and the like: the picture moves and the glass moves with it, fully live, at zero cost to the app itself. The trade-off: the blur strength is fixed by the system (on Windows 11 the blur-radius slider measurably has no effect), and material presets are not part of the rendering — only color, opacity and luminosity still apply.
+
+**Wallpaper sampling (new)**: the app paints the backdrop itself. It first samples the current wallpaper into a bitmap at native 1:1 physical resolution, applies a Gaussian blur at the configured radius, then crops the region matching each window's on-screen rectangle and lays it underneath, with tint and grain layers stacked on top — the blur radius is real pixels, and all eight material presets (backdrop type, grain strength, tint parameters) take full effect. It also auto-adapts to dynamic-wallpaper apps such as Wallpaper Engine, Lively and Firefly: image wallpapers are read straight from the file, scene wallpapers are captured from the current frame (glass windows briefly step aside during the grab so they never sample themselves), and each monitor lays out its own wallpaper. The trade-off: sampling yields a still frame — the backdrop does not follow a moving wallpaper (only DWM mode can do that). After changing the wallpaper, hit "Resample" in Settings to refresh.
+
+In short: pick DWM mode to follow dynamic wallpapers live at zero overhead; pick wallpaper sampling for a real, adjustable blur radius and the full material feel.
 
 ### Icons link to the real files — nothing to break
 
