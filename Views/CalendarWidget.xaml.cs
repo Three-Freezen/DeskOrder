@@ -363,7 +363,7 @@ public partial class CalendarWidget : Window
     /// 返回 true = 背板已接管;壁纸不可用/材质=自定义 → false(回退 DWM)。</summary>
     bool TryApplyWallpaperBackdrop(string fillColorStr)
     {
-        if (!AcrylicHelper.ResolveSelfDrawn(_calendar.GlassMaterial)) return false;
+        if (!AcrylicHelper.ResolveSelfDrawn(_calendar.GlassMaterial, _calendar.UseWallpaperRenderer)) return false;
         _wallpaperBackdrop ??= WallpaperBackdropLayer.TryCreate();
         if (_wallpaperBackdrop == null) return false;
 
@@ -502,7 +502,7 @@ public partial class CalendarWidget : Window
 
     // ── Style (border / fill) ──
 
-    void ApplyStyle()
+    public void ApplyStyle()
     {
         // Always apply user's border color (overrides chromatic border from LiquidGlass if needed)
         try
@@ -1115,6 +1115,12 @@ public partial class CalendarWidget : Window
         // Without this, the FillRect "snaps" to model the moment the property window opens, even
         // though the user hasn't touched anything.
         Left = _calendar.X; Top = _calendar.Y;
+        // ponytail 2026-09-26「先出整窗框再展开」修复:窗口尺寸必须落在展开动画之前
+        // (详见 ZoneWindow.ShowZone 同款注释)。整窗隐藏的挂件被缩到 36×36,尺寸恢复
+        // 若排在动画之后,动画第一帧会先出现一个全尺寸空窗轮廓。
+        MinWidth = 260; MinHeight = 460;
+        Width = _calendar.Width > 260 ? _calendar.Width : 320;
+        Height = _calendar.Height > 340 ? _calendar.Height : 440;
         if (waveDelayMs > 0)
         {
             // ponytail: batch "Show All" wave — start collapsed and play the calendar's
@@ -1138,9 +1144,7 @@ public partial class CalendarWidget : Window
         // showing from the collapsed button.
         if (!skipResync)
             ApplyAcrylic();
-        MinWidth = 260; MinHeight = 460;
-        Width = _calendar.Width > 260 ? _calendar.Width : 320;
-        Height = _calendar.Height > 340 ? _calendar.Height : 440;
+        // 尺寸已在本方法开头(动画之前)设好 —— 这里不再重复设置,保持「先定尺寸再动画」。
         DesktopLayer.BringToFront(this);
         NativeMethods.SetRoundedCorners(this, 10);
         // ponytail: 2026-08-23 — persist LAST so a failure in the model/event path can

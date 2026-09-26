@@ -68,6 +68,39 @@
         </StackPanel>
       </Border>
 
+      <!-- 玻璃渲染方案 -->
+      <TextBlock Text="{loc:Loc Key=Settings.Renderer}" FontSize="11" FontWeight="SemiBold" Margin="0,4,0,8"
+                 Foreground="{DynamicResource Brush.Text.Tertiary}"/>
+      <Border Background="{DynamicResource Brush.Bg.Surface}"
+              BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1"
+              CornerRadius="6" Padding="14,8" Margin="0,0,0,16">
+        <StackPanel>
+          <CheckBox x:Name="WallpaperRendererBox" Content="{loc:Loc Key=Settings.Renderer.Wallpaper}"
+                    Margin="0,6,0,2" Foreground="{DynamicResource Brush.Text.Primary}"
+                    Checked="WallpaperRenderer_Changed" Unchecked="WallpaperRenderer_Changed"/>
+          <TextBlock Text="{loc:Loc Key=Settings.Renderer.Wallpaper.Hint}" FontSize="11" Margin="24,0,0,8"
+                     Foreground="{DynamicResource Brush.Text.Tertiary}" TextWrapping="Wrap"/>
+          <Grid Margin="24,0,0,8">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+              <TextBlock Text="{loc:Loc Key=Settings.Renderer.Source}" FontSize="11"
+                         Foreground="{DynamicResource Brush.Text.Tertiary}"/>
+              <TextBlock x:Name="WallpaperSourceText" Text="" FontSize="11" Margin="0,2,0,0"
+                         Foreground="{DynamicResource Brush.Text.Primary}" TextWrapping="Wrap"/>
+            </StackPanel>
+            <Button x:Name="ResampleButton" Grid.Column="1" Content="{loc:Loc Key=Settings.Renderer.Resample}"
+                    Margin="12,0,0,0" Padding="10,4" VerticalAlignment="Center"
+                    Click="Resample_Click"/>
+          </Grid>
+          <TextBlock x:Name="ResampleHintText" Text="{loc:Loc Key=Settings.Renderer.Resample.Hint}"
+                     FontSize="11" Margin="24,0,0,6"
+                     Foreground="{DynamicResource Brush.Text.Tertiary}" TextWrapping="Wrap"/>
+        </StackPanel>
+      </Border>
+
       <!-- 快捷键 -->
       <TextBlock Text="{loc:Loc Key=Note.Hotkey}" FontSize="11" FontWeight="SemiBold" Margin="0,4,0,8"
                  Foreground="{DynamicResource Brush.Text.Tertiary}"/>

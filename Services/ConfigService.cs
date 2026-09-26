@@ -91,7 +91,31 @@ public class ConfigService
 
         MigrateOrphanPanelFields(config);
         MigratePanelGlass(config);
+        ApplyRendererSwitch(config);
         return (config, true);
+    }
+
+    /// <summary>ponytail 2026-09-26(二期): 把「设置 → 外观」的全局渲染方案开关写进每个对象,
+    /// 渲染侧只读对象自己的 <c>UseWallpaperRenderer</c> 快照。
+    ///
+    /// 同时决定 <see cref="Helpers.WallpaperSource.Enabled"/> —— 关掉开关时不做任何壁纸检测/
+    /// 抓屏(这是"关掉后不该有额外开销"的唯一保证点)。
+    ///
+    /// 注意(<see cref="Helpers.AcrylicHelper.ShowLiquidGlassDialog"/> 的材质是另一回事):
+    /// 材质为空串 = 自定义,在渲染侧本来就回退 DWM,所以这里只写开关值,不动材质。</summary>
+    public static void ApplyRendererSwitch(AppConfig config)
+    {
+        Helpers.WallpaperSource.Enabled = config.UseWallpaperRenderer;
+        foreach (var z in config.Zones)
+        {
+            z.UseWallpaperRenderer = config.UseWallpaperRenderer;
+            foreach (var it in z.Items)
+                if (it.Type == ItemType.SubFolder) it.UseWallpaperRenderer = config.UseWallpaperRenderer;
+        }
+        foreach (var n in config.Notes) n.UseWallpaperRenderer = config.UseWallpaperRenderer;
+        foreach (var c in config.Clocks) c.UseWallpaperRenderer = config.UseWallpaperRenderer;
+        foreach (var c in config.Calendars) c.UseWallpaperRenderer = config.UseWallpaperRenderer;
+        config.Panel.PanelUseWallpaperRenderer = config.UseWallpaperRenderer;
     }
 
     // ── One-time migration: AppConfig-level liquid glass → Panel POCO ──

@@ -606,6 +606,12 @@ public partial class StickyNoteWindow : Window
         var savedW = _note.Width; var savedH = _note.Height;
         if (!IsVisible) Show();
         Left = _note.X; Top = _note.Y;
+        // ponytail 2026-09-26「先出整窗框再展开」修复:窗口尺寸必须在**播展开动画之前**就位。
+        // 原先这句 Width/Height 排在 ApplyAcrylic 之后 —— 整窗隐藏态(缩到 36×36)下由快捷键
+        // 唤出时,动画第一帧会先出现一个全尺寸空窗轮廓,内容随后才展开(关闭路径无此问题,
+        // 因为收起不动窗口尺寸)。改动时务必保持「先定尺寸再动画」。
+        MinWidth = 180; MinHeight = 120;
+        Width = savedW; Height = _note.TileMode ? Math.Max(120, savedH - NoteTileTitleBarCut) : savedH;
         if (waveDelayMs > 0)
         {
             // ponytail: batch "Show All" wave — start collapsed and play the note's own
@@ -628,12 +634,10 @@ public partial class StickyNoteWindow : Window
         // expanded-state gate sees IsExpanded == true and re-enables liquid glass when
         // showing from the collapsed button.
         ApplyAcrylic();
-        MinWidth = 180; MinHeight = 120;
         _note.IsVisible = true; if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
         NativeMethods.SetRoundedCorners(this, _note.CornerRadius);
         _notesService.UpdateNote(_note);
-        // Restore dimensions AFTER UpdateNote (which may trigger OnNotesChanged / reference swap)
-        Width = savedW; Height = _note.TileMode ? Math.Max(120, savedH - NoteTileTitleBarCut) : savedH;
+        // 尺寸已在本方法开头(动画之前)设好 —— 这里不再重复设置,保持「先定尺寸再动画」。
         // ponytail: locked notes stay below app windows — Topmost would re-pin above them and
         // defeat PinBelowProgman. PinnedTop notes still get Topmost via the constructor branch.
         if (_vm?.IsLocked != true) Topmost = true;
@@ -883,7 +887,7 @@ public partial class StickyNoteWindow : Window
     /// 返回 true = 背板已接管;壁纸不可用/材质=自定义 → false(回退 DWM)。</summary>
     bool TryApplyWallpaperBackdrop(string fillColorStr)
     {
-        if (!AcrylicHelper.ResolveSelfDrawn(_note.GlassMaterial)) return false;
+        if (!AcrylicHelper.ResolveSelfDrawn(_note.GlassMaterial, _note.UseWallpaperRenderer)) return false;
         _wallpaperBackdrop ??= WallpaperBackdropLayer.TryCreate();
         if (_wallpaperBackdrop == null) return false;
 
@@ -899,7 +903,7 @@ public partial class StickyNoteWindow : Window
         return true;
     }
 
-    void ApplyAcrylic()
+    public void ApplyAcrylic()
     {
         string fillColorStr = _note.FillColor;
         string borderColorStr = _note.BorderColor;

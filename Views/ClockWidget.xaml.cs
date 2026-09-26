@@ -369,7 +369,7 @@ public partial class ClockWidget : Window
     /// 返回 true = 背板已接管;壁纸不可用/材质=自定义 → false(回退 DWM)。</summary>
     bool TryApplyWallpaperBackdrop(string fillColorStr)
     {
-        if (!AcrylicHelper.ResolveSelfDrawn(_clock.GlassMaterial)) return false;
+        if (!AcrylicHelper.ResolveSelfDrawn(_clock.GlassMaterial, _clock.UseWallpaperRenderer)) return false;
         _wallpaperBackdrop ??= WallpaperBackdropLayer.TryCreate();
         if (_wallpaperBackdrop == null) return false;
 
@@ -465,7 +465,7 @@ public partial class ClockWidget : Window
         Helpers.IconGlyph.Apply(RestoreIconChar, RestoreIconPath, icon, ic, 18);
     }
 
-    void ApplyAcrylic()
+    public void ApplyAcrylic()
     {
         SyncFillRect();
 
@@ -997,6 +997,13 @@ public partial class ClockWidget : Window
         // Without this, the FillRect "snaps" to model the moment the property window opens, even
         // though the user hasn't touched anything.
         Left = _clock.X; Top = _clock.Y;
+        // ponytail 2026-09-26「先出整窗框再展开」修复:窗口尺寸必须落在展开动画之前
+        // (详见 ZoneWindow.ShowZone 同款注释)。整窗隐藏的挂件被缩到 36×36,若尺寸恢复
+        // 排在动画之后,第一帧会先出现一个全尺寸空窗轮廓。ResolveModeSize 只读模型,
+        // 提前调用无副作用。
+        MinWidth = 140; MinHeight = 80;
+        var (showW, showH) = ResolveModeSize();
+        Width = showW; Height = showH;
         if (waveDelayMs > 0)
         {
             // ponytail: batch "Show All" wave — start collapsed and play the clock's own
@@ -1020,11 +1027,7 @@ public partial class ClockWidget : Window
         // showing from the collapsed button.
         if (!skipResync)
             ApplyAcrylic();
-        MinWidth = 140; MinHeight = 80;
-        // ponytail: 用当前模式的持久化尺寸（ApplyMode 已按模式设置，这里用 ResolveModeSize
-        // 保持一致），模式切换/图片应用后不再缩回硬编码默认。
-        var (showW, showH) = ResolveModeSize();
-        Width = showW; Height = showH;
+        // 尺寸已在本方法开头(动画之前)设好 —— 这里不再重复设置,保持「先定尺寸再动画」。
         DesktopLayer.BringToFront(this);
         NativeMethods.SetRoundedCorners(this, 10);
         // ponytail: 2026-08-23 — persist LAST so a failure in the model/event path can

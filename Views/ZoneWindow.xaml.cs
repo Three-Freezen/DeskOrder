@@ -1391,6 +1391,11 @@ public partial class ZoneWindow : Window
         bool alreadyExpanded = _hover?.IsExpanded == true
             && MainContent.Visibility == Visibility.Visible
             && RestoreButton.Visibility != Visibility.Visible;
+        // ponytail 2026-09-26「先出一个整窗框再展开」修复:窗口尺寸必须在**播展开动画之前**
+        // 就位(上面那句 Width/ApplyProgrammaticHeight)。原先收缩到 36×36 再 Hide() 的整窗
+        // 隐藏态,Show() 会先把那个 36×36 的空窗口显示出来,而恢复尺寸落在动画启动之后 ——
+        // 于是动画第一帧先出现一个全尺寸空窗轮廓,内容随后才在框里缩放展开。关闭路径没有
+        // 这个问题,因为带恢复按钮的收起本来就不改窗口尺寸。改动时务必保持「先定尺寸再动画」。
         if (waveDelayMs > 0 && !alreadyExpanded)
         {
             // ponytail: batch "Show All" wave — start collapsed and play the zone's own
@@ -4377,7 +4382,7 @@ public partial class ZoneWindow : Window
     /// 返回 true = 背板已接管(调用方不要再走 DWM);壁纸不可用/材质=自定义 → false(回退 DWM)。</summary>
     bool TryApplyWallpaperBackdrop(ResolvedZoneStyle s)
     {
-        if (!AcrylicHelper.ResolveSelfDrawn(_zone.GlassMaterial)) return false;
+        if (!AcrylicHelper.ResolveSelfDrawn(_zone.GlassMaterial, _zone.UseWallpaperRenderer)) return false;
         _wallpaperBackdrop ??= WallpaperBackdropLayer.TryCreate();
         if (_wallpaperBackdrop == null) return false;
 

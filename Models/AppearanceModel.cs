@@ -57,6 +57,13 @@ public abstract class AppearanceModel
     /// </summary>
     public bool HoverAutoExpand { get; set; } = false;
 
+    /// <summary>ponytail 2026-09-26(二期): 每个对象自己记住「本对象是否走新渲染方案
+    /// (壁纸采样自绘背板)」。全局开关在「设置 → 外观」,这里是它写入各对象的快照 ——
+    /// 渲染侧只读这个字段,所以新旧方案可以同时存在于桌面上(切开关不会动老对象)。
+    /// 默认 false = 使用 DWM 方案(用户明确要求默认 DWM)。**注意**:一期已选过材质的
+    /// 对象在迁移时会被写成 true(否则切到全局默认后会突然换观感)。</summary>
+    public bool UseWallpaperRenderer { get; set; } = false;
+
     // ── Hover restore animation (per-instance, spec §7.1 #2) ──
     // ponytail: EnableRestoreButton (above) gates the entire feature — when off
     // the RestoreButton is hidden and no hover/click animation runs. When on,

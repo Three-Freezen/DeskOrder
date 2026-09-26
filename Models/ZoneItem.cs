@@ -186,6 +186,15 @@ public class ZoneItem : INotifyPropertyChanged
         set => SetField(ref _glassMaterial, value);
     }
 
+    // ponytail 2026-09-26(二期): 渲染方案快照 —— true = 走「壁纸采样自绘背板」(真模糊半径),
+    // false = 原 DWM 方案。由「设置 → 外观」的全局开关写入,渲染侧只读本字段。
+    private bool _useWallpaperRenderer;
+    public bool UseWallpaperRenderer
+    {
+        get => _useWallpaperRenderer;
+        set => SetField(ref _useWallpaperRenderer, value);
+    }
+
     // ponytail 2026-08-31: 次级分区默认网格 56 → 65，与主分区(Zone.GridSize)一致 —
     // 展开浮层的内格边长直接取本值(SubfolderFlyoutViewModel.GridSize)，56 会让浮层
     // 比分区里的图标格明显小一圈。旧配置里已存盘的 56 不做迁移(尊重用户手动调过的值)。
@@ -270,6 +279,7 @@ public class ZoneItem : INotifyPropertyChanged
             GlassTintLuminosity = GlassTintLuminosity,
             GlassColorMode = GlassColorMode,
             GlassMaterial = GlassMaterial,
+            UseWallpaperRenderer = UseWallpaperRenderer,
             GridSize = GridSize,
             SnapToGrid = SnapToGrid,
             AutoArrange = AutoArrange,

@@ -34,98 +34,14 @@ public static class WallpaperBackdrop
     /// <summary>预模糊半径小于该值时不做模糊(避免无意义的 RTB 开销)。</summary>
     const double MinBlurPx = 0.4;
 
-    // ── 壁纸来源 ──
+    // ── 壁纸来源(二期改为 WallpaperSource:自动识别第三方动态壁纸软件) ──
 
-    sealed record WallpaperSource(string Path, string Style, string Tile, DateTime Stamp, BitmapSource Image);
+    /// <summary>取「铺满虚拟桌面」的壁纸图。实际来源见 <see cref="WallpaperSource"/> ——
+    /// 系统静态壁纸读文件、Wallpaper Engine 之类读壁纸本体文件或抓屏。</summary>
+    static BitmapSource? LoadWallpaper() => WallpaperSource.GetDesktop();
 
-    static WallpaperSource? _source;
-    static int _layoutVx, _layoutVy, _layoutVw, _layoutVh;
-    static bool _layoutValid;
-
-    /// <summary>取当前壁纸图(带路径+mtime 缓存,幻灯片/聚焦换图后自动重载)。
-    /// 优先注册表里用户指定的图片(原图,适配模式自己算),失效则退
-    /// %APPDATA%\Microsoft\Windows\Themes\TranscodedWallpaper(系统实际渲染的那张,
-    /// 无扩展名 → 按字节流解码)。</summary>
-    static BitmapSource? LoadWallpaper()
-    {
-        string? path = null;
-        string style = "10", tile = "0";
-        try
-        {
-            using var k = Registry.CurrentUser.OpenSubKey(@"Control Panel\Desktop");
-            path = k?.GetValue("Wallpaper") as string;
-            style = (k?.GetValue("WallpaperStyle") as string) ?? "10";
-            tile = (k?.GetValue("TileWallpaper") as string) ?? "0";
-        }
-        catch { }
-
-        var candidates = new List<string>();
-        if (!string.IsNullOrEmpty(path)) candidates.Add(path!);
-        var transcoded = System.IO.Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "Microsoft", "Windows", "Themes", "TranscodedWallpaper");
-        candidates.Add(transcoded);
-        candidates.Add(transcoded + ".jpg");
-        candidates.Add(System.IO.Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.Windows), "web", "wallpaper", "Windows", "img19.jpg"));
-
-        foreach (var p in candidates)
-        {
-            try
-            {
-                if (!File.Exists(p)) continue;
-                var stamp = File.GetLastWriteTimeUtc(p);
-                if (_source != null && _source.Path == p && _source.Stamp == stamp) return _source.Image;
-
-                // 先读进内存再解码:TranscodedWallpaper 常被系统占用,且没有扩展名。
-                var bytes = File.ReadAllBytes(p);
-                var bi = new BitmapImage();
-                bi.BeginInit();
-                bi.StreamSource = new MemoryStream(bytes);
-                bi.CacheOption = BitmapCacheOption.OnLoad;
-                bi.CreateOptions = BitmapCreateOptions.IgnoreColorProfile; // 与桌面观感一致
-                bi.EndInit();
-                bi.Freeze();
-                if (bi.PixelWidth < 16 || bi.PixelHeight < 16) continue;
-
-                _source = new WallpaperSource(p, style, tile, stamp, bi);
-                _layoutValid = false; // 布局尺寸随图变化
-                return bi;
-            }
-            catch { }
-        }
-        return null;
-    }
-
-    static void EnsureLayout()
-    {
-        if (_layoutValid) return;
-        _layoutVx = NativeMethods.GetSystemMetrics(NativeMethods.SM_XVIRTUALSCREEN);
-        _layoutVy = NativeMethods.GetSystemMetrics(NativeMethods.SM_YVIRTUALSCREEN);
-        _layoutVw = NativeMethods.GetSystemMetrics(NativeMethods.SM_CXVIRTUALSCREEN);
-        _layoutVh = NativeMethods.GetSystemMetrics(NativeMethods.SM_CYVIRTUALSCREEN);
-        _layoutValid = _layoutVw > 0 && _layoutVh > 0;
-    }
-
-    /// <summary>把壁纸按 WallpaperStyle 铺到虚拟桌面的变换(物理像素)。
-    /// 返回 (scaleX, scaleY, offsetX, offsetY);style 0 且 tile=1 时按原始尺寸平铺。</summary>
-    static (double sx, double sy, double ox, double oy, bool tile) ResolveLayout(BitmapSource img)
-    {
-        double vw = _layoutVw, vh = _layoutVh;
-        double iw = img.PixelWidth, ih = img.PixelHeight;
-        string style = _source?.Style ?? "10";
-        bool tile = _source?.Tile == "1" && style == "0";
-        return style switch
-        {
-            "2" => (vw / iw, vh / ih, 0, 0, false),                                   // 拉伸
-            "6" => Fit(Math.Min(vw / iw, vh / ih), iw, ih, vw, vh),                    // 适应
-            "22" => (vw / iw, vh / ih, 0, 0, false),                                   // 跨屏
-            "0" => (1, 1, (vw - iw) / 2, (vh - ih) / 2, tile),                         // 居中/平铺
-            _ => Fit(Math.Max(vw / iw, vh / ih), iw, ih, vw, vh),                      // 10 = 填充
-        };
-        static (double, double, double, double, bool) Fit(double s, double iw, double ih, double vw, double vh)
-            => (s, s, (vw - iw * s) / 2, (vh - ih * s) / 2, false);
-    }
+    /// <summary>虚拟桌面在物理像素下的原点/尺寸(与壁纸图的像素空间配套)。</summary>
+    static (int vx, int vy, int vw, int vh) Layout() => WallpaperSource.LayoutRect;
 
     // ── 预模糊缓存(按屏幕半径) ──
 
@@ -133,21 +49,25 @@ public static class WallpaperBackdrop
     static readonly object _lock = new();
 
     /// <summary>取得「壁纸铺满虚拟桌面 + 已按半径预模糊」的位图(1/Downscale 分辨率)。
-    /// screenRadiusPx = 期望的屏幕模糊半径(物理像素);返回 null = 壁纸不可用。</summary>
+    /// screenRadiusPx = 期望的屏幕模糊半径(物理像素);返回 null = 壁纸不可用。
+    /// ponytail 2026-09-26(二期): 来源图已由 <see cref="WallpaperSource"/> 统一铺满虚拟桌面
+    /// (并已降采样),这里不再自己算适配,直接 1:1 画进模糊画布。</summary>
     public static BitmapSource? GetBlurredDesktop(int screenRadiusPx)
     {
         var img = LoadWallpaper();
         if (img == null)
         {
-            DzTrace.Log("[WallpaperBackdrop] 壁纸不可用(所有候选路径都读不到) → 回退 DWM");
+            AcrylicHelper.SelfDrawnAvailable = WallpaperSource.HostDetected;   // 宿主在跑 → 只是这一帧没采到,别永久关掉
+            DzTrace.Log("[WallpaperBackdrop] 壁纸不可用 → 回退 DWM");
             return null;
         }
-        EnsureLayout();
-        if (!_layoutValid)
+        var (_, _, vw, vh) = Layout();
+        if (vw <= 0 || vh <= 0)
         {
-            DzTrace.Log($"[WallpaperBackdrop] 虚拟桌面尺寸无效 {_layoutVw}x{_layoutVh} → 回退 DWM");
+            DzTrace.Log($"[WallpaperBackdrop] 虚拟桌面尺寸无效 {vw}x{vh} → 回退 DWM");
             return null;
         }
+        AcrylicHelper.SelfDrawnAvailable = true;
 
         int key = Math.Max(0, screenRadiusPx);
         lock (_lock)
@@ -155,16 +75,14 @@ public static class WallpaperBackdrop
             if (_blurCache.TryGetValue(key, out var cached)) return cached;
         }
 
-        var (sx, sy, ox, oy, _) = ResolveLayout(img);
-        int dw = Math.Max(8, _layoutVw / Downscale);
-        int dh = Math.Max(8, _layoutVh / Downscale);
+        int dw = Math.Max(8, vw / Downscale);
+        int dh = Math.Max(8, vh / Downscale);
 
         var visual = new DrawingVisual();
         using (var dc = visual.RenderOpen())
         {
             dc.DrawRectangle(Brushes.Black, null, new Rect(0, 0, dw, dh));
-            dc.DrawImage(img, new Rect(ox / Downscale, oy / Downscale,
-                img.PixelWidth * sx / Downscale, img.PixelHeight * sy / Downscale));
+            dc.DrawImage(img, new Rect(0, 0, img.PixelWidth, img.PixelHeight));
         }
         double blur = key / (double)Downscale;
         if (blur > MinBlurPx)
@@ -185,25 +103,24 @@ public static class WallpaperBackdrop
         return rtb;
     }
 
-    /// <summary>清缓存(壁纸变更/显示器拓扑变化时调用)。</summary>
+    /// <summary>清缓存(壁纸变更/显示器拓扑变化/手动重采时调用)。</summary>
     public static void Invalidate()
     {
         lock (_lock)
         {
             _blurCache.Clear();
-            _source = null;
-            _layoutValid = false;
         }
+        WallpaperSource.Invalidate();
     }
 
     /// <summary>窗口在虚拟桌面里的裁剪 Viewbox(图像像素空间,已含降采样)。
     /// windowPx = 窗口的屏幕物理矩形(Win32 GetWindowRect 口径)。</summary>
     public static Rect GetCropViewbox(int screenRadiusPx, Rect windowPx)
     {
-        EnsureLayout();
+        var (vx, vy, _, _) = Layout();
         return new Rect(
-            (windowPx.X - _layoutVx) / Downscale,
-            (windowPx.Y - _layoutVy) / Downscale,
+            (windowPx.X - vx) / Downscale,
+            (windowPx.Y - vy) / Downscale,
             Math.Max(1, windowPx.Width) / Downscale,
             Math.Max(1, windowPx.Height) / Downscale);
     }
@@ -214,10 +131,10 @@ public static class WallpaperBackdrop
     {
         var desk = GetBlurredDesktop(screenRadiusPx);
         if (desk == null) return null;
-        EnsureLayout();
+        var (vx, vy, _, _) = Layout();
 
-        int x = (int)Math.Round((windowPx.X - _layoutVx) / Downscale);
-        int y = (int)Math.Round((windowPx.Y - _layoutVy) / Downscale);
+        int x = (int)Math.Round((windowPx.X - vx) / Downscale);
+        int y = (int)Math.Round((windowPx.Y - vy) / Downscale);
         int w = (int)Math.Max(1, Math.Round(Math.Max(1, windowPx.Width) / Downscale));
         int h = (int)Math.Max(1, Math.Round(Math.Max(1, windowPx.Height) / Downscale));
         // 夹到图内,避免越界(窗口有一半在虚拟桌面外时)

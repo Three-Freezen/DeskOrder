@@ -59,6 +59,13 @@ public class AppConfig
     /// 空串 = 自定义 = 历史亚克力背板。</summary>
     public string GlassMaterial { get; set; } = "";
 
+    /// <summary>ponytail 2026-09-26(二期): 全局渲染方案开关 —— true = 新方案(壁纸采样自绘
+    /// 背板,模糊半径真正生效,但要多花一次壁纸采样/预模糊的开销);false = 原 DWM 方案(默认)。
+    /// 开关值在启动时**写进每个对象**的 <c>UseWallpaperRenderer</c>(渲染侧只读对象自己的快照),
+    /// 所以切换只影响之后新显示的对象,老对象保持切换前的观感。
+    /// 同时它决定 <see cref="WallpaperSource.Enabled"/>:关掉开关时不做任何抓屏。</summary>
+    public bool UseWallpaperRenderer { get; set; } = false;
+
     // ── Panel (POCOs, was 19 inline fields) ──
     public PanelConfig Panel { get; set; } = new();
     public PanelHotkeyConfig PanelHotkey { get; set; } = new();

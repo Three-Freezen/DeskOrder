@@ -187,10 +187,18 @@ public static class AcrylicHelper
         => FindMaterial(materialKey)?.NoiseOpacity ?? 0;
 
     /// <summary>ponytail 2026-09-26(方案①): 该材质是否走「壁纸采样自绘背板」—— 壁纸采样后
-    /// 模糊半径才真正生效。**自定义(空串)= false** —— 老配置与"自定义"继续走 DWM,升级后
-    /// 视觉零变化;想要真半径就选一个材质。壁纸不可用时调用方同样回退 DWM。</summary>
-    public static bool ResolveSelfDrawn(string? materialKey)
-        => FindMaterial(materialKey) != null;
+    /// 模糊半径才真正生效。**自定义(空串)= false** —— 老配置与"自定义"继续走 DWM。
+    ///
+    /// 二期新增两道闸(任一为假都回退 DWM):
+    ///  ① <paramref name="useWallpaperRenderer"/> = 对象自己的渲染方案开关(设置页写下的快照);
+    ///  ② <see cref="SelfDrawnAvailable"/> = 全局兜底,壁纸来源不可用(读不到、虚拟桌面尺寸异常、
+    ///     抓屏失败)时由 <see cref="WallpaperBackdrop"/> 关掉,保证绝不出现"关了 DWM 又没背板"的空窗。</summary>
+    public static bool ResolveSelfDrawn(string? materialKey, bool useWallpaperRenderer = true)
+        => useWallpaperRenderer && SelfDrawnAvailable && FindMaterial(materialKey) != null;
+
+    /// <summary>全局:壁纸来源当前是否可用(由 WallpaperBackdrop 在取图失败时置 false)。
+    /// 默认 true —— 让「还没试过」不阻塞渲染;真正不可用时第一次取图就会把它压下去。</summary>
+    public static bool SelfDrawnAvailable { get; set; } = true;
 
     /// <summary>模型里的模糊半径(0-60,原本是 DWM accent flags 的档位)→ 自绘背板的
     /// **屏幕物理像素**半径。1:1 映射:滑块的数字从此就是"多少像素"。</summary>

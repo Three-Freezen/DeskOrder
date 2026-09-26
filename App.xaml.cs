@@ -148,6 +148,10 @@ public partial class App : System.Windows.Application
         // over the OS default on startup. Without this the user picks Dark, restarts,
         // and the window reverts to whatever the OS happens to be set to.
         _configService = new ConfigService();
+        // ponytail 2026-09-26(二期): 先把「玻璃渲染方案」全局开关落到运行时 ——
+        // ConfigService.Load() 内部已把它写进每个对象的 UseWallpaperRenderer 快照,这里再
+        // 决定壁纸来源是否允许做第三方检测/抓屏(关掉开关时不该有任何采样开销)。
+        Helpers.WallpaperSource.Enabled = _configService.Load().UseWallpaperRenderer;
         // ponytail 2026-08-28: 预设从 exe 旁旧目录迁到 AppData（Velopack 更新会替换
         // 整个应用目录，BaseDirectory 里的预设会被冲掉；幂等，详见 PresetService）。
         PresetService.MigrateFromBaseDirectory();

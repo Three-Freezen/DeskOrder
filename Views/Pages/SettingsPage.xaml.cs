@@ -190,6 +190,8 @@ public partial class SettingsPage : UserControl
             AutoCheckUpdateBox.IsChecked = cfg.AutoCheckUpdate;
             DeleteSetupAfterUpdateBox.IsChecked = cfg.DeleteSetupAfterUpdate;
             SelectComboByTag(LanguageCombo, cfg.Language);
+            WallpaperRendererBox.IsChecked = cfg.UseWallpaperRenderer;
+            SyncRendererUi();
             SyncThemeRadios(cfg.ThemeMode switch
             {
                 "Light" => AppThemeMode.Light,
@@ -198,6 +200,91 @@ public partial class SettingsPage : UserControl
             });
         }
         finally { _suppress = false; }
+    }
+
+    // ── 玻璃渲染方案(二期) ──
+
+    /// <summary>ponytail 2026-09-26(二期): 勾选「壁纸采样」→ 写全局开关 → 同步到每个对象
+    /// (ConfigService.ApplyRendererSwitch) → 逐个刷新已显示的窗口。
+    /// 刷新用 ApplyStyle/ApplyAcrylic 那条既有路径,所以切换后无需重启。</summary>
+    void WallpaperRenderer_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_suppress) return;
+        var cfg = _configService.Load();
+        cfg.UseWallpaperRenderer = WallpaperRendererBox.IsChecked == true;
+        ConfigService.ApplyRendererSwitch(cfg);
+        _configService.Save(cfg);
+        // 换了来源/方案 → 背板模糊缓存作废,下次渲染按新方案重建
+        WallpaperBackdrop.Invalidate();
+        RefreshGlassWindows();
+        SyncRendererUi();
+    }
+
+    /// <summary>「重新采样」—— 让壁纸背板丢掉缓存重新采集一次。仅新方案下可用。
+    /// 采集前会先把玻璃窗口隐藏一会儿(见 WallpaperSource),避免把应用自己的窗口采进背板。</summary>
+    void Resample_Click(object sender, RoutedEventArgs e)
+    {
+        if (WallpaperRendererBox.IsChecked != true) return;
+        ResampleButton.IsEnabled = false;
+        ResampleHintText.Text = LocalizationService.Instance["Settings.Renderer.Resampling"];
+        try
+        {
+            WallpaperBackdrop.Invalidate();
+            var img = Helpers.WallpaperSource.Resample();
+            if (img == null)
+            {
+                ResampleHintText.Text = LocalizationService.Instance["Settings.Renderer.Resample.Failed"];
+            }
+            else
+            {
+                // 新图 → 让每个窗口按新背板重画(否则要等下次状态变化才会用上新图)
+                RefreshGlassWindows();
+                SyncRendererUi();   // 采样来源文字也跟着更新
+                ResampleHintText.Text = LocalizationService.Instance["Settings.Renderer.Resample.Hint"];
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[SettingsPage] Resample failed: {ex}");
+            ResampleHintText.Text = LocalizationService.Instance["Settings.Renderer.Resample.Failed"];
+        }
+        finally
+        {
+            SyncRendererUi();
+        }
+    }
+
+    /// <summary>按当前开关状态刷新这一块的可用性/文字(采样来源、按钮可用性)。</summary>
+    void SyncRendererUi()
+    {
+        bool on = WallpaperRendererBox.IsChecked == true;
+        ResampleButton.IsEnabled = on;
+        if (!on)
+        {
+            WallpaperSourceText.Text = LocalizationService.Instance["Settings.Renderer.Source.Off"];
+            return;
+        }
+        // 读一次来源(会走缓存,不重复抓屏)
+        try { Helpers.WallpaperSource.GetDesktop(); } catch (Exception ex) { Debug.WriteLine(ex.Message); }
+        var desc = Helpers.WallpaperSource.Describe;
+        WallpaperSourceText.Text = string.IsNullOrEmpty(desc)
+            ? LocalizationService.Instance["Settings.Renderer.Source.None"] : desc;
+    }
+
+    /// <summary>让所有已显示的窗口按新方案重画玻璃。</summary>
+    static void RefreshGlassWindows()
+    {
+        foreach (Window w in Application.Current.Windows)
+        {
+            switch (w)
+            {
+                case Views.ZoneWindow z: z.ApplyStyle(); break;
+                case Views.StickyNoteWindow n: n.ApplyAcrylic(); break;
+                case Views.ClockWidget c: c.ApplyAcrylic(); break;
+                case Views.CalendarWidget c: c.ApplyStyle(); break;
+                case Views.PanelWindow p: p.ApplyStyle(); break;
+            }
+        }
     }
 
     // Shared by initial SyncFromConfig and the live ThemeService.Changed listener.

@@ -271,7 +271,7 @@ public partial class PanelWindow : Window
     /// 返回 true = 背板已接管;壁纸不可用/材质=自定义 → false(回退 DWM)。</summary>
     bool TryApplyWallpaperBackdrop(PanelConfig p, string fillColorStr)
     {
-        bool selfDrawn = AcrylicHelper.ResolveSelfDrawn(p.PanelGlassMaterial);
+        bool selfDrawn = AcrylicHelper.ResolveSelfDrawn(p.PanelGlassMaterial, p.PanelUseWallpaperRenderer);
         DzTrace.Log($"[PanelWindow] TryApplyWallpaperBackdrop mat='{p.PanelGlassMaterial}' selfDrawn={selfDrawn}");
         if (!selfDrawn) return false;
         _wallpaperBackdrop ??= WallpaperBackdropLayer.TryCreate();
