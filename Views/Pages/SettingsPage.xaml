@@ -92,8 +92,10 @@
                          Foreground="{DynamicResource Brush.Text.Primary}" TextWrapping="Wrap"/>
             </StackPanel>
             <Button x:Name="ResampleButton" Grid.Column="1" Content="{loc:Loc Key=Settings.Renderer.Resample}"
-                    Margin="12,0,0,0" Padding="10,4" VerticalAlignment="Center"
-                    Click="Resample_Click"/>
+                    Margin="12,0,0,0" VerticalAlignment="Center"
+                    Click="Resample_Click"
+                    FontWeight="SemiBold" Padding="14,6" MinWidth="96"
+                    Style="{DynamicResource FillBtn}"/>
           </Grid>
           <TextBlock x:Name="ResampleHintText" Text="{loc:Loc Key=Settings.Renderer.Resample.Hint}"
                      FontSize="11" Margin="24,0,0,6"

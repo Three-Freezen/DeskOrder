@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Windows;
 
@@ -159,4 +160,48 @@ public static class MonitorHelper
             return SystemParameters.WorkArea;
         }
     }
+
+    /// <summary>所有显示器的**物理像素**矩形(虚拟屏幕坐标),**主显示器排第一**,其余按 (Left,Top) 排序。
+    ///
+    /// ponytail 2026-09-26(二期修订 3): 壁纸必须**按每个显示器各自适配**来铺,而不是把一张图
+    /// 拉满整个虚拟桌面 —— Windows 与 Wallpaper Engine 都是这么做的(只有「跨屏」才是整块铺)。
+    /// 之前按整块虚拟桌面铺,遇到 16:9 的图配 2.8:1 的双屏,内容位置和真实壁纸能差出几百像素,
+    /// 表现就是"采样区域有很大偏移"(用户实测反馈)。主显示器排第一是为了对上 Wallpaper Engine
+    /// 的 Monitor0/Monitor1 编号习惯(它这里 Monitor0 = 主屏)。</summary>
+    public static IReadOnlyList<Rect> Monitors()
+    {
+        var list = new List<(Rect Rect, bool Primary)>();
+        try
+        {
+            EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (IntPtr h, IntPtr hdc, ref RECT r, IntPtr dw) =>
+            {
+                var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+                if (!GetMonitorInfo(h, ref info)) return true;
+                var m = info.rcMonitor;
+                if (m.Right - m.Left <= 0 || m.Bottom - m.Top <= 0) return true;
+                list.Add((new Rect(m.Left, m.Top, m.Right - m.Left, m.Bottom - m.Top),
+                    (info.dwFlags & MONITORINFOF_PRIMARY) != 0));
+                return true;
+            }, IntPtr.Zero);
+        }
+        catch { }
+
+        if (list.Count == 0)
+        {
+            // 枚举失败:退回整块虚拟桌面当"一个显示器",至少不至于让布局崩掉
+            int vx = NativeMethods.GetSystemMetrics(NativeMethods.SM_XVIRTUALSCREEN);
+            int vy = NativeMethods.GetSystemMetrics(NativeMethods.SM_YVIRTUALSCREEN);
+            int vw = NativeMethods.GetSystemMetrics(NativeMethods.SM_CXVIRTUALSCREEN);
+            int vh = NativeMethods.GetSystemMetrics(NativeMethods.SM_CYVIRTUALSCREEN);
+            if (vw > 0 && vh > 0) list.Add((new Rect(vx, vy, vw, vh), true));
+        }
+        return list
+            .OrderByDescending(m => m.Primary)
+            .ThenBy(m => m.Rect.Left)
+            .ThenBy(m => m.Rect.Top)
+            .Select(m => m.Rect)
+            .ToList();
+    }
+
+    const uint MONITORINFOF_PRIMARY = 0x1;
 }

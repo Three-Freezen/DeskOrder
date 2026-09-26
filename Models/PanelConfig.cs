@@ -40,7 +40,8 @@ public class PanelConfig
     /// 空串 = 自定义 = 历史亚克力背板。</summary>
     public string PanelGlassMaterial { get; set; } = "";
     /// <summary>ponytail 2026-09-26(二期): 渲染方案快照 —— true = 壁纸采样自绘背板(false = 原 DWM)。
-    /// 由「设置 → 外观」的全局开关写入(config 里是 AppConfig.UseWallpaperRenderer)。</summary>
+    /// 由「设置 → 外观」的全局开关写入(config 里是 AppConfig.UseWallpaperRenderer)。
+    /// **渲染侧已不再读本字段**(判据统一为全局开关),保留只为老配置兼容。</summary>
     public bool PanelUseWallpaperRenderer { get; set; } = false;
     /// <summary>One-shot migration flag: legacy configs kept liquid-glass on AppConfig;
     /// on first load those values are copied into the Panel POCO and this flag is set.</summary>

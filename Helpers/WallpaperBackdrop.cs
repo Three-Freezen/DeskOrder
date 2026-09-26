@@ -28,11 +28,18 @@ namespace DesktopZones.Helpers;
 /// </summary>
 public static class WallpaperBackdrop
 {
-    /// <summary>降采样倍数: 4480x1600 虚拟桌面 → 2240x800,预模糊代价可忽略。</summary>
-    const int Downscale = 2;
+    /// <summary>降采样倍数 —— **直接引用 <see cref="WallpaperSource.Downscale"/>**。
+    /// ponytail 2026-09-26(二期修订 3): 原来两处各写一个 2,改分辨率时极易只改一边
+    /// (裁剪坐标立刻全体偏移)。现在只有一个真源。</summary>
+    const int Downscale = WallpaperSource.Downscale;
 
     /// <summary>预模糊半径小于该值时不做模糊(避免无意义的 RTB 开销)。</summary>
     const double MinBlurPx = 0.4;
+
+    /// <summary>预模糊缓存档位上限。全分辨率(1:1)下每档约 = 虚拟桌面像素 × 4 字节
+    /// (本机 4480×1600 → 约 29 MB),所以从 12 降到 6:再高就是几百 MB 的位图常驻。
+    /// 关掉渲染方案 / 重新采样时会整块清空。</summary>
+    const int MaxBlurCacheEntries = 6;
 
     // ── 壁纸来源(二期改为 WallpaperSource:自动识别第三方动态壁纸软件) ──
 
@@ -47,6 +54,15 @@ public static class WallpaperBackdrop
 
     static readonly Dictionary<int, BitmapSource> _blurCache = new();
     static readonly object _lock = new();
+    static int _generation;
+
+    /// <summary>壁纸图/模糊图的「世代号」,每次 <see cref="Invalidate"/> 自增。
+    ///
+    /// ponytail 2026-09-26(二期修订): **必须有这个号**。已经挂好的
+    /// <see cref="WallpaperBackdropLayer"/> 原本只在「半径变了」时才去重取模糊图,于是
+    /// 用户换了壁纸点「重新采样」时 —— 半径没变 → 图层继续用旧 ImageBrush → 屏幕上毫无
+    /// 反应(用户实测反馈的 bug)。图层现在比对这个号,号变了就重取。</summary>
+    public static int Generation => _generation;
 
     /// <summary>取得「壁纸铺满虚拟桌面 + 已按半径预模糊」的位图(1/Downscale 分辨率)。
     /// screenRadiusPx = 期望的屏幕模糊半径(物理像素);返回 null = 壁纸不可用。
@@ -97,18 +113,20 @@ public static class WallpaperBackdrop
         rtb.Freeze();
         lock (_lock)
         {
-            if (_blurCache.Count > 12) _blurCache.Clear(); // 半径档位很少,清空比 LRU 简单
+            if (_blurCache.Count > MaxBlurCacheEntries) _blurCache.Clear(); // 半径档位很少,清空比 LRU 简单
             _blurCache[key] = rtb;
         }
         return rtb;
     }
 
-    /// <summary>清缓存(壁纸变更/显示器拓扑变化/手动重采时调用)。</summary>
+    /// <summary>清缓存(壁纸变更/显示器拓扑变化/手动重采时调用)。
+    /// 同时自增 <see cref="Generation"/> —— 已挂载的图层靠它察觉"图换了"。</summary>
     public static void Invalidate()
     {
         lock (_lock)
         {
             _blurCache.Clear();
+            _generation++;
         }
         WallpaperSource.Invalidate();
     }
@@ -152,8 +170,16 @@ public static class WallpaperBackdrop
         group.Children.Add(new GeometryDrawing(new SolidColorBrush(tint), null, new RectangleGeometry(new Rect(0, 0, w, h))));
         if (noiseOpacity > 0.001)
         {
-            var noise = new GeometryDrawing(NoiseBrush, null, new RectangleGeometry(new Rect(0, 0, w, h)));
-            group.Children.Add(noise);
+            // ponytail 2026-09-26(二期修订): **必须真的把 noiseOpacity 用上**。原先直接把
+            // GeometryDrawing 塞进 group,强度参数完全没生效 —— NoiseBrush 的颗粒 alpha 是
+            // 255(二值黑白),于是浮层被一层**满强度**噪点糊住,看上去就是"一张噪声图"
+            // (用户实测反馈)。亚克力系材质的配方噪点只有 0.045~0.055,这里按它设整层透明度。
+            // 对照:动态图层 WallpaperBackdropLayer.SetAppearance 里是 `_noise.Opacity = noiseOpacity`,
+            // 那条路一直是对的,只有这个"一次性静态画刷"(浮层用)漏了。
+            var noiseLayer = new DrawingGroup { Opacity = Math.Clamp(noiseOpacity, 0, 1) };
+            noiseLayer.Children.Add(new GeometryDrawing(NoiseBrush, null, new RectangleGeometry(new Rect(0, 0, w, h))));
+            noiseLayer.Freeze();
+            group.Children.Add(noiseLayer);
         }
         group.Freeze();
 
@@ -165,7 +191,6 @@ public static class WallpaperBackdrop
             ViewportUnits = BrushMappingMode.RelativeToBoundingBox,
             Viewport = new Rect(0, 0, 1, 1),
         };
-        if (noiseOpacity > 0.001) brush.Opacity = 1; // 噪点强度由纹理自身的 alpha + 整体透明度控制
         brush.Freeze();
         return brush;
     }
@@ -224,6 +249,7 @@ public sealed class WallpaperBackdropLayer
     readonly System.Windows.Shapes.Rectangle _noise = new() { IsHitTestVisible = false };
     Panel? _host;
     int _attachedRadius = -1;
+    int _attachedGeneration = -1;
     Color _attachedTint = Colors.Transparent;
     double _attachedNoise = -1;
     Rect _attachedWindow = Rect.Empty;
@@ -346,10 +372,14 @@ public sealed class WallpaperBackdropLayer
             return;
         }
 
-        if (radius != _attachedRadius || _wallpaper.Fill == null)
+        // ponytail 2026-09-26(二期修订): 除了"半径变了",**世代号变了也要重取** ——
+        // 否则「重新采样」在一模一样的半径下拿不到新图(用户实测反馈的 bug:换壁纸后点
+        // 重新采样毫无反应)。
+        int gen = WallpaperBackdrop.Generation;
+        if (radius != _attachedRadius || gen != _attachedGeneration || _wallpaper.Fill == null)
         {
             var desk = WallpaperBackdrop.GetBlurredDesktop(radius);
-            DzTrace.Log($"[WallpaperBackdrop] SetAppearance r={radius} desk={(desk == null ? "NULL" : $"{desk.PixelWidth}x{desk.PixelHeight}")} rect={rect.X:F0},{rect.Y:F0} {rect.Width:F0}x{rect.Height:F0} tint=#{tint.A:X2}{tint.R:X2}{tint.G:X2}{tint.B:X2} noise={noiseOpacity:F3}");
+            DzTrace.Log($"[WallpaperBackdrop] SetAppearance r={radius} gen={gen} desk={(desk == null ? "NULL" : $"{desk.PixelWidth}x{desk.PixelHeight}")} rect={rect.X:F0},{rect.Y:F0} {rect.Width:F0}x{rect.Height:F0} tint=#{tint.A:X2}{tint.R:X2}{tint.G:X2}{tint.B:X2} noise={noiseOpacity:F3}");
             if (desk == null) return;
             var brush = new ImageBrush(desk)
             {
@@ -360,6 +390,7 @@ public sealed class WallpaperBackdropLayer
             };
             _wallpaper.Fill = brush;
             _attachedRadius = radius;
+            _attachedGeneration = gen;
             _attachedWindow = Rect.Empty; // 新图 → Viewbox 必须重设
         }
 

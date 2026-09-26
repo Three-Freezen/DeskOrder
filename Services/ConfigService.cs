@@ -102,7 +102,12 @@ public class ConfigService
     /// 抓屏(这是"关掉后不该有额外开销"的唯一保证点)。
     ///
     /// 注意(<see cref="Helpers.AcrylicHelper.ShowLiquidGlassDialog"/> 的材质是另一回事):
-    /// 材质为空串 = 自定义,在渲染侧本来就回退 DWM,所以这里只写开关值,不动材质。</summary>
+    /// 材质为空串 = 自定义,在渲染侧本来就回退 DWM,所以这里只写开关值,不动材质。
+    ///
+    /// ponytail 2026-09-26(二期修订): 下面写的逐对象 <c>UseWallpaperRenderer</c> **渲染侧已不再读**。
+    /// 原设计让每个窗口读自己的快照,结果开关打开后**新建**的分区/便签拿到构造默认值 false,
+    /// 永远走 DWM。现在渲染统一读全局开关(<see cref="Helpers.WallpaperSource.Enabled"/>),
+    /// 逐对象字段只为老配置兼容与将来可能的"按对象覆盖"保留 —— 别再拿它做判据。</summary>
     public static void ApplyRendererSwitch(AppConfig config)
     {
         Helpers.WallpaperSource.Enabled = config.UseWallpaperRenderer;

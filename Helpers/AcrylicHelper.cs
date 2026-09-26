@@ -174,27 +174,51 @@ public static class AcrylicHelper
     public static string GetMaterialDisplayName(string? key)
         => FindMaterial(key) is { } m ? _loc[m.DisplayNameKey] : _loc["LiquidGlass.Mat.Custom"];
 
-    /// <summary>材质 → 背板 AccentState(自定义/未知 → 亚克力 = 历史行为)。</summary>
-    public static int ResolveAccentState(string? materialKey)
-        => FindMaterial(materialKey)?.AccentState ?? AccentStateAcrylic;
-
-    /// <summary>材质 → 是否叠加经典 blurbehind(自定义/未知 → 叠加 = 历史行为)。</summary>
-    public static bool ResolveUseClassicBlur(string? materialKey)
-        => FindMaterial(materialKey)?.UseClassicBlur ?? true;
-
-    /// <summary>材质 → 自绘背板的颗粒强度(自定义/未知 → 0 = 无噪点)。</summary>
-    public static double ResolveNoiseOpacity(string? materialKey)
-        => FindMaterial(materialKey)?.NoiseOpacity ?? 0;
-
-    /// <summary>ponytail 2026-09-26(方案①): 该材质是否走「壁纸采样自绘背板」—— 壁纸采样后
-    /// 模糊半径才真正生效。**自定义(空串)= false** —— 老配置与"自定义"继续走 DWM。
+    /// <summary>材质在**当前渲染方案**下是否生效 —— DWM 方案(设置页开关关闭)恒返回 null。
     ///
-    /// 二期新增两道闸(任一为假都回退 DWM):
-    ///  ① <paramref name="useWallpaperRenderer"/> = 对象自己的渲染方案开关(设置页写下的快照);
+    /// ponytail 2026-09-26(二期修订): 这是「渲染方案开关」的**唯一收口**。四参数解析器
+    /// (AccentState / 经典模糊 / 噪点 / WPF 着色补偿)全部先过这里,于是 DWM 方案下材质
+    /// 整体化为历史默认值(state4 亚克力 + 经典模糊 + 不做 WPF 着色补偿),即 147aa4a 的
+    /// DWM 行为。
+    ///
+    /// **必须这样收口**:DWM 的 state3(平滑模糊)背板**不认 GradientColor**(实测白15%/
+    /// 黑62%/无色三块肉眼一致),材质一旦泄漏进 DWM 方案,用户拖颜色/不透明度/亮度滑块会
+    /// 整体"没有反应"(用户实测反馈)。收口在解析器里而不是逐个调用点,是为了让将来新增的
+    /// 第 N 个调用点不会漏掉这道闸。</summary>
+    public static string? EffectiveMaterial(string? materialKey)
+        => WallpaperSource.Enabled ? materialKey : null;
+
+    /// <summary>材质 → 背板 AccentState(自定义/未知/当前为 DWM 方案 → 亚克力 = 历史行为)。</summary>
+    public static int ResolveAccentState(string? materialKey)
+        => FindMaterial(EffectiveMaterial(materialKey))?.AccentState ?? AccentStateAcrylic;
+
+    /// <summary>材质 → 是否叠加经典 blurbehind(自定义/未知/当前为 DWM 方案 → 叠加 = 历史行为)。</summary>
+    public static bool ResolveUseClassicBlur(string? materialKey)
+        => FindMaterial(EffectiveMaterial(materialKey))?.UseClassicBlur ?? true;
+
+    /// <summary>材质 → 自绘背板的颗粒强度(自定义/未知/当前为 DWM 方案 → 0 = 无噪点)。</summary>
+    public static double ResolveNoiseOpacity(string? materialKey)
+        => FindMaterial(EffectiveMaterial(materialKey))?.NoiseOpacity ?? 0;
+
+    /// <summary>当前渲染方案下是否走「壁纸采样自绘背板」(模糊半径才真正生效)。
+    ///
+    /// 两道闸(任一为假都回退 DWM):
+    ///  ① <see cref="WallpaperSource.Enabled"/> = 设置页的渲染方案开关。
+    ///     ponytail 2026-09-26(二期修订): 判据由「逐对象快照」改成**全局开关**。原设计把开关
+    ///     复制进每个分区/便签/面板的模型字段,于是开关打开之后**新建**的对象拿到的是构造
+    ///     默认值 false,永远走 DWM(而 UI 上开关明明是开的)。全局开关是唯一 UI,就以它为
+    ///     唯一真源;逐对象字段仍由 ConfigService.ApplyRendererSwitch 写入,但渲染不再读它。
     ///  ② <see cref="SelfDrawnAvailable"/> = 全局兜底,壁纸来源不可用(读不到、虚拟桌面尺寸异常、
-    ///     抓屏失败)时由 <see cref="WallpaperBackdrop"/> 关掉,保证绝不出现"关了 DWM 又没背板"的空窗。</summary>
-    public static bool ResolveSelfDrawn(string? materialKey, bool useWallpaperRenderer = true)
-        => useWallpaperRenderer && SelfDrawnAvailable && FindMaterial(materialKey) != null;
+    ///     抓屏失败)时由 <see cref="WallpaperBackdrop"/> 关掉,保证绝不出现"关了 DWM 又没背板"的空窗。
+    ///
+    /// ponytail 2026-09-26(二期修订 2): **不再要求"选过材质"**。原实现是
+    /// `&& FindMaterial(materialKey) != null`,于是材质为空串(= 自定义)的对象即使用户把开关
+    /// 打开了也照旧走 DWM —— 用户配置里时钟/便签/面板的材质都是空串,表现就是"三个小组件没同步
+    /// 当前方案、面板完全没有反应"。开关管的是**渲染通道**(要不要自绘背板、半径是否真实),
+    /// 材质只决定**配方**(噪点/背板类型);没选材质就用模型里的半径 + 配色,完全成立。
+    /// 所以签名也去掉了 materialKey —— 免得看签名的人以为材质还是判据。</summary>
+    public static bool ResolveSelfDrawn()
+        => WallpaperSource.Enabled && SelfDrawnAvailable;
 
     /// <summary>全局:壁纸来源当前是否可用(由 WallpaperBackdrop 在取图失败时置 false)。
     /// 默认 true —— 让「还没试过」不阻塞渲染;真正不可用时第一次取图就会把它压下去。</summary>
@@ -601,11 +625,18 @@ public static class AcrylicHelper
     /// GradientColor;state2 是只着色不模糊)。所以这些材质(毛玻璃/清透玻璃/液态玻璃/深色玻璃)
     /// 的着色必须改由 WPF 层承担:本方法返回「填充 over 玻璃着色」的合成画刷,调用方把它当作
     /// 填充层(FillRect/BodyFillRect)的画刷。
-    /// state 4(亚克力系)返回 null —— 着色仍交给 DWM,填充层保持透明(历史行为,视觉零变化)。</summary>
+    /// state 4(亚克力系)返回 null —— 着色仍交给 DWM,填充层保持透明(历史行为,视觉零变化)。
+    /// ponytail 2026-09-26(二期修订): 两道 null 短路 ——
+    ///  ① 内部走 <see cref="ResolveAccentState"/>,所以 DWM 方案下恒返回 null(即 147aa4a 的历史行为);
+    ///  ② <see cref="ResolveSelfDrawn"/> 为真(新方案 + 壁纸可用)时也返回 null:
+    ///     **自绘背板自己已经携带着色**,再往填充层叠一层同一个着色就是"上两遍色"——实测分区
+    ///     屏幕均值 (217,183,240),而"背板像 + 一层着色"应为 (193,185,225),明显偏粉偏亮。
+    ///     壁纸不可用(自绘背板回退 DWM,SelfDrawnAvailable=false)时 ② 不成立 → 补偿照旧生效。</summary>
     public static Brush? ResolveWpfGlassTintBrush(string? materialKey, string? fillHex, double fillOpacity01,
         string glassMode, int tintOpacity, int tintLuminosity)
     {
         if (ResolveAccentState(materialKey) == AccentStateAcrylic) return null;
+        if (ResolveSelfDrawn()) return null;
         var brush = new SolidColorBrush(CompositeFillOverGlass(fillHex, fillOpacity01, glassMode, tintOpacity, tintLuminosity));
         brush.Freeze();
         return brush;
@@ -935,14 +966,21 @@ public static class AcrylicHelper
 
         dlgBg.Child = rootGrid;
         dlg.Content = dlgBg;
+        // ponytail 2026-09-26(二期修订): 行表必须与实际加进去的子元素**一一对应**。
+        // 一期加材质行时漏了它那一行定义,导致后面所有元素整体错位一格(原「模糊半径」说明
+        // 掉进了 Star 行)。二期又插了一行 DWM 提示,错位再+1 → 说明直接压到了按钮那一行
+        // (用户看到"说明跑到最底部")。现在把材质行、DWM 提示行都补上,并让按钮行显式取
+        // **最后一个**定义 —— 以后再加行也不会把按钮顶出去。
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // title
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // blur slider
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // opacity slider
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // luminosity slider
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // material preset
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // color preset
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // custom color
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // exclusive hint
-        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // hint
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // hint (原说明)
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // DWM 方案提示(新说明,紧随原说明之下)
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // buttons
 
@@ -1235,7 +1273,7 @@ public static class AcrylicHelper
         Grid.SetRow(exclusiveTb, row++);
         grid.Children.Add(exclusiveTb);
 
-        // Original hint (moved down)
+        // Original hint —— 位置保持原样(紧接互斥说明之下),**不要**在它上面插任何东西。
         var hintTb = new TextBlock
         {
             Text = _loc["LiquidGlass.Hint"],
@@ -1246,6 +1284,27 @@ public static class AcrylicHelper
         hintTb.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "Brush.Text.Tertiary");
         Grid.SetRow(hintTb, row++);
         grid.Children.Add(hintTb);
+
+        // ponytail 2026-09-26(二期修订): DWM 方案提示 —— **必须排在原说明之下**(用户明确要求:
+        // "不要改变原本说明的位置,把新的说明移动到原本说明下方")。
+        // 说明内容:DWM 下材质与模糊半径都不参与渲染(DWM 背板模糊强度固定、state3 又不认着色),
+        // 但颜色/不透明度/亮度照旧生效;并指明去哪打开新方案。不说清楚的话用户会以为
+        // "选了材质/拖了滑块没反应"是 bug —— 用户实测反馈正是如此。
+        // 行号**恒定占用**(即使这次不显示也 row++),这样按钮行号不随分支变化。
+        if (!WallpaperSource.Enabled)
+        {
+            var dwmTb = new TextBlock
+            {
+                Text = _loc["LiquidGlass.DwmMode.Hint"],
+                FontSize = 9,
+                Margin = new Thickness(0, 4, 0, 0),
+                TextWrapping = TextWrapping.Wrap
+            };
+            dwmTb.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "Brush.Text.Tertiary");
+            Grid.SetRow(dwmTb, row);
+            grid.Children.Add(dwmTb);
+        }
+        row++;
 
         // Buttons
         var btnRow = new StackPanel
@@ -1292,7 +1351,8 @@ public static class AcrylicHelper
 
         btnRow.Children.Add(cancelBtn);
         btnRow.Children.Add(saveBtn);
-        Grid.SetRow(btnRow, row++);
+        // 按钮行 = 最后一个定义(显式取,不再靠 row 计数 —— 上面任何一行增删都不会把它顶出表格)。
+        Grid.SetRow(btnRow, grid.RowDefinitions.Count - 1);
         grid.Children.Add(btnRow);
 
         dlg.ShowDialog();

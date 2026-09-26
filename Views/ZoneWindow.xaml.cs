@@ -4379,12 +4379,21 @@ public partial class ZoneWindow : Window
     WallpaperBackdropLayer? _wallpaperBackdrop;
 
     /// <summary>材质 = 「自绘背板」通道时,把壁纸采样层插到填充层之下并关掉 DWM 玻璃。
-    /// 返回 true = 背板已接管(调用方不要再走 DWM);壁纸不可用/材质=自定义 → false(回退 DWM)。</summary>
+    /// 返回 true = 背板已接管(调用方不要再走 DWM);壁纸不可用/材质=自定义/开关关闭 → false(回退 DWM)。</summary>
     bool TryApplyWallpaperBackdrop(ResolvedZoneStyle s)
     {
-        if (!AcrylicHelper.ResolveSelfDrawn(_zone.GlassMaterial, _zone.UseWallpaperRenderer)) return false;
+        // ponytail 2026-09-26(二期修订): 一旦不走自绘背板(开关关掉 / 材质=自定义 / 壁纸不可用),
+        // **必须先把已经挂上的背板层藏起来**。它是一张**不透明**的壁纸裁剪图,留在可见状态就会
+        // 整块盖住下面的 DWM 玻璃与它的着色 —— 用户从新方案切回 DWM 之后,改颜色/不透明度/亮度
+        // 全都"没有反应"(实测反馈,查明就是这个原因:切换只调了 TryApply… 的返回值,没人去藏它)。
+        // 收口在本方法里,调用点就不会漏。
+        if (!AcrylicHelper.ResolveSelfDrawn())
+        {
+            _wallpaperBackdrop?.SetVisible(false);
+            return false;
+        }
         _wallpaperBackdrop ??= WallpaperBackdropLayer.TryCreate();
-        if (_wallpaperBackdrop == null) return false;
+        if (_wallpaperBackdrop == null) return false;   // 从没建起来过 → 没有层需要藏
 
         _wallpaperBackdrop.Attach(MainContent, FillRect);
         _wallpaperBackdrop.SetVisible(true);
@@ -4411,17 +4420,13 @@ public partial class ZoneWindow : Window
         bool fillIndependent = s.TitleBarFillIndependent && !s.TileMode;
         if (s.EnableLiquidGlass && expanded)
         {
-            // ponytail 2026-09-26 方案①: 选了材质 → 壁纸采样自绘背板(模糊半径真正生效)。
-            // 背板层插在填充层之下、又在 MainContent 之内,所以收起/展开动画自动带着它走;
-            // 壁纸读不到或材质=自定义 → 返回 false,走下面的 DWM 老路径。
-            if (TryApplyWallpaperBackdrop(s))
+            // ponytail 2026-09-26(二期修订 2): 「保留原有填充」必须排在自绘背板**之前**判断。
+            // 这种分区要求填充独立成层、并被裁到标题栏之下(FillRect.Margin),而自绘背板是
+            // **整窗一层**、又会把填充并进自己的着色里 —— 天然做不到这种裁剪。所以这条路固定
+            // 走 DWM(与一期一致),否则组合分区的「保留原有填充」会被背板吃掉。
+            if (fillIndependent)
             {
-                // 着色已并入背板层 → 填充层保持透明(与 DWM 路径的"填充并入玻璃"同语义)
-                FillRect.Fill = AcrylicHelper.HitTestFill;
-                FillRect.Opacity = 1.0;
-            }
-            else if (fillIndependent)
-            {
+                _wallpaperBackdrop?.SetVisible(false);   // 老背板让位,别盖住 DWM 玻璃
                 var blurResult = AcrylicHelper.EnableBlur(this, _zone.GlassBlurAmount,
                     _zone.GlassTintOpacity, _zone.GlassTintLuminosity, _zone.GlassColorMode,
                     AcrylicHelper.ResolveAccentState(_zone.GlassMaterial),
@@ -4429,6 +4434,15 @@ public partial class ZoneWindow : Window
                 if (!blurResult.Success)
                     System.Diagnostics.Debug.WriteLine($"[ZoneWindow] EnableBlur failed: {blurResult.Error}");
                 try { FillRect.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.FillColor)!); } catch { }
+                FillRect.Opacity = 1.0;
+            }
+            // ponytail 2026-09-26 方案①: 新方案 → 壁纸采样自绘背板(模糊半径真正生效)。
+            // 背板层插在填充层之下、又在 MainContent 之内,所以收起/展开动画自动带着它走;
+            // 开关关掉 / 壁纸读不到 → 返回 false(并让老背板让位),走下面的 DWM 老路径。
+            else if (TryApplyWallpaperBackdrop(s))
+            {
+                // 着色已并入背板层 → 填充层保持透明(与 DWM 路径的"填充并入玻璃"同语义)
+                FillRect.Fill = AcrylicHelper.HitTestFill;
                 FillRect.Opacity = 1.0;
             }
             else

@@ -251,7 +251,7 @@ public partial class SubfolderFlyout : UserControl
 
             // ponytail 2026-09-26 方案①: 材质 = 自绘壁纸背板(模糊半径真正生效)。浮层打开后
             // 不再移动,所以用一次性静态画刷(裁剪图+着色+噪点)即可,不必维护 Viewbox 绑定。
-            if (AcrylicHelper.ResolveSelfDrawn(fill.GlassMaterial))
+            if (AcrylicHelper.ResolveSelfDrawn())
             {
                 var rect = NativeMethods.GetWindowRect(src.Handle, out var wr)
                     ? new Rect(wr.Left, wr.Top, Math.Max(1, wr.Right - wr.Left), Math.Max(1, wr.Bottom - wr.Top))

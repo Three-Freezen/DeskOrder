@@ -61,9 +61,10 @@ public class AppConfig
 
     /// <summary>ponytail 2026-09-26(二期): 全局渲染方案开关 —— true = 新方案(壁纸采样自绘
     /// 背板,模糊半径真正生效,但要多花一次壁纸采样/预模糊的开销);false = 原 DWM 方案(默认)。
-    /// 开关值在启动时**写进每个对象**的 <c>UseWallpaperRenderer</c>(渲染侧只读对象自己的快照),
-    /// 所以切换只影响之后新显示的对象,老对象保持切换前的观感。
-    /// 同时它决定 <see cref="WallpaperSource.Enabled"/>:关掉开关时不做任何抓屏。</summary>
+    /// **渲染侧以本开关为唯一判据**(经 <see cref="WallpaperSource.Enabled"/>);
+    /// 早期版本让每个窗口读自己的 <c>UseWallpaperRenderer</c> 快照,开关打开后新建的对象拿到
+    /// 构造默认值 false,永远走 DWM —— 现已改为全局判据,逐对象字段仅作兼容保留。
+    /// 本开关同时决定是否做壁纸检测/抓屏:关掉时零开销。</summary>
     public bool UseWallpaperRenderer { get; set; } = false;
 
     // ── Panel (POCOs, was 19 inline fields) ──

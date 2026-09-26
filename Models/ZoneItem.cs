@@ -187,7 +187,9 @@ public class ZoneItem : INotifyPropertyChanged
     }
 
     // ponytail 2026-09-26(二期): 渲染方案快照 —— true = 走「壁纸采样自绘背板」(真模糊半径),
-    // false = 原 DWM 方案。由「设置 → 外观」的全局开关写入,渲染侧只读本字段。
+    // false = 原 DWM 方案。由「设置 → 外观」的全局开关经 ConfigService.ApplyRendererSwitch 写入。
+    // **渲染侧已不再读本字段**(判据统一为全局开关 WallpaperSource.Enabled,逐对象快照会让
+    // 开关打开后新建的次级分区永远走 DWM),保留只为老配置兼容。
     private bool _useWallpaperRenderer;
     public bool UseWallpaperRenderer
     {

@@ -221,38 +221,51 @@ public partial class SettingsPage : UserControl
     }
 
     /// <summary>「重新采样」—— 让壁纸背板丢掉缓存重新采集一次。仅新方案下可用。
-    /// 采集前会先把玻璃窗口隐藏一会儿(见 WallpaperSource),避免把应用自己的窗口采进背板。</summary>
+    /// 采集前会先把本应用窗口隐藏一会儿(见 WallpaperSource),避免把应用自己的窗口采进背板。</summary>
     void Resample_Click(object sender, RoutedEventArgs e)
     {
         if (WallpaperRendererBox.IsChecked != true) return;
+        var loc = LocalizationService.Instance;
         ResampleButton.IsEnabled = false;
-        ResampleHintText.Text = LocalizationService.Instance["Settings.Renderer.Resampling"];
+        ResampleHintText.Text = loc["Settings.Renderer.Resampling"];
+        // ponytail 2026-09-26(二期修订): 抓屏是在 UI 线程上同步跑并 Sleep 110ms 的,
+        // 不先逼一次渲染的话「正在采样…」根本来不及画出来,用户点了按钮看不到任何反馈。
+        PumpRender();
         try
         {
             WallpaperBackdrop.Invalidate();
             var img = Helpers.WallpaperSource.Resample();
             if (img == null)
             {
-                ResampleHintText.Text = LocalizationService.Instance["Settings.Renderer.Resample.Failed"];
+                ResampleHintText.Text = loc["Settings.Renderer.Resample.Failed"];
             }
             else
             {
                 // 新图 → 让每个窗口按新背板重画(否则要等下次状态变化才会用上新图)
                 RefreshGlassWindows();
                 SyncRendererUi();   // 采样来源文字也跟着更新
-                ResampleHintText.Text = LocalizationService.Instance["Settings.Renderer.Resample.Hint"];
+                // 明确回一句话:采样成功但屏幕上看不出变化时(比如新壁纸和旧的很像),
+                // 这条文字是唯一能确认"真的采了一次"的地方。
+                ResampleHintText.Text = loc.Get("Settings.Renderer.Resample.Done",
+                    WallpaperSourceText.Text);
             }
         }
         catch (Exception ex)
         {
             Debug.WriteLine($"[SettingsPage] Resample failed: {ex}");
-            ResampleHintText.Text = LocalizationService.Instance["Settings.Renderer.Resample.Failed"];
+            ResampleHintText.Text = loc["Settings.Renderer.Resample.Failed"];
         }
         finally
         {
             SyncRendererUi();
         }
     }
+
+    /// <summary>把「正在采样…」这类文字逼上屏 —— 抓屏会 Sleep 110ms 卡住 UI 线程,
+    /// 不先冲一次渲染队列的话文字只会和采样结果一起出现(= 没有"正在进行"的观感)。</summary>
+    static void PumpRender()
+        => System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(
+            () => { }, System.Windows.Threading.DispatcherPriority.Render);
 
     /// <summary>按当前开关状态刷新这一块的可用性/文字(采样来源、按钮可用性)。</summary>
     void SyncRendererUi()
@@ -271,18 +284,23 @@ public partial class SettingsPage : UserControl
             ? LocalizationService.Instance["Settings.Renderer.Source.None"] : desc;
     }
 
-    /// <summary>让所有已显示的窗口按新方案重画玻璃。</summary>
+    /// <summary>让所有已显示的窗口按新方案重画玻璃。
+    /// ponytail 2026-09-26(二期修订 3): **每个窗口都必须调到"重画玻璃"那个方法**。
+    /// 日历原来调的是 ApplyStyle() —— 它只管边框/圆角/快捷栏,玻璃完全没刷,于是
+    /// 「重新采样」「切换渲染方案」对日历静默失效(用户实测反馈:日历/时钟不实时同步)。
+    /// 时钟那条本来就是 ApplyAcrylic()(内部会调 ApplyStyle),面板两个都要。</summary>
     static void RefreshGlassWindows()
     {
         foreach (Window w in Application.Current.Windows)
         {
             switch (w)
             {
-                case Views.ZoneWindow z: z.ApplyStyle(); break;
+                case Views.ZoneWindow z: z.ApplyStyle(); break;          // ApplyStyle 内部会调 ApplyAcrylic
                 case Views.StickyNoteWindow n: n.ApplyAcrylic(); break;
-                case Views.ClockWidget c: c.ApplyAcrylic(); break;
-                case Views.CalendarWidget c: c.ApplyStyle(); break;
-                case Views.PanelWindow p: p.ApplyStyle(); break;
+                case Views.ClockWidget c: c.ApplyAcrylic(); break;       // ApplyAcrylic 内部会调 ApplyStyle
+                case Views.CalendarWidget c: c.ApplyAcrylic(); break;    // ← 上一版这里错调了 ApplyStyle
+                // 面板这两个方法是分开的 —— ApplyAcrylic 负责背板/DWM 玻璃,ApplyStyle 负责填充层。
+                case Views.PanelWindow p: p.ApplyAcrylic(); p.ApplyStyle(); break;
             }
         }
     }

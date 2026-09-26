@@ -57,11 +57,12 @@ public abstract class AppearanceModel
     /// </summary>
     public bool HoverAutoExpand { get; set; } = false;
 
-    /// <summary>ponytail 2026-09-26(二期): 每个对象自己记住「本对象是否走新渲染方案
-    /// (壁纸采样自绘背板)」。全局开关在「设置 → 外观」,这里是它写入各对象的快照 ——
-    /// 渲染侧只读这个字段,所以新旧方案可以同时存在于桌面上(切开关不会动老对象)。
-    /// 默认 false = 使用 DWM 方案(用户明确要求默认 DWM)。**注意**:一期已选过材质的
-    /// 对象在迁移时会被写成 true(否则切到全局默认后会突然换观感)。</summary>
+    /// <summary>ponytail 2026-09-26(二期): 「本对象是否走新渲染方案(壁纸采样自绘背板)」的
+    /// 快照,由全局开关经 ConfigService.ApplyRendererSwitch 写入。
+    ///
+    /// **渲染侧已不再读它** —— 判据统一为全局开关(<see cref="Helpers.WallpaperSource.Enabled"/>),
+    /// 因为逐对象快照会让"开关打开之后新建的对象"拿着构造默认值 false 永远走 DWM。
+    /// 保留字段只为老配置兼容,别再拿它做渲染判据。</summary>
     public bool UseWallpaperRenderer { get; set; } = false;
 
     // ── Hover restore animation (per-instance, spec §7.1 #2) ──

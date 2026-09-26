@@ -884,10 +884,16 @@ public partial class StickyNoteWindow : Window
     WallpaperBackdropLayer? _wallpaperBackdrop;
 
     /// <summary>材质 = 「自绘背板」通道时,把壁纸采样层插到填充层之下并关掉 DWM 玻璃。
-    /// 返回 true = 背板已接管;壁纸不可用/材质=自定义 → false(回退 DWM)。</summary>
+    /// 返回 true = 背板已接管;壁纸不可用/材质=自定义/开关关闭 → false(回退 DWM)。</summary>
     bool TryApplyWallpaperBackdrop(string fillColorStr)
     {
-        if (!AcrylicHelper.ResolveSelfDrawn(_note.GlassMaterial, _note.UseWallpaperRenderer)) return false;
+        // ponytail 2026-09-26(二期修订): 回退 DWM 前必须先把背板层藏起来 —— 它是不透明的
+        // 壁纸裁剪图,留着就会盖住 DWM 玻璃及着色,表现为"改颜色没反应"(见 ZoneWindow 同款注释)。
+        if (!AcrylicHelper.ResolveSelfDrawn())
+        {
+            _wallpaperBackdrop?.SetVisible(false);
+            return false;
+        }
         _wallpaperBackdrop ??= WallpaperBackdropLayer.TryCreate();
         if (_wallpaperBackdrop == null) return false;
 
