@@ -72,7 +72,6 @@ public class ZoneManager
         _isBatchOperation = true;
         try
         {
-            var desktopIconLookup = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
             foreach (var zone in _config.Zones)
             {
                 Zones.Add(zone);
@@ -119,14 +118,18 @@ public class ZoneManager
                     // is missing a custom desktop-shortcut icon — e.g. 必剪.lnk points at
                     // BCUT.exe but renders BCUT_Deskpic.ico. Match the desktop shortcut by
                     // target path and adopt its icon location.
+                    //
+                    // ponytail 2026-09-26(审计修订): 只**收集**,不再在这里同步跑 —— 这条恢复
+                    // 要对桌面上的每个 .lnk 做一次 WScript.Shell COM 解析。实测本机:桌面 23 个
+                    // .lnk,每个 ResolveTarget 约 6.5ms(COM 就是慢),**跑一遍全表 149ms**;而
+                    // 这条路径是"每个缺图标的条目各跑一遍全表",全部堵在首帧之前。
+                    // 现在:① 整轮只建一次索引(COM 次数 = 快捷方式数,条目查询 O(1));
+                    // ② 排到 Dispatcher 空闲时跑(见 RecoverMissingIcons)。
                     if (it.IconPath == null
                         && it.Type is ItemType.Application or ItemType.Shortcut
                         && !string.IsNullOrEmpty(it.TargetPath)
                         && File.Exists(it.TargetPath))
-                    {
-                        var iconLoc = FindDesktopIcon(it.TargetPath, desktopIconLookup);
-                        if (iconLoc != null) { it.IconPath = iconLoc; anyResolved = true; }
-                    }
+                        _iconRecoveryQueue.Add(it);
                 }
                 if (zone.IsVisible)
                 {
@@ -139,16 +142,58 @@ public class ZoneManager
         {
             EndBatch(anyNormalized || anyResolved || anyShown);
         }
+
+        // 缺图标的恢复排在首帧之后(见 RecoverMissingIcons)
+        if (_iconRecoveryQueue.Count > 0)
+            (_dispatcher ??= System.Windows.Application.Current?.Dispatcher
+                             ?? System.Windows.Threading.Dispatcher.CurrentDispatcher)
+                .BeginInvoke(System.Windows.Threading.DispatcherPriority.ApplicationIdle,
+                    new Action(RecoverMissingIcons));
     }
 
-    /// <summary>
-    /// Look for a desktop .lnk whose resolved target equals <paramref name="target"/> and
-    /// return its custom icon location. Cached per target for the whole startup scan.
-    /// </summary>
-    private static string? FindDesktopIcon(string target, Dictionary<string, string?> cache)
+    /// <summary>UI Dispatcher(见 <see cref="Initialize"/> 末尾的延迟恢复)。</summary>
+    private System.Windows.Threading.Dispatcher? _dispatcher;
+
+    /// <summary>缺自定义图标的条目(待恢复)。见 <see cref="RecoverMissingIcons"/>。</summary>
+    private readonly List<ZoneItem> _iconRecoveryQueue = new();
+
+    /// <summary>桌面 .lnk 的「解析目标 → 快捷方式路径」索引,整轮恢复只建一次。
+    /// ponytail 2026-09-26(审计修订): 原来每个缺图标的条目都要把桌面 .lnk **全扫一遍**
+    /// (每个文件一次 COM ResolveTarget);现在一次遍历建成索引,条目查询变 O(1)。</summary>
+    private Dictionary<string, string>? _desktopShortcutIndex;
+
+    /// <summary>把「缺自定义图标」的条目补回桌面快捷方式上的图标位置。
+    ///
+    /// ponytail 2026-09-26(审计修订): 从 <see cref="Initialize"/> 的同步路径里挪出来 ——
+    /// 它对桌面上的每个 .lnk 做一次 WScript.Shell COM 解析(实测本机 23 个 .lnk × 6.5ms
+    /// = **149ms 一遍全表**,而旧实现是每个缺图标的条目各跑一遍全表),全部堵在**首帧之前**。
+    /// 现在:① 整轮只建一次索引(COM 次数 = 桌面快捷方式数);② 排到 Dispatcher 空闲时再跑,
+    /// 启动不再等它;③ 补到的图标位置落盘一次并抛一次 ZonesChanged,分区/面板自己重取图标。
+    /// 绝大多数情况下这里一条都不用补(图标位置第一次补到就落盘了),队列是空的。
+    /// 注意:只扫 *.lnk —— 目标是 .url 之类的条目永远匹配不到,会每次启动白扫一遍(现在只是
+    /// 空闲时的一遍,可接受;要根治得连 .url 一起解析,那是另一件事)。</summary>
+    void RecoverMissingIcons()
     {
-        if (cache.TryGetValue(target, out var cached)) return cached;
-        string? result = null;
+        if (_iconRecoveryQueue.Count == 0) return;
+        _desktopShortcutIndex = null;   // 每轮重建(用户可能刚在桌面上加了快捷方式)
+        int pending = _iconRecoveryQueue.Count, recovered = 0;
+        foreach (var it in _iconRecoveryQueue)
+        {
+            var iconLoc = FindDesktopIcon(it.TargetPath);
+            if (iconLoc != null) { it.IconPath = iconLoc; recovered++; }
+        }
+        _iconRecoveryQueue.Clear();
+        if (recovered == 0) return;
+        DzTrace.Log($"[ZoneManager] 首帧后补回自定义图标 {recovered} 个(待补 {pending} 个)");
+        SaveConfig();
+        ZonesChanged?.Invoke();
+    }
+
+    /// <summary>桌面 .lnk 索引(懒建一次)。</summary>
+    private Dictionary<string, string> DesktopShortcutIndex()
+    {
+        if (_desktopShortcutIndex != null) return _desktopShortcutIndex;
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         try
         {
             var desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
@@ -156,18 +201,29 @@ public class ZoneManager
             {
                 foreach (var lnk in Directory.GetFiles(desktop, "*.lnk"))
                 {
-                    var lnkTarget = ShortcutResolver.ResolveTarget(lnk);
-                    if (lnkTarget != null && string.Equals(lnkTarget, target, StringComparison.OrdinalIgnoreCase))
-                    {
-                        result = ShortcutResolver.ResolveIconLocation(lnk);
-                        break;
-                    }
+                    var target = ShortcutResolver.ResolveTarget(lnk);
+                    if (!string.IsNullOrEmpty(target) && !map.ContainsKey(target!)) map[target!] = lnk;
                 }
             }
         }
         catch { /* desktop scan is best-effort */ }
-        cache[target] = result;
-        return result;
+        _desktopShortcutIndex = map;
+        return map;
+    }
+
+    /// <summary>
+    /// Look for a desktop .lnk whose resolved target equals <paramref name="target"/> and
+    /// return its custom icon location. 走 <see cref="DesktopShortcutIndex"/> 的一次性索引。
+    /// </summary>
+    private string? FindDesktopIcon(string target)
+    {
+        try
+        {
+            return DesktopShortcutIndex().TryGetValue(target, out var lnk)
+                ? ShortcutResolver.ResolveIconLocation(lnk)
+                : null;
+        }
+        catch { return null; }
     }
 
     public Zone CreateZone(string name = "New Zone", double x = 200, double y = 200,

@@ -149,6 +149,9 @@ public partial class ZoneWindow : Window
     private CancellationTokenSource? _folderLoadCts;
     private DateTime _lastFolderRefreshUtc = DateTime.MinValue;
     private string _folderLoadedPath = ""; // last successfully loaded path — reload guard
+    /// <summary>映射区上一次的显示状态(null = 还没跑过)。只有它翻转时才重跑 ApplyStyle,
+    /// 见 <see cref="RefreshFolderMapping"/> 的注释。</summary>
+    private bool? _folderMappingShown;
 
     // ── SubFolder flyout auto-close + drag-hover scale ──
     // ponytail 2026-08-26: 鼠标移出 Flyout 200ms 后自动关闭;移回取消关闭。
@@ -1913,11 +1916,18 @@ public partial class ZoneWindow : Window
     {
         var (enabled, path) = ResolveFolderMapping();
         bool show = enabled;
+        // ponytail 2026-09-26(审计修订): 只有「映射区显示与否」**真的翻转**时才需要重跑样式。
+        // 那条 ApplyStyle 存在的唯一理由就是"映射表头是标题栏带子的一部分,填充/裁剪要跟着
+        // 开关走"(见下面的原注释);而它每次都被无条件调用,于是每次面板编辑都要跑两遍
+        // ApplyStyle(RefreshZone 里一遍 + 这里一遍)—— 每遍含背景图解码、遍历所有图标容器
+        // 改画刷、重建子分区页签,拖一次滑块就是几十遍。
+        bool visibilityChanged = _folderMappingShown != show;
+        _folderMappingShown = show;
         FolderMappingView.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
         ItemsViewport.Visibility = show ? Visibility.Collapsed : Visibility.Visible;
         // The mapping header row is part of the title-bar band — re-run the style
         // pass so the independent-fill clip / header fill follow the toggle.
-        ApplyStyle();
+        if (visibilityChanged) ApplyStyle();
         if (!show)
         {
             _folderLoadCts?.Cancel();
@@ -4192,49 +4202,81 @@ public partial class ZoneWindow : Window
         // 标题栏独立填充：背景图与 FillRect 一样不铺到标题栏下方（顶部裁剪）。
         double clipTop = s.TitleBarFillIndependent && !s.TileMode ? TitleBarLayerHeight() : 0;
         BgImageBorder.Margin = new Thickness(0, clipTop, 0, 0);
-        if (!string.IsNullOrEmpty(s.BgImagePath) && File.Exists(s.BgImagePath))
+        var bi = GetBackgroundImage(s.BgImagePath);
+        if (bi != null)
         {
-            try
-            {
-                var bi = new System.Windows.Media.Imaging.BitmapImage();
-                bi.BeginInit();
-                bi.UriSource = new Uri(s.BgImagePath);
-                bi.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
-                bi.DecodePixelWidth = 1920;
-                bi.EndInit();
-                bi.Freeze();
-                BgImage.Source = bi;
-                BgImage.Stretch = Stretch.UniformToFill;
+            BgImage.Source = bi;
+            BgImage.Stretch = Stretch.UniformToFill;
 
-                var bw = ActualWidth > 0 ? ActualWidth : _zone.Width;
-                var bh = ActualHeight > 0 ? ActualHeight : _zone.Height;
+            var bw = ActualWidth > 0 ? ActualWidth : _zone.Width;
+            var bh = ActualHeight > 0 ? ActualHeight : _zone.Height;
 
-                double imgW = bi.PixelWidth;
-                double imgH = bi.PixelHeight;
-                double utfScale = Math.Max((bw * s.BgImageZoom) / imgW, (bh * s.BgImageZoom) / imgH);
-                double displayedW = imgW * utfScale;
-                double displayedH = imgH * utfScale;
+            double imgW = bi.PixelWidth;
+            double imgH = bi.PixelHeight;
+            double utfScale = Math.Max((bw * s.BgImageZoom) / imgW, (bh * s.BgImageZoom) / imgH);
+            double displayedW = imgW * utfScale;
+            double displayedH = imgH * utfScale;
 
-                BgImage.Width = displayedW;
-                BgImage.Height = displayedH;
+            BgImage.Width = displayedW;
+            BgImage.Height = displayedH;
 
-                double zoneCenterX = bw / 2;
-                double zoneCenterY = bh / 2;
-                double imgCenterX = displayedW / 2;
-                double imgCenterY = displayedH / 2;
-                double zox = s.BgImageOffsetX;
-                double zoy = s.BgImageOffsetY;
+            double zoneCenterX = bw / 2;
+            double zoneCenterY = bh / 2;
+            double imgCenterX = displayedW / 2;
+            double imgCenterY = displayedH / 2;
+            double zox = s.BgImageOffsetX;
+            double zoy = s.BgImageOffsetY;
 
-                BgImage.Margin = new Thickness(
-                    zoneCenterX - imgCenterX + zox,
-                    zoneCenterY - imgCenterY + zoy - clipTop, 0, 0);
-                BgImage.HorizontalAlignment = HorizontalAlignment.Left;
-                BgImage.VerticalAlignment = VerticalAlignment.Top;
-                BgImage.Opacity = Math.Max(0.01, s.BgImageOpacity / 100.0);
-            }
-            catch { BgImage.Opacity = 0; }
+            BgImage.Margin = new Thickness(
+                zoneCenterX - imgCenterX + zox,
+                zoneCenterY - imgCenterY + zoy - clipTop, 0, 0);
+            BgImage.HorizontalAlignment = HorizontalAlignment.Left;
+            BgImage.VerticalAlignment = VerticalAlignment.Top;
+            BgImage.Opacity = Math.Max(0.01, s.BgImageOpacity / 100.0);
         }
         else { BgImage.Source = null; BgImage.Opacity = 0; }
+    }
+
+    // 背景图解码缓存。ponytail 2026-09-26(审计修订): 原来每次 ApplyStyle 都
+    // `new BitmapImage + UriSource + DecodePixelWidth=1920 + OnLoad` —— 那是**同步磁盘读取 +
+    // 1920px 解码**,而 ApplyStyle 是每次面板编辑(拖滑块逐帧)都会跑的,而且 RefreshZone
+    // 还会跑两遍。路径与文件时间戳没变时直接用上次的解码结果。
+    string _bgImageCacheKey = "";
+    System.Windows.Media.Imaging.BitmapSource? _bgImageCache;
+
+    /// <summary>取(并缓存)背景图解码结果。路径为空/文件不存在/解码失败 → null。
+    /// 缓存键含文件最后写入时间,替换成同名文件也能立刻生效。</summary>
+    System.Windows.Media.Imaging.BitmapSource? GetBackgroundImage(string path)
+    {
+        if (string.IsNullOrEmpty(path) || !File.Exists(path))
+        {
+            _bgImageCacheKey = "";      // 顺手放掉上一张,别让"不再用背景图"的分区还占着一张位图
+            _bgImageCache = null;
+            return null;
+        }
+        DateTime stamp;
+        try { stamp = File.GetLastWriteTimeUtc(path); } catch { stamp = default; }
+        string key = path + "|" + stamp.Ticks;
+        if (key == _bgImageCacheKey && _bgImageCache != null) return _bgImageCache;
+        try
+        {
+            var bi = new System.Windows.Media.Imaging.BitmapImage();
+            bi.BeginInit();
+            bi.UriSource = new Uri(path);
+            bi.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+            bi.DecodePixelWidth = 1920;
+            bi.EndInit();
+            bi.Freeze();
+            _bgImageCacheKey = key;
+            _bgImageCache = bi;
+            return bi;
+        }
+        catch
+        {
+            _bgImageCacheKey = "";
+            _bgImageCache = null;
+            return null;
+        }
     }
 
     /// <summary>Apply the resolved 主体内容颜色 to item labels. The brush is exposed as
