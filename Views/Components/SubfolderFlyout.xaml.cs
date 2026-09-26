@@ -248,6 +248,29 @@ public partial class SubfolderFlyout : UserControl
         {
             var src = PresentationSource.FromVisual(this) as System.Windows.Interop.HwndSource;
             if (src == null || src.Handle == IntPtr.Zero) return false;
+
+            // ponytail 2026-09-26 方案①: 材质 = 自绘壁纸背板(模糊半径真正生效)。浮层打开后
+            // 不再移动,所以用一次性静态画刷(裁剪图+着色+噪点)即可,不必维护 Viewbox 绑定。
+            if (AcrylicHelper.ResolveSelfDrawn(fill.GlassMaterial))
+            {
+                var rect = NativeMethods.GetWindowRect(src.Handle, out var wr)
+                    ? new Rect(wr.Left, wr.Top, Math.Max(1, wr.Right - wr.Left), Math.Max(1, wr.Bottom - wr.Top))
+                    : Rect.Empty;
+                var brush = rect.IsEmpty ? null : WallpaperBackdrop.CreateStaticBrush(
+                    AcrylicHelper.ResolveSelfDrawnRadiusPx(fill.GlassBlur), rect,
+                    AcrylicHelper.ResolveBackdropTint(fill.FillHex, fill.FillOpacity / 100.0, fill.GlassMode!,
+                        fill.GlassTintOpacity, fill.GlassTintLuminosity),
+                    AcrylicHelper.ResolveNoiseOpacity(fill.GlassMaterial));
+                if (brush != null)
+                {
+                    ViewModel?.SetWallpaperBackdrop(brush);
+                    AcrylicHelper.DisableBlur(src.Handle);
+                    DzTrace.Log($"[SubFlyout] TryApplyRealGlass(wallpaper backdrop): host={ViewModel?.HostSubItem.Name} r={fill.GlassBlur} mat={fill.GlassMaterial}");
+                    return true;
+                }
+            }
+            ViewModel?.SetWallpaperBackdrop(null);
+
             var r = AcrylicHelper.EnableBlurComposite(src.Handle, fill.GlassBlur,
                 fill.FillHex, fill.FillOpacity / 100.0, fill.GlassMode!,
                 fill.GlassTintOpacity, fill.GlassTintLuminosity, skipClassicBlur: true,

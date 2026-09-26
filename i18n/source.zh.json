@@ -587,7 +587,7 @@
   "LiquidGlass.Custom": "自定义",
   "LiquidGlass.CustomPick": "自定义颜色…",
   "LiquidGlass.ExclusiveHint": "预设与自定义不能同时启用",
-  "LiquidGlass.Hint": "模糊半径=0 关闭效果 | 亮度100%=原始色彩 | 预设决定基础色调",
+  "LiquidGlass.Hint": "模糊半径=0 关闭效果 | 亮度100%=原始色彩 | 预设决定基础色调 | 选了材质后模糊半径为真实像素(背板改为采样壁纸)",
   "LiquidGlass.Save": "保存",
   "LiquidGlass.Cancel": "取消",
 

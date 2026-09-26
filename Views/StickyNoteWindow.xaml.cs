@@ -875,6 +875,30 @@ public partial class StickyNoteWindow : Window
 
     // ── Acrylic / frosted glass ──
 
+    // ── 自绘背板(方案①:壁纸采样 + 可变半径模糊) ──
+
+    WallpaperBackdropLayer? _wallpaperBackdrop;
+
+    /// <summary>材质 = 「自绘背板」通道时,把壁纸采样层插到填充层之下并关掉 DWM 玻璃。
+    /// 返回 true = 背板已接管;壁纸不可用/材质=自定义 → false(回退 DWM)。</summary>
+    bool TryApplyWallpaperBackdrop(string fillColorStr)
+    {
+        if (!AcrylicHelper.ResolveSelfDrawn(_note.GlassMaterial)) return false;
+        _wallpaperBackdrop ??= WallpaperBackdropLayer.TryCreate();
+        if (_wallpaperBackdrop == null) return false;
+
+        _wallpaperBackdrop.Attach(MainContent, BodyFillRect);
+        _wallpaperBackdrop.SetVisible(true);
+        _wallpaperBackdrop.BindWindow(this);
+        _wallpaperBackdrop.SetAppearance(this,
+            AcrylicHelper.ResolveSelfDrawnRadiusPx(_note.GlassBlurAmount),
+            AcrylicHelper.ResolveBackdropTint(fillColorStr, 1.0, _note.GlassColorMode,
+                _note.GlassTintOpacity, _note.GlassTintLuminosity),
+            AcrylicHelper.ResolveNoiseOpacity(_note.GlassMaterial));
+        AcrylicHelper.DisableBlur(this);
+        return true;
+    }
+
     void ApplyAcrylic()
     {
         string fillColorStr = _note.FillColor;
@@ -887,6 +911,20 @@ public partial class StickyNoteWindow : Window
         bool expanded = _hover?.IsExpanded ?? false;
         if (_note.EnableLiquidGlass && expanded)
         {
+            // ponytail 2026-09-26 方案①: 选了材质 → 壁纸采样自绘背板(半径真正生效);
+            // 壁纸不可用/自定义 → 落回 DWM。
+            if (TryApplyWallpaperBackdrop(fillColorStr))
+            {
+                if (NoteGlassBorder != null)
+                {
+                    NoteGlassBorder.BorderBrush = AcrylicHelper.CreateChromaticBorder();
+                    NoteGlassBorder.BorderThickness = new Thickness(Math.Max(1.0, borderThickness));
+                    NoteGlassBorder.CornerRadius = new CornerRadius(_note.CornerRadius);
+                }
+                if (BodyFillRect != null) BodyFillRect.Fill = AcrylicHelper.HitTestFill;
+                return;
+            }
+
             // ponytail 2026-08-30: 一体化 — 填充并入玻璃 tint(算一层),BodyFillRect 透明;
             // 填充色与玻璃配色作为两个输入本质上仍是两层。
             var blurResult = AcrylicHelper.EnableBlurComposite(this, _note.GlassBlurAmount,
@@ -915,6 +953,7 @@ public partial class StickyNoteWindow : Window
             // ponytail: ghost-glass fix — this branch previously never disabled blur, so
             // toggling acrylic off (or collapsing) could leave the full-window blur behind.
             AcrylicHelper.DisableBlur(this);
+            _wallpaperBackdrop?.SetVisible(false);
             // ponytail: additive overlay — clear the glass border when the effect is off.
             if (NoteGlassBorder != null)
                 NoteGlassBorder.BorderThickness = new Thickness(0);

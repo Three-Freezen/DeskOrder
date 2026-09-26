@@ -150,19 +150,20 @@ public static class AcrylicHelper
     public sealed record GlassMaterialRecipe(
         string Key, string DisplayNameKey,
         int AccentState, bool UseClassicBlur,
-        int BlurAmount, int TintOpacity, int TintLuminosity, string ColorMode);
+        int BlurAmount, int TintOpacity, int TintLuminosity, string ColorMode,
+        double NoiseOpacity = 0);
 
     /// <summary>材质清单(数组顺序 = 下拉框顺序)。</summary>
     public static readonly IReadOnlyList<GlassMaterialRecipe> Materials = new[]
     {
-        new GlassMaterialRecipe("Acrylic",     "LiquidGlass.Mat.Acrylic",     AccentStateAcrylic, true,  30, 55, 100, "Accent"),
-        new GlassMaterialRecipe("AcrylicThin", "LiquidGlass.Mat.AcrylicThin", AccentStateAcrylic, true,  18, 30, 110, "GlassWhite"),
-        new GlassMaterialRecipe("Matte",       "LiquidGlass.Mat.Matte",       AccentStateAcrylic, true,  60, 88,  95, "MistGrey"),
-        new GlassMaterialRecipe("Smoke",       "LiquidGlass.Mat.Smoke",       AccentStateAcrylic, true,  25, 78,  80, "DeepBlack"),
-        new GlassMaterialRecipe("Frosted",     "LiquidGlass.Mat.Frosted",     AccentStateBlur,    true,  45, 40, 100, "GlassWhite"),
-        new GlassMaterialRecipe("Clear",       "LiquidGlass.Mat.Clear",       AccentStateBlur,    false, 12, 15, 130, "GlassWhite"),
-        new GlassMaterialRecipe("Liquid",      "LiquidGlass.Mat.Liquid",      AccentStateBlur,    false, 24, 22, 125, "Accent"),
-        new GlassMaterialRecipe("DarkGlass",   "LiquidGlass.Mat.DarkGlass",   AccentStateBlur,    true,  35, 62,  85, "DeepBlack"),
+        new GlassMaterialRecipe("Acrylic",     "LiquidGlass.Mat.Acrylic",     AccentStateAcrylic, true,  30, 55, 100, "Accent",     0.055),
+        new GlassMaterialRecipe("AcrylicThin", "LiquidGlass.Mat.AcrylicThin", AccentStateAcrylic, true,  18, 30, 110, "GlassWhite", 0.045),
+        new GlassMaterialRecipe("Matte",       "LiquidGlass.Mat.Matte",       AccentStateAcrylic, true,  60, 88,  95, "MistGrey",   0.050),
+        new GlassMaterialRecipe("Smoke",       "LiquidGlass.Mat.Smoke",       AccentStateAcrylic, true,  25, 78,  80, "DeepBlack",  0.050),
+        new GlassMaterialRecipe("Frosted",     "LiquidGlass.Mat.Frosted",     AccentStateBlur,    true,  45, 40, 100, "GlassWhite", 0),
+        new GlassMaterialRecipe("Clear",       "LiquidGlass.Mat.Clear",       AccentStateBlur,    false, 12, 15, 130, "GlassWhite", 0),
+        new GlassMaterialRecipe("Liquid",      "LiquidGlass.Mat.Liquid",      AccentStateBlur,    false, 24, 22, 125, "Accent",     0),
+        new GlassMaterialRecipe("DarkGlass",   "LiquidGlass.Mat.DarkGlass",   AccentStateBlur,    true,  35, 62,  85, "DeepBlack",  0),
     };
 
     /// <summary>按 key 找材质;空串/未知 → null(= 自定义,沿用已存参数,即历史行为)。</summary>
@@ -180,6 +181,27 @@ public static class AcrylicHelper
     /// <summary>材质 → 是否叠加经典 blurbehind(自定义/未知 → 叠加 = 历史行为)。</summary>
     public static bool ResolveUseClassicBlur(string? materialKey)
         => FindMaterial(materialKey)?.UseClassicBlur ?? true;
+
+    /// <summary>材质 → 自绘背板的颗粒强度(自定义/未知 → 0 = 无噪点)。</summary>
+    public static double ResolveNoiseOpacity(string? materialKey)
+        => FindMaterial(materialKey)?.NoiseOpacity ?? 0;
+
+    /// <summary>ponytail 2026-09-26(方案①): 该材质是否走「壁纸采样自绘背板」—— 壁纸采样后
+    /// 模糊半径才真正生效。**自定义(空串)= false** —— 老配置与"自定义"继续走 DWM,升级后
+    /// 视觉零变化;想要真半径就选一个材质。壁纸不可用时调用方同样回退 DWM。</summary>
+    public static bool ResolveSelfDrawn(string? materialKey)
+        => FindMaterial(materialKey) != null;
+
+    /// <summary>模型里的模糊半径(0-60,原本是 DWM accent flags 的档位)→ 自绘背板的
+    /// **屏幕物理像素**半径。1:1 映射:滑块的数字从此就是"多少像素"。</summary>
+    public static int ResolveSelfDrawnRadiusPx(int blurAmount)
+        => Math.Clamp(blurAmount, 0, 60);
+
+    /// <summary>自绘背板的着色 = 「填充 over 玻璃着色」的合成色(与 DWM 路径同一套算法,
+    /// 保证两条通道看到的颜色一致)。</summary>
+    public static Color ResolveBackdropTint(string? fillHex, double fillOpacity01,
+        string glassMode, int tintOpacity, int tintLuminosity)
+        => CompositeFillOverGlass(fillHex, fillOpacity01, glassMode, tintOpacity, tintLuminosity);
 
     /// <summary>当前参数是否正好等于某个材质 → 返回其 key(不等则返回空串 = 自定义)。
     /// 用于对话框回显。

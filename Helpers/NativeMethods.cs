@@ -265,6 +265,22 @@ public static class NativeMethods
     // ── Win32 file drop (for transparent-window fallback) ──
     public const int WM_DROPFILES = 0x0233;
 
+    // ponytail 2026-09-26: 虚拟桌面尺寸/窗口物理矩形 — 壁纸采样背板(WallpaperBackdrop)用。
+    // 刻意用 Win32 物理像素口径:虚拟桌面原点可负(副屏在左),且与 DPI 缩放无关。
+    public const int SM_XVIRTUALSCREEN = 76;
+    public const int SM_YVIRTUALSCREEN = 77;
+    public const int SM_CXVIRTUALSCREEN = 78;
+    public const int SM_CYVIRTUALSCREEN = 79;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT { public int Left, Top, Right, Bottom; }
+
+    [DllImport("user32.dll")]
+    public static extern int GetSystemMetrics(int nIndex);
+
+    [DllImport("user32.dll")]
+    public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
     [StructLayout(LayoutKind.Sequential)]
     public struct POINT { public int x; public int y; }
 

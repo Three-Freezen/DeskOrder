@@ -254,6 +254,41 @@ public partial class PanelWindow : Window
         ApplyBackgroundImage();
     }
 
+    /// <summary>刷新增减:HoverExpandSpeed 等 — 这里只保留玻璃分支的关闭处理。</summary>
+    void DisableAcrylic()
+    {
+        AcrylicHelper.DisableBlur(this);
+        _backdropActive = false;
+        _wallpaperBackdrop?.SetVisible(false);
+    }
+
+    // ── 自绘背板(方案①:壁纸采样 + 可变半径模糊) ──
+
+    WallpaperBackdropLayer? _wallpaperBackdrop;
+    bool _backdropActive;
+
+    /// <summary>材质 = 「自绘背板」通道时,把壁纸采样层插到填充层之下并关掉 DWM 玻璃。
+    /// 返回 true = 背板已接管;壁纸不可用/材质=自定义 → false(回退 DWM)。</summary>
+    bool TryApplyWallpaperBackdrop(PanelConfig p, string fillColorStr)
+    {
+        bool selfDrawn = AcrylicHelper.ResolveSelfDrawn(p.PanelGlassMaterial);
+        DzTrace.Log($"[PanelWindow] TryApplyWallpaperBackdrop mat='{p.PanelGlassMaterial}' selfDrawn={selfDrawn}");
+        if (!selfDrawn) return false;
+        _wallpaperBackdrop ??= WallpaperBackdropLayer.TryCreate();
+        if (_wallpaperBackdrop == null) return false;
+
+        _wallpaperBackdrop.Attach(null, FillRect);
+        _wallpaperBackdrop.SetVisible(true);
+        _wallpaperBackdrop.BindWindow(this);
+        _wallpaperBackdrop.SetAppearance(this,
+            AcrylicHelper.ResolveSelfDrawnRadiusPx(p.PanelGlassBlurAmount),
+            AcrylicHelper.ResolveBackdropTint(fillColorStr, 1.0, p.PanelGlassColorMode,
+                p.PanelGlassTintOpacity, p.PanelGlassTintLuminosity),
+            AcrylicHelper.ResolveNoiseOpacity(p.PanelGlassMaterial));
+        AcrylicHelper.DisableBlur(this);
+        return true;
+    }
+
     public void ApplyAcrylic()
     {
         var config = _zoneManager.GetConfig();
@@ -261,6 +296,12 @@ public partial class PanelWindow : Window
 
         if (config.Panel.PanelEnableLiquidGlass)
         {
+            // ponytail 2026-09-26 方案①: 选了材质 → 壁纸采样自绘背板(模糊半径真正生效);
+            // 壁纸不可用/材质=自定义 → _backdropActive=false,走下面的 DWM 老路径。
+            // 注意顺序:本方法先跑、ApplyStyle 后跑,所以填充层是否透明由 _backdropActive 决定。
+            _backdropActive = TryApplyWallpaperBackdrop(config.Panel, fillColorStr);
+            if (_backdropActive) return;
+
             // ponytail 2026-08-30: 一体化 — 填充并入玻璃 tint(算一层),FillRect 由
             // ApplyStyle 置透明;填充色与玻璃配色作为两个输入本质上仍是两层。
             var blurResult = AcrylicHelper.EnableBlurComposite(this, config.Panel.PanelGlassBlurAmount,
@@ -274,6 +315,8 @@ public partial class PanelWindow : Window
         else
         {
             AcrylicHelper.DisableBlur(this);
+            _backdropActive = false;
+            _wallpaperBackdrop?.SetVisible(false);
         }
     }
 
@@ -288,7 +331,7 @@ public partial class PanelWindow : Window
         // Fill — 一体化:玻璃开时填充已并入玻璃 tint,此处透明;玻璃关时纯填充照旧。
         try
         {
-            bool glassCarriesFill = config.Panel.PanelEnableLiquidGlass;
+            bool glassCarriesFill = config.Panel.PanelEnableLiquidGlass && !_backdropActive;
             // 非亚克力材质 DWM 不认着色 → 合成着色改由填充层承担(见 ResolveWpfGlassTintBrush)。
             var wpfGlassTint = glassCarriesFill
                 ? AcrylicHelper.ResolveWpfGlassTintBrush(config.Panel.PanelGlassMaterial, fillColorStr, 1.0,

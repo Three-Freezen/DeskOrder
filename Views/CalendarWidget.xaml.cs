@@ -180,6 +180,15 @@ public partial class CalendarWidget : Window
         // ponytail 2026-08-30: 一体化 — 玻璃开时填充并入玻璃 tint,FillRect 透明;
         // 玻璃关/收起时 FillRect 保持纯填充。
         bool glassCarriesFill = _calendar.EnableLiquidGlass && (_hover?.IsExpanded ?? false);
+        // ponytail 2026-09-26 方案①: 选了材质 → 壁纸采样自绘背板(半径真正生效);否则走 DWM。
+        if (glassCarriesFill && TryApplyWallpaperBackdrop(fillColorStr))
+        {
+            FillRect.Fill = AcrylicHelper.HitTestFill;
+            FillRect.Opacity = 1.0;
+            FillRect.InvalidateVisual();
+            return;
+        }
+        _wallpaperBackdrop?.SetVisible(false);
         // 非亚克力材质 DWM 不认着色 → 合成着色改由填充层承担(见 ResolveWpfGlassTintBrush)。
         var wpfGlassTint = glassCarriesFill
             ? AcrylicHelper.ResolveWpfGlassTintBrush(_calendar.GlassMaterial, fillColorStr, 1.0,
@@ -346,6 +355,30 @@ public partial class CalendarWidget : Window
         Helpers.IconGlyph.Apply(RestoreIconChar, RestoreIconPath, icon, ic, 18);
     }
 
+    // ── 自绘背板(方案①:壁纸采样 + 可变半径模糊) ──
+
+    WallpaperBackdropLayer? _wallpaperBackdrop;
+
+    /// <summary>材质 = 「自绘背板」通道时,把壁纸采样层插到填充层之下并关掉 DWM 玻璃。
+    /// 返回 true = 背板已接管;壁纸不可用/材质=自定义 → false(回退 DWM)。</summary>
+    bool TryApplyWallpaperBackdrop(string fillColorStr)
+    {
+        if (!AcrylicHelper.ResolveSelfDrawn(_calendar.GlassMaterial)) return false;
+        _wallpaperBackdrop ??= WallpaperBackdropLayer.TryCreate();
+        if (_wallpaperBackdrop == null) return false;
+
+        _wallpaperBackdrop.Attach(MainContent, FillRect);
+        _wallpaperBackdrop.SetVisible(true);
+        _wallpaperBackdrop.BindWindow(this);
+        _wallpaperBackdrop.SetAppearance(this,
+            AcrylicHelper.ResolveSelfDrawnRadiusPx(_calendar.GlassBlurAmount),
+            AcrylicHelper.ResolveBackdropTint(fillColorStr, 1.0, _calendar.GlassColorMode,
+                _calendar.GlassTintOpacity, _calendar.GlassTintLuminosity),
+            AcrylicHelper.ResolveNoiseOpacity(_calendar.GlassMaterial));
+        AcrylicHelper.DisableBlur(this);
+        return true;
+    }
+
     void ApplyAcrylic()
     {
         SyncFillRect();
@@ -359,14 +392,19 @@ public partial class CalendarWidget : Window
         bool expanded = _hover?.IsExpanded ?? false;
         if (_calendar.EnableLiquidGlass && expanded)
         {
-            // ponytail 2026-08-30: 一体化 — 填充并入玻璃 tint(算一层),FillRect 已由
-            // SyncFillRect 置透明;填充色与玻璃配色作为两个输入本质上仍是两层。
-            var blurResult = AcrylicHelper.EnableBlurComposite(this, _calendar.GlassBlurAmount,
-                _calendar.FillColor, 1.0, _calendar.GlassColorMode, _calendar.GlassTintOpacity, _calendar.GlassTintLuminosity,
-                AcrylicHelper.ResolveAccentState(_calendar.GlassMaterial),
-                AcrylicHelper.ResolveUseClassicBlur(_calendar.GlassMaterial));
-            if (!blurResult.Success)
-                System.Diagnostics.Debug.WriteLine($"[CalendarWidget] EnableBlur failed: {blurResult.Error}");
+            // ponytail 2026-09-26 方案①: 选了材质 → 壁纸采样自绘背板(半径真正生效);
+            // 壁纸不可用/自定义 → 落回 DWM。
+            if (!TryApplyWallpaperBackdrop(_calendar.FillColor))
+            {
+                // ponytail 2026-08-30: 一体化 — 填充并入玻璃 tint(算一层),FillRect 已由
+                // SyncFillRect 置透明;填充色与玻璃配色作为两个输入本质上仍是两层。
+                var blurResult = AcrylicHelper.EnableBlurComposite(this, _calendar.GlassBlurAmount,
+                    _calendar.FillColor, 1.0, _calendar.GlassColorMode, _calendar.GlassTintOpacity, _calendar.GlassTintLuminosity,
+                    AcrylicHelper.ResolveAccentState(_calendar.GlassMaterial),
+                    AcrylicHelper.ResolveUseClassicBlur(_calendar.GlassMaterial));
+                if (!blurResult.Success)
+                    System.Diagnostics.Debug.WriteLine($"[CalendarWidget] EnableBlur failed: {blurResult.Error}");
+            }
             // ponytail: additive liquid-glass overlay — the chromatic border rides a
             // separate overlay Border so it never replaces the user's base CalendarBorder.
             if (CalendarGlassBorder != null)
@@ -379,6 +417,7 @@ public partial class CalendarWidget : Window
         else
         {
             AcrylicHelper.DisableBlur(this);
+            _wallpaperBackdrop?.SetVisible(false);
             // ponytail: additive overlay — clear the glass border when the effect is off.
             if (CalendarGlassBorder != null)
                 CalendarGlassBorder.BorderThickness = new Thickness(0);

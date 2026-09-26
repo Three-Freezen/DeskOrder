@@ -4369,6 +4369,30 @@ public partial class ZoneWindow : Window
         NativeMethods.DisableDwmFrameShadow(this);
     }
 
+    // ── 自绘背板(方案①:壁纸采样 + 可变半径模糊) ──
+
+    WallpaperBackdropLayer? _wallpaperBackdrop;
+
+    /// <summary>材质 = 「自绘背板」通道时,把壁纸采样层插到填充层之下并关掉 DWM 玻璃。
+    /// 返回 true = 背板已接管(调用方不要再走 DWM);壁纸不可用/材质=自定义 → false(回退 DWM)。</summary>
+    bool TryApplyWallpaperBackdrop(ResolvedZoneStyle s)
+    {
+        if (!AcrylicHelper.ResolveSelfDrawn(_zone.GlassMaterial)) return false;
+        _wallpaperBackdrop ??= WallpaperBackdropLayer.TryCreate();
+        if (_wallpaperBackdrop == null) return false;
+
+        _wallpaperBackdrop.Attach(MainContent, FillRect);
+        _wallpaperBackdrop.SetVisible(true);
+        _wallpaperBackdrop.BindWindow(this);
+        _wallpaperBackdrop.SetAppearance(this,
+            AcrylicHelper.ResolveSelfDrawnRadiusPx(_zone.GlassBlurAmount),
+            AcrylicHelper.ResolveBackdropTint(s.FillColor, 1.0, _zone.GlassColorMode,
+                _zone.GlassTintOpacity, _zone.GlassTintLuminosity),
+            AcrylicHelper.ResolveNoiseOpacity(_zone.GlassMaterial));
+        AcrylicHelper.DisableBlur(this); // 自绘背板与 DWM 背板不能叠加
+        return true;
+    }
+
     void ApplyAcrylic(ResolvedZoneStyle s)
     {
         // ponytail: ghost-glass fix — a collapsed zone keeps its full-size window (only the
@@ -4382,7 +4406,16 @@ public partial class ZoneWindow : Window
         bool fillIndependent = s.TitleBarFillIndependent && !s.TileMode;
         if (s.EnableLiquidGlass && expanded)
         {
-            if (fillIndependent)
+            // ponytail 2026-09-26 方案①: 选了材质 → 壁纸采样自绘背板(模糊半径真正生效)。
+            // 背板层插在填充层之下、又在 MainContent 之内,所以收起/展开动画自动带着它走;
+            // 壁纸读不到或材质=自定义 → 返回 false,走下面的 DWM 老路径。
+            if (TryApplyWallpaperBackdrop(s))
+            {
+                // 着色已并入背板层 → 填充层保持透明(与 DWM 路径的"填充并入玻璃"同语义)
+                FillRect.Fill = AcrylicHelper.HitTestFill;
+                FillRect.Opacity = 1.0;
+            }
+            else if (fillIndependent)
             {
                 var blurResult = AcrylicHelper.EnableBlur(this, _zone.GlassBlurAmount,
                     _zone.GlassTintOpacity, _zone.GlassTintLuminosity, _zone.GlassColorMode,
@@ -4412,6 +4445,7 @@ public partial class ZoneWindow : Window
         else
         {
             AcrylicHelper.DisableBlur(this);
+            _wallpaperBackdrop?.SetVisible(false);
             try
             {
                 FillRect.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.FillColor)!);

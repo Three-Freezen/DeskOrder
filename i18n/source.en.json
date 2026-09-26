@@ -587,7 +587,7 @@
   "LiquidGlass.Custom": "Custom",
   "LiquidGlass.CustomPick": "Custom color…",
   "LiquidGlass.ExclusiveHint": "Preset and custom cannot be enabled at the same time",
-  "LiquidGlass.Hint": "Blur=0 disables | Luminosity 100%=original | Preset sets base tint",
+  "LiquidGlass.Hint": "Blur=0 disables | Luminosity 100%=original | Preset sets base tint | With a material, blur radius is real pixels (backdrop samples the wallpaper)",
   "LiquidGlass.Save": "Save",
   "LiquidGlass.Cancel": "Cancel",
 

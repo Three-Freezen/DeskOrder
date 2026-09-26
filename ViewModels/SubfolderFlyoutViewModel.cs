@@ -79,6 +79,17 @@ public class SubfolderFlyoutViewModel : INotifyPropertyChanged
     /// 真玻璃成功时玻璃在 DWM accent,失败时玻璃已合成进 UnifiedBackgroundBrush。</summary>
     public System.Windows.Media.Brush? GlassBrush => null;
 
+    /// <summary>ponytail 2026-09-26 方案①: 自绘壁纸背板画刷 —— 浮层 view 拿到 HWND 后算好塞进来,
+    /// 非空即优先使用(此时不走 DWM,也不走渐变兜底)。</summary>
+    private System.Windows.Media.Brush? _wallpaperBackdrop;
+
+    public void SetWallpaperBackdrop(System.Windows.Media.Brush? brush)
+    {
+        if (ReferenceEquals(_wallpaperBackdrop, brush)) return;
+        _wallpaperBackdrop = brush;
+        OnPropertyChanged(nameof(UnifiedBackgroundBrush));
+    }
+
     /// <summary>一体化背景画刷:真玻璃成功时 null(DWM accent 已含填充);否则 =
     /// 填充 over 玻璃渐变(或纯填充),放在背景图之下。
     /// ponytail 2026-09-26: 例外 —— 非亚克力材质(毛玻璃/清透/液态/深色玻璃)的 DWM 背板
@@ -87,6 +98,7 @@ public class SubfolderFlyoutViewModel : INotifyPropertyChanged
     {
         get
         {
+            if (_wallpaperBackdrop != null) return _wallpaperBackdrop;
             bool realGlass = Fill.HasGlass && !_showGlassFallback;
             if (!realGlass) return Fill.UnifiedBackgroundBrush;
             return AcrylicHelper.ResolveWpfGlassTintBrush(Fill.GlassMaterial, Fill.FillHex,
