@@ -177,7 +177,10 @@ public class ZoneItem : INotifyPropertyChanged
         set => SetField(ref _glassColorMode, value);
     }
 
-    private int _gridSize = 56;
+    // ponytail 2026-08-31: 次级分区默认网格 56 → 65，与主分区(Zone.GridSize)一致 —
+    // 展开浮层的内格边长直接取本值(SubfolderFlyoutViewModel.GridSize)，56 会让浮层
+    // 比分区里的图标格明显小一圈。旧配置里已存盘的 56 不做迁移(尊重用户手动调过的值)。
+    private int _gridSize = 65;
     public int GridSize
     {
         get => _gridSize;

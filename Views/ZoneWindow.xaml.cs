@@ -180,6 +180,9 @@ public partial class ZoneWindow : Window
         SubfolderFlyoutView.ItemOpenLocationRequested += OnFlyoutItemOpenLocation;
         SubfolderFlyoutView.ItemRenameRequested += OnFlyoutItemRename;
         SubfolderFlyoutView.ItemDeleteRequested += OnFlyoutItemDelete;
+        // ponytail 2026-08-31: flyout 内层回收站图标的「清空回收站」— 与主分区右键
+        // ItemEmptyRecycle_Click 共用同一实现(EmptyRecycleBin)。
+        SubfolderFlyoutView.ItemEmptyRecycleBinRequested += OnFlyoutItemEmptyRecycleBin;
         SubfolderFlyoutView.ItemsChanged += OnFlyoutItemsChanged;
         SubfolderFlyoutView.ClickOutsideRequested += OnFlyoutClickOutside;
         // ponytail 2026-08-28: 这 4 个事件原先挂在 XAML 属性上 — 但标记编译器对
@@ -1335,6 +1338,10 @@ public partial class ZoneWindow : Window
                 if (item.Type == ItemType.ShellLocation && ShellIconService.IsRecycleBin(item.TargetPath))
                 { hasRecycle = true; break; }
             }
+            // ponytail 2026-08-31: 回收站图标在次级分区里时外层只是 SubFolder，
+            // 上面的平铺扫描看不见它 → 轮询直接短路(hasRecycle=false)，浮层里的
+            // 空桶/满桶图标永不刷新。这里递归进 SubItems 再判一次。
+            if (!hasRecycle) hasRecycle = ZoneContainsRecycleBin(_zone.Items);
             if (!hasRecycle) { _recycleStateInit = false; return; }
 
             bool full = ShellIconService.RecycleBinHasItems();
@@ -1348,6 +1355,20 @@ public partial class ZoneWindow : Window
             }
         }
         catch { }
+    }
+
+    /// <summary>ponytail 2026-08-31: 分区里(含次级分区内部，递归)是否存在回收站图标 —
+    /// 轮询要先确认"有没有回收站要刷",否则次级分区里的回收站永远等不到刷新。</summary>
+    static bool ZoneContainsRecycleBin(IEnumerable<ZoneItem> items)
+    {
+        foreach (var item in items)
+        {
+            if (item.Type == ItemType.ShellLocation && ShellIconService.IsRecycleBin(item.TargetPath))
+                return true;
+            if (item.Type == ItemType.SubFolder && ZoneContainsRecycleBin(item.SubItems))
+                return true;
+        }
+        return false;
     }
 
     // ── Show / Hide ──
@@ -3726,19 +3747,48 @@ public partial class ZoneWindow : Window
     void ItemEmptyRecycle_Click(object s, RoutedEventArgs e)
     {
         if (VM(s) is not ZoneItemViewModel v) return;
+        EmptyRecycleBin();
+        // Refresh the bin icon immediately instead of waiting for the next poll tick.
+        _recycleStateInit = false;
+        foreach (var item in _vm.Items)
+        {
+            if (item.Type == ItemType.ShellLocation && ShellIconService.IsRecycleBin(item.TargetPath))
+                item.RefreshIcon();
+        }
+    }
+
+    /// <summary>ponytail 2026-08-31: 清空回收站 — 主分区右键与次级分区浮层内层图标
+    /// 共用(SHEmptyRecycleBinW 的 hwnd 只是 UIPI 父窗口，用本窗口句柄即可)。</summary>
+    void EmptyRecycleBin()
+    {
         try
         {
             NativeMethods.SHEmptyRecycleBinW(new WindowInteropHelper(this).Handle, null,
                 NativeMethods.SHERB_NOCONFIRMATION | NativeMethods.SHERB_NOPROGRESSUI | NativeMethods.SHERB_NOSOUND);
         }
         catch { }
-        // Refresh the bin icon immediately instead of waiting for the next poll tick.
         ShellIconService.InvalidateRecycleBinState();
+    }
+
+    /// <summary>ponytail 2026-08-31: 浮层内层图标「清空回收站」— 与主分区右键同款，
+    /// 清空后本分区主图标 + 浮层内层图标一起刷新，浮层开着时立即变空桶(浮层内层图标
+    /// 有自己的 VM 与 Icon 缓存，主分区那份循环刷不到)。</summary>
+    void OnFlyoutItemEmptyRecycleBin(ZoneItemViewModel vm)
+    {
+        EmptyRecycleBin();
         _recycleStateInit = false;
         foreach (var item in _vm.Items)
         {
             if (item.Type == ItemType.ShellLocation && ShellIconService.IsRecycleBin(item.TargetPath))
                 item.RefreshIcon();
+        }
+        if (SubfolderFlyoutView.ViewModel is { } fvm)
+        {
+            foreach (var item in fvm.ItemVms)
+            {
+                if (item.Type == ItemType.ShellLocation && ShellIconService.IsRecycleBin(item.TargetPath))
+                    item.RefreshIcon();
+            }
         }
     }
     void ItemOpenLocation_Click(object s, RoutedEventArgs e)

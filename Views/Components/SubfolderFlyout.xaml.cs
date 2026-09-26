@@ -9,6 +9,7 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using DesktopZones.Helpers;
 using DesktopZones.Models;
+using DesktopZones.Services;
 using DesktopZones.ViewModels;
 
 namespace DesktopZones.Views.Components;
@@ -76,6 +77,10 @@ public partial class SubfolderFlyout : UserControl
     public event Action<ZoneItemViewModel>? ItemRenameRequested;
     /// <summary>右键菜单"删除"内层图标(ZoneWindow 侧支持多选批量确认)。</summary>
     public event Action<ZoneItemViewModel>? ItemDeleteRequested;
+    /// <summary>ponytail 2026-08-31: 右键菜单"清空回收站"内层图标(仅回收站图标可见)。
+    /// 与主分区 ItemEmptyRecycle_Click 同款 — 由宿主执行 SHEmptyRecycleBinW(需要
+    /// 宿主窗口句柄),与其它菜单项一样走事件委托。</summary>
+    public event Action<ZoneItemViewModel>? ItemEmptyRecycleBinRequested;
     /// <summary>flyout 内部换位/删除完成后触发(模型已写回 HostSubItem.SubItems),
     /// 供 ZoneWindow 保存配置。</summary>
     public event Action? ItemsChanged;
@@ -175,6 +180,25 @@ public partial class SubfolderFlyout : UserControl
             cm.Closed -= OnCtxMenuClosed;
             cm.Closed += OnCtxMenuClosed;
             _ctxMenuOpen = true;
+        }
+    }
+
+    /// <summary>ponytail 2026-08-31: 内层图标右键菜单打开 — 显隐「清空回收站」。
+    /// 挂在 ContextMenu 自己的 Opened 上(模板里的 <c>Opened="CtxMenu_Opened"</c>)：
+    /// 与主分区 ItemMenu_Opened 同一条路径；改之前走的是 SubfolderFlyout 的
+    /// ContextMenuOpening，实测该事件到不了 UserControl(Popup 里的模板菜单)，
+    /// 菜单项一直停在 Collapsed，右键看不到「清空回收站」。sender 是菜单本身，
+    /// 其 DataContext 由模板沿格子继承到菜单项，即当前图标。</summary>
+    void CtxMenu_Opened(object sender, RoutedEventArgs e)
+    {
+        // 子菜单(如"新建 ▸")也会冒泡到同一个 handler — 只认菜单根。
+        if (sender is not ContextMenu cm || !ReferenceEquals(cm, e.OriginalSource)) return;
+        var vm = cm.DataContext as ZoneItemViewModel;
+        bool isRecycle = vm?.Type == ItemType.ShellLocation && ShellIconService.IsRecycleBin(vm.TargetPath);
+        foreach (var entry in cm.Items)
+        {
+            if (entry is not MenuItem mi || mi.Name != "CtxEmptyRecycle") continue;
+            mi.Visibility = isRecycle ? Visibility.Visible : Visibility.Collapsed;
         }
     }
 
@@ -667,6 +691,12 @@ public partial class SubfolderFlyout : UserControl
     void CtxDelete_Click(object sender, RoutedEventArgs e)
     {
         if (MenuVm(sender) is ZoneItemViewModel vm) ItemDeleteRequested?.Invoke(vm);
+    }
+    /// <summary>ponytail 2026-08-31: 「清空回收站」— 与主分区同款,实际操作由宿主完成
+    /// (SHEmptyRecycleBinW 要窗口句柄,且清空后要刷新本分区/浮层里所有回收站图标)。</summary>
+    void CtxEmptyRecycle_Click(object sender, RoutedEventArgs e)
+    {
+        if (MenuVm(sender) is ZoneItemViewModel vm) ItemEmptyRecycleBinRequested?.Invoke(vm);
     }
     static ZoneItemViewModel? MenuVm(object s)
         => s is MenuItem mi && mi.DataContext is ZoneItemViewModel vm ? vm : null;

@@ -820,18 +820,7 @@ public partial class PanelWindow : Window
         if (item.Type == ItemType.ShellLocation && ShellIconService.IsRecycleBin(item.TargetPath))
         {
             var emptyRecycle = new MenuItem { Header = _loc["Item.EmptyRecycleBin"] };
-            emptyRecycle.Click += (_, _) =>
-            {
-                try
-                {
-                    NativeMethods.SHEmptyRecycleBinW(new WindowInteropHelper(this).Handle, null,
-                        NativeMethods.SHERB_NOCONFIRMATION | NativeMethods.SHERB_NOPROGRESSUI | NativeMethods.SHERB_NOSOUND);
-                }
-                catch { }
-                ShellIconService.InvalidateRecycleBinState();
-                _recycleStateInit = false;
-                RebuildDisplay();
-            };
+            emptyRecycle.Click += (_, _) => EmptyRecycleBinAndRefresh();
             menu.Items.Add(emptyRecycle);
         }
 
@@ -1182,6 +1171,9 @@ public partial class PanelWindow : Window
             }
         };
         flyout.ItemDeleteRequested += vm => DeleteFlyoutItems(flyout, vm);
+        // ponytail 2026-08-31: 浮层内层回收站图标的「清空回收站」— 与面板卡片右键
+        // 的回收站项共用同一实现(EmptyRecycleBinAndRefresh)。
+        flyout.ItemEmptyRecycleBinRequested += _ => EmptyRecycleBinAndRefresh();
         flyout.ItemsChanged += () =>
         {
             _zoneManager.SaveConfig();
@@ -1873,6 +1865,29 @@ public partial class PanelWindow : Window
 
     // ── Recycle Bin icon state (empty ⇄ full) ──
 
+    /// <summary>ponytail 2026-08-31: 清空回收站 — 面板卡片右键与次级分区浮层内层图标
+    /// 共用(原逻辑内联在卡片右键菜单里)。清空后作废图标状态缓存并立即重绘，等不到
+    /// 下一次轮询。</summary>
+    void EmptyRecycleBinAndRefresh()
+    {
+        try
+        {
+            NativeMethods.SHEmptyRecycleBinW(new WindowInteropHelper(this).Handle, null,
+                NativeMethods.SHERB_NOCONFIRMATION | NativeMethods.SHERB_NOPROGRESSUI | NativeMethods.SHERB_NOSOUND);
+        }
+        catch { }
+        ShellIconService.InvalidateRecycleBinState();
+        _recycleStateInit = false;
+        // ponytail 2026-08-31: 浮层里也有回收站图标时(次级分区内层)，VM 持有自己的
+        // Icon 缓存，RebuildDisplay 刷不到 — 一并作废，浮层开着时立即变空桶。
+        foreach (var item in _subfolderFlyout?.ViewModel?.ItemVms ?? Enumerable.Empty<ZoneItemViewModel>())
+        {
+            if (item.Type == ItemType.ShellLocation && ShellIconService.IsRecycleBin(item.TargetPath))
+                item.RefreshIcon();
+        }
+        RebuildDisplay();
+    }
+
     void RecycleTimer_Tick(object? s, EventArgs e)
     {
         try
@@ -1884,6 +1899,10 @@ public partial class PanelWindow : Window
                 {
                     if (i.Type == ItemType.ShellLocation && ShellIconService.IsRecycleBin(i.TargetPath))
                     { hasRecycle = true; break; }
+                    // ponytail 2026-08-31: 回收站被收进次级分区时，外层只看到
+                    // SubFolder → 展开内层递归找一次，否则轮询直接短路。
+                    if (i.Type == ItemType.SubFolder && ContainsRecycleBin(i.SubItems))
+                    { hasRecycle = true; break; }
                 }
                 if (hasRecycle) break;
             }
@@ -1894,8 +1913,28 @@ public partial class PanelWindow : Window
             _recycleStateInit = true;
             _recycleFullLast = full;
             RebuildDisplay();
+            // ponytail 2026-08-31: 浮层内层的回收站图标有自己的 VM 与 Icon 缓存，
+            // RebuildDisplay 只重绘面板卡片刷不到它 — 同一次轮询里一并刷新。
+            foreach (var item in _subfolderFlyout?.ViewModel?.ItemVms ?? Enumerable.Empty<ZoneItemViewModel>())
+            {
+                if (item.Type == ItemType.ShellLocation && ShellIconService.IsRecycleBin(item.TargetPath))
+                    item.RefreshIcon();
+            }
         }
         catch { }
+    }
+
+    /// <summary>ponytail 2026-08-31: 列表里(含次级分区内部，递归)是否有回收站图标。</summary>
+    static bool ContainsRecycleBin(IEnumerable<ZoneItem> items)
+    {
+        foreach (var item in items)
+        {
+            if (item.Type == ItemType.ShellLocation && ShellIconService.IsRecycleBin(item.TargetPath))
+                return true;
+            if (item.Type == ItemType.SubFolder && ContainsRecycleBin(item.SubItems))
+                return true;
+        }
+        return false;
     }
 
     // ── 面板弹出动画(从桌面角落滑到屏幕中央 + 展开/收起,关闭时逆向) ──

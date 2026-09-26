@@ -92,9 +92,19 @@
                                      右键菜单(打开/重命名/删除)、悬停高光、拖拽换位(蓝色
                                      竖条指示)、Ctrl+点选/Ctrl+A 全选、双击打开。 -->
                                 <Grid.ContextMenu>
-                                    <ContextMenu>
+                                    <!-- ponytail 2026-08-31: Opened 挂在 ContextMenu 自身上
+                                         (与主分区 ItemMenu_Opened 同一条可靠路径)。之前把显隐
+                                         放在 SubfolderFlyout 的 ContextMenuOpening 里 —
+                                         实测该事件到不了 UserControl(Popup 里的模板菜单)，
+                                         菜单项永远停在 Collapsed，右键看不到「清空回收站」。 -->
+                                    <ContextMenu Opened="CtxMenu_Opened">
                                         <MenuItem Header="{loc:Loc Key=Item.Open}" Click="CtxOpen_Click"/>
                                         <MenuItem Header="{loc:Loc Key=Item.OpenLocation}" Click="CtxOpenLocation_Click"/>
+                                        <!-- ponytail 2026-08-31: 回收站专用项 — 与主分区右键同款
+                                             (CtxEmptyRecycle)，默认折叠，OnContextMenuOpening 里
+                                             按当前图标是否为回收站决定显隐。 -->
+                                        <MenuItem x:Name="CtxEmptyRecycle" Header="{loc:Loc Key=Item.EmptyRecycleBin}"
+                                                  Visibility="Collapsed" Click="CtxEmptyRecycle_Click"/>
                                         <MenuItem Header="{loc:Loc Key=Item.Rename}" Click="CtxRename_Click"/>
                                         <Separator/>
                                         <MenuItem Header="{loc:Loc Key=Item.Delete}" Foreground="#FF6666" Click="CtxDelete_Click"/>
@@ -116,9 +126,11 @@
                                            Margin="1,0,1,2"
                                            HorizontalAlignment="Center"
                                            VerticalAlignment="Bottom"/>
-                                <!-- Multi-select highlight (Ctrl+click / Ctrl+A) -->
+                                <!-- Multi-select highlight (Ctrl+click / Ctrl+A) —
+                                     ponytail 2026-08-31: 去掉 #80FFFFFF 高光描边(选中时那圈
+                                     白框)，选中只留 #26FFFFFF 淡色底，与分区里图标格的选中观感一致。 -->
                                 <Border x:Name="CellSelBox" Visibility="Collapsed" IsHitTestVisible="False"
-                                        Background="#26FFFFFF" BorderBrush="#80FFFFFF" BorderThickness="1.2"
+                                        Background="#26FFFFFF"
                                         CornerRadius="4"/>
                             </Grid>
                             <DataTemplate.Triggers>
