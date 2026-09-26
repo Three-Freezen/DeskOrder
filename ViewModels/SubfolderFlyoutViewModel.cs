@@ -80,14 +80,17 @@ public class SubfolderFlyoutViewModel : INotifyPropertyChanged
     public System.Windows.Media.Brush? GlassBrush => null;
 
     /// <summary>一体化背景画刷:真玻璃成功时 null(DWM accent 已含填充);否则 =
-    /// 填充 over 玻璃渐变(或纯填充),放在背景图之下。</summary>
+    /// 填充 over 玻璃渐变(或纯填充),放在背景图之下。
+    /// ponytail 2026-09-26: 例外 —— 非亚克力材质(毛玻璃/清透/液态/深色玻璃)的 DWM 背板
+    /// 完全不着色(实测 state3),真玻璃成功也得由 WPF 层补上合成着色,否则浮层"只有模糊没有颜色"。</summary>
     public System.Windows.Media.Brush? UnifiedBackgroundBrush
     {
         get
         {
             bool realGlass = Fill.HasGlass && !_showGlassFallback;
-            if (realGlass) return null;
-            return Fill.UnifiedBackgroundBrush;
+            if (!realGlass) return Fill.UnifiedBackgroundBrush;
+            return AcrylicHelper.ResolveWpfGlassTintBrush(Fill.GlassMaterial, Fill.FillHex,
+                Fill.FillOpacity / 100.0, Fill.GlassMode!, Fill.GlassTintOpacity, Fill.GlassTintLuminosity);
         }
     }
 

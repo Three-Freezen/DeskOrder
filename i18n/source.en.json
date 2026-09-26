@@ -606,6 +606,17 @@
   "LiquidGlass.ChampagneGold": "Champagne Gold",
   "LiquidGlass.MorandiGrayGreen": "Morandi Gray-Green",
 
+  "LiquidGlass.Material": "Material",
+  "LiquidGlass.Mat.Custom": "Custom",
+  "LiquidGlass.Mat.Acrylic": "Acrylic",
+  "LiquidGlass.Mat.AcrylicThin": "Acrylic Thin",
+  "LiquidGlass.Mat.Matte": "Matte",
+  "LiquidGlass.Mat.Smoke": "Smoke",
+  "LiquidGlass.Mat.Frosted": "Frosted",
+  "LiquidGlass.Mat.Clear": "Clear Glass",
+  "LiquidGlass.Mat.Liquid": "Liquid Glass",
+  "LiquidGlass.Mat.DarkGlass": "Dark Glass",
+
   "SubfolderProp.Section.Basic": "Basic",
   "SubfolderProp.Name": "Name",
   "SubfolderProp.Section.Motion": "Motion",
@@ -636,6 +647,7 @@
   "NoteProp.Pinned": "Pinned",
   "NoteProp.Name": "Note name",
   "NoteProp.NameColor": "Note name color",
+  "NoteProp.OpenAtFixedPosition": "Open at fixed position",
 
   "BgImage.Crop": "Crop",
   "BgImage.Browse": "Browse",

@@ -34,6 +34,8 @@ public class PanelPresetConfig
     public int GlassTintLuminosity { get; set; } = 100;
     /// <summary>GlassColorMode included in preset so the panel preview card can render the same iridescence.</summary>
     public string GlassColorMode { get; set; } = "Default";
+    /// <summary>ponytail 2026-09-26: 面板材质预设 key;空串 = 自定义(历史亚克力背板)。</summary>
+    public string GlassMaterial { get; set; } = "";
 
     // ── Hover expand (panel excluded from auto-expand per spec §7.2; speed is the only knob) ──
     public double HoverExpandSpeed { get; set; } = 1.0;
@@ -70,6 +72,7 @@ public class PanelPresetConfig
         GlassTintOpacity = GlassTintOpacity,
         GlassTintLuminosity = GlassTintLuminosity,
         GlassColorMode = GlassColorMode,
+        GlassMaterial = GlassMaterial,
         HoverExpandSpeed = HoverExpandSpeed,
         EnableRestoreButton = EnableRestoreButton,
         PanelPopupMotion = PanelPopupMotion,
@@ -104,6 +107,7 @@ public class PanelPresetConfig
         GlassTintOpacity = cfg.Panel.PanelGlassTintOpacity,
         GlassTintLuminosity = cfg.Panel.PanelGlassTintLuminosity,
         GlassColorMode = cfg.Panel.PanelGlassColorMode,
+        GlassMaterial = cfg.Panel.PanelGlassMaterial,
         HoverExpandSpeed = cfg.Panel.PanelHoverExpandSpeed,
         EnableRestoreButton = false,
         PanelPopupMotion = cfg.Panel.PanelPopupMotion,
@@ -138,6 +142,7 @@ public class PanelPresetConfig
         cfg.Panel.PanelGlassTintOpacity = GlassTintOpacity;
         cfg.Panel.PanelGlassTintLuminosity = GlassTintLuminosity;
         cfg.Panel.PanelGlassColorMode = GlassColorMode;
+        cfg.Panel.PanelGlassMaterial = GlassMaterial;
         cfg.Panel.PanelHoverExpandSpeed = HoverExpandSpeed;
         cfg.Panel.PanelPopupMotion = PanelPopupMotion;
         cfg.Panel.PanelPopupOrigin = PanelPopupOrigin;

@@ -47,6 +47,10 @@ public class StickyNote : AppearanceModel
     public int HotkeyModifiers { get; set; } = 1; // MOD_ALT = 0x0001
     public int HotkeyKey { get; set; } = 0x4E; // 'N'
     public List<CustomHotkey> CustomHotkeys { get; set; } = new();
+    /// <summary>固定位置打开 — 快捷键唤出时固定落在聚焦显示器正中央(旧行为)。
+    /// 默认 false:按便签自己的位置打开(可见/收起态原地展开,整窗隐藏的便签回落到
+    /// 上一次显示的位置 = X/Y)。旧配置没有该字段,反序列化后即为 false。</summary>
+    public bool OpenAtFixedPosition { get; set; } = false;
     public DateTime CreatedAt { get; set; } = DateTime.Now;
     public DateTime ModifiedAt { get; set; } = DateTime.Now;
 
@@ -69,6 +73,7 @@ public class StickyNote : AppearanceModel
             LastSavePath = LastSavePath,
             HotkeyEnabled = HotkeyEnabled, HotkeyModifiers = HotkeyModifiers,
             HotkeyKey = HotkeyKey, CustomHotkeys = new List<CustomHotkey>(CustomHotkeys),
+            OpenAtFixedPosition = OpenAtFixedPosition,
             CreatedAt = CreatedAt, ModifiedAt = ModifiedAt
         };
         Helpers.CloneHelper.CopyBaseProperties<AppearanceModel>(this, copy);

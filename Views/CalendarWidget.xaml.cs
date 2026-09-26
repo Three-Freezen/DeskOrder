@@ -180,11 +180,16 @@ public partial class CalendarWidget : Window
         // ponytail 2026-08-30: 一体化 — 玻璃开时填充并入玻璃 tint,FillRect 透明;
         // 玻璃关/收起时 FillRect 保持纯填充。
         bool glassCarriesFill = _calendar.EnableLiquidGlass && (_hover?.IsExpanded ?? false);
+        // 非亚克力材质 DWM 不认着色 → 合成着色改由填充层承担(见 ResolveWpfGlassTintBrush)。
+        var wpfGlassTint = glassCarriesFill
+            ? AcrylicHelper.ResolveWpfGlassTintBrush(_calendar.GlassMaterial, fillColorStr, 1.0,
+                _calendar.GlassColorMode, _calendar.GlassTintOpacity, _calendar.GlassTintLuminosity)
+            : null;
         try
         {
-            FillRect.Fill = glassCarriesFill
+            FillRect.Fill = wpfGlassTint ?? (glassCarriesFill
                 ? AcrylicHelper.HitTestFill
-                : new SolidColorBrush((Color)ColorConverter.ConvertFromString(fillColorStr)!);
+                : new SolidColorBrush((Color)ColorConverter.ConvertFromString(fillColorStr)!));
         }
         catch { }
         // ponytail: force re-render — FillRect paints more reliably than
@@ -357,7 +362,9 @@ public partial class CalendarWidget : Window
             // ponytail 2026-08-30: 一体化 — 填充并入玻璃 tint(算一层),FillRect 已由
             // SyncFillRect 置透明;填充色与玻璃配色作为两个输入本质上仍是两层。
             var blurResult = AcrylicHelper.EnableBlurComposite(this, _calendar.GlassBlurAmount,
-                _calendar.FillColor, 1.0, _calendar.GlassColorMode, _calendar.GlassTintOpacity, _calendar.GlassTintLuminosity);
+                _calendar.FillColor, 1.0, _calendar.GlassColorMode, _calendar.GlassTintOpacity, _calendar.GlassTintLuminosity,
+                AcrylicHelper.ResolveAccentState(_calendar.GlassMaterial),
+                AcrylicHelper.ResolveUseClassicBlur(_calendar.GlassMaterial));
             if (!blurResult.Success)
                 System.Diagnostics.Debug.WriteLine($"[CalendarWidget] EnableBlur failed: {blurResult.Error}");
             // ponytail: additive liquid-glass overlay — the chromatic border rides a

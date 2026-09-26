@@ -250,7 +250,10 @@ public partial class SubfolderFlyout : UserControl
             if (src == null || src.Handle == IntPtr.Zero) return false;
             var r = AcrylicHelper.EnableBlurComposite(src.Handle, fill.GlassBlur,
                 fill.FillHex, fill.FillOpacity / 100.0, fill.GlassMode!,
-                fill.GlassTintOpacity, fill.GlassTintLuminosity, skipClassicBlur: true);
+                fill.GlassTintOpacity, fill.GlassTintLuminosity, skipClassicBlur: true,
+                // ponytail 2026-09-26: 材质只取背板类型;经典 blurbehind 在 Popup 上会压暗背景
+                // (见上),所以浮层恒 skipClassicBlur —— 材质的「经典模糊」维度在浮层上不生效。
+                accentState: AcrylicHelper.ResolveAccentState(fill.GlassMaterial));
             DzTrace.Log($"[SubFlyout] TryApplyRealGlass(composite accent-only): host={ViewModel?.HostSubItem.Name} success={r.Success} err={r.Error} mode={fill.GlassMode}");
             return r.Success;
         }

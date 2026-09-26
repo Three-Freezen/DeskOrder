@@ -132,6 +132,71 @@ public static class AcrylicHelper
         _ => key,
     };
 
+    // ── 材质预设(ponytail 2026-09-26) ──
+    //
+    // 材质 = 「背板配方 + 一套着色参数」。Windows 上 DWM 背板真正有区别的只有两条路:
+    //   * AccentState=4 亚克力(带细微噪点、偏灰哑光);
+    //   * AccentState=3 平滑模糊(无噪点、更亮、颜色更浓);
+    // 再叠加一个「是否同时发经典 blurbehind」的明暗/饱和维度。实机实测(Win11 26200):
+    //   * 模糊半径在 Win11 上不起作用 —— blur=1/30/60 肉眼完全一致,DWM 背板模糊强度固定
+    //     (AccentFlags 里的半径值 Win10 认、Win11 不认);配方里仍写半径,Win10 上有效;
+    //   * AccentState=5(host backdrop,即"云母"那条路)在分层窗口上是空操作,拿不到系统云母。
+    // 所以材质之间的可见差异只能来自:背板类型 / 经典模糊 / 着色。别指望靠半径拉开差距。
+    public const int AccentStateAcrylic = ACCENT_ENABLE_ACRYLICBLURBEHIND; // 4
+    public const int AccentStateBlur = 3;                                  // ACCENT_ENABLE_BLURBEHIND
+
+    /// <summary>一个材质预设。选中时会把 Blur/Tint/Luminosity/ColorMode 四个值写回
+    /// 模型与对话框滑块(即"材质自带底色,一起切")。</summary>
+    public sealed record GlassMaterialRecipe(
+        string Key, string DisplayNameKey,
+        int AccentState, bool UseClassicBlur,
+        int BlurAmount, int TintOpacity, int TintLuminosity, string ColorMode);
+
+    /// <summary>材质清单(数组顺序 = 下拉框顺序)。</summary>
+    public static readonly IReadOnlyList<GlassMaterialRecipe> Materials = new[]
+    {
+        new GlassMaterialRecipe("Acrylic",     "LiquidGlass.Mat.Acrylic",     AccentStateAcrylic, true,  30, 55, 100, "Accent"),
+        new GlassMaterialRecipe("AcrylicThin", "LiquidGlass.Mat.AcrylicThin", AccentStateAcrylic, true,  18, 30, 110, "GlassWhite"),
+        new GlassMaterialRecipe("Matte",       "LiquidGlass.Mat.Matte",       AccentStateAcrylic, true,  60, 88,  95, "MistGrey"),
+        new GlassMaterialRecipe("Smoke",       "LiquidGlass.Mat.Smoke",       AccentStateAcrylic, true,  25, 78,  80, "DeepBlack"),
+        new GlassMaterialRecipe("Frosted",     "LiquidGlass.Mat.Frosted",     AccentStateBlur,    true,  45, 40, 100, "GlassWhite"),
+        new GlassMaterialRecipe("Clear",       "LiquidGlass.Mat.Clear",       AccentStateBlur,    false, 12, 15, 130, "GlassWhite"),
+        new GlassMaterialRecipe("Liquid",      "LiquidGlass.Mat.Liquid",      AccentStateBlur,    false, 24, 22, 125, "Accent"),
+        new GlassMaterialRecipe("DarkGlass",   "LiquidGlass.Mat.DarkGlass",   AccentStateBlur,    true,  35, 62,  85, "DeepBlack"),
+    };
+
+    /// <summary>按 key 找材质;空串/未知 → null(= 自定义,沿用已存参数,即历史行为)。</summary>
+    public static GlassMaterialRecipe? FindMaterial(string? key)
+        => string.IsNullOrEmpty(key) ? null : Materials.FirstOrDefault(m => m.Key == key);
+
+    /// <summary>材质显示名 — 每次按当前语言读,切语言后下次开对话框即生效。</summary>
+    public static string GetMaterialDisplayName(string? key)
+        => FindMaterial(key) is { } m ? _loc[m.DisplayNameKey] : _loc["LiquidGlass.Mat.Custom"];
+
+    /// <summary>材质 → 背板 AccentState(自定义/未知 → 亚克力 = 历史行为)。</summary>
+    public static int ResolveAccentState(string? materialKey)
+        => FindMaterial(materialKey)?.AccentState ?? AccentStateAcrylic;
+
+    /// <summary>材质 → 是否叠加经典 blurbehind(自定义/未知 → 叠加 = 历史行为)。</summary>
+    public static bool ResolveUseClassicBlur(string? materialKey)
+        => FindMaterial(materialKey)?.UseClassicBlur ?? true;
+
+    /// <summary>当前参数是否正好等于某个材质 → 返回其 key(不等则返回空串 = 自定义)。
+    /// 用于对话框回显。
+    /// ponytail 2026-09-26: **有意不比较 GlassColorMode** —— 材质只锁定"玻璃参数"
+    /// (模糊/不透明/亮度),颜色是独立的,改颜色预设或自定义色都不该把材质顶成"自定义"
+    /// (用户明确要求)。手改任一玻璃参数才落回自定义。</summary>
+    public static string ResolveMaterialKey(int blur, int tintOpacity, int tintLuminosity)
+    {
+        foreach (var m in Materials)
+        {
+            if (m.BlurAmount == blur && m.TintOpacity == tintOpacity
+                && m.TintLuminosity == tintLuminosity)
+                return m.Key;
+        }
+        return "";
+    }
+
     /// <summary>True when the glass color mode is a custom "#RRGGBB"/"#AARRGGBB" hex
     /// instead of one of the preset names.</summary>
     public static bool IsCustomGlassColor(string? mode)
@@ -376,7 +441,7 @@ public static class AcrylicHelper
     // by window instance; entries get removed in DisableBlur.
     // fillHex/fillOpacity:分区本体一体化时填充并入玻璃 tint,重算"Accent"需要回填原始
     // 填充输入;普通玻璃窗口为 null/0。
-    private static readonly Dictionary<Window, (int blur, int opacity, int lum, string mode, string? fillHex, double fillOpacity)> _registered = new();
+    private static readonly Dictionary<Window, (int blur, int opacity, int lum, string mode, string? fillHex, double fillOpacity, int accentState, bool useClassicBlur)> _registered = new();
 
     /// <summary>
     /// Build the GradientColor (ABGR format) from color mode + tint opacity + tint luminosity.
@@ -443,11 +508,14 @@ public static class AcrylicHelper
             try
             {
                 // ponytail 2026-08-30: 分区本体一体化路径按原始填充+玻璃输入重算合成 tint。
+                // ponytail 2026-09-26: 材质(背板 AccentState + 是否叠加经典模糊)一并回填,
+                // 否则切系统强调色会把材质的背板类型冲回亚克力。
                 if (settings.fillHex is null)
-                    EnableBlur(window, settings.blur, settings.opacity, settings.lum, settings.mode);
+                    EnableBlur(window, settings.blur, settings.opacity, settings.lum, settings.mode,
+                        settings.accentState, settings.useClassicBlur);
                 else
                     EnableBlurComposite(window, settings.blur, settings.fillHex, settings.fillOpacity,
-                        settings.mode, settings.opacity, settings.lum);
+                        settings.mode, settings.opacity, settings.lum, settings.accentState, settings.useClassicBlur);
             }
             catch (Exception ex)
             {
@@ -464,13 +532,17 @@ public static class AcrylicHelper
     /// <param name="tintOpacity">Tint alpha 0-100%.</param>
     /// <param name="tintLuminosity">Color brightness 0-150%.</param>
     /// <param name="colorMode">Color preset name (Default, Accent, GlassWhite, etc.).</param>
-    public static BlurResult EnableBlur(Window window, int blurAmount, int tintOpacity, int tintLuminosity, string colorMode)
+    /// <param name="accentState">材质背板:4 = 亚克力(带噪点,历史行为),3 = 平滑模糊。</param>
+    /// <param name="useClassicBlur">是否同时发经典 DwmEnableBlurBehindWindow(更灰更哑光)。</param>
+    public static BlurResult EnableBlur(Window window, int blurAmount, int tintOpacity, int tintLuminosity,
+        string colorMode, int accentState = AccentStateAcrylic, bool useClassicBlur = true)
     {
         // ponytail: remember (window → settings) so OnSystemAccentChanged can re-apply
         // when the system accent changes. Override existing entry if EnableBlur is
         // called again with different params (e.g. user edited settings live).
-        _registered[window] = (blurAmount, tintOpacity, tintLuminosity, colorMode, null, 0);
-        return EnableBlur(new WindowInteropHelper(window).Handle, blurAmount, tintOpacity, tintLuminosity, colorMode);
+        _registered[window] = (blurAmount, tintOpacity, tintLuminosity, colorMode, null, 0, accentState, useClassicBlur);
+        return EnableBlur(new WindowInteropHelper(window).Handle, blurAmount, tintOpacity, tintLuminosity,
+            colorMode, skipClassicBlur: !useClassicBlur, accentState: accentState);
     }
 
     // ── 分区本体一体化:内部填充 + 液态玻璃合成 ──
@@ -494,21 +566,40 @@ public static class AcrylicHelper
         return Over(f, g);
     }
 
+    /// <summary>ponytail 2026-09-26: 非亚克力背板(材质 AccentState≠4)在 DWM 侧**完全不着色**
+    /// —— 实测 state3 下「白15% / 黑62% / 无色」三块肉眼一模一样(只有 state4 亚克力认
+    /// GradientColor;state2 是只着色不模糊)。所以这些材质(毛玻璃/清透玻璃/液态玻璃/深色玻璃)
+    /// 的着色必须改由 WPF 层承担:本方法返回「填充 over 玻璃着色」的合成画刷,调用方把它当作
+    /// 填充层(FillRect/BodyFillRect)的画刷。
+    /// state 4(亚克力系)返回 null —— 着色仍交给 DWM,填充层保持透明(历史行为,视觉零变化)。</summary>
+    public static Brush? ResolveWpfGlassTintBrush(string? materialKey, string? fillHex, double fillOpacity01,
+        string glassMode, int tintOpacity, int tintLuminosity)
+    {
+        if (ResolveAccentState(materialKey) == AccentStateAcrylic) return null;
+        var brush = new SolidColorBrush(CompositeFillOverGlass(fillHex, fillOpacity01, glassMode, tintOpacity, tintLuminosity));
+        brush.Freeze();
+        return brush;
+    }
+
     /// <summary>分区本体一体化开玻璃:填充并入玻璃 tint 后走与 EnableBlur 同款 DWM 配方
     /// (经典 blurbehind + accent),只是 accent 的着色换成合成值。注册原始填充输入,
     /// 系统强调色(Accent)变化时能按原始输入重算。</summary>
     public static BlurResult EnableBlurComposite(Window window, int blurAmount,
-        string? fillHex, double fillOpacity01, string glassMode, int tintOpacity, int tintLuminosity)
+        string? fillHex, double fillOpacity01, string glassMode, int tintOpacity, int tintLuminosity,
+        int accentState = AccentStateAcrylic, bool useClassicBlur = true)
     {
-        _registered[window] = (blurAmount, tintOpacity, tintLuminosity, glassMode, fillHex, fillOpacity01);
+        _registered[window] = (blurAmount, tintOpacity, tintLuminosity, glassMode, fillHex, fillOpacity01, accentState, useClassicBlur);
         return EnableBlurComposite(new WindowInteropHelper(window).Handle, blurAmount,
-            fillHex, fillOpacity01, glassMode, tintOpacity, tintLuminosity, skipClassicBlur: false);
+            fillHex, fillOpacity01, glassMode, tintOpacity, tintLuminosity,
+            skipClassicBlur: !useClassicBlur, accentState: accentState);
     }
 
     /// <summary>HWND 版一体化开玻璃(次级分区浮层用,不注册 _registered)。
-    /// skipClassicBlur=true 时只设 accent(与浮层现配方一致),否则经典 blurbehind + accent。</summary>
+    /// skipClassicBlur=true 时只设 accent(与浮层现配方一致),否则经典 blurbehind + accent。
+    /// <paramref name="accentState"/> = 材质背板(4 亚克力 / 3 平滑模糊)。</summary>
     public static BlurResult EnableBlurComposite(IntPtr hwnd, int blurAmount,
-        string? fillHex, double fillOpacity01, string glassMode, int tintOpacity, int tintLuminosity, bool skipClassicBlur)
+        string? fillHex, double fillOpacity01, string glassMode, int tintOpacity, int tintLuminosity,
+        bool skipClassicBlur, int accentState = AccentStateAcrylic)
     {
         if (hwnd == IntPtr.Zero) return BlurResult.Fail("Window handle not created yet");
 
@@ -526,7 +617,7 @@ public static class AcrylicHelper
         int abgr = ArgbToAbgr(tint);
         int accentFlags = (Math.Clamp(blurAmount, 1, 60) << 8) | 0x100;
         var primary = skipClassicBlur ? BlurResult.Fail("skipped by caller") : TryBlurBehind(hwnd, true);
-        var secondary = TrySetAccent(hwnd, ACCENT_ENABLE_ACRYLICBLURBEHIND, accentFlags, abgr);
+        var secondary = TrySetAccent(hwnd, accentState, accentFlags, abgr);
         if (primary.Success || secondary.Success) return BlurResult.Ok;
         return BlurResult.Fail(primary.Error ?? secondary.Error ?? "unknown");
     }
@@ -616,8 +707,10 @@ public static class AcrylicHelper
     /// (accent 着色+模糊),跳过 DwmEnableBlurBehindWindow 经典 blur。实测 Popup 子窗口上
     /// 经典 blur 生效而 accent 被静默忽略时,浮层会显示成"压暗 ~30% 的灰底"(对比分区
     /// 的明亮着色玻璃)"浮层更深"的根源。去掉经典 blur 后:accent 成功 = 与分区同款
-    /// 着色玻璃;accent 无效果 = 调用方走渐变兜底,两者都不再变暗。</summary>
-    public static BlurResult EnableBlur(IntPtr hwnd, int blurAmount, int tintOpacity, int tintLuminosity, string colorMode, bool skipClassicBlur)
+    /// 着色玻璃;accent 无效果 = 调用方走渐变兜底,两者都不再变暗。
+    /// ponytail 2026-09-26: <paramref name="accentState"/> = 材质背板(4 亚克力 / 3 平滑模糊)。</summary>
+    public static BlurResult EnableBlur(IntPtr hwnd, int blurAmount, int tintOpacity, int tintLuminosity,
+        string colorMode, bool skipClassicBlur, int accentState = AccentStateAcrylic)
     {
         if (hwnd == IntPtr.Zero) return BlurResult.Fail("Window handle not created yet");
 
@@ -650,7 +743,7 @@ public static class AcrylicHelper
             : TryBlurBehind(hwnd, true);
 
         // Secondary: Win10+ acrylic accent for stronger / varied effect
-        var secondary = TrySetAccent(hwnd, ACCENT_ENABLE_ACRYLICBLURBEHIND, accentFlags, gradientColor);
+        var secondary = TrySetAccent(hwnd, accentState, accentFlags, gradientColor);
 
         // Blur is considered enabled if either path worked.
         if (primary.Success || secondary.Success) return BlurResult.Ok;
@@ -703,10 +796,12 @@ public static class AcrylicHelper
     /// <summary>
     /// Show a liquid glass settings popup dialog. Returns true if saved, false if cancelled.
     /// Modifies the ref parameters on save.
+    /// ponytail 2026-09-26: 新增 <paramref name="material"/> — 材质预设(背板配方)。
+    /// 空串 = 自定义(渲染沿用历史亚克力背板);材质行在三滑块下方,选中即回写三滑块与颜色预设。
     /// </summary>
     public static bool ShowLiquidGlassDialog(Window owner, string title,
-        ref int blurAmount, ref int tintOpacity, ref int tintLuminosity, ref string colorMode,
-        bool isChinese, Action<int, int, int, string>? onPreviewChanged = null)
+        ref int blurAmount, ref int tintOpacity, ref int tintLuminosity, ref string colorMode, ref string material,
+        bool isChinese, Action<int, int, int, string, string>? onPreviewChanged = null)
     {
         // Copy ref params to locals for lambda capture
         int localBlur = blurAmount;
@@ -714,14 +809,22 @@ public static class AcrylicHelper
         int localTintLuminosity = tintLuminosity;
         string localColorMode = colorMode;
         string colorModeSaved = colorMode;
+        // 材质 = 背板通道(决定 AccentState + 是否叠加经典模糊),会持久化。
+        // 别的参数被手改后它仍然保留 —— 微调滑块不该悄悄把平滑模糊换回带噪点亚克力。
+        string localMaterial = FindMaterial(material) != null ? material : "";
+        string materialSaved = localMaterial;
 
         // Helper to fire live preview
-        void FirePreview() => onPreviewChanged?.Invoke(localBlur, localTintOpacity, localTintLuminosity, localColorMode);
+        void FirePreview() => onPreviewChanged?.Invoke(localBlur, localTintOpacity, localTintLuminosity, localColorMode, localMaterial);
+        // 材质下拉的选中项 = 「当前四参数正好等于某配方」,否则显示自定义。
+        // 具体实现在颜色模式区(需要 presetCombo / ApplyColorModeVisuals)之后赋值。
+        Action? refreshMaterialSelection = null;
+        bool syncingMaterial = false;
 
         var dlg = new Window
         {
             Title = isChinese ? $"💧 {title}" : $"💧 {title}",
-            Width = 440, Height = 520,
+            Width = 440, Height = 570,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Owner = owner,
             ResizeMode = ResizeMode.NoResize,
@@ -832,24 +935,55 @@ public static class AcrylicHelper
 
         // Blur Amount slider (0-60)
         var blurSaved = localBlur;
-        var blurLabelRow = BuildSliderRow(_loc["LiquidGlass.BlurRadius"], 0, 60, localBlur,
-            t1, t2, (v, lbl) => { localBlur = (int)v; lbl.Text = $"{(int)v}"; FirePreview(); });
-        Grid.SetRow(blurLabelRow, row++);
-        grid.Children.Add(blurLabelRow);
+        var blurRow = BuildSliderRow(_loc["LiquidGlass.BlurRadius"], 0, 60, localBlur,
+            t1, t2, (v, lbl) => { localBlur = (int)v; lbl.Text = $"{(int)v}"; if (!syncingMaterial) refreshMaterialSelection?.Invoke(); FirePreview(); });
+        var blurSlider = blurRow.Slider;
+        var blurValue = blurRow.Value;
+        Grid.SetRow(blurRow.Row, row++);
+        grid.Children.Add(blurRow.Row);
 
         // Tint Opacity slider (0-100%)
         var opacitySaved = localTintOpacity;
-        var opacityLabelRow = BuildSliderRow(_loc["LiquidGlass.TintOpacity"], 0, 100, localTintOpacity,
-            t1, t2, (v, lbl) => { localTintOpacity = (int)v; lbl.Text = $"{localTintOpacity}%"; FirePreview(); });
-        Grid.SetRow(opacityLabelRow, row++);
-        grid.Children.Add(opacityLabelRow);
+        var opacityRow = BuildSliderRow(_loc["LiquidGlass.TintOpacity"], 0, 100, localTintOpacity,
+            t1, t2, (v, lbl) => { localTintOpacity = (int)v; lbl.Text = $"{localTintOpacity}%"; if (!syncingMaterial) refreshMaterialSelection?.Invoke(); FirePreview(); });
+        var tintSlider = opacityRow.Slider;
+        var tintValue = opacityRow.Value;
+        Grid.SetRow(opacityRow.Row, row++);
+        grid.Children.Add(opacityRow.Row);
 
         // Tint Luminosity slider (0-150%)
         var luminositySaved = localTintLuminosity;
-        var luminosityLabelRow = BuildSliderRow(_loc["LiquidGlass.TintLuminosity"], 0, 150, localTintLuminosity,
-            t1, t2, (v, lbl) => { localTintLuminosity = (int)v; lbl.Text = $"{localTintLuminosity}%"; FirePreview(); });
-        Grid.SetRow(luminosityLabelRow, row++);
-        grid.Children.Add(luminosityLabelRow);
+        var luminosityRow = BuildSliderRow(_loc["LiquidGlass.TintLuminosity"], 0, 150, localTintLuminosity,
+            t1, t2, (v, lbl) => { localTintLuminosity = (int)v; lbl.Text = $"{localTintLuminosity}%"; if (!syncingMaterial) refreshMaterialSelection?.Invoke(); FirePreview(); });
+        var lumSlider = luminosityRow.Slider;
+        var lumValue = luminosityRow.Value;
+        Grid.SetRow(luminosityRow.Row, row++);
+        grid.Children.Add(luminosityRow.Row);
+
+        // ── 材质预设(在三滑块下方、颜色预设上方) ──
+        // ponytail 2026-09-26: 选中材质 → 立刻把三滑块 + 颜色预设写成该配方的值(实时同步),
+        // 并 FirePreview 让桌面窗口跟着变;之后手动改任一滑块/颜色,下拉自动落回「自定义」,
+        // 但背板通道(localMaterial)保留 —— 微调不该把材质换掉。
+        var materialLabel = new TextBlock
+        {
+            Text = _loc["LiquidGlass.Material"] + ":",
+            Foreground = t2, FontSize = 12,
+            Width = 100,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        var materialCombo = ComboBoxHelper.Create(width: 200, fontSize: 12,
+            margin: new Thickness(8, 0, 0, 0));
+        materialCombo.Items.Add(_loc["LiquidGlass.Mat.Custom"]);
+        foreach (var m in Materials) materialCombo.Items.Add(_loc[m.DisplayNameKey]);
+        var materialRow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Margin = new Thickness(0, 12, 0, 0)
+        };
+        materialRow.Children.Add(materialLabel);
+        materialRow.Children.Add(materialCombo);
+        Grid.SetRow(materialRow, row++);
+        grid.Children.Add(materialRow);
 
         // ── Color mode: preset (checkbox + combo) ──
         bool usePreset = !IsCustomGlassColor(localColorMode);
@@ -883,6 +1017,7 @@ public static class AcrylicHelper
         {
             if (syncingColorMode || !usePreset) return;
             localColorMode = ColorPresetNames[presetCombo.SelectedIndex];
+            if (!syncingMaterial) refreshMaterialSelection?.Invoke();
             FirePreview();
         };
         var colorRow = new StackPanel
@@ -956,6 +1091,7 @@ public static class AcrylicHelper
             useCustom = !presetOn;
             ApplyColorModeVisuals();
             localColorMode = presetOn ? ColorPresetNames[presetCombo.SelectedIndex] : customColor;
+            if (!syncingMaterial) refreshMaterialSelection?.Invoke();
             FirePreview();
         }
 
@@ -979,10 +1115,83 @@ public static class AcrylicHelper
                 if (useCustom)
                 {
                     localColorMode = customColor;
+                    if (!syncingMaterial) refreshMaterialSelection?.Invoke();
                     FirePreview();
                 }
             }
         };
+
+        // ── 材质行逻辑(放在颜色模式区之后:回写颜色需要 presetCombo / ApplyColorModeVisuals) ──
+
+        // 下拉选中项:三个滑块 + 颜色的当前组合正好等于某配方 → 高亮该材质,否则「自定义」。
+        int MaterialComboIndex(string key)
+        {
+            if (FindMaterial(key) is not { } m) return 0;
+            for (int i = 0; i < Materials.Count; i++)
+                if (Materials[i].Key == m.Key) return i + 1;
+            return 0;
+        }
+
+        // 把颜色模式(预设名或 #AARRGGBB)写进颜色行 UI —— 材质自带底色,一起切。
+        void ApplyColorModeFromMaterial(string mode)
+        {
+            syncingColorMode = true;
+            if (IsCustomGlassColor(mode))
+            {
+                useCustom = true; usePreset = false;
+                customColor = mode;
+                customSwatch.Background = TryParseGlassColor(mode, out var c2) ? new SolidColorBrush(c2) : Brushes.Transparent;
+            }
+            else
+            {
+                usePreset = true; useCustom = false;
+                int idx = 0;
+                for (int i = 0; i < ColorPresetNames.Count; i++)
+                    if (ColorPresetNames[i] == mode) { idx = i; break; }
+                presetCombo.SelectedIndex = idx;
+            }
+            ApplyColorModeVisuals();
+            localColorMode = mode;
+            syncingColorMode = false;
+        }
+
+        // 选中材质 → 三滑块 + 颜色预设一起跳到该配方的值(实时同步),并立即预览。
+        void ApplyMaterial(GlassMaterialRecipe m)
+        {
+            syncingMaterial = true;
+            localMaterial = m.Key;
+            localBlur = Math.Clamp(m.BlurAmount, 0, 60);
+            localTintOpacity = Math.Clamp(m.TintOpacity, 0, 100);
+            localTintLuminosity = Math.Clamp(m.TintLuminosity, 0, 150);
+            blurSlider.Value = localBlur; blurValue.Text = $"{localBlur}";
+            tintSlider.Value = localTintOpacity; tintValue.Text = $"{localTintOpacity}%";
+            lumSlider.Value = localTintLuminosity; lumValue.Text = $"{localTintLuminosity}%";
+            ApplyColorModeFromMaterial(m.ColorMode);
+            materialCombo.SelectedIndex = MaterialComboIndex(ResolveMaterialKey(
+                localBlur, localTintOpacity, localTintLuminosity));
+            syncingMaterial = false;
+            FirePreview();
+        }
+
+        refreshMaterialSelection = () =>
+        {
+            syncingMaterial = true;
+            materialCombo.SelectedIndex = MaterialComboIndex(ResolveMaterialKey(
+                localBlur, localTintOpacity, localTintLuminosity));
+            syncingMaterial = false;
+        };
+
+        materialCombo.SelectionChanged += (_, _) =>
+        {
+            if (syncingMaterial) return;
+            int i = materialCombo.SelectedIndex;
+            // 索引 0 = 自定义:不动任何参数,背板通道也保持不变(允许「先选材质再手调」)。
+            if (i <= 0 || i > Materials.Count) return;
+            ApplyMaterial(Materials[i - 1]);
+        };
+
+        // 初次回显:参数与某配方一致才高亮材质,否则显示自定义(老配置没有该字段 → 自定义)。
+        refreshMaterialSelection();
 
         // Mutual-exclusion note (below both color rows)
         var exclusiveTb = new TextBlock
@@ -1046,6 +1255,7 @@ public static class AcrylicHelper
             localTintOpacity = opacitySaved;
             localTintLuminosity = luminositySaved;
             localColorMode = colorModeSaved;
+            localMaterial = materialSaved;
             FirePreview(); // revert preview to original values
             dlg.Close();
         };
@@ -1062,11 +1272,14 @@ public static class AcrylicHelper
         tintOpacity = localTintOpacity;
         tintLuminosity = localTintLuminosity;
         colorMode = localColorMode;
+        material = localMaterial;
 
         return saved;
     }
 
-    private static Grid BuildSliderRow(string labelText, double min, double max, double value,
+    /// <summary>三滑块共用的一行:标签 + 滑杆 + 数值。返回滑杆与数值文本的引用,
+    /// 供材质预设把选中的配方回写到滑块上(实时同步)。</summary>
+    private static (Grid Row, Slider Slider, TextBlock Value) BuildSliderRow(string labelText, double min, double max, double value,
         Brush t1, Brush t2, Action<double, TextBlock> onChanged)
     {
         var grid = new Grid { Margin = new Thickness(0, 8, 0, 0) };
@@ -1108,7 +1321,7 @@ public static class AcrylicHelper
 
         slider.ValueChanged += (s, _) => onChanged(slider.Value, valueLabel);
 
-        return grid;
+        return (grid, slider, valueLabel);
     }
 
     /// <summary>Backward-compat overload: delegates to <see cref="EnableBlur(Window, int, int, int, string)"/> with liquid glass defaults.</summary>

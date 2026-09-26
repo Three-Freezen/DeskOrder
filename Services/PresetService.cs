@@ -394,6 +394,7 @@ public class PresetService
         target.GlassTintOpacity = src.GlassTintOpacity;
         target.GlassTintLuminosity = src.GlassTintLuminosity;
         target.GlassColorMode = src.GlassColorMode;
+        target.GlassMaterial = src.GlassMaterial;
         target.GridSize = src.GridSize;
         target.SnapToGrid = src.SnapToGrid;
         target.AutoArrange = src.AutoArrange;

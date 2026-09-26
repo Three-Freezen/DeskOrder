@@ -664,10 +664,24 @@ public partial class StickyNoteWindow : Window
         Left = left; Top = top;
     }
 
-    /// <summary>快捷键唤出:先聚焦显示器居中,再按便签自己的展开动画(种类/速度/
-    /// 原点=恢复按钮中心或左上角)展开。恢复按钮态从按钮动画展开;整窗隐藏的便签
-    /// 先恢复尺寸再显示;无恢复按钮的便签直接显示。非快捷键路径(托盘/按钮点击)
-    /// 不受影响,仍在历史位置展开。</summary>
+    /// <summary>便签当前坐标是否还落在虚拟桌面内。拔掉副屏 / 改分辨率后 X/Y 会留在
+    /// 旧坐标上,这时「按原位置打开」= 便签永远看不见、快捷键也救不回来(托盘显示
+    /// 同样按 X/Y 打开),所以这种情况退化成居中。X/Y 与窗口 Left/Top 同步
+    /// (LocationChanged + 各拖拽路径都写回),收起态也成立。</summary>
+    bool NotePositionReachable()
+    {
+        double w = _note.Width > 0 ? _note.Width : Width;
+        double h = _note.Height > 0 ? _note.Height : Height;
+        double vl = SystemParameters.VirtualScreenLeft, vt = SystemParameters.VirtualScreenTop;
+        double vr = vl + SystemParameters.VirtualScreenWidth, vb = vt + SystemParameters.VirtualScreenHeight;
+        return _note.X + w > vl && _note.X < vr && _note.Y + h > vt && _note.Y < vb;
+    }
+
+    /// <summary>快捷键唤出:按便签自己的展开动画(种类/速度/原点=恢复按钮中心或
+    /// 左上角)展开。恢复按钮态从按钮动画展开;整窗隐藏的便签先恢复尺寸再显示;
+    /// 无恢复按钮的便签直接显示。定位由「固定位置打开」(便签设置→开关区)决定:
+    /// 勾选 = 聚焦显示器居中(旧行为);默认不勾 = 按便签自己的位置打开。
+    /// 非快捷键路径(托盘/按钮点击)不受影响,始终在历史位置展开。</summary>
     public void ShowFromHotkey()
     {
         bool fromButton = RestoreButton.Visibility == Visibility.Visible;
@@ -680,7 +694,14 @@ public partial class StickyNoteWindow : Window
             Height = _note.Height < 150 ? 200 : NoteWindowHeight();
         }
 
-        CenterOnFocusedScreen();
+        // ponytail 2026-08-30: 快捷键唤出定位 —— 「固定位置打开」勾选时才居中。
+        // 不勾(默认)= 不碰窗口坐标,各状态各自成立:
+        //   • 展开态 / 恢复按钮态:窗口保持原位(收起态窗口仍是整窗大小,恢复按钮
+        //     按 HoverExpandOrigin 停在角落或正中),原地展开即「便签当前位置」。
+        //   • 整窗隐藏态:窗口被 HideNote 缩到 36×36 时左上角没动,ShowNote 会按
+        //     _note.X/Y 重新摆回 → 正是「上一次显示的位置」。
+        // 之前无条件居中的话,放在副屏或角落的便签每次按快捷键都会被搬到屏幕中间。
+        if (_note.OpenAtFixedPosition || !NotePositionReachable()) CenterOnFocusedScreen();
 
         if (fromButton && _hover != null)
         {
@@ -869,7 +890,9 @@ public partial class StickyNoteWindow : Window
             // ponytail 2026-08-30: 一体化 — 填充并入玻璃 tint(算一层),BodyFillRect 透明;
             // 填充色与玻璃配色作为两个输入本质上仍是两层。
             var blurResult = AcrylicHelper.EnableBlurComposite(this, _note.GlassBlurAmount,
-                fillColorStr, 1.0, _note.GlassColorMode, _note.GlassTintOpacity, _note.GlassTintLuminosity);
+                fillColorStr, 1.0, _note.GlassColorMode, _note.GlassTintOpacity, _note.GlassTintLuminosity,
+                AcrylicHelper.ResolveAccentState(_note.GlassMaterial),
+                AcrylicHelper.ResolveUseClassicBlur(_note.GlassMaterial));
             if (!blurResult.Success)
                 System.Diagnostics.Debug.WriteLine($"[StickyNoteWindow] EnableBlur failed: {blurResult.Error}");
             // ponytail: additive liquid-glass overlay — the chromatic border rides a
@@ -880,7 +903,12 @@ public partial class StickyNoteWindow : Window
                 NoteGlassBorder.BorderThickness = new Thickness(Math.Max(1.0, borderThickness));
                 NoteGlassBorder.CornerRadius = new CornerRadius(_note.CornerRadius);
             }
-            BodyFillRect.Fill = AcrylicHelper.HitTestFill;
+            // ponytail 2026-09-26: 非亚克力材质(毛玻璃/清透/液态/深色玻璃)的 DWM 背板不认着色
+            // (实测 state3 完全不着色),合成着色改由 BodyFillRect 承担;亚克力系返回 null →
+            // 保持透明,着色交给 DWM(历史行为)。
+            BodyFillRect.Fill = AcrylicHelper.ResolveWpfGlassTintBrush(_note.GlassMaterial,
+                fillColorStr, 1.0, _note.GlassColorMode, _note.GlassTintOpacity, _note.GlassTintLuminosity)
+                ?? AcrylicHelper.HitTestFill;
         }
         else
         {

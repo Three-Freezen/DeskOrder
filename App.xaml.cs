@@ -562,9 +562,9 @@ public partial class App : System.Windows.Application
             if (note != null)
             {
                 OpenNoteWindow(note);
-                // 快捷键新建/唤出的窗口同样落到聚焦显示器中央(窗口已按原位置
-                // 展开,这里只搬位置;展开动画由窗口自身的入场动画负责)
-                if (_notesService.Windows.TryGetValue(noteId, out var w))
+                // 快捷键新建/唤出的窗口:只有勾了「固定位置打开」才落到聚焦显示器
+                // 中央;默认(不勾)保持 OpenNoteWindow 按便签自身 X/Y 建窗的位置。
+                if (note.OpenAtFixedPosition && _notesService.Windows.TryGetValue(noteId, out var w))
                     w.CenterOnFocusedScreen();
             }
         }

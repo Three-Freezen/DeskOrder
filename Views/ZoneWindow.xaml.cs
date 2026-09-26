@@ -815,7 +815,8 @@ public partial class ZoneWindow : Window
             s.FillColor, 100,
             s.BgImagePath, s.BgImageOpacity,
             s.EnableLiquidGlass ? _zone.GlassColorMode : null,
-            _zone.GlassBlurAmount, _zone.GlassTintOpacity, _zone.GlassTintLuminosity);
+            _zone.GlassBlurAmount, _zone.GlassTintOpacity, _zone.GlassTintLuminosity,
+            _zone.GlassMaterial);
     }
 
     void OpenSubfolderFlyout(ZoneItem sub)
@@ -4049,7 +4050,14 @@ public partial class ZoneWindow : Window
         // 只把纯玻璃着色交给 DWM accent,填充仍走 FillRect。
         bool fillIndependent = s.TitleBarFillIndependent && !s.TileMode;
         bool glassCarriesFill = s.EnableLiquidGlass && (_hover?.IsExpanded ?? false) && !fillIndependent;
-        try { FillRect.Fill = glassCarriesFill ? AcrylicHelper.HitTestFill : new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.FillColor)!); } catch { }
+        // ponytail 2026-09-26: 非亚克力材质(毛玻璃/清透/液态/深色玻璃)的 DWM 背板不认着色
+        // (实测 state3 完全不着色),合成着色改由填充层承担;亚克力系仍返回 null → 填充层保持
+        // 透明,着色交给 DWM(与历史行为一致)。
+        var wpfGlassTint = glassCarriesFill
+            ? AcrylicHelper.ResolveWpfGlassTintBrush(_zone.GlassMaterial, s.FillColor, 1.0,
+                _zone.GlassColorMode, _zone.GlassTintOpacity, _zone.GlassTintLuminosity)
+            : null;
+        try { FillRect.Fill = wpfGlassTint ?? (glassCarriesFill ? AcrylicHelper.HitTestFill : new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.FillColor)!)); } catch { }
         FillRect.RadiusX = FillRect.RadiusY = fillIndependent ? 0 : s.CornerRadius;
         // ponytail 2026-08-26: the merged master's title bar is TWO layers — the
         // 24px top bar + the 24px sub-zone tab row — so the body fill starts below
@@ -4377,7 +4385,9 @@ public partial class ZoneWindow : Window
             if (fillIndependent)
             {
                 var blurResult = AcrylicHelper.EnableBlur(this, _zone.GlassBlurAmount,
-                    _zone.GlassTintOpacity, _zone.GlassTintLuminosity, _zone.GlassColorMode);
+                    _zone.GlassTintOpacity, _zone.GlassTintLuminosity, _zone.GlassColorMode,
+                    AcrylicHelper.ResolveAccentState(_zone.GlassMaterial),
+                    AcrylicHelper.ResolveUseClassicBlur(_zone.GlassMaterial));
                 if (!blurResult.Success)
                     System.Diagnostics.Debug.WriteLine($"[ZoneWindow] EnableBlur failed: {blurResult.Error}");
                 try { FillRect.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.FillColor)!); } catch { }
@@ -4388,7 +4398,9 @@ public partial class ZoneWindow : Window
                 // ponytail 2026-08-30: 分区本体一体化 — 内部填充并入玻璃 tint(算一层),
                 // FillRect 透明;填充色与玻璃配色作为两个输入本质上仍是两层。
                 var blurResult = AcrylicHelper.EnableBlurComposite(this, _zone.GlassBlurAmount,
-                    s.FillColor, 1.0, _zone.GlassColorMode, _zone.GlassTintOpacity, _zone.GlassTintLuminosity);
+                    s.FillColor, 1.0, _zone.GlassColorMode, _zone.GlassTintOpacity, _zone.GlassTintLuminosity,
+                    AcrylicHelper.ResolveAccentState(_zone.GlassMaterial),
+                    AcrylicHelper.ResolveUseClassicBlur(_zone.GlassMaterial));
                 if (!blurResult.Success)
                     System.Diagnostics.Debug.WriteLine($"[ZoneWindow] EnableBlur failed: {blurResult.Error}");
                 FillRect.Fill = AcrylicHelper.HitTestFill;

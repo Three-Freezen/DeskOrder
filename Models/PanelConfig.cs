@@ -36,6 +36,9 @@ public class PanelConfig
     public int PanelGlassTintOpacity { get; set; } = 50;
     public int PanelGlassTintLuminosity { get; set; } = 100;
     public string PanelGlassColorMode { get; set; } = "Default";
+    /// <summary>ponytail 2026-09-26: 面板材质预设 key(见 AcrylicHelper.Materials);
+    /// 空串 = 自定义 = 历史亚克力背板。</summary>
+    public string PanelGlassMaterial { get; set; } = "";
     /// <summary>One-shot migration flag: legacy configs kept liquid-glass on AppConfig;
     /// on first load those values are copied into the Panel POCO and this flag is set.</summary>
     public bool PanelGlassMigrated { get; set; } = false;

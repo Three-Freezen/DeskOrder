@@ -109,6 +109,9 @@ public class ConfigService
         config.Panel.PanelGlassTintOpacity = config.GlassTintOpacity;
         config.Panel.PanelGlassTintLuminosity = config.GlassTintLuminosity;
         config.Panel.PanelGlassColorMode = config.GlassColorMode;
+        // ponytail 2026-09-26: 材质是后加的字段;老配置的 AppConfig 层没有它,
+        // PanelConfig 默认空串 = 自定义 = 历史亚克力背板。
+        config.Panel.PanelGlassMaterial = config.GlassMaterial;
         config.Panel.PanelGlassMigrated = true;
     }
 

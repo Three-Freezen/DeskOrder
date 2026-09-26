@@ -2442,6 +2442,10 @@ public partial class PropertyPanel : UserControl
             _loc["Motion.SettingsEllipsis"], _ => OpenMotionDialog(note, () => BuildNoteFields(note))));
         switches.Children.Add(MakeCheckRow(_loc["Motion.HoverAutoExpand"], note.HoverAutoExpand,
             v => { note.HoverAutoExpand = v; Save(note); }));
+        // ponytail 2026-08-30: 「固定位置打开」— 快捷键唤出定位开关,默认关(= 按便签
+        // 自己的位置打开)。开 = 历史行为,固定落在聚焦显示器正中央。
+        switches.Children.Add(MakeCheckRow(_loc["NoteProp.OpenAtFixedPosition"], note.OpenAtFixedPosition,
+            v => { note.OpenAtFixedPosition = v; Save(note); }));
         switches.Children.Add(MakeCornerStyleRow(note.CornerRadius > 0, rounded =>
         {
             note.CornerRadius = rounded ? (note.CornerRadius > 0 ? note.CornerRadius : 10) : 0;
@@ -3244,6 +3248,7 @@ public partial class PropertyPanel : UserControl
         dst.GlassTintOpacity = src.GlassTintOpacity;
         dst.GlassTintLuminosity = src.GlassTintLuminosity;
         dst.GlassColorMode = src.GlassColorMode;
+        dst.GlassMaterial = src.GlassMaterial;
         dst.GridSize = src.GridSize;
         dst.SnapToGrid = src.SnapToGrid;
         dst.AutoArrange = src.AutoArrange;
@@ -3397,6 +3402,7 @@ public partial class PropertyPanel : UserControl
         dst.PanelGlassTintOpacity = src.GlassTintOpacity;
         dst.PanelGlassTintLuminosity = src.GlassTintLuminosity;
         dst.PanelGlassColorMode = src.GlassColorMode;
+        dst.PanelGlassMaterial = src.GlassMaterial;
         dst.PanelPopupMotion = src.PanelPopupMotion;
         dst.PanelPopupOrigin = src.PanelPopupOrigin;
         dst.PanelPopupSpeed = src.PanelPopupSpeed;
@@ -3552,18 +3558,26 @@ public partial class PropertyPanel : UserControl
     {
         var owner = CachedOwner ?? Window.GetWindow(this);
         if (owner == null) { MessageBox.Show(_loc["PropertyPanel.NoOwnerWindow"]); return; }
+        void ApplyAll(int b, int t, int l, string c, string mat)
+        {
+            m.GlassBlurAmount = b;
+            m.GlassTintOpacity = t;
+            m.GlassTintLuminosity = l;
+            m.GlassColorMode = c;
+            m.GlassMaterial = mat;
+            Save(m); // = Preview(实时刷新桌面窗口,不落盘)
+        }
         int blur = m.GlassBlurAmount;
         int tint = m.GlassTintOpacity;
         int lum = m.GlassTintLuminosity;
         string mode = m.GlassColorMode;
+        string material = m.GlassMaterial;
         var cn = LocalizationService.Instance.CurrentLanguage == "zh";
+        // ponytail 2026-09-26: 接上 onPreviewChanged —— 对话框里选材质/拖滑块立刻写回模型并
+        // 预览;取消时对话框会用原值再发一次(= 自然回退)。Apply 时才落盘,与面板一致。
         if (!AcrylicHelper.ShowLiquidGlassDialog(owner, _loc["ZoneProp.Section.LiquidGlass"],
-            ref blur, ref tint, ref lum, ref mode, cn)) return;
-        m.GlassBlurAmount = blur;
-        m.GlassTintOpacity = tint;
-        m.GlassTintLuminosity = lum;
-        m.GlassColorMode = mode;
-        Save(m);
+            ref blur, ref tint, ref lum, ref mode, ref material, cn, ApplyAll)) return;
+        ApplyAll(blur, tint, lum, mode, material);
     }
 
     /// <summary>ponytail 2026-08-26: SubFolder 版液态玻璃设置 — ZoneItem 自带玻璃
@@ -3572,18 +3586,24 @@ public partial class PropertyPanel : UserControl
     {
         var owner = CachedOwner ?? Window.GetWindow(this);
         if (owner == null) { MessageBox.Show(_loc["PropertyPanel.NoOwnerWindow"]); return; }
+        void ApplyAll(int b, int t, int l, string c, string mat)
+        {
+            sub.GlassBlurAmount = b;
+            sub.GlassTintOpacity = t;
+            sub.GlassTintLuminosity = l;
+            sub.GlassColorMode = c;
+            sub.GlassMaterial = mat;
+            Save(sub);
+        }
         int blur = sub.GlassBlurAmount;
         int tint = sub.GlassTintOpacity;
         int lum = sub.GlassTintLuminosity;
         string mode = sub.GlassColorMode;
+        string material = sub.GlassMaterial;
         var cn = LocalizationService.Instance.CurrentLanguage == "zh";
         if (!AcrylicHelper.ShowLiquidGlassDialog(owner, _loc["ZoneProp.Section.LiquidGlass"],
-            ref blur, ref tint, ref lum, ref mode, cn)) return;
-        sub.GlassBlurAmount = blur;
-        sub.GlassTintOpacity = tint;
-        sub.GlassTintLuminosity = lum;
-        sub.GlassColorMode = mode;
-        Save(sub);
+            ref blur, ref tint, ref lum, ref mode, ref material, cn, ApplyAll)) return;
+        ApplyAll(blur, tint, lum, mode, material);
     }
 
     // ponytail 2026-08-25: PanelConfig is not an AppearanceModel — the panel
@@ -3593,18 +3613,24 @@ public partial class PropertyPanel : UserControl
     {
         var owner = CachedOwner ?? Window.GetWindow(this);
         if (owner == null) { MessageBox.Show(_loc["PropertyPanel.NoOwnerWindow"]); return; }
+        void ApplyAll(int b, int t, int l, string c, string mat)
+        {
+            p.PanelGlassBlurAmount = b;
+            p.PanelGlassTintOpacity = t;
+            p.PanelGlassTintLuminosity = l;
+            p.PanelGlassColorMode = c;
+            p.PanelGlassMaterial = mat;
+            Save(p);
+        }
         int blur = p.PanelGlassBlurAmount;
         int tint = p.PanelGlassTintOpacity;
         int lum = p.PanelGlassTintLuminosity;
         string mode = p.PanelGlassColorMode;
+        string material = p.PanelGlassMaterial;
         var cn = LocalizationService.Instance.CurrentLanguage == "zh";
         if (!AcrylicHelper.ShowLiquidGlassDialog(owner, _loc["ZoneProp.Section.LiquidGlass"],
-            ref blur, ref tint, ref lum, ref mode, cn)) return;
-        p.PanelGlassBlurAmount = blur;
-        p.PanelGlassTintOpacity = tint;
-        p.PanelGlassTintLuminosity = lum;
-        p.PanelGlassColorMode = mode;
-        Save(p);
+            ref blur, ref tint, ref lum, ref mode, ref material, cn, ApplyAll)) return;
+        ApplyAll(blur, tint, lum, mode, material);
     }
 
     void OpenImagePicker(BgImageBinding b, TextBox pathBox)

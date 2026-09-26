@@ -24,7 +24,11 @@ public sealed record SubfolderFill(
     string? GlassMode,      // 液态玻璃渐变模式(空 = 无玻璃)
     int GlassBlur = 18,     // 玻璃模糊半径(真玻璃用,同 AppearanceModel 默认)
     int GlassTintOpacity = 50,
-    int GlassTintLuminosity = 100)
+    int GlassTintLuminosity = 100,
+    // ponytail 2026-09-26: 材质预设 key(见 AcrylicHelper.Materials)。空串 = 自定义 =
+    // 历史亚克力背板。浮层只取它的「背板 AccentState」——经典 blurbehind 在 Popup 上会
+    // 把背景压暗(见 TryApplyRealGlass 注释),所以浮层恒 skipClassicBlur。
+    string GlassMaterial = "")
 {
     public bool HasGlass => !string.IsNullOrEmpty(GlassMode);
 
@@ -35,7 +39,7 @@ public sealed record SubfolderFill(
         sub.BackgroundImagePath,
         sub.BackgroundImageOpacity < 0 ? 30 : sub.BackgroundImageOpacity,
         sub.EnableLiquidGlass ? (string.IsNullOrEmpty(sub.GlassColorMode) ? "Default" : sub.GlassColorMode) : null,
-        sub.GlassBlurAmount, sub.GlassTintOpacity, sub.GlassTintLuminosity);
+        sub.GlassBlurAmount, sub.GlassTintOpacity, sub.GlassTintLuminosity, sub.GlassMaterial);
 
     /// <summary>解析后的填充画刷(alpha 已乘透明度)。FillHex 为空时返回 null。</summary>
     public Brush? FillBrush

@@ -55,6 +55,9 @@ public class AppConfig
     public int GlassTintOpacity { get; set; } = 50;       // 0-100%
     public int GlassTintLuminosity { get; set; } = 100;   // 0-150%
     public string GlassColorMode { get; set; } = "Default"; // color preset name
+    /// <summary>ponytail 2026-09-26: 材质预设 key(历史遗留层,面板用 PanelGlassMaterial)。
+    /// 空串 = 自定义 = 历史亚克力背板。</summary>
+    public string GlassMaterial { get; set; } = "";
 
     // ── Panel (POCOs, was 19 inline fields) ──
     public PanelConfig Panel { get; set; } = new();

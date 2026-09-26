@@ -265,7 +265,9 @@ public partial class PanelWindow : Window
             // ApplyStyle 置透明;填充色与玻璃配色作为两个输入本质上仍是两层。
             var blurResult = AcrylicHelper.EnableBlurComposite(this, config.Panel.PanelGlassBlurAmount,
                 fillColorStr, 1.0, config.Panel.PanelGlassColorMode,
-                config.Panel.PanelGlassTintOpacity, config.Panel.PanelGlassTintLuminosity);
+                config.Panel.PanelGlassTintOpacity, config.Panel.PanelGlassTintLuminosity,
+                AcrylicHelper.ResolveAccentState(config.Panel.PanelGlassMaterial),
+                AcrylicHelper.ResolveUseClassicBlur(config.Panel.PanelGlassMaterial));
             if (!blurResult.Success)
                 System.Diagnostics.Debug.WriteLine($"[PanelWindow] EnableBlur failed: {blurResult.Error}");
         }
@@ -287,9 +289,14 @@ public partial class PanelWindow : Window
         try
         {
             bool glassCarriesFill = config.Panel.PanelEnableLiquidGlass;
-            FillRect.Fill = glassCarriesFill
+            // 非亚克力材质 DWM 不认着色 → 合成着色改由填充层承担(见 ResolveWpfGlassTintBrush)。
+            var wpfGlassTint = glassCarriesFill
+                ? AcrylicHelper.ResolveWpfGlassTintBrush(config.Panel.PanelGlassMaterial, fillColorStr, 1.0,
+                    config.Panel.PanelGlassColorMode, config.Panel.PanelGlassTintOpacity, config.Panel.PanelGlassTintLuminosity)
+                : null;
+            FillRect.Fill = wpfGlassTint ?? (glassCarriesFill
                 ? AcrylicHelper.HitTestFill
-                : new SolidColorBrush((Color)ColorConverter.ConvertFromString(fillColorStr)!);
+                : new SolidColorBrush((Color)ColorConverter.ConvertFromString(fillColorStr)!));
             FillRect.Opacity = 1.0; // Brush alpha from FillColor controls transparency
         }
         catch { }
@@ -1307,7 +1314,8 @@ public partial class PanelWindow : Window
             zone.FillColor, 100,
             zone.BackgroundImagePath, zone.BackgroundImageOpacity,
             zone.EnableLiquidGlass ? zone.GlassColorMode : null,
-            zone.GlassBlurAmount, zone.GlassTintOpacity, zone.GlassTintLuminosity);
+            zone.GlassBlurAmount, zone.GlassTintOpacity, zone.GlassTintLuminosity,
+            zone.GlassMaterial);
     }
 
     void OpenPanelItem(ZoneItemViewModel vm)

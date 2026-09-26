@@ -606,6 +606,17 @@
   "LiquidGlass.ChampagneGold": "香槟金",
   "LiquidGlass.MorandiGrayGreen": "莫兰迪灰绿",
 
+  "LiquidGlass.Material": "材质",
+  "LiquidGlass.Mat.Custom": "自定义",
+  "LiquidGlass.Mat.Acrylic": "亚克力",
+  "LiquidGlass.Mat.AcrylicThin": "亚克力·薄",
+  "LiquidGlass.Mat.Matte": "磨砂哑光",
+  "LiquidGlass.Mat.Smoke": "烟雾",
+  "LiquidGlass.Mat.Frosted": "毛玻璃",
+  "LiquidGlass.Mat.Clear": "清透玻璃",
+  "LiquidGlass.Mat.Liquid": "液态玻璃",
+  "LiquidGlass.Mat.DarkGlass": "深色玻璃",
+
   "SubfolderProp.Section.Basic": "基础",
   "SubfolderProp.Name": "名称",
   "SubfolderProp.Section.Motion": "动效",
@@ -636,6 +647,7 @@
   "NoteProp.Pinned": "置顶",
   "NoteProp.Name": "便签名称",
   "NoteProp.NameColor": "便签名称颜色",
+  "NoteProp.OpenAtFixedPosition": "固定位置打开",
 
   "BgImage.Crop": "裁剪",
   "BgImage.Browse": "选图",
