@@ -39,6 +39,18 @@
     </None>
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- ponytail 2026-09-26: 微软商店审核在 Surface 触屏机(Surface Go / Laptop 5,
+         OS 26200)上遇到"启动即崩、无错误消息"(Event 1000: coreclr.dll 0xc0000409
+         fail-fast,无 .NET Runtime 托管堆栈);本机同系统线+同运行时+全新配置、无触屏
+         正常。WPF 创建第一个窗口时会初始化笔/触控输入栈(默认 WISP 老栈),该栈在
+         部分 digitizer/服务状态下启动即致命失败(dotnet/wpf #1151 同形状,#11123/
+         #11486 是它 2025-2026 仍活跃的崩溃类)。本应用完全不用墨迹/触控笔势,
+         置位后启动彻底跳过栈初始化(HwndSource 不再挂 HwndStylusInputProvider),
+         触点由 Windows 原生模拟成普通鼠标输入,点按/拖动不受影响。 -->
+    <RuntimeHostConfigurationOption Include="Switch.System.Windows.Input.Stylus.DisableStylusAndTouchSupport" Value="true" />
+  </ItemGroup>
+
   <!-- RebuildMultiResIco is a standalone console tool (its own .csproj). Its
        top-level Program.Main must NOT be compiled into DeskOrder, otherwise it
        becomes the WPF app's entry point and double-clicking DeskOrder.exe runs

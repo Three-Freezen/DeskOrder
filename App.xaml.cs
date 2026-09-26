@@ -62,8 +62,48 @@ public partial class App : System.Windows.Application
     private readonly Dictionary<Guid, int> _noteIdToHotkeyId = new();
     private IntPtr _mainHwnd;
 
+    // ── Crash logging ──
+    // ponytail 2026-09-26: 崩溃现场落盘(配合 csproj 里的 DisableStylusAndTouchSupport)。
+    // 格式刻意自包含:版本、打包/便携形态、异常链各层类型+消息+堆栈,拿到一个文件就够定位。
+    private void RegisterGlobalCrashLogging()
+    {
+        AppDomain.CurrentDomain.UnhandledException += (s, e) =>
+            WriteCrashLog($"AppDomain.UnhandledException (IsTerminating={e.IsTerminating})",
+                          e.ExceptionObject as Exception);
+    }
+
+    internal static void WriteCrashLog(string source, Exception? ex)
+    {
+        try
+        {
+            var dir = Services.DataLocator.LogsRoot;
+            System.IO.Directory.CreateDirectory(dir);
+            var path = System.IO.Path.Combine(dir,
+                $"crash-{DateTime.Now:yyyyMMdd-HHmmss}-{Environment.ProcessId % 10000:0000}.log");
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] DeskOrder {AppVersion.Current}");
+            sb.AppendLine($"Packaged={Services.DataLocator.IsPackaged} Portable={Services.DataLocator.IsPortable} OS={Environment.OSVersion.Version}");
+            sb.AppendLine($"Source: {source}");
+            var depth = 0;
+            for (var cur = ex; cur != null && depth < 8; cur = cur.InnerException, depth++)
+            {
+                sb.AppendLine($"--- [{depth}] {cur.GetType().FullName}: {cur.Message}");
+                sb.AppendLine(cur.StackTrace ?? "(no stack)");
+            }
+            System.IO.File.WriteAllText(path, sb.ToString());
+        }
+        catch { }
+    }
+
     private void Application_Startup(object sender, StartupEventArgs e)
     {
+        // ponytail 2026-09-26: 全局未处理异常落盘,必须先于一切可能抛点的初始化。
+        // 商店审核在 Surface 触屏机遇到"启动即崩、无错误消息"(Event 1000:
+        // coreclr.dll 0xc0000409 fail-fast,没有 .NET Runtime 托管堆栈)——后台线程
+        // 的未处理异常不走 DispatcherUnhandledException,在 .NET(Core) 上直接
+        // fail-fast,这里是唯一能留下证据的地方。写日志自身包 try,崩溃路径绝不二次抛。
+        RegisterGlobalCrashLogging();
+
         // ponytail 2026-08-29: 数据落点定位必须先于一切 DataLocator.Root 消费者
         // (Trace 监听器 / ConfigService / LocalizationService):建根目录 + 便携模式
         // 首启接管 AppData 既有数据。
@@ -130,6 +170,7 @@ public partial class App : System.Windows.Application
         DispatcherUnhandledException += (s, args) =>
         {
             System.Diagnostics.Debug.WriteLine($"[DeskOrder] Unhandled: {args.Exception}");
+            WriteCrashLog("DispatcherUnhandledException", args.Exception);
             var ex = args.Exception;
             var sb = new System.Text.StringBuilder();
             sb.AppendLine($"Outer: {ex.GetType().FullName}");
