@@ -153,9 +153,12 @@ public static class AcrylicHelper
         int BlurAmount, int TintOpacity, int TintLuminosity, string ColorMode,
         double NoiseOpacity = 0);
 
-    /// <summary>材质清单(数组顺序 = 下拉框顺序)。</summary>
+    /// <summary>材质清单(数组顺序 = 下拉框顺序)。第 0 项 = 「默认」= 老配置(空串)渲染出来的
+    /// 那套参数(state4 亚克力 + 经典模糊 + 18/50/100/Default + 无颗粒),所以"选中默认材质"
+    /// 对视觉是零变化 —— 见下面 DefaultMaterialKey 的说明。</summary>
     public static readonly IReadOnlyList<GlassMaterialRecipe> Materials = new[]
     {
+        new GlassMaterialRecipe(DefaultMaterialKey, "LiquidGlass.Mat.Default", AccentStateAcrylic, true,  18, 50, 100, "Default",    0),
         new GlassMaterialRecipe("Acrylic",     "LiquidGlass.Mat.Acrylic",     AccentStateAcrylic, true,  30, 55, 100, "Accent",     0.055),
         new GlassMaterialRecipe("AcrylicThin", "LiquidGlass.Mat.AcrylicThin", AccentStateAcrylic, true,  18, 30, 110, "GlassWhite", 0.045),
         new GlassMaterialRecipe("Matte",       "LiquidGlass.Mat.Matte",       AccentStateAcrylic, true,  60, 88,  95, "MistGrey",   0.050),
@@ -166,7 +169,23 @@ public static class AcrylicHelper
         new GlassMaterialRecipe("DarkGlass",   "LiquidGlass.Mat.DarkGlass",   AccentStateBlur,    true,  35, 62,  85, "DeepBlack",  0),
     };
 
-    /// <summary>按 key 找材质;空串/未知 → null(= 自定义,沿用已存参数,即历史行为)。</summary>
+    /// <summary>「默认」材质 key = 材质预设的默认选中项。
+    ///
+    /// ponytail 2026-09-26(用户要求"材质预设默认勾选上"): 材质预设复选框现在默认勾选,
+    /// 与颜色预设(默认勾选 + 选「默认」)完全对称。配方的四个参数刻意等于老配置(材质空串)的
+    /// 渲染解析结果 —— state4 亚克力 / 经典模糊 / 18,50,100 / Default / 无颗粒 —— 于是
+    /// "只是打开对话框看了一眼再确定"对画面零影响(不会像挑亚克力那样凭空多出颗粒)。</summary>
+    public const string DefaultMaterialKey = "Default";
+
+    /// <summary>「自定义」材质 key = 显式不套任何配方(复选框不勾)。
+    /// ponytail 2026-09-26: 以前不勾是写空串,而空串同时又是"从没选过"的默认值 ——
+    /// 材质预设默认勾选后就分不清了(用户特意取消勾选,下次打开又变回勾选)。改成一个显式
+    /// 哨兵值:渲染侧 FindMaterial("Custom") = null,与空串行为完全一致(亚克力 + 经典模糊
+    /// + 无颗粒),但对话框能凭它把"不勾"这个状态原样回显。</summary>
+    public const string CustomMaterialKey = "Custom";
+
+    /// <summary>按 key 找材质;空串(从没选过)/Custom(显式自定义)/未知 → null
+    /// (= 沿用已存参数,即历史行为)。</summary>
     public static GlassMaterialRecipe? FindMaterial(string? key)
         => string.IsNullOrEmpty(key) ? null : Materials.FirstOrDefault(m => m.Key == key);
 
@@ -883,7 +902,10 @@ public static class AcrylicHelper
         string colorModeSaved = colorMode;
         // 材质 = 背板通道(决定 AccentState + 是否叠加经典模糊),会持久化。
         // 别的参数被手改后它仍然保留 —— 微调滑块不该悄悄把平滑模糊换回带噪点亚克力。
-        string localMaterial = FindMaterial(material) != null ? material : "";
+        // ponytail 2026-09-26: 未知 key 归一成空串(= 从没选过);但「自定义」哨兵必须原样保留,
+        // 否则用户取消勾选后再打开对话框又变回勾选(显式自定义状态丢失)。
+        string localMaterial = FindMaterial(material) != null ? material
+            : (material == CustomMaterialKey ? CustomMaterialKey : "");
         string materialSaved = localMaterial;
 
         // Helper to fire live preview
@@ -1062,7 +1084,13 @@ public static class AcrylicHelper
         // 半径恰好都落在档位边界上);② "自定义"是个推断状态,没法主动选。
         // 现在与颜色预设同款:**一个显式复选框 + 下拉**。勾选 = 用材质配方(I/O 颗粒/背板类型 +
         // 四个参数一起套);不勾 = 自定义(不套任何配方,只有滑块参数)。
-        bool useMaterialPreset = FindMaterial(localMaterial) != null;
+        //
+        // ponytail 2026-09-26(用户要求"材质预设默认勾选上"): 复选框**默认勾选**,与颜色预设
+        // (默认勾选 + 选「默认」)对称。判定只看一个哨兵:显式选过「自定义」(CustomMaterialKey)
+        // 才不勾;空串(从没选过)/任何真材质 → 勾上,下拉停在 DefaultMaterialKey(空串时
+        // materialIdx 自然落在第 0 项 = 默认)。因为「默认」配方的参数 = 老配置的解析结果,
+        // 所以这次默认勾选对既存对象的画面是零变化。
+        bool useMaterialPreset = localMaterial != CustomMaterialKey;
         var materialCb = new CheckBox
         {
             Content = _loc["LiquidGlass.MaterialPreset"],
@@ -1268,8 +1296,9 @@ public static class AcrylicHelper
             FirePreview();
         }
 
-        // 勾/取消「材质预设」。勾上 = 套用当前下拉选中的配方;取消 = 自定义(清掉材质 key,
-        // 背板回落成亚克力、无颗粒),三个滑块保持不动。
+        // 勾/取消「材质预设」。勾上 = 套用当前下拉选中的配方;取消 = 自定义(材质 key 写成
+        // CustomMaterialKey 哨兵 —— 渲染解析与空串完全一致,但下次打开对话框能原样回显"不勾"),
+        // 三个滑块保持不动。
         void SetMaterialPreset(bool on)
         {
             useMaterialPreset = on;
@@ -1281,7 +1310,7 @@ public static class AcrylicHelper
             }
             else
             {
-                localMaterial = "";
+                localMaterial = CustomMaterialKey;
                 blurPreviewTimer.Stop();
                 FirePreview();
             }
@@ -1297,7 +1326,8 @@ public static class AcrylicHelper
         materialCb.Checked += (_, _) => { if (!useMaterialPreset) SetMaterialPreset(true); };
         materialCb.Unchecked += (_, _) => { if (useMaterialPreset) SetMaterialPreset(false); };
 
-        // 初次回显:老配置的 key 是真材质 → 勾上并选中它;空串/未知 → 自定义(不套任何配方)。
+        // 初次回显:显式「自定义」→ 不勾;其余(含从没选过的空串)→ 勾上,下拉落在默认材质
+        // (materialIdx 初值 0 = 「默认」;老配置里的真材质 key 会命中自己的下标)。
         materialCb.IsChecked = useMaterialPreset;
         materialCombo.IsEnabled = useMaterialPreset;
 

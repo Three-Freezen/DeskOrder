@@ -34,10 +34,12 @@ public abstract class AppearanceModel
     public int GlassTintOpacity { get; set; } = 50;
     public int GlassTintLuminosity { get; set; } = 100;
     public string GlassColorMode { get; set; } = "Default";
-    /// <summary>ponytail 2026-09-26: 材质预设 key(Acrylic / AcrylicThin / Matte / Smoke /
-    /// Frosted / Clear / Liquid / DarkGlass)。决定 DWM 背板配方 = AccentState(4 亚克力带噪点 /
-    /// 3 平滑模糊) + 是否叠加经典 blurbehind。空串 = 自定义 = 历史亚克力背板 —— 老配置没有
-    /// 该字段,反序列化后即空串,视觉效果与升级前完全一致。模糊/着色仍由上面四个字段决定。</summary>
+    /// <summary>ponytail 2026-09-26: 材质预设 key(Default / Acrylic / AcrylicThin / Matte /
+    /// Smoke / Frosted / Clear / Liquid / DarkGlass)。决定 DWM 背板配方 = AccentState(4 亚克力带噪点 /
+    /// 3 平滑模糊) + 是否叠加经典 blurbehind。空串 = 从没选过(渲染同「默认」= 历史亚克力背板);
+    /// AcrylicHelper.CustomMaterialKey("Custom") = 显式「自定义」。老配置没有该字段,反序列化后即
+    /// 空串,视觉效果与升级前完全一致 —— 「默认」配方就是照这套参数写的,选中它也是零变化。
+    /// 模糊/着色仍由上面四个字段决定。</summary>
     public string GlassMaterial { get; set; } = "";
     /// <summary>ponytail 2026-08-28: 新建分区/时钟/日历/便签默认开启液态玻璃。
     /// JSON 反序列化时旧数据里显式的 false 仍会覆盖此默认,已存在对象不受影响。</summary>

@@ -177,8 +177,9 @@ public class ZoneItem : INotifyPropertyChanged
         set => SetField(ref _glassColorMode, value);
     }
 
-    // ponytail 2026-09-26: 材质预设 key(见 AcrylicHelper.Materials);空串 = 自定义 =
-    // 历史亚克力背板,老配置反序列化后即空串,视觉零变化。
+    // ponytail 2026-09-26: 材质预设 key(见 AcrylicHelper.Materials);空串 = 从没选过
+    // (渲染同「默认」= 历史亚克力背板,老配置反序列化后即空串,视觉零变化);
+    // AcrylicHelper.CustomMaterialKey = 显式自定义。
     private string _glassMaterial = "";
     public string GlassMaterial
     {

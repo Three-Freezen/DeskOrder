@@ -25,9 +25,10 @@ public sealed record SubfolderFill(
     int GlassBlur = 18,     // 玻璃模糊半径(真玻璃用,同 AppearanceModel 默认)
     int GlassTintOpacity = 50,
     int GlassTintLuminosity = 100,
-    // ponytail 2026-09-26: 材质预设 key(见 AcrylicHelper.Materials)。空串 = 自定义 =
-    // 历史亚克力背板。浮层只取它的「背板 AccentState」——经典 blurbehind 在 Popup 上会
-    // 把背景压暗(见 TryApplyRealGlass 注释),所以浮层恒 skipClassicBlur。
+    // ponytail 2026-09-26: 材质预设 key(见 AcrylicHelper.Materials)。空串 = 从没选过
+    // (解析同「默认」= 历史亚克力背板);Custom = 显式自定义。浮层只取它的「背板 AccentState」
+    // ——经典 blurbehind 在 Popup 上会把背景压暗(见 TryApplyRealGlass 注释),所以浮层恒
+    // skipClassicBlur。
     string GlassMaterial = "")
 {
     public bool HasGlass => !string.IsNullOrEmpty(GlassMode);

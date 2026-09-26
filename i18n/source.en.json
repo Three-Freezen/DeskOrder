@@ -624,6 +624,7 @@
   "LiquidGlass.Material": "Material",
     "LiquidGlass.MaterialPreset": "Material Preset",
   "LiquidGlass.Mat.Custom": "Custom",
+  "LiquidGlass.Mat.Default": "Default",
   "LiquidGlass.Mat.Acrylic": "Acrylic",
   "LiquidGlass.Mat.AcrylicThin": "Acrylic Thin",
   "LiquidGlass.Mat.Matte": "Matte",

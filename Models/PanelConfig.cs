@@ -37,7 +37,7 @@ public class PanelConfig
     public int PanelGlassTintLuminosity { get; set; } = 100;
     public string PanelGlassColorMode { get; set; } = "Default";
     /// <summary>ponytail 2026-09-26: 面板材质预设 key(见 AcrylicHelper.Materials);
-    /// 空串 = 自定义 = 历史亚克力背板。</summary>
+    /// 空串 = 从没选过(渲染同「默认」= 历史亚克力背板);Custom = 显式自定义。</summary>
     public string PanelGlassMaterial { get; set; } = "";
     /// <summary>ponytail 2026-09-26(二期): 渲染方案快照 —— true = 壁纸采样自绘背板(false = 原 DWM)。
     /// 由「设置 → 外观」的全局开关写入(config 里是 AppConfig.UseWallpaperRenderer)。

@@ -56,7 +56,7 @@ public class AppConfig
     public int GlassTintLuminosity { get; set; } = 100;   // 0-150%
     public string GlassColorMode { get; set; } = "Default"; // color preset name
     /// <summary>ponytail 2026-09-26: 材质预设 key(历史遗留层,面板用 PanelGlassMaterial)。
-    /// 空串 = 自定义 = 历史亚克力背板。</summary>
+    /// 空串 = 从没选过(渲染同「默认」= 历史亚克力背板);见 AcrylicHelper.CustomMaterialKey。</summary>
     public string GlassMaterial { get; set; } = "";
 
     /// <summary>ponytail 2026-09-26(二期): 全局渲染方案开关 —— true = 新方案(壁纸采样自绘
