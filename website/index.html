@@ -298,7 +298,7 @@ html.lang-fading main{animation:langIn .22s ease}
   <section class="hero" id="top" data-od-id="hero">
     <div class="container">
       <div class="badges" data-anim="1">
-        <span class="badge badge-accent">v1.0.11</span>
+        <span class="badge badge-accent">v1.0.15</span>
         <span class="badge" data-i18n="badge_win">Windows 10+ x64</span>
         <span class="badge" data-i18n="badge_net">.NET 10 自包含</span>
         <span class="badge" data-i18n="badge_mit">MIT 开源</span>
@@ -338,6 +338,10 @@ html.lang-fading main{animation:langIn .22s ease}
         <figure class="shot reveal" data-od-id="shot-tiles">
           <img src="assets/tiles.webp" alt="磁贴模式：大图标加液态玻璃" loading="lazy">
           <figcaption><span class="shot-chip" data-i18n="shot_tiles_c">磁贴模式</span><span class="shot-d" data-i18n="shot_tiles_d">大图标加液态玻璃，常用应用双击直达</span></figcaption>
+        </figure>
+        <figure class="shot reveal" data-od-id="shot-glass">
+          <img src="assets/glass.webp" alt="液态玻璃材质预设：八种材质" loading="lazy">
+          <figcaption><span class="shot-chip" data-i18n="shot_glass_c">液态玻璃</span><span class="shot-d" data-i18n="shot_glass_d">八种材质预设，同一张壁纸采样出不同质感</span></figcaption>
         </figure>
         <figure class="shot reveal" data-od-id="shot-widgets">
           <img src="assets/widgets.webp" alt="时钟、日历、便签挂件" loading="lazy">
@@ -417,8 +421,13 @@ html.lang-fading main{animation:langIn .22s ease}
             <span class="chip" data-i18n="chip_border">边框</span><span class="chip" data-i18n="chip_fill">填充</span><span class="chip" data-i18n="chip_titlebar">标题栏</span><span class="chip" data-i18n="chip_material">材质</span><span class="chip" data-i18n="chip_bg">背景</span><span class="chip" data-i18n="chip_icons">图标</span><span class="chip" data-i18n="chip_content">内容</span><span class="chip" data-i18n="chip_layout">布局</span><span class="chip" data-i18n="chip_shape">形状</span><span class="chip" data-i18n="chip_motion">动效</span><span class="chip" data-i18n="chip_presets">预设</span>
           </div>
         </article>
-        <article class="feature-card reveal" data-od-id="why-file-links">
+        <article class="feature-card reveal" data-od-id="why-glass">
           <span class="num">03</span>
+          <h3 data-i18n="w_glass_t">丰富的液态玻璃</h3>
+          <p data-i18n="w_glass_d">八种材质预设一键套用；背板两种渲染方案随心切——DWM 方案由系统实时模糊窗口背后的画面，动态壁纸也跟着动；壁纸采样渲染按真实像素半径自行模糊，材质手感完整。</p>
+        </article>
+        <article class="feature-card reveal" data-od-id="why-file-links">
+          <span class="num">04</span>
           <h3 data-i18n="w3t">图标直连原文件</h3>
           <p data-i18n="w3d">图标只是文件路径的引用：不复制、不移动、不改名；删图标只是去掉引用，原文件还在原处。所有整理动作都不碰文件本体。</p>
         </article>
@@ -514,7 +523,15 @@ html.lang-fading main{animation:langIn .22s ease}
         <h2 data-i18n="sec_cl_t">更新日志</h2>
       </div>
       <div class="cl-card reveal" data-od-id="changelog-card">
-        <div class="cl-head"><span class="rm-ver">v1.0.14</span></div>
+        <div class="cl-head"><span class="rm-ver">v1.0.15</span></div>
+        <ul class="cl-list">
+          <li><b data-i18n="cl15_i1t"></b><span data-i18n="cl15_i1d"></span></li>
+          <li><b data-i18n="cl15_i2t"></b><span data-i18n="cl15_i2d"></span></li>
+          <li><b data-i18n="cl15_i3t"></b><span data-i18n="cl15_i3d"></span></li>
+          <li><b data-i18n="cl15_i4t"></b><span data-i18n="cl15_i4d"></span></li>
+          <li><b data-i18n="cl15_i5t"></b><span data-i18n="cl15_i5d"></span></li>
+        </ul>
+        <div class="cl-head cl-prev"><span class="rm-ver">v1.0.14</span></div>
         <ul class="cl-list">
           <li><b data-i18n="cl14_i1t"></b><span data-i18n="cl14_i1d"></span></li>
           <li><b data-i18n="cl14_i2t"></b><span data-i18n="cl14_i2d"></span></li>
@@ -530,10 +547,6 @@ html.lang-fading main{animation:langIn .22s ease}
         <ul class="cl-list">
           <li><b data-i18n="cl12_i1t"></b><span data-i18n="cl12_i1d"></span></li>
           <li><b data-i18n="cl12_i2t"></b><span data-i18n="cl12_i2d"></span></li>
-        </ul>
-        <div class="cl-head cl-prev"><span class="rm-ver">v1.0.11</span></div>
-        <ul class="cl-list">
-          <li><b data-i18n="cl11_i1t"></b><span data-i18n="cl11_i1d"></span></li>
         </ul>
         <div class="cl-foot">
           <a href="https://github.com/Three-Freezen/DeskOrder/releases" target="_blank" rel="noopener" data-od-id="cl-link" data-i18n="cl_link">完整更新记录见 Releases →</a>
@@ -601,13 +614,14 @@ zh:{
   hero_note:"Windows 10 及以上 · 自带运行时，无需安装 .NET",
   sec_preview_t:"效果预览",sec_preview_s:"全部为软件实际运行截图。",
   shot_zones_c:"分区",shot_zones_d:"子文件夹悬浮展开，不用点进文件夹翻",
+  shot_glass_c:"液态玻璃",shot_glass_d:"八种材质预设，同一张壁纸采样出不同质感",
   shot_tiles_c:"磁贴模式",shot_tiles_d:"大图标加液态玻璃，常用应用双击直达",
   shot_widgets_c:"桌面挂件",shot_widgets_d:"时钟、日历、便签",
   shot_panel_c:"快捷面板",shot_panel_d:"分区卡片、系统项目和搜索收在一处",
   shot_manager_c:"管理窗口",shot_manager_d:"分区、组件和设置集中管理",
   sec_features_t:"软件功能",sec_features_s:"从整理到美化，六大模块。",
   f1t:"桌面分区",f1d:"任意数量的透明悬浮分区，文件拖入即归类；网格或自由排列、吸附与自动重排，支持多显示器。",
-  f2t:"磁贴与美化",f2d:"分区一键变磁贴，液态玻璃与背景图随心调；整套样式存成预设卡，其他分区一键套用。",
+  f2t:"磁贴与美化",f2d:"分区一键变磁贴，八种液态玻璃材质与背景图随心调；整套样式存成预设卡，其他分区一键套用。",
   f3t:"桌面挂件",f3d:"时钟支持指针/数字与 12/24 小时制，日历待办到点托盘提醒，便签可绑定全局热键随时唤起。",
   f4t:"快捷面板",f4d:"全局热键呼出，分区卡片、文件搜索、新建文档与文件夹收在一处，弹出位置和动效可调。",
   f5t:"合并组",f5d:"多个分区组成一组统一管理，样式一起换。",
@@ -616,6 +630,7 @@ zh:{
   w1t:"整理和美化，二合一",w1d:"不用一边装整理工具、一边装美化工具，也不用来回同步两套配置。",
   w2t:"深度自定义，调一次就够",w2d:"从边框、填充到材质、动效，每个部分都能改；调满意的整套样式存成预设卡，一键套用到其他分区、面板、挂件。",
   chip_border:"边框",chip_fill:"填充",chip_titlebar:"标题栏",chip_material:"材质",chip_bg:"背景",chip_icons:"图标",chip_content:"内容",chip_layout:"布局",chip_shape:"形状",chip_motion:"动效",chip_presets:"预设",
+  w_glass_t:"丰富的液态玻璃",w_glass_d:"八种材质预设一键套用；背板两种渲染方案随心切——DWM 方案由系统实时模糊窗口背后的画面，动态壁纸也跟着动；壁纸采样渲染按真实像素半径自行模糊，材质手感完整。",
   w3t:"图标直连原文件",w3d:"图标只是文件路径的引用：不复制、不移动、不改名；删图标只是去掉引用，原文件还在原处。所有整理动作都不碰文件本体。",
   sec_tech_t:"技术架构",
   t_l1:"语言 / 运行时",t_v1:"C# · .NET 10（自包含）",t_l2:"界面框架",t_l3:"系统集成",t_l4:"配置存储",
@@ -637,6 +652,11 @@ zh:{
   sec_rm_t:"未来展望",rm_note:"计划中的功能，发布顺序可能调整。",
   rm_i1:"媒体播放显示组件",rm_i2:"分区列表模式支持",rm_i3:"性能优化",
   sec_cl_t:"更新日志",
+  cl15_i1t:"液态玻璃材质预设（8 种）：",cl15_i1d:"亚克力、烟雾、毛玻璃、液态玻璃、深色玻璃等一键套用整套背板配方，与颜色预设互不干扰；材质选择改为显式开关并新增「默认」。",
+  cl15_i2t:"壁纸采样渲染（新方案）：",cl15_i2d:"背板改为采样当前壁纸自行模糊，模糊半径变成真实像素、材质全部生效；自动适配 Wallpaper Engine 等动态壁纸软件，1:1 物理像素采样，换壁纸后点「重新采样」即可刷新。",
+  cl15_i3t:"标题栏改名修复：",cl15_i3d:"窗口标题栏里改名字即时生效并同步到设置界面；点别处、停手、关窗也会提交，不再出现界面新名字、配置旧名字。",
+  cl15_i4t:"便签固定位置打开：",cl15_i4d:"快捷键唤出便签可选按原位置打开，不再强制居中。",
+  cl15_i5t:"性能与细节：",cl15_i5d:"拖模糊滑块不再卡顿（大半径预模糊最快约 7 倍加速），修复多处内存泄漏，启动不再同步扫描桌面快捷方式；次级分区浮层与回收站细节优化。",
   cl14_i1t:"修复更新后安装包残留：",cl14_i1d:"安装器在新版首启时仍在运行并锁住安装包，删除失败且标记已被一次性消费。现在删除成功才消费标记，被占用时后台自动重试，下次启动也会再试。",
   cl14_i2t:"下载完成即登记待清理：",cl14_i2d:"原来只在点「重启并更新」时登记；现在下载完成即写入标记，下载后手动运行安装包装完同样会被自动清理。",
   cl13_i1t:"备注弹窗深浅色同步：",cl13_i1d:"日历备注弹窗的优先级下拉与提醒勾选框跟随系统深浅色（新增 Menu.CheckBox 样式）。",
@@ -645,7 +665,6 @@ zh:{
   cl13_i4t:"标题栏实时同步：",cl13_i4d:"分区与便签窗口重命名时标题栏即时更新。",
   cl12_i1t:"组合分区保留原有填充：",cl12_i1d:"组合分区并保留原有填充时，分区表面禁用液态玻璃效果，原有填充样式完整保留、显示正确。",
   cl12_i2t:"微软商店版就绪：",cl12_i2d:"商店渠道安装的版本由微软商店负责更新，应用内不再重复检查；GitHub 侧载 MSIX 的应用内更新不受影响。",
-  cl11_i1t:"日历便签编辑窗口深浅色跟随修复：",cl11_i1d:"便签编辑浮层换用与其他二级窗口一致的表面与配色，彻底跟随系统深浅色，不再残留固定配色。",
   cl_link:"完整更新记录见 Releases →",cl_req:"适用于 Windows 10 1809+ · 自包含运行时，无需安装 .NET",
   sec_au_t:"关于作者",au_d:"DeskOrder 的开发者，项目以 MIT 协议开源。",au_license:"MIT License",
   ft_line:"MIT 开源 · 配置仅存本地",ft_releases:"Releases",ft_license:"LICENSE",
@@ -661,13 +680,14 @@ en:{
   hero_note:"Windows 10 or later · Self-contained runtime, no .NET needed",
   sec_preview_t:"Screenshots",sec_preview_s:"All captured from the actual app.",
   shot_zones_c:"Zones",shot_zones_d:"Subfolder flyout — peek inside without opening it",
+  shot_glass_c:"Liquid glass",shot_glass_d:"Eight material presets, one sampled wallpaper",
   shot_tiles_c:"Tile mode",shot_tiles_d:"Large custom icons with liquid glass; double-click to launch",
   shot_widgets_c:"Widgets",shot_widgets_d:"Clock, calendar and sticky notes",
   shot_panel_c:"Quick panel",shot_panel_d:"Zone cards, system locations and search in one place",
   shot_manager_c:"Manager",shot_manager_d:"Zones, widgets and settings in one place",
   sec_features_t:"Features",sec_features_s:"Six modules, from organizing to beautifying.",
   f1t:"Desktop zones",f1d:"Any number of transparent floating zones — drop files in to organize them; grid or free layout, snap and auto-arrange, multi-monitor.",
-  f2t:"Tiles & styling",f2d:"Turn a zone into one big tile; tune liquid glass and background images, then save the whole look as a preset card for other zones.",
+  f2t:"Tiles & styling",f2d:"Turn a zone into one big tile; tune eight liquid glass materials and background images, then save the whole look as a preset card for other zones.",
   f3t:"Widgets",f3d:"Analog or digital clock with 12/24-hour modes; calendar reminders via tray notifications; sticky notes with global hotkeys.",
   f4t:"Quick panel",f4d:"Summon with a global hotkey: zone cards, file search and new document/folder in one place; popup position and motion configurable.",
   f5t:"Merged groups",f5d:"Combine zones into a group and restyle them together.",
@@ -676,6 +696,7 @@ en:{
   w1t:"Two tools in one",w1d:"No second tool to install, no two configs to keep in sync.",
   w2t:"Set it once, reuse everywhere",w2d:"Every part is tunable. Save the whole look as a preset card and apply it to other zones, panels and widgets with one click.",
   chip_border:"Border",chip_fill:"Fill",chip_titlebar:"Title bar",chip_material:"Material",chip_bg:"Background",chip_icons:"Icons",chip_content:"Content",chip_layout:"Layout",chip_shape:"Shape",chip_motion:"Motion",chip_presets:"Presets",
+  w_glass_t:"Rich liquid glass",w_glass_d:"Eight material presets in one click, plus two switchable backdrop renderers — DWM mode lets the system blur whatever is behind the window in real time, dynamic wallpapers included, while wallpaper sampling blurs the wallpaper itself at a real pixel radius for the full material feel.",
   w3t:"Icons link to real files",w3d:"An icon is only a reference to the file path — nothing is copied or moved. Removing an icon removes only the reference; organizing never touches the files.",
   sec_tech_t:"Architecture",
   t_l1:"Language / runtime",t_v1:"C# · .NET 10 (self-contained)",t_l2:"UI framework",t_l3:"System integration",t_l4:"Config storage",
@@ -697,6 +718,11 @@ en:{
   sec_rm_t:"What's next",rm_note:"Planned features; shipping order may change.",
   rm_i1:"Media playback display widget",rm_i2:"List mode for zones",rm_i3:"Performance improvements",
   sec_cl_t:"Changelog",
+  cl15_i1t:"Liquid glass material presets (8): ",cl15_i1d:"Acrylic, Smoke, Frosted, Liquid Glass, Dark Glass and more apply a whole backdrop recipe in one click, independent of color presets; picking a material is now an explicit toggle with a new \"Default\" entry.",
+  cl15_i2t:"Wallpaper sampling rendering (new): ",cl15_i2d:"the backdrop is sampled from the current wallpaper and blurred in-app — the blur radius becomes real pixels and material presets take full effect; auto-adapts to Wallpaper Engine and other dynamic-wallpaper apps at native 1:1 pixels, with a Resample button for wallpaper changes.",
+  cl15_i3t:"Title-bar rename fixed: ",cl15_i3d:"renames in window title bars apply instantly and sync across the management UI; clicking elsewhere, pausing or closing the window commits too — no more new name on screen, old name in the config.",
+  cl15_i4t:"Sticky notes open in place: ",cl15_i4d:"hotkey-summoned notes can reopen at their last position instead of being forced to screen center.",
+  cl15_i5t:"Performance & polish: ",cl15_i5d:"dragging the blur slider no longer stutters (large-radius pre-blur up to ~7× faster), several memory leaks fixed, and startup no longer scans desktop shortcuts; subfolder flyout and recycle-bin refinements.",
   cl14_i1t:"Leftover installer after updates — fixed: ",cl14_i1d:"the setup launcher is still running when the new version first starts, holding a lock on the downloaded installer, so the delete failed after the marker had already been consumed. The marker is now consumed only after a successful delete, with automatic background retries and another attempt on the next launch.",
   cl14_i2t:"Registered as soon as the download completes: ",cl14_i2d:"the cleanup marker is now written right after downloading (previously only when clicking Restart & Update), so manually running the downloaded installer is also cleaned up after the update.",
   cl13_i1t:"Note dialog follows light/dark: ",cl13_i1d:"the priority dropdown and reminder checkbox in the calendar note popup now track the system theme (new Menu.CheckBox style).",
@@ -705,7 +731,6 @@ en:{
   cl13_i4t:"Live title bar sync: ",cl13_i4d:"zone and sticky note windows update their title bar instantly on rename.",
   cl12_i1t:"Combining zones keeps the original fill: ",cl12_i1d:"when merging zones while keeping the original fill, the merged surface disables liquid glass so the preserved fill renders correctly.",
   cl12_i2t:"Microsoft Store ready: ",cl12_i2d:"Store-installed copies are updated by the Microsoft Store — the in-app checker no longer runs for them; GitHub-sideloaded MSIX keeps in-app updates.",
-  cl11_i1t:"Calendar & note editor follows light/dark: ",cl11_i1d:"the note edit overlay now uses the same window surface as other dialogs, fully tracking the system theme with no fixed colors left.",
   cl_link:"Full history in Releases →",cl_req:"For Windows 10 1809+ · self-contained runtime, no .NET needed",
   sec_au_t:"About",au_d:"Developer of DeskOrder. The project is open source under the MIT license.",au_license:"MIT License",
   ft_line:"MIT open source · config stays local",ft_releases:"Releases",ft_license:"LICENSE",
