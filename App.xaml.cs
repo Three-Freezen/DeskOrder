@@ -95,22 +95,44 @@ public partial class App : System.Windows.Application
         catch { }
     }
 
+    // ── Startup trace ──
+    // ponytail 2026-10-01: 启动分步打点。商店审核机(10.1.2.10 两轮)启动即崩且拿不到
+    // 托管堆栈——本方法每完成一个启动里程碑就追加一行到 startup-trace.log 并立即落盘,
+    // 下次再崩,日志最后一行就是死亡边界(为空 = 死在托管 Main 之前,即 CLR/宿主层)。
+    internal static void StartupTrace(string step)
+    {
+        try
+        {
+            var dir = Services.DataLocator.LogsRoot;
+            System.IO.Directory.CreateDirectory(dir);
+            System.IO.File.AppendAllText(
+                System.IO.Path.Combine(dir, "startup-trace.log"),
+                $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] {step}\r\n");
+        }
+        catch { }
+    }
+
     private void Application_Startup(object sender, StartupEventArgs e)
     {
+        StartupTrace($"01 process-start ver={AppVersion.Current} packaged={Services.DataLocator.IsPackaged} portable={Services.DataLocator.IsPortable} os={Environment.OSVersion.Version} cmd={string.Join(' ', e.Args)}");
+
         // ponytail 2026-09-26: 全局未处理异常落盘,必须先于一切可能抛点的初始化。
         // 商店审核在 Surface 触屏机遇到"启动即崩、无错误消息"(Event 1000:
         // coreclr.dll 0xc0000409 fail-fast,没有 .NET Runtime 托管堆栈)——后台线程
         // 的未处理异常不走 DispatcherUnhandledException,在 .NET(Core) 上直接
         // fail-fast,这里是唯一能留下证据的地方。写日志自身包 try,崩溃路径绝不二次抛。
         RegisterGlobalCrashLogging();
+        StartupTrace("02 crash-logging registered");
 
         // ponytail 2026-08-29: 数据落点定位必须先于一切 DataLocator.Root 消费者
         // (Trace 监听器 / ConfigService / LocalizationService):建根目录 + 便携模式
         // 首启接管 AppData 既有数据。
         Services.DataLocator.Initialize();
+        StartupTrace("03 data-locator initialized");
         // ponytail 2026-08-30: 勾选"更新完成后自动删除安装包"时,新版首启在此消费
         // 待清理标记删掉下载文件夹里的安装包(必须先于更新检查,避免旧标记被新周期覆盖)。
         Services.UpdateService.ConsumePendingSetupCleanup();
+        StartupTrace("04 pending-cleanup consumed");
 #if DEBUG
         // ponytail 2026-08-26: fresh diagnostics log per run (ghost-ring regression trace).
         Helpers.DzTrace.Reset();
@@ -165,6 +187,7 @@ public partial class App : System.Windows.Application
         }
 
         StartActivationListener();
+        StartupTrace("05 single-instance acquired");
 
         // Global crash guard — show error instead of crashing silently
         DispatcherUnhandledException += (s, args) =>
@@ -193,6 +216,7 @@ public partial class App : System.Windows.Application
         // ConfigService.Load() 内部已把它写进每个对象的 UseWallpaperRenderer 快照,这里再
         // 决定壁纸来源是否允许做第三方检测/抓屏(关掉开关时不该有任何采样开销)。
         Helpers.WallpaperSource.Enabled = _configService.Load().UseWallpaperRenderer;
+        StartupTrace("06 config loaded");
         // ponytail 2026-08-28: 预设从 exe 旁旧目录迁到 AppData（Velopack 更新会替换
         // 整个应用目录，BaseDirectory 里的预设会被冲掉；幂等，详见 PresetService）。
         PresetService.MigrateFromBaseDirectory();
@@ -229,13 +253,16 @@ public partial class App : System.Windows.Application
             Width = 0, Height = 0,
             WindowStyle = WindowStyle.None,
             ShowInTaskbar = false,
-            AllowsTransparency = true,
+            // ponytail 2026-10-01: 不再用 AllowsTransparency(分层窗口)。这个窗口只是
+            // 热键 WndProc 的宿主,0x0 且立即隐藏,不需要透明;分层窗口在部分核显驱动
+            // 上是 WPF 渲染线程致命错误的已知雷区(商店审核机 10.1.2.10 崩溃疑似)。
             Background = System.Windows.Media.Brushes.Transparent,
             Left = -100, Top = -100,
             Icon = appIcon
         };
         MainWindow.Show();
         MainWindow.Hide();
+        StartupTrace("07 hidden main window created (non-layered)");
 
         // Hook WndProc for hotkey messages
         _mainHwnd = new WindowInteropHelper(MainWindow).Handle;
@@ -243,11 +270,13 @@ public partial class App : System.Windows.Application
         source?.AddHook(HotkeyWndProc);
 
         CreateTrayIcon();
+        StartupTrace("08 tray icon created");
 
         // Listen to language changes
         _loc.LanguageChanged += _ => UpdateTrayTooltip();
 
         _zoneManager.Initialize();
+        StartupTrace("09 zone manager initialized");
 
         // 自动整理：注入 ZoneManager + 启动时挂载已启用分区；之后跟随 ZonesChanged
         // 自动同步 watcher 集合（规则/监听路径/启停即时生效，删除分区自动卸载）。
@@ -324,6 +353,7 @@ public partial class App : System.Windows.Application
             _reminderService.CheckMissedReminders();
             _reminderService.Start();
         }
+        StartupTrace("10 startup complete");
 
         // ponytail 2026-08-28: 后台更新检查（24h 节流，设置里可关）。延迟到空闲优先级，
         // 不占启动路径；发现新版本只发托盘气泡，不自动下载（交互定为「提示后更新」）。
