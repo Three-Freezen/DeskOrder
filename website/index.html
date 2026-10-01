@@ -298,7 +298,7 @@ html.lang-fading main{animation:langIn .22s ease}
   <section class="hero" id="top" data-od-id="hero">
     <div class="container">
       <div class="badges" data-anim="1">
-        <span class="badge badge-accent">v1.0.16</span>
+        <span class="badge badge-accent">v1.0.17</span>
         <span class="badge" data-i18n="badge_win">Windows 10+ x64</span>
         <span class="badge" data-i18n="badge_net">.NET 10 自包含</span>
         <span class="badge" data-i18n="badge_mit">MIT 开源</span>
@@ -523,7 +523,12 @@ html.lang-fading main{animation:langIn .22s ease}
         <h2 data-i18n="sec_cl_t">更新日志</h2>
       </div>
       <div class="cl-card reveal" data-od-id="changelog-card">
-        <div class="cl-head"><span class="rm-ver">v1.0.16</span></div>
+        <div class="cl-head"><span class="rm-ver">v1.0.17</span></div>
+        <ul class="cl-list">
+          <li><b data-i18n="cl17_i1t"></b><span data-i18n="cl17_i1d"></span></li>
+          <li><b data-i18n="cl17_i2t"></b><span data-i18n="cl17_i2d"></span></li>
+        </ul>
+        <div class="cl-head cl-prev"><span class="rm-ver">v1.0.16</span></div>
         <ul class="cl-list">
           <li><b data-i18n="cl16_i1t"></b><span data-i18n="cl16_i1d"></span></li>
           <li><b data-i18n="cl16_i2t"></b><span data-i18n="cl16_i2d"></span></li>
@@ -540,13 +545,6 @@ html.lang-fading main{animation:langIn .22s ease}
         <ul class="cl-list">
           <li><b data-i18n="cl14_i1t"></b><span data-i18n="cl14_i1d"></span></li>
           <li><b data-i18n="cl14_i2t"></b><span data-i18n="cl14_i2d"></span></li>
-        </ul>
-        <div class="cl-head cl-prev"><span class="rm-ver">v1.0.13</span></div>
-        <ul class="cl-list">
-          <li><b data-i18n="cl13_i1t"></b><span data-i18n="cl13_i1d"></span></li>
-          <li><b data-i18n="cl13_i2t"></b><span data-i18n="cl13_i2d"></span></li>
-          <li><b data-i18n="cl13_i3t"></b><span data-i18n="cl13_i3d"></span></li>
-          <li><b data-i18n="cl13_i4t"></b><span data-i18n="cl13_i4d"></span></li>
         </ul>
         <div class="cl-foot">
           <a href="https://github.com/Three-Freezen/DeskOrder/releases" target="_blank" rel="noopener" data-od-id="cl-link" data-i18n="cl_link">完整更新记录见 Releases →</a>
@@ -654,6 +652,8 @@ zh:{
   sec_cl_t:"更新日志",
   cl16_i1t:"触屏设备启动崩溃修复：",cl16_i1d:"修复微软商店审核在 Surface 等触屏设备上发现的启动即崩溃问题。本应用不使用墨迹与触控笔势，现已跳过 WPF 笔/触控栈初始化，触屏点按仍作为普通鼠标输入工作。",
   cl16_i2t:"崩溃日志落盘：",cl16_i2d:"应用未处理异常（含后台线程）现在会写入 logs 目录的 crash-*.log，含版本、运行形态、异常链与堆栈，出问题不再无声无息。",
+  cl17_i1t:"启动稳定性加固：",cl17_i1d:"自包含运行时升级至 .NET 10.0.12（含四轮服务修复）；启动用隐藏窗口不再创建为分层透明窗口，绕开部分核显驱动上的渲染线程雷区。",
+  cl17_i2t:"启动分步追踪：",cl17_i2d:"启动 10 个里程碑逐步落盘 startup-trace.log，若再出现启动问题，日志最后一行即死亡边界。",
   cl15_i1t:"液态玻璃材质预设（8 种）：",cl15_i1d:"亚克力、烟雾、毛玻璃、液态玻璃、深色玻璃等一键套用整套背板配方，与颜色预设互不干扰；材质选择改为显式开关并新增「默认」。",
   cl15_i2t:"壁纸采样渲染（新方案）：",cl15_i2d:"背板改为采样当前壁纸自行模糊，模糊半径变成真实像素、材质全部生效；自动适配 Wallpaper Engine 等动态壁纸软件，1:1 物理像素采样，换壁纸后点「重新采样」即可刷新。",
   cl15_i3t:"标题栏改名修复：",cl15_i3d:"窗口标题栏里改名字即时生效并同步到设置界面；点别处、停手、关窗也会提交，不再出现界面新名字、配置旧名字。",
@@ -720,6 +720,8 @@ en:{
   sec_cl_t:"Changelog",
   cl16_i1t:"Touch-device launch crash fixed: ",cl16_i1d:"fixes the launch crash that Microsoft Store certification found on touch devices such as the Surface family. The app never uses ink or stylus gestures and now skips WPF's stylus/touch stack initialization entirely; touch taps still work as plain mouse input.",
   cl16_i2t:"Crash logs on disk: ",cl16_i2d:"unhandled exceptions (including background threads) are now written to crash-*.log in the logs folder, with version, run mode, exception chain and stack traces — no more silent deaths.",
+  cl17_i1t:"Launch stability hardening: ",cl17_i1d:"the self-contained runtime upgrades to .NET 10.0.12 (four servicing rounds of fixes); the startup helper window is no longer a layered transparent window, sidestepping a render-thread danger zone on some integrated-GPU drivers.",
+  cl17_i2t:"Step-by-step startup trace: ",cl17_i2d:"ten startup milestones are appended to startup-trace.log and flushed at every step — if a launch issue ever reappears, the last log line marks the exact death boundary.",
   cl15_i1t:"Liquid glass material presets (8): ",cl15_i1d:"Acrylic, Smoke, Frosted, Liquid Glass, Dark Glass and more apply a whole backdrop recipe in one click, independent of color presets; picking a material is now an explicit toggle with a new \"Default\" entry.",
   cl15_i2t:"Wallpaper sampling rendering (new): ",cl15_i2d:"the backdrop is sampled from the current wallpaper and blurred in-app — the blur radius becomes real pixels and material presets take full effect; auto-adapts to Wallpaper Engine and other dynamic-wallpaper apps at native 1:1 pixels, with a Resample button for wallpaper changes.",
   cl15_i3t:"Title-bar rename fixed: ",cl15_i3d:"renames in window title bars apply instantly and sync across the management UI; clicking elsewhere, pausing or closing the window commits too — no more new name on screen, old name in the config.",
