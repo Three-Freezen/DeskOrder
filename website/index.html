@@ -298,7 +298,7 @@ html.lang-fading main{animation:langIn .22s ease}
   <section class="hero" id="top" data-od-id="hero">
     <div class="container">
       <div class="badges" data-anim="1">
-        <span class="badge badge-accent">v1.0.17</span>
+        <span class="badge badge-accent">v1.0.18</span>
         <span class="badge" data-i18n="badge_win">Windows 10+ x64</span>
         <span class="badge" data-i18n="badge_net">.NET 10 自包含</span>
         <span class="badge" data-i18n="badge_mit">MIT 开源</span>
@@ -509,8 +509,7 @@ html.lang-fading main{animation:langIn .22s ease}
       <div class="cl-card reveal" data-od-id="future-card">
         <ul class="cl-list">
           <li data-i18n="rm_i1">媒体播放显示组件</li>
-          <li data-i18n="rm_i2">分区列表模式支持</li>
-          <li data-i18n="rm_i3">性能优化</li>
+          <li data-i18n="rm_i2">性能优化</li>
         </ul>
       </div>
     </div>
@@ -523,7 +522,15 @@ html.lang-fading main{animation:langIn .22s ease}
         <h2 data-i18n="sec_cl_t">更新日志</h2>
       </div>
       <div class="cl-card reveal" data-od-id="changelog-card">
-        <div class="cl-head"><span class="rm-ver">v1.0.17</span></div>
+        <div class="cl-head"><span class="rm-ver">v1.0.18</span></div>
+        <ul class="cl-list">
+          <li><b data-i18n="cl18_i1t"></b><span data-i18n="cl18_i1d"></span></li>
+          <li><b data-i18n="cl18_i2t"></b><span data-i18n="cl18_i2d"></span></li>
+          <li><b data-i18n="cl18_i3t"></b><span data-i18n="cl18_i3d"></span></li>
+          <li><b data-i18n="cl18_i4t"></b><span data-i18n="cl18_i4d"></span></li>
+          <li><b data-i18n="cl18_i5t"></b><span data-i18n="cl18_i5d"></span></li>
+        </ul>
+        <div class="cl-head cl-prev"><span class="rm-ver">v1.0.17</span></div>
         <ul class="cl-list">
           <li><b data-i18n="cl17_i1t"></b><span data-i18n="cl17_i1d"></span></li>
           <li><b data-i18n="cl17_i2t"></b><span data-i18n="cl17_i2d"></span></li>
@@ -648,8 +655,13 @@ zh:{
   dl_releases:"手动下载请到 Releases 页面 →",
   dl_upgrade:"升级：打开「设置 → 检查更新」，下载完成后自动重启安装，配置不会丢。",
   sec_rm_t:"未来展望",rm_note:"计划中的功能，发布顺序可能调整。",
-  rm_i1:"媒体播放显示组件",rm_i2:"分区列表模式支持",rm_i3:"性能优化",
+  rm_i1:"媒体播放显示组件",rm_i2:"性能优化",
   sec_cl_t:"更新日志",
+  cl18_i1t:"分区列表模式：",cl18_i1d:"分区标题栏新增 ▦/≡ 视图切换。列表模式一行一个「图标 + 名称」、可滚动，顺序与网格的阅读顺序一致；切换不移动任何图标，状态随分区保存。",
+  cl18_i2t:"小按钮高光统一：",cl18_i2d:"分区、时钟、日历、便签、面板右上角的小按钮改为「平时无底盘、悬停一层圆角高光」，字色不随悬停变化；按钮透明度改为逐个按钮生效，不再整排压暗。",
+  cl18_i3t:"次级分区浮层定位修复：",cl18_i3d:"分区与面板的列表模式下点开次级分区，浮层不再跑到屏幕角落或整行最右侧，改为紧贴被点的图标弹出；面板的 2×2 图标底边框也不再被裁。",
+  cl18_i4t:"样式设置与滑块修复：",cl18_i4d:"修好「标题栏下面的设置都不能调」（预览钩子被清空）、标题栏透明度改为整体淡出、所有滑块只显示整数；配置里被写坏的非法颜色载入时自动修正。",
+  cl18_i5t:"面板与日历打磨：",cl18_i5d:"面板列表视图的悬停/选中高光铺满整行、行距与分区统一，次级分区图标与分区同源；日历去掉「今天」按钮，首行高度压到原来的 2/3。",
   cl16_i1t:"触屏设备启动崩溃修复：",cl16_i1d:"修复微软商店审核在 Surface 等触屏设备上发现的启动即崩溃问题。本应用不使用墨迹与触控笔势，现已跳过 WPF 笔/触控栈初始化，触屏点按仍作为普通鼠标输入工作。",
   cl16_i2t:"崩溃日志落盘：",cl16_i2d:"应用未处理异常（含后台线程）现在会写入 logs 目录的 crash-*.log，含版本、运行形态、异常链与堆栈，出问题不再无声无息。",
   cl17_i1t:"启动稳定性加固：",cl17_i1d:"自包含运行时升级至 .NET 10.0.12（含四轮服务修复）；启动用隐藏窗口不再创建为分层透明窗口，绕开部分核显驱动上的渲染线程雷区。",
@@ -716,8 +728,13 @@ en:{
   dl_releases:"Grab them manually from the Releases page →",
   dl_upgrade:"Updating: open Settings → Check for updates. The app downloads, installs and restarts automatically — your configuration is preserved.",
   sec_rm_t:"What's next",rm_note:"Planned features; shipping order may change.",
-  rm_i1:"Media playback display widget",rm_i2:"List mode for zones",rm_i3:"Performance improvements",
+  rm_i1:"Media playback display widget",rm_i2:"Performance improvements",
   sec_cl_t:"Changelog",
+  cl18_i1t:"List mode for zones: ",cl18_i1d:"a ▦/≡ switch in the zone title bar. List mode shows one icon + name per row, scrollable, in the same order you read the grid; switching never moves an icon, and the mode is stored per zone.",
+  cl18_i2t:"Small buttons unified: ",cl18_i2d:"the buttons in zone, clock, calendar, sticky-note and panel title bars now share one recipe — no idle square, a single rounded hover highlight, and text color that never changes on hover. Button opacity applies per button instead of dimming the whole row.",
+  cl18_i3t:"Subfolder flyout placement fixed: ",cl18_i3d:"in list mode the flyout no longer jumps to a screen corner or to the far right of a full-width row — it opens right next to the icon you clicked. The panel's 2×2 icon frame is no longer clipped at the bottom.",
+  cl18_i4t:"Style settings and sliders fixed: ",cl18_i4d:"settings under the title bar respond again (the live-preview hooks were being cleared), title-bar opacity now fades the whole bar, every slider shows whole numbers only, and invalid colors written by older builds are repaired on load.",
+  cl18_i5t:"Panel and calendar polish: ",cl18_i5d:"panel list highlights span the full row with row spacing matching zones, secondary-zone icons share the same control as zones, and the calendar drops its Today button with the top row at two-thirds height.",
   cl16_i1t:"Touch-device launch crash fixed: ",cl16_i1d:"fixes the launch crash that Microsoft Store certification found on touch devices such as the Surface family. The app never uses ink or stylus gestures and now skips WPF's stylus/touch stack initialization entirely; touch taps still work as plain mouse input.",
   cl16_i2t:"Crash logs on disk: ",cl16_i2d:"unhandled exceptions (including background threads) are now written to crash-*.log in the logs folder, with version, run mode, exception chain and stack traces — no more silent deaths.",
   cl17_i1t:"Launch stability hardening: ",cl17_i1d:"the self-contained runtime upgrades to .NET 10.0.12 (four servicing rounds of fixes); the startup helper window is no longer a layered transparent window, sidestepping a render-thread danger zone on some integrated-GPU drivers.",
