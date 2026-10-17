@@ -236,10 +236,11 @@ dotnet publish DesktopZones.csproj -c Release -r win-x64 --self-contained
 
 打包安装器和便携版用 `tools/pack.ps1`（需要先装 [Inno Setup 6](https://jrsoftware.org/isinfo.php)）。正式发布由 GitHub Actions 自动完成，产物上传到 Releases。
 
+发版用 `tools/release.ps1`：推送代码 → 打 `v<版本号>` 标签 → 等 Actions 构建完 → 用 `releases\notes-<版本号>.md`（中英双语）覆盖 Release 正文。先加 `-DryRun` 可以只做检查不推送。
+
 ## 未来展望
 
 - 添加媒体播放显示组件
-- 分区列表模式支持
 - 性能优化
 
 更新记录见 [Releases](https://github.com/Three-Freezen/DeskOrder/releases)。
