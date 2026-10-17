@@ -2,6 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:loc="clr-namespace:DesktopZones.Helpers"
+        xmlns:h="clr-namespace:DesktopZones.Helpers"
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
@@ -49,36 +50,32 @@
                            Opacity="0" IsHitTestVisible="False"/>
                 </Border>
                 <!-- Hide button overlaying top-right -->
+                <!-- ponytail: 小按钮统一口径 —— 平时无底盘方块(去掉了原来的 #10FFFFFF 方框),
+                     悬停铺一层 #30FFFFFF 高光(与便签按钮同色), 字色不随悬停变化。
+                     Style="{x:Null}" 是为了绕开 App 级隐式 Button 样式的主题灰底 + 边框。 -->
                 <Button x:Name="HideBtn" Content="─" Width="20" Height="20"
                         FontSize="10" Foreground="#40FFFFFF"
-                        Background="#10FFFFFF" BorderThickness="0"
+                        Background="Transparent" BorderThickness="0"
+                        Template="{x:Static h:HoverHighlight.RoundedButtonTemplate}" h:HoverHighlight.IsEnabled="True"
                         Cursor="Hand" Click="HideBtn_Click"
                         HorizontalAlignment="Right" VerticalAlignment="Top"
-                        Margin="0,4,6,0" Panel.ZIndex="1">
-                    <Button.Resources>
-                        <Style TargetType="Border">
-                            <Setter Property="CornerRadius" Value="4"/>
-                        </Style>
-                    </Button.Resources>
-                </Button>
+                        Margin="0,0,6,0" Panel.ZIndex="1"/>
                 <!-- Lock button (top-left, symmetric with HideBtn top-right) -->
                 <Button x:Name="LockBtn" Content="🔓" Width="20" Height="20"
                         FontSize="10" Foreground="#40FFFFFF"
-                        Background="#10FFFFFF" BorderThickness="0"
+                        Background="Transparent" BorderThickness="0"
+                        Template="{x:Static h:HoverHighlight.RoundedButtonTemplate}" h:HoverHighlight.IsEnabled="True"
                         Cursor="Hand" Click="LockBtn_Click"
                         HorizontalAlignment="Left" VerticalAlignment="Top"
-                        Margin="6,4,0,0" Panel.ZIndex="2">
-                    <Button.Resources>
-                        <Style TargetType="Border">
-                            <Setter Property="CornerRadius" Value="4"/>
-                        </Style>
-                    </Button.Resources>
-                </Button>
+                        Margin="6,0,0,0" Panel.ZIndex="2"/>
 
                 <Grid Margin="8">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
+                    <!-- ponytail: 原「今天」按钮行。按钮已移除(用户要求去掉那个方框),
+                         但保留约 2/3 的行距 —— 原来按钮实测高 24.7px, 24.7 × 2/3 ≈ 17。
+                         留空行而不是把整行删掉, 是为了不改变月份标题与日期格之间的呼吸感。 -->
+                    <RowDefinition Height="17"/>
                     <RowDefinition Height="Auto"/>
                     <!-- ponytail: fixed date row height (6 × 40px) so all months lay out
                          identically regardless of widget size. Old Auto let dates stretch
@@ -96,6 +93,7 @@
                     <Button x:Name="PrevMonthBtn" Content="&#x25C0;" Width="24" Height="24" FontSize="10"
                             Foreground="#AAFFFFFF" Background="Transparent"
                             BorderThickness="0" Cursor="Hand"
+                            Template="{x:Static h:HoverHighlight.RoundedButtonTemplate}" h:HoverHighlight.IsEnabled="True"
                             HorizontalAlignment="Left" Margin="14,0,0,0"
                             Click="PrevMonth_Click"/>
                     <TextBlock x:Name="MonthTitleText" Text="2026年6月"
@@ -106,17 +104,10 @@
                     <Button x:Name="NextMonthBtn" Content="&#x25B6;" Width="24" Height="24" FontSize="10"
                             Foreground="#AAFFFFFF" Background="Transparent"
                             BorderThickness="0" Cursor="Hand"
+                            Template="{x:Static h:HoverHighlight.RoundedButtonTemplate}" h:HoverHighlight.IsEnabled="True"
                             HorizontalAlignment="Right" Margin="0,0,14,0"
                             Click="NextMonth_Click"/>
                 </Grid>
-
-                <!-- Today button -->
-                <Button Grid.Row="1" x:Name="TodayBtn" Content="{loc:Loc Key=Calendar.Today}"
-                        FontSize="10" Foreground="#6C63FF" Background="Transparent"
-                        BorderBrush="#406C63FF" BorderThickness="1"
-                        Padding="8,3" Cursor="Hand"
-                        HorizontalAlignment="Center" Margin="0,0,0,4"
-                        Click="Today_Click"/>
 
                 <!-- Day-of-week headers -->
                 <UniformGrid Grid.Row="2" Columns="7" Margin="0,0,0,2">
@@ -233,7 +224,8 @@
                                        VerticalAlignment="Center"/>
                             <Button x:Name="AddNoteBtn" Content="+" Width="20" Height="20"
                                     FontSize="12" Foreground="#6C63FF"
-                                    Background="#20FFFFFF" BorderThickness="0"
+                                    Background="Transparent" BorderThickness="0"
+                                    Template="{x:Static h:HoverHighlight.RoundedButtonTemplate}" h:HoverHighlight.IsEnabled="True"
                                     Cursor="Hand" Margin="6,0,0,0"
                                     Click="AddNote_Click"/>
                         </StackPanel>

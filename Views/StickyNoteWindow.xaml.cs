@@ -20,8 +20,8 @@ namespace DesktopZones.Views;
 
 public partial class StickyNoteWindow : Window
 {
-    private static readonly SolidColorBrush PinHoverBrush     = Freeze(new(Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF)));
-    private static readonly SolidColorBrush LockHoverBrush    = Freeze(new(Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF)));
+    // ponytail: 悬停高光已收口到 Helpers/HoverHighlight.cs（全应用唯一配方 #30FFFFFF）。
+    // 原来的 PinHoverBrush / LockHoverBrush 与 PinBtn_Enter/Leave 等手工换色已删除。
     private static readonly SolidColorBrush FormatActiveBrush = Freeze(new(Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF)));
     static SolidColorBrush Freeze(SolidColorBrush b) { b.Freeze(); return b; }
 
@@ -1104,17 +1104,11 @@ public partial class StickyNoteWindow : Window
             if (FontSizeCombo != null)
                 FontSizeCombo.SetResourceReference(Control.ForegroundProperty, "Menu.Text.Primary");
 
-            // 按钮透明度 — 所有按钮 chrome 统一走 ControlOpacity。
-            var ctl = Math.Max(0.05, _note.ControlOpacity / 100.0);
-            if (SaveBtn != null) SaveBtn.Opacity = ctl;
-            if (PinBtn != null) PinBtn.Opacity = ctl;
-            if (HideBtn != null) HideBtn.Opacity = ctl;
-            if (LockBtn != null) LockBtn.Opacity = ctl;
-            if (BoldBtn != null) BoldBtn.Opacity = ctl;
-            if (ItalicBtn != null) ItalicBtn.Opacity = ctl;
-            if (UnderlineBtn != null) UnderlineBtn.Opacity = ctl;
-            if (RestoreIconChar != null) RestoreIconChar.Opacity = ctl;
-            if (RestoreIconPath != null) RestoreIconPath.Opacity = ctl;
+            // 按钮透明度 — 所有小按钮统一走 HoverHighlight 的那一个值（分区/组件/面板一致）。
+            HoverHighlight.ApplyControlOpacity(_note.ControlOpacity,
+                new UIElement[] { SaveBtn, PinBtn, HideBtn, LockBtn, BoldBtn, ItalicBtn, UnderlineBtn, FontColorBtn });
+            if (RestoreIconChar != null) RestoreIconChar.Opacity = HoverHighlight.ChromeOpacity;
+            if (RestoreIconPath != null) RestoreIconPath.Opacity = HoverHighlight.ChromeOpacity;
         }
         catch { }
     }
@@ -1406,37 +1400,6 @@ public partial class StickyNoteWindow : Window
         e.Handled = true;
     }
 
-    void PinBtn_Enter(object s, MouseEventArgs e)
-    {
-        PinBtn.Background = PinHoverBrush;
-        PinBtn.Foreground = Brushes.White;
-    }
-
-    void PinBtn_Leave(object s, MouseEventArgs e)
-    {
-        PinBtn.Background = Brushes.Transparent;
-        // ponytail: prefer cached button-color brush; pinned color wins when pinned
-        if (_vm.PinnedTop)
-            PinBtn.Foreground = new SolidColorBrush(Color.FromRgb(0x7C, 0x3A, 0xED));
-        else
-            PinBtn.Foreground = _buttonBrush
-                ?? new SolidColorBrush(Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF));
-    }
-
-    void SaveBtn_Enter(object s, MouseEventArgs e)
-    {
-        SaveBtn.Background = new SolidColorBrush(Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF));
-        SaveBtn.Foreground = Brushes.White;
-    }
-
-    void SaveBtn_Leave(object s, MouseEventArgs e)
-    {
-        SaveBtn.Background = Brushes.Transparent;
-        // ponytail: prefer cached button-color brush so hover→leave cycle doesn't clobber it
-        SaveBtn.Foreground = _buttonBrush
-            ?? new SolidColorBrush(Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF));
-    }
-
     void PinBtn_Click(object s, RoutedEventArgs e)
     {
         _vm.PinnedTop = !_vm.PinnedTop;
@@ -1475,20 +1438,6 @@ public partial class StickyNoteWindow : Window
         if (_vm.IsLocked == locked) return;
         _vm.IsLocked = locked;
         ApplyLockState();
-    }
-
-    void LockBtn_Enter(object s, MouseEventArgs e)
-    {
-        LockBtn.Background = LockHoverBrush;
-        LockBtn.Foreground = Brushes.White;
-    }
-
-    // ponytail: same button-color-cache pattern as SaveBtn_Leave / PinBtn_Leave — don't clobber button color
-    void LockBtn_Leave(object s, MouseEventArgs e)
-    {
-        LockBtn.Background = Brushes.Transparent;
-        LockBtn.Foreground = _buttonBrush
-            ?? new SolidColorBrush(Color.FromArgb(0x80, 0xFF, 0xFF, 0xFF));
     }
 
     void ApplyLockState()

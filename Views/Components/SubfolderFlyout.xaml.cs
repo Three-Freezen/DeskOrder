@@ -756,13 +756,20 @@ public partial class SubfolderFlyout : UserControl
         OpenStyleEditor();
     }
 
+    // ponytail: 悬停高光统一走 Helpers/HoverHighlight 那一个配方(#30FFFFFF)，离开时回到透明
+    // （原来是常驻 #30FFFFFF + 悬停 #55FFFFFF 两级，与分区/面板/组件不一致）。
+    // 不透明度也一并对齐统一值，浮层上的 ⚙ 不再比主界面亮一档。
     void StyleBtn_Enter(object sender, MouseEventArgs e)
     {
-        if (sender is Border b) b.Background = new SolidColorBrush(Color.FromArgb(0x55, 0xFF, 0xFF, 0xFF));
+        if (sender is not Border b) return;
+        b.Opacity = Helpers.HoverHighlight.ChromeOpacity;
+        b.Background = Helpers.HoverHighlight.Brush;
     }
     void StyleBtn_Leave(object sender, MouseEventArgs e)
     {
-        if (sender is Border b) b.Background = new SolidColorBrush(Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF));
+        if (sender is not Border b) return;
+        b.Opacity = Helpers.HoverHighlight.ChromeOpacity;
+        b.Background = Brushes.Transparent;
     }
 
     // ── Drop-in (delegated to ZoneWindow) ──

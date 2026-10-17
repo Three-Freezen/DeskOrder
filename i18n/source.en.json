@@ -153,6 +153,8 @@
   "Common.SwitchTheme": "Switch theme",
   "Common.SortByName": "⇅ Name",
   "Common.SortTooltip": "Sort",
+  "Common.GridView": "Grid view",
+  "Common.ListView": "List view",
   "Common.Notes": "Notes",
   "Common.Transparent": "Transparent",
 
@@ -448,7 +450,6 @@
   "Preset.DeleteMenuItem": "Delete",
   "Preset.OverwritePrompt": "Preset \"{0}\" already exists. Overwrite?",
 
-  "Calendar.Today": "Today",
   "Calendar.AddNote": "Add note",
   "Calendar.Delete": "Delete calendar",
   "Calendar.Priority": "Priority:",

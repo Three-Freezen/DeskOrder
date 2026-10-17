@@ -28,10 +28,12 @@ public partial class PanelWindow : Window
     const uint WM_NCLBUTTONDOWN = 0x00A1;
     const int HTTOPLEFT = 13, HTTOPRIGHT = 14, HTBOTTOMLEFT = 16, HTBOTTOMRIGHT = 17;
 
-    // ponytail: frozen hover brushes — same color on every mouse-over.
-    private static readonly SolidColorBrush CtrlHoverBrush = Freeze(new(Color.FromArgb(0x60, 0xFF, 0xFF, 0xFF)));
-    private static readonly SolidColorBrush CtrlIdleBrush  = Freeze(new(Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF)));
-    private static readonly SolidColorBrush ItemHoverBrush = Freeze(new(Color.FromArgb(0x10, 0xFF, 0xFF, 0xFF)));
+    // ponytail: 小按钮统一口径 —— 底盘方块只在「网格/列表」这一对切换按钮上保留
+    // （它是选中态标识，用户明确要求留着，色值 #20FFFFFF 见 ToggleIdleBrush）。
+    // 其余顶栏按钮平时透明，悬停统一铺 HoverHighlight.Brush(#30FFFFFF)。
+    private static readonly SolidColorBrush CtrlHoverBrush  = HoverHighlight.Brush;
+    private static readonly SolidColorBrush ToggleIdleBrush = Freeze(new(Color.FromArgb(0x20, 0xFF, 0xFF, 0xFF)));
+    private static readonly SolidColorBrush ItemHoverBrush  = Freeze(new(Color.FromArgb(0x10, 0xFF, 0xFF, 0xFF)));
     static SolidColorBrush Freeze(SolidColorBrush b) { b.Freeze(); return b; }
 
     private readonly ZoneManager _zoneManager;
@@ -187,17 +189,25 @@ public partial class PanelWindow : Window
     void GridToggle_Click(object s, MouseButtonEventArgs e)
     {
         _isGridView = true;
-        if (GridToggleBtn != null) GridToggleBtn.Background = new SolidColorBrush(Color.FromArgb(0x20, 0xFF, 0xFF, 0xFF));
-        if (ListToggleBtn != null) ListToggleBtn.Background = Brushes.Transparent;
+        ApplyViewToggleBackgrounds();
         RebuildDisplay();
     }
 
     void ListToggle_Click(object s, MouseButtonEventArgs e)
     {
         _isGridView = false;
-        if (ListToggleBtn != null) ListToggleBtn.Background = new SolidColorBrush(Color.FromArgb(0x20, 0xFF, 0xFF, 0xFF));
-        if (GridToggleBtn != null) GridToggleBtn.Background = Brushes.Transparent;
+        ApplyViewToggleBackgrounds();
         RebuildDisplay();
+    }
+
+    /// <summary>▦/≡ 选中态方块 —— 小按钮里唯一保留底盘的一对（用户明确要求）。
+    /// 悬停色与其它按钮共用 <see cref="CtrlHoverBrush"/>，见 <see cref="Ctrl_Leave"/>。</summary>
+    void ApplyViewToggleBackgrounds()
+    {
+        if (GridToggleBtn != null)
+            GridToggleBtn.Background = _isGridView ? ToggleIdleBrush : System.Windows.Media.Brushes.Transparent;
+        if (ListToggleBtn != null)
+            ListToggleBtn.Background = _isGridView ? System.Windows.Media.Brushes.Transparent : ToggleIdleBrush;
     }
 
     void SettingsBtn_Click(object s, MouseButtonEventArgs e)
@@ -227,6 +237,9 @@ public partial class PanelWindow : Window
         ApplyStyle();
         ApplyBackgroundImage();
         ApplyLoc();
+        // ▦/≡ 是唯一保留底盘方块的小按钮（选中态标识）；首帧也按当前视图落一次，
+        // 免得重建后悬停态/选中态残留上一次的底色。
+        ApplyViewToggleBackgrounds();
         RebuildDisplay();
         // Set rounded corners LAST after all sizing
         NativeMethods.SetRoundedCorners(this, _zoneManager.GetConfig().Panel.PanelCornerRadius);
@@ -420,13 +433,10 @@ public partial class PanelWindow : Window
         ApplyButtonGlyphForeground(SettingsBtn, topBarBrush);
         ApplyButtonGlyphForeground(HideBtn, topBarBrush);
 
-        // 按钮透明度 — top-bar control chrome rides PanelControlOpacity, Zone-style.
-        var controlOpacity = Math.Max(0.05, config.Panel.PanelControlOpacity / 100.0);
-        if (GridToggleBtn != null) GridToggleBtn.Opacity = controlOpacity;
-        if (ListToggleBtn != null) ListToggleBtn.Opacity = controlOpacity;
-        if (ImportBtn != null) ImportBtn.Opacity = controlOpacity;
-        if (SettingsBtn != null) SettingsBtn.Opacity = controlOpacity;
-        if (HideBtn != null) HideBtn.Opacity = controlOpacity;
+        // 按钮透明度 — top-bar 小按钮统一走 HoverHighlight 的那一个值（与分区/组件同源）。
+        // 特别注意别对按钮再单独设 Opacity：那会和统一值相乘，又变回“面板比别处淡”。
+        HoverHighlight.ApplyControlOpacity(config.Panel.PanelControlOpacity,
+            new UIElement[] { GridToggleBtn, ListToggleBtn, ImportBtn, SettingsBtn, HideBtn });
     }
 
     /// <summary>Set the foreground of a top-bar glyph button (a <see cref="Border"/> whose
@@ -544,7 +554,8 @@ public partial class PanelWindow : Window
                 if (_isGridView)
                 {
                     // Grid view: wrap items in a WrapPanel
-                    var wrapPanel = new WrapPanel { Margin = new Thickness(4) };
+                    // 12 = 原来 ScrollViewer 的 8px 横向留白 + 这里的 4px，图标位置与旧版一致。
+                    var wrapPanel = new WrapPanel { Margin = new Thickness(12, 4, 12, 4) };
                     foreach (var zone in zonesToShow)
                     {
                         foreach (var item in zone.Items.ToList())
@@ -665,6 +676,7 @@ public partial class PanelWindow : Window
             var stack = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
             var iconImg = new Image
             {
+                Name = "ItemIcon",   // 次级分区浮层的锚点（见 FlyoutAnchorOf）
                 Width = 40, Height = 40, Stretch = Stretch.Uniform,
                 Source = ResolveItemIcon(item),
                 HorizontalAlignment = HorizontalAlignment.Center,
@@ -687,14 +699,15 @@ public partial class PanelWindow : Window
         }
         else
         {
-            // List view: icon + name horizontal
-            card.Margin = new Thickness(0, 2, 0, 2);
-            card.Padding = new Thickness(8, 4, 8, 4);
+            // 列表视图：行距 3+3（行高 26 + 6 = 32 的节距），比原来松一点。
+            card.Margin = new Thickness(3, 3, 3, 3);
+            card.Padding = new Thickness(8, 3, 8, 3);
             var grid = new Grid();
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             var iconImg = new Image
             {
+                Name = "ItemIcon",   // 次级分区浮层的锚点（见 FlyoutAnchorOf）
                 Width = 20, Height = 20, Stretch = Stretch.Uniform,
                 Source = ResolveItemIcon(item),
                 Margin = new Thickness(0, 0, 8, 0),
@@ -743,6 +756,7 @@ public partial class PanelWindow : Window
             card.Margin = new Thickness(4);
             var sv = new SubfolderItemView
             {
+                Name = "ItemIcon",   // 次级分区浮层的锚点（见 FlyoutAnchorOf）
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center
             };
@@ -751,15 +765,23 @@ public partial class PanelWindow : Window
         }
         else
         {
-            card.Margin = new Thickness(0, 2, 0, 2);
-            card.Padding = new Thickness(8, 4, 8, 4);
+            // 与普通图标行同一套外距/内边距（高光铺满整行，对齐分区列表）。
+            card.Margin = new Thickness(3, 3, 3, 3);
+            card.Padding = new Thickness(8, 3, 8, 3);
             var grid = new Grid();
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-            var box = BuildSubfolderPreview(item, 28, 12);
-            box.VerticalAlignment = VerticalAlignment.Center;
+            // 与面板列表视图共用同一个 2×2 预览控件（Views/Components/SubfolderPreview）。
+            var box = new SubfolderPreview
+            {
+                Name = "ItemIcon",   // 次级分区浮层的锚点（见 FlyoutAnchorOf）
+                Source = item,
+                BoxSize = 28,
+                ThumbSize = 12,
+                VerticalAlignment = VerticalAlignment.Center
+            };
             Grid.SetColumn(box, 0);
             grid.Children.Add(box);
 
@@ -800,47 +822,6 @@ public partial class PanelWindow : Window
         return _iconService.GetIcon(item.TargetPath, item.Type, item.IconPath);
     }
 
-    /// <summary>次级文件夹列表视图的小型 2×2 缩略图预览。</summary>
-    FrameworkElement BuildSubfolderPreview(ZoneItem sub, double boxSize, double thumbSize)
-    {
-        var box = new Border
-        {
-            Width = boxSize, Height = boxSize,
-            Background = Brushes.Transparent,
-            BorderBrush = new SolidColorBrush(Color.FromArgb(0x40, 0xFF, 0xFF, 0xFF)),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(5),
-            ClipToBounds = true
-        };
-        var grid = new UniformGrid { Rows = 2, Columns = 2, Margin = new Thickness(3) };
-        var inners = sub.SubItems.Take(4).ToList();
-        for (int i = 0; i < 4; i++)
-        {
-            var slot = new Border
-            {
-                Background = new SolidColorBrush(Color.FromArgb(0x14, 0xFF, 0xFF, 0xFF)),
-                CornerRadius = new CornerRadius(3),
-                Margin = new Thickness(1)
-            };
-            if (i < inners.Count)
-            {
-                var img = new Image
-                {
-                    Source = ResolveItemIcon(inners[i]),
-                    Width = thumbSize, Height = thumbSize,
-                    Stretch = Stretch.Uniform,
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    VerticalAlignment = VerticalAlignment.Center
-                };
-                RenderOptions.SetBitmapScalingMode(img, BitmapScalingMode.HighQuality);
-                slot.Child = img;
-            }
-            grid.Children.Add(slot);
-        }
-        box.Child = grid;
-        return box;
-    }
-
     /// <summary>给卡片包一层 Grid 并叠加选中高亮框(与分区 SelBox 同款视觉)。</summary>
     void AttachSelectionOverlay(Border card, FrameworkElement content, ZoneItem item, Zone zone)
     {
@@ -849,7 +830,12 @@ public partial class PanelWindow : Window
             Visibility = Visibility.Collapsed,
             IsHitTestVisible = false,
             Background = new SolidColorBrush(Color.FromArgb(0x26, 0xFF, 0xFF, 0xFF)),
-            CornerRadius = new CornerRadius(4)
+            CornerRadius = new CornerRadius(4),
+            // 选中高光要和悬停高光同尺寸：悬停是卡片自身 Background（含内边距），
+            // 这层是卡片的子元素（被内边距挤小）→ 用负外边距顶回卡片边界。
+            // 网格视图卡片没有内边距，负值为 0，行为不变。
+            Margin = new Thickness(-card.Padding.Left, -card.Padding.Top,
+                                   -card.Padding.Right, -card.Padding.Bottom)
         };
         var wrapper = new Grid();
         wrapper.Children.Add(content);
@@ -1334,7 +1320,9 @@ public partial class PanelWindow : Window
 
     void OpenFlyoutAnimated(Popup popup, SubfolderFlyout flyout, Border card)
     {
-        var (pos, c) = SubfolderFlyout.ComputePosAndAnchor(card, new Size(flyout.ActualWidth, flyout.ActualHeight));
+        // ponytail 2026-10: 锚点取「卡片里那颗图标」，不再用整张卡片 —— 列表视图的卡片是
+        // 整行宽，用它当锚点浮层会跑到最右侧（与分区不一致）。分区那边锚的就是图标元素。
+        var (pos, c) = SubfolderFlyout.ComputePosAndAnchor(FlyoutAnchorOf(card), new Size(flyout.ActualWidth, flyout.ActualHeight));
         popup.HorizontalOffset = pos.X;
         popup.VerticalOffset = pos.Y;
         flyout.SetAnchor(c);
@@ -1342,6 +1330,23 @@ public partial class PanelWindow : Window
         // ponytail 2026-08-29: 圆角偏好同步到 Popup HWND(与 ZoneWindow 打开路径一致)。
         flyout.ApplyCornerPref();
         flyout.AnimateOpen();
+    }
+
+    /// <summary>浮层锚点：卡片里那颗图标（网格 = 40px Image / 2×2 预览，列表 = 20px Image /
+    /// 28px 2×2 预览）。找不到就退回整张卡片。</summary>
+    static FrameworkElement FlyoutAnchorOf(Border card)
+        => FindDescendant(card, fe => fe.Name == "ItemIcon") ?? card;
+
+    static FrameworkElement? FindDescendant(DependencyObject root, Func<FrameworkElement, bool> match)
+    {
+        int n = VisualTreeHelper.GetChildrenCount(root);
+        for (int i = 0; i < n; i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is FrameworkElement fe && match(fe)) return fe;
+            if (FindDescendant(child, match) is { } found) return found;
+        }
+        return null;
     }
 
     void CloseSubfolderFlyout()
@@ -2345,7 +2350,11 @@ public partial class PanelWindow : Window
 
     void Ctrl_Leave(object s, MouseEventArgs e)
     {
-        if (s is Border b) b.Background = CtrlIdleBrush;
+        if (s is not Border b) return;
+        // ▦/≡ 这对切换按钮平时要留着「选中」那个方块，其余按钮回到全透明。
+        if (b == GridToggleBtn) b.Background = _isGridView ? ToggleIdleBrush : System.Windows.Media.Brushes.Transparent;
+        else if (b == ListToggleBtn) b.Background = _isGridView ? System.Windows.Media.Brushes.Transparent : ToggleIdleBrush;
+        else b.Background = System.Windows.Media.Brushes.Transparent;
     }
 
     protected override void OnClosing(CancelEventArgs e)

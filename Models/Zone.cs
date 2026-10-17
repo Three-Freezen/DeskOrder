@@ -21,6 +21,17 @@ public class Zone : AppearanceModel
     public int GridSize { get; set; } = 65;
     public bool SnapToGrid { get; set; } = true;
     public string TitleBarFillColor { get; set; } = "#10FFFFFF"; // title bar background
+    /// <summary>
+    /// 标题栏整体不透明度（%），作用在 <c>TitleBarBg.Opacity</c> 上 —— 与
+    /// <see cref="ControlOpacity"/>（按钮透明度）同一套语义：0 = 标题栏整条淡出，
+    /// 而不是把透明度揉进 <see cref="TitleBarFillColor"/> 的 alpha。
+    /// </summary>
+    /// <remarks>
+    /// ponytail 2026-10: 之前 Zone 没有这个字段，属性面板那行「标题栏透明度」只能去改
+    /// TitleBarFillColor 的 alpha，于是「调到 0」只是填充色变透明、整条标题栏还在，
+    /// 与用户预期（像按钮透明度那样整体淡出）不符。默认 100 = 历史观感不变。
+    /// </remarks>
+    public double TitleBarOpacity { get; set; } = 100;
     public double ControlOpacity { get; set; } = 40;
     public double BackgroundImageOpacity { get; set; } = 40; // Zone-specific default (widgets use 30)
     public bool AutoArrange { get; set; } = true;
@@ -29,6 +40,17 @@ public class Zone : AppearanceModel
     public bool TileMode { get; set; } = false;
     /// <summary>隐藏应用名 — 磁贴模式下默认隐藏；非磁贴模式下也可手动勾选。</summary>
     public bool HideAppName { get; set; } = false;
+    /// <summary>
+    /// 内容视图（标题栏 ▦/≡ 切换，与面板那对图标同款）：<c>true</c> = 网格视图
+    /// （画布自由/自动排列，历史行为），<c>false</c> = 列表视图（单列，一行一个图标 +
+    /// 名称，可滚动）。
+    /// </summary>
+    /// <remarks>
+    /// ponytail 2026-10: 只影响「怎么显示」，**不写 item.X/Y** —— 切回网格时图标还在
+    /// 原来的位置；列表视图里也不能拖拽图标（没有落点概念），单击/双击/右键菜单照旧。
+    /// 默认 true，老配置反序列化后自然落在网格视图。
+    /// </remarks>
+    public bool IsGridView { get; set; } = true;
     /// <summary>自定义图标 — 单图标模式，需 TileMode=true 且 Items.Count&lt;=1 才能启用。</summary>
     public bool CustomIcon { get; set; } = false;
     private List<ZoneItem> _items = new();
@@ -128,6 +150,7 @@ public class Zone : AppearanceModel
             SnapToGrid = SnapToGrid,
             IconChar = IconChar,
             TitleBarFillColor = TitleBarFillColor,
+            TitleBarOpacity = TitleBarOpacity,
             ControlOpacity = ControlOpacity,
             BackgroundImageOpacity = BackgroundImageOpacity,
             AutoArrange = AutoArrange,
@@ -135,6 +158,7 @@ public class Zone : AppearanceModel
             TitleTextColor = TitleTextColor,
             TileMode = TileMode,
             HideAppName = HideAppName,
+            IsGridView = IsGridView,
             CustomIcon = CustomIcon,
             TitleBarFillIndependent = TitleBarFillIndependent,
             FolderMappingEnabled = FolderMappingEnabled,

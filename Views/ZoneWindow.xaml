@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:l="clr-namespace:DesktopZones.Services"
         xmlns:loc="clr-namespace:DesktopZones.Helpers"
+        xmlns:h="clr-namespace:DesktopZones.Helpers"
         xmlns:c="clr-namespace:DesktopZones.Views.Components"
         WindowStyle="None"
         AllowsTransparency="True"
@@ -124,9 +125,117 @@
                     </DataTrigger>
                 </DataTemplate.Triggers>
             </DataTemplate>
+            <!-- ══ 列表视图（≡）的行模板 —— 参照面板 PanelWindow 的列表视图 ══
+                 ponytail 2026-10: 整行「图标 + 名称」，双击打开、右键菜单、悬停铺
+                 ItemHoverBrush、选中铺 #26FFFFFF（与网格视图同一套颜色）。
+                 这里**故意不挂** Item_MouseDown/Move/Up：列表里没有自由落点，拖动
+                 只会改写看不见的 X/Y，切回网格时图标被莫名挪走。 -->
+            <DataTemplate x:Key="ZoneItemListTemplate">
+                <!-- ponytail 2026-10: 逐项对齐面板列表视图 —— 卡片 26 高（图标 20 + 上下各 3）
+                     + 上下外距 3 → 行节距 32；高光左右各留 3、高度 26；图标 20px、名字 12px，
+                     图标 x=11、名字 x=39，与面板同一套数字。 -->
+                <Grid Background="Transparent" Cursor="Hand" Margin="0,3,0,3"
+                      MouseLeftButtonDown="ListRow_MouseDown"
+                      MouseEnter="ListRow_Enter" MouseLeave="ListRow_Leave">
+                    <Grid.ContextMenu>
+                        <ContextMenu Opened="ItemMenu_Opened">
+                            <MenuItem x:Name="CtxOpen" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.Open]}" Click="ItemOpen_Click"/>
+                            <MenuItem x:Name="CtxOpenLocation" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.OpenLocation]}" Click="ItemOpenLocation_Click"/>
+                            <MenuItem x:Name="CtxEmptyRecycle" Visibility="Collapsed"
+                                      Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.EmptyRecycleBin]}"
+                                      Click="ItemEmptyRecycle_Click"/>
+                            <MenuItem x:Name="CtxRename" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.Rename]}" Click="ItemRename_Click"/>
+                            <Separator x:Name="CtxSep1"/>
+                            <MenuItem x:Name="CtxDelete" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.Delete]}" Click="ItemDelete_Click" Foreground="#FF6666"/>
+                        </ContextMenu>
+                    </Grid.ContextMenu>
+                    <Border x:Name="RowSelBox" Margin="3,0" CornerRadius="4"
+                            Background="#26FFFFFF" Visibility="Collapsed" IsHitTestVisible="False"/>
+                    <Border x:Name="RowHoverBox" Margin="3,0" CornerRadius="4"
+                            Background="Transparent" IsHitTestVisible="False"/>
+                    <Grid Margin="11,3,11,3" IsHitTestVisible="False">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Image x:Name="RowIcon" Source="{Binding Icon}" Width="20" Height="20" Stretch="Uniform"
+                               RenderOptions.BitmapScalingMode="HighQuality"
+                               VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBlock x:Name="ItemNameText" Grid.Column="1" Text="{Binding Name}"
+                                   FontSize="12" VerticalAlignment="Center"
+                                   Foreground="{Binding ItemTextBrush, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=#E0FFFFFF}"
+                                   TextTrimming="CharacterEllipsis"/>
+                    </Grid>
+                </Grid>
+                <DataTemplate.Triggers>
+                    <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                        <Setter TargetName="RowSelBox" Property="Visibility" Value="Visible"/>
+                    </DataTrigger>
+                    <DataTrigger Binding="{Binding DataContext.Zone.HideAppName,
+                                                  RelativeSource={RelativeSource AncestorType=Window}}"
+                                 Value="True">
+                        <Setter TargetName="ItemNameText" Property="Visibility" Value="Collapsed"/>
+                    </DataTrigger>
+                </DataTemplate.Triggers>
+            </DataTemplate>
+
+            <!-- 次级分区的列表行：图标用「面板列表视图那套 2×2 预览」的共享控件
+                 <c:SubfolderPreview>（圆角/边框/内距都是面板的常量），边长与面板列表一致 28px；
+                 名称 + 内部数量跟在后面，行高 34（28 + 上下各 3），与面板那一行同样高。 -->
+            <DataTemplate x:Key="SubfolderListTemplate">
+                <Grid Background="Transparent" Cursor="Hand" Margin="0,3,0,3"
+                      MouseLeftButtonDown="ListRow_MouseDown"
+                      MouseEnter="ListRow_Enter" MouseLeave="ListRow_Leave">
+                    <Grid.ContextMenu>
+                        <ContextMenu>
+                            <MenuItem x:Name="CtxSubOpen" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.Open]}" Click="SubfolderOpen_Click"/>
+                            <MenuItem x:Name="CtxSubRename" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.Rename]}" Click="SubfolderRename_Click"/>
+                            <MenuItem x:Name="CtxSubDissolve" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Subfolder.Dissolve]}" Click="SubfolderDissolve_Click"/>
+                            <Separator/>
+                            <MenuItem x:Name="CtxSubDelete" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.Delete]}" Click="SubfolderDelete_Click" Foreground="#FF6666"/>
+                        </ContextMenu>
+                    </Grid.ContextMenu>
+                    <Border x:Name="RowSelBox" Margin="3,0" CornerRadius="4"
+                            Background="#26FFFFFF" Visibility="Collapsed" IsHitTestVisible="False"/>
+                    <Border x:Name="RowHoverBox" Margin="3,0" CornerRadius="4"
+                            Background="Transparent" IsHitTestVisible="False"/>
+                    <Grid Margin="11,3,11,3" IsHitTestVisible="False">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <c:SubfolderPreview x:Name="RowIcon" Source="{Binding Source}" BoxSize="28" ThumbSize="12"
+                                            HorizontalAlignment="Left" VerticalAlignment="Center"
+                                            Margin="0,0,8,0"/>
+                        <TextBlock x:Name="ItemNameText" Grid.Column="1" Text="{Binding Name}"
+                                   FontSize="12" VerticalAlignment="Center"
+                                   Foreground="{Binding ItemTextBrush, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=#E0FFFFFF}"
+                                   TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Grid.Column="2" Text="{Binding Source.SubItems.Count}"
+                                   FontSize="10" Opacity="0.55" VerticalAlignment="Center" Margin="6,0,0,0"
+                                   Foreground="{Binding ItemTextBrush, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=#E0FFFFFF}"/>
+                    </Grid>
+                </Grid>
+                <DataTemplate.Triggers>
+                    <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                        <Setter TargetName="RowSelBox" Property="Visibility" Value="Visible"/>
+                    </DataTrigger>
+                    <DataTrigger Binding="{Binding DataContext.Zone.HideAppName,
+                                                  RelativeSource={RelativeSource AncestorType=Window}}"
+                                 Value="True">
+                        <Setter TargetName="ItemNameText" Property="Visibility" Value="Collapsed"/>
+                    </DataTrigger>
+                </DataTemplate.Triggers>
+            </DataTemplate>
+
             <c:SubfolderItemTemplateSelector x:Key="SubfolderItemTemplateSelector"
                                              ZoneItemTemplate="{StaticResource ZoneItemTemplate}"
                                              SubfolderItemTemplate="{StaticResource SubfolderItemTemplate}"/>
+            <!-- 同一个选择器类，换一套行模板 —— 列表视图宿主用。 -->
+            <c:SubfolderItemTemplateSelector x:Key="ZoneItemListSelector"
+                                             ZoneItemTemplate="{StaticResource ZoneItemListTemplate}"
+                                             SubfolderItemTemplate="{StaticResource SubfolderListTemplate}"/>
         </ResourceDictionary>
     </Window.Resources>
 
@@ -204,13 +313,25 @@
                                 Background="#10FFFFFF"
                                 CornerRadius="8,8,0,0"
                                 Cursor="SizeAll"
+                                SizeChanged="TitleBarBg_SizeChanged"
                                 RenderTransformOrigin="0.5,0.5"
                                 MouseLeftButtonDown="TitleBar_Drag">
                             <Border.RenderTransform>
                                 <ScaleTransform x:Name="TitleBarScale" ScaleX="1" ScaleY="1"/>
                             </Border.RenderTransform>
                             <Grid>
-                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,0,0">
+                                <!-- ponytail 2026-10: 标题与右侧按钮改成两列（* / Auto）——
+                                     多了 ▦/≡ 之后整排按钮要 139px，窄分区里标题会钻到按钮底下。
+                                     分列后标题列被挤窄就自动缩，不会压到按钮。 -->
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <!-- ClipToBounds：标题是横向 StackPanel（子元素按无限宽测量），
+                                     在窄分区里会溢出到按钮底下；裁到列边界就不会压住按钮。 -->
+                                <StackPanel Grid.Column="0" Orientation="Horizontal"
+                                            VerticalAlignment="Center" Margin="8,0,0,0"
+                                            ClipToBounds="True">
                                     <Path x:Name="TitleIconPath" Width="12" Height="12"
                                           Stretch="Uniform" Stroke="#A0FFFFFF" StrokeThickness="1.5"
                                           StrokeLineJoin="Round" VerticalAlignment="Center"
@@ -228,25 +349,57 @@
                                              LostFocus="ZoneTitle_LostFocus"
                                              KeyDown="ZoneTitle_KeyDown"/>
                                 </StackPanel>
+                                <!-- ponytail: 容器不再统一设 Opacity —— 明暗下放到每个按钮
+                                     (HoverHighlight.ApplyControlOpacity), 否则悬停高光会被
+                                     容器再压一次, 看起来比组件淡一大截。 -->
                                 <StackPanel x:Name="ControlPoint"
+                                            Grid.Column="1"
                                             Orientation="Horizontal"
                                             HorizontalAlignment="Right"
-                                            Margin="0,0,4,0" Opacity="0.4">
-                                    <Border x:Name="LockBtn" Width="18" Height="16"
-                                            CornerRadius="3" Background="#30FFFFFF"
+                                            Margin="0,0,4,0">
+                                    <!-- ponytail: 小按钮统一口径 —— 去掉了常驻的 #30FFFFFF 淡白方块,
+                                         改成平时透明、悬停铺一层 #30FFFFFF 高光(Helpers/HoverHighlight)。
+                                         高光不碰字色(按钮颜色仍由「按钮颜色」设置控制)。
+                                         尺寸/字号/间距对齐便签标题栏那排: 20×20、FontSize 10、间隙 3。 -->
+                                    <!-- ponytail 2026-10: ▦/≡ 视图切换 —— 与面板标题栏那对同款：
+                                         选中态铺 #20FFFFFF 底盘（全应用唯一保留底盘的小按钮），
+                                         悬停叠 #30FFFFFF 高光，移开由 HoverHighlight.BaseBackground
+                                         复位回选中态。放在锁定按钮左侧（用户指定）。 -->
+                                    <Border x:Name="GridToggleBtn" Width="20" Height="20"
+                                            CornerRadius="4" Background="#20FFFFFF"
                                             Cursor="Hand" Margin="0,0,3,0"
-                                            MouseLeftButtonDown="LockBtn_Click"
-                                            MouseEnter="Ctrl_Enter" MouseLeave="Ctrl_Leave"
-                                            ToolTip="{loc:Loc Key=Common.Lock}">
-                                        <TextBlock x:Name="LockBtnText" Text="🔓" FontSize="9"
+                                            MouseLeftButtonDown="GridToggle_Click"
+                                            h:HoverHighlight.IsEnabled="True"
+                                            ToolTip="{loc:Loc Key=Common.GridView}">
+                                        <TextBlock x:Name="GridToggleText" Text="▦" FontSize="10"
                                                    Foreground="#80FFFFFF"
                                                    HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                     </Border>
-                                    <Border x:Name="ImportBtn" Width="18" Height="16"
-                                            CornerRadius="3" Background="#30FFFFFF"
+                                    <Border x:Name="ListToggleBtn" Width="20" Height="20"
+                                            CornerRadius="4" Background="Transparent"
+                                            Cursor="Hand" Margin="0,0,3,0"
+                                            MouseLeftButtonDown="ListToggle_Click"
+                                            h:HoverHighlight.IsEnabled="True"
+                                            ToolTip="{loc:Loc Key=Common.ListView}">
+                                        <TextBlock x:Name="ListToggleText" Text="≡" FontSize="10"
+                                                   Foreground="#80FFFFFF"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <Border x:Name="LockBtn" Width="20" Height="20"
+                                            CornerRadius="4" Background="Transparent"
+                                            Cursor="Hand" Margin="0,0,3,0"
+                                            MouseLeftButtonDown="LockBtn_Click"
+                                            h:HoverHighlight.IsEnabled="True"
+                                            ToolTip="{loc:Loc Key=Common.Lock}">
+                                        <TextBlock x:Name="LockBtnText" Text="🔓" FontSize="10"
+                                                   Foreground="#80FFFFFF"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <Border x:Name="ImportBtn" Width="20" Height="20"
+                                            CornerRadius="4" Background="Transparent"
                                             Cursor="Hand" Margin="0,0,3,0"
                                             MouseLeftButtonDown="ImportBtn_Click"
-                                            MouseEnter="Ctrl_Enter" MouseLeave="Ctrl_Leave"
+                                            h:HoverHighlight.IsEnabled="True"
                                             ToolTip="{loc:Loc Key=Subfolder.New}">
                                     <Border.ContextMenu>
                                         <ContextMenu>
@@ -271,24 +424,27 @@
                                             <MenuItem x:Name="CtxMapFolder2" Header="{loc:Loc Key=FolderMap.MenuMap}" Click="FolderMapChoose_Click"/>
                                         </ContextMenu>
                                     </Border.ContextMenu>
-                                        <TextBlock x:Name="ImportBtnText" Text="+" FontSize="11" FontWeight="Bold"
+                                        <TextBlock x:Name="ImportBtnText" Text="+" FontSize="10" FontWeight="Bold"
                                                    Foreground="#80FFFFFF"
                                                    HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                     </Border>
-                                    <Border x:Name="EditBtn" Width="22" Height="20"
-                                            CornerRadius="3" Background="#30FFFFFF"
+                                    <!-- ponytail: ⚙ 与同排三个按钮统一成「按下即触发」——
+                                         原来挂 MouseLeftButtonUp，按下时会冒泡进标题栏拖动，
+                                         与 +/锁/隐藏 的触发时机不一致。 -->
+                                    <Border x:Name="EditBtn" Width="20" Height="20"
+                                            CornerRadius="4" Background="Transparent"
                                             Cursor="Hand" Margin="0,0,3,0"
-                                            MouseLeftButtonUp="EditButton_Click"
-                                            MouseEnter="Ctrl_Enter" MouseLeave="Ctrl_Leave">
-                                        <TextBlock x:Name="EditBtnText" Text="⚙" FontSize="9"
+                                            MouseLeftButtonDown="EditButton_Click"
+                                            h:HoverHighlight.IsEnabled="True">
+                                        <TextBlock x:Name="EditBtnText" Text="⚙" FontSize="10"
                                                    Foreground="#80FFFFFF"
                                                    HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                     </Border>
-                                    <Border x:Name="HideBtn" Width="18" Height="16"
-                                            CornerRadius="3" Background="#30FFFFFF"
+                                    <Border x:Name="HideBtn" Width="20" Height="20"
+                                            CornerRadius="4" Background="Transparent"
                                             Cursor="Hand"
                                             MouseLeftButtonDown="HideButton_Click"
-                                            MouseEnter="Ctrl_Enter" MouseLeave="Ctrl_Leave"
+                                            h:HoverHighlight.IsEnabled="True"
                                             ToolTip="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Zone.Hide]}">
                                         <TextBlock x:Name="HideBtnText" Text="─" FontSize="10" Foreground="#80FFFFFF"
                                                    HorizontalAlignment="Center" VerticalAlignment="Center"
@@ -331,6 +487,15 @@
                                                                  SubfolderItemTemplate="{StaticResource SubfolderItemTemplate}"/>
                             </ItemsControl.ItemTemplateSelector>
                         </ItemsControl>
+                        <!-- 列表视图宿主（≡）—— 与网格画布同一块视口，互斥显示。
+                             ponytail 2026-10: 绑同一个 Items 集合（ItemsSource 由
+                             EnsureListViewSource 在代码里设成「按 Y/X 排序」的视图），
+                             所以选中态/名称颜色/隐藏应用名都是声明式同步的，
+                             切视图不用重建数据。 -->
+                        <ItemsControl x:Name="ItemsListHost"
+                                      Visibility="Collapsed" VerticalAlignment="Top"
+                                      HorizontalAlignment="Stretch" Margin="0,2,0,2"
+                                      ItemTemplateSelector="{StaticResource ZoneItemListSelector}"/>
                         <Canvas x:Name="DropIndicatorLayer" IsHitTestVisible="False" Background="Transparent"/>
                         </Grid>
                         </ScrollViewer>
@@ -348,29 +513,30 @@
                                      title-bar band (fills + crop dividers include it). -->
                                 <Border x:Name="FolderMapHeaderBg" Grid.Row="0" Background="#22FFFFFF">
                                     <DockPanel LastChildFill="True">
-                                        <Border x:Name="FolderMapUpBtn" Width="20" Height="18" CornerRadius="3"
-                                                Background="#30FFFFFF" Cursor="Hand" Margin="4,0,0,0"
+                                        <!-- ponytail: 小按钮统一口径(20×20 / FontSize 10 / 间隙 3)。 -->
+                                        <Border x:Name="FolderMapUpBtn" Width="20" Height="20" CornerRadius="4"
+                                                Background="Transparent" Cursor="Hand" Margin="4,0,0,0"
                                                 VerticalAlignment="Center"
                                                 MouseLeftButtonDown="FolderMapUp_Click"
-                                                MouseEnter="Ctrl_Enter" MouseLeave="Ctrl_Leave"
+                                                h:HoverHighlight.IsEnabled="True"
                                                 ToolTip="{loc:Loc Key=FolderMap.Up}">
                                             <TextBlock x:Name="FolderMapUpText" Text="↰" FontSize="10" Foreground="#A0FFFFFF"
                                                        HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                         </Border>
-                                        <Border x:Name="FolderMapCloseBtn" Width="20" Height="18" CornerRadius="3"
-                                                Background="#30FFFFFF" Cursor="Hand" Margin="0,0,4,0"
+                                        <Border x:Name="FolderMapCloseBtn" Width="20" Height="20" CornerRadius="4"
+                                                Background="Transparent" Cursor="Hand" Margin="0,0,4,0"
                                                 VerticalAlignment="Center" DockPanel.Dock="Right"
                                                 MouseLeftButtonDown="FolderMapClose_Click"
-                                                MouseEnter="Ctrl_Enter" MouseLeave="Ctrl_Leave"
+                                                h:HoverHighlight.IsEnabled="True"
                                                 ToolTip="{loc:Loc Key=FolderMap.Disable}">
-                                            <TextBlock x:Name="FolderMapCloseText" Text="✕" FontSize="9" Foreground="#A0FFFFFF"
+                                            <TextBlock x:Name="FolderMapCloseText" Text="✕" FontSize="10" Foreground="#A0FFFFFF"
                                                        HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                         </Border>
-                                        <Border x:Name="FolderMapRefreshBtn" Width="20" Height="18" CornerRadius="3"
-                                                Background="#30FFFFFF" Cursor="Hand" Margin="0,0,3,0"
+                                        <Border x:Name="FolderMapRefreshBtn" Width="20" Height="20" CornerRadius="4"
+                                                Background="Transparent" Cursor="Hand" Margin="0,0,3,0"
                                                 VerticalAlignment="Center" DockPanel.Dock="Right"
                                                 MouseLeftButtonDown="FolderMapRefresh_Click"
-                                                MouseEnter="Ctrl_Enter" MouseLeave="Ctrl_Leave"
+                                                h:HoverHighlight.IsEnabled="True"
                                                 ToolTip="{loc:Loc Key=FolderMap.Refresh}">
                                             <TextBlock x:Name="FolderMapRefreshText" Text="⟳" FontSize="10" Foreground="#A0FFFFFF"
                                                        HorizontalAlignment="Center" VerticalAlignment="Center"/>

@@ -633,9 +633,8 @@ public partial class ClockWidget : Window
         var vis = _clock.TileMode ? Visibility.Collapsed : Visibility.Visible;
         LockBtn.Visibility = vis;
         HideBtn.Visibility = vis;
-        var op = Math.Max(0.05, _clock.ControlOpacity / 100.0);
-        LockBtn.Opacity = op;
-        HideBtn.Opacity = op;
+        // ponytail: 小按钮的不透明度统一走 HoverHighlight（全应用同一个值）。
+        HoverHighlight.ApplyControlOpacity(_clock.ControlOpacity, new UIElement[] { LockBtn, HideBtn });
     }
 
     private string _lastDateText = "";

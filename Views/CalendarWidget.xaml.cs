@@ -335,7 +335,6 @@ public partial class CalendarWidget : Window
         ApplyToDayCells(content);
 
         // Buttons — 按钮颜色.
-        if (TodayBtn != null) TodayBtn.Foreground = buttons;
         if (HideBtn != null) HideBtn.Foreground = buttons;
         if (LockBtn != null) LockBtn.Foreground = buttons;
         if (PrevMonthBtn != null) PrevMonthBtn.Foreground = buttons;
@@ -558,9 +557,10 @@ public partial class CalendarWidget : Window
         var vis = _calendar.TileMode ? Visibility.Collapsed : Visibility.Visible;
         LockBtn.Visibility = vis;
         HideBtn.Visibility = vis;
-        var op = Math.Max(0.05, _calendar.ControlOpacity / 100.0);
-        LockBtn.Opacity = op;
-        HideBtn.Opacity = op;
+        // ponytail: 小按钮的不透明度统一走 HoverHighlight（全应用同一个值），
+        // 否则组件的悬停高光会被压成和分区不一样的强度。
+        HoverHighlight.ApplyControlOpacity(_calendar.ControlOpacity,
+            new UIElement[] { LockBtn, HideBtn, PrevMonthBtn, NextMonthBtn, AddNoteBtn });
     }
 
     /// <summary>Refresh all visual styles from the current _calendar model (for live preview).
@@ -595,7 +595,6 @@ public partial class CalendarWidget : Window
 
     void ApplyLoc()
     {
-        TodayBtn.Content = _loc["Calendar.Today"];
         AddNoteBtn.ToolTip = _loc["Calendar.AddNote"];
         NotesDateLabel.Text = _loc["Common.Notes"];
         // ponytail 2026-08-27: 切语言时刷新右键菜单 — XAML 静态绑定只读一次 i18n,
@@ -717,13 +716,8 @@ public partial class CalendarWidget : Window
         RebuildDisplay();
     }
 
-    void Today_Click(object s, RoutedEventArgs e)
-    {
-        var now = DateTime.Now;
-        _vm.DisplayYear = now.Year;
-        _vm.DisplayMonth = now.Month;
-        RebuildDisplay();
-    }
+    // ponytail: 「今天」按钮已移除（用户要求去掉那个方框）。跳回本月仍可通过
+    // 右键菜单或翻月按钮回到当前月；此处原 Today_Click 一并删除。
 
     void DayCell_Click(object s, MouseButtonEventArgs e)
     {

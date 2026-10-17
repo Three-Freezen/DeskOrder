@@ -91,8 +91,91 @@ public class ConfigService
 
         MigrateOrphanPanelFields(config);
         MigratePanelGlass(config);
+        SanitizeColorFields(config);
         ApplyRendererSwitch(config);
         return (config, true);
+    }
+
+    /// <summary>
+    /// 清洗历史脏颜色值（ponytail 2026-10）。
+    /// </summary>
+    /// <remarks>
+    /// 旧版 <c>ColorSwatchButton</c> 的「透明」预设把**字面量 "Transparent"** 直接写进模型，
+    /// 之后任何按 alpha 的换算（<c>SetPercent</c>）都会把它切成 "ransparent" 再拼成
+    /// <c>"#4Cransparent"</c> / <c>"#00nsparent"</c> 这种垃圾串。表现为：
+    /// **标题栏/填充等透明度滑块怎么拖都没反应**（用户实测）。
+    ///
+    /// 这里在加载时把它们统一修成 <c>#00FFFFFF</c>（全透明白，语义上等价于原来的
+    /// "透明"），于是旧配置不需要手工重调也能恢复滑块功能。只改非法值，合法值不动。
+    /// </remarks>
+    static void SanitizeColorFields(AppConfig config)
+    {
+        static bool Bad(string? s) =>
+            !string.IsNullOrWhiteSpace(s) &&
+            !System.Text.RegularExpressions.Regex.IsMatch(s, "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$");
+
+        const string TransparentHex = "#00FFFFFF";
+
+        foreach (var z in config.Zones)
+        {
+            if (Bad(z.TitleBarFillColor)) z.TitleBarFillColor = TransparentHex;
+            if (Bad(z.FillColor)) z.FillColor = "#08000000";
+            if (Bad(z.BorderColor)) z.BorderColor = "#40FFFFFF";
+            if (Bad(z.TitleTextColor)) z.TitleTextColor = "#A0FFFFFF";
+            if (Bad(z.TextColor)) z.TextColor = "#E0FFFFFF";
+            if (Bad(z.ButtonColor)) z.ButtonColor = "#80FFFFFF";
+            if (Bad(z.IconColor)) z.IconColor = "";
+
+            var gs = z.MergedGroupStyle;
+            if (gs != null)
+            {
+                if (Bad(gs.TitleBarFillColor)) gs.TitleBarFillColor = TransparentHex;
+                if (Bad(gs.FillColor)) gs.FillColor = "#08000000";
+                if (Bad(gs.BorderColor)) gs.BorderColor = "#40FFFFFF";
+                if (Bad(gs.TitleTextColor)) gs.TitleTextColor = "#A0FFFFFF";
+                if (Bad(gs.TextColor)) gs.TextColor = "#E0FFFFFF";
+                if (Bad(gs.ButtonColor)) gs.ButtonColor = "#80FFFFFF";
+            }
+
+            foreach (var it in z.Items)
+            {
+                if (it.Type != ItemType.SubFolder) continue;
+                if (Bad(it.FillColorOverride)) it.FillColorOverride = "#08000000";
+            }
+        }
+
+        foreach (var c in config.Clocks)
+            SanitizeAppearance(c);
+
+        foreach (var c in config.Calendars)
+            SanitizeAppearance(c);
+
+        foreach (var n in config.Notes)
+        {
+            if (Bad(n.TitleBarFillColor)) n.TitleBarFillColor = TransparentHex;
+            if (Bad(n.TitleTextColor)) n.TitleTextColor = "#E0E0E0";
+            if (Bad(n.ButtonColor)) n.ButtonColor = "#80FFFFFF";
+            SanitizeAppearance(n);
+        }
+
+        var panel = config.Panel;
+        if (panel != null)
+        {
+            if (Bad(panel.PanelTitleBarFillColor)) panel.PanelTitleBarFillColor = TransparentHex;
+            if (Bad(panel.PanelFillColor)) panel.PanelFillColor = "#08000000";
+            if (Bad(panel.PanelBorderColor)) panel.PanelBorderColor = "#30FFFFFF";
+            if (Bad(panel.PanelTextColor)) panel.PanelTextColor = "#E8E8F0";
+            if (Bad(panel.PanelButtonColor)) panel.PanelButtonColor = "#E8E8F0";
+        }
+
+        // AppearanceModel 上的公共颜色字段（分区/时钟/日历/便签都继承它）。
+        static void SanitizeAppearance(AppearanceModel m)
+        {
+            if (Bad(m.FillColor)) m.FillColor = "#08000000";
+            if (Bad(m.BorderColor)) m.BorderColor = "#40FFFFFF";
+            // IconColor 的空串是合法语义（回退默认），只在"非空且非法"时清空。
+            if (!string.IsNullOrEmpty(m.IconColor) && Bad(m.IconColor)) m.IconColor = "";
+        }
     }
 
     /// <summary>ponytail 2026-09-26(二期): 把「设置 → 外观」的全局渲染方案开关写进每个对象,

@@ -34,10 +34,20 @@ public partial class ZoneWindow : Window
     private Zone _zone;
     private readonly ZoneManager _mgr;
 
-    private static readonly SolidColorBrush CtrlHoverBrush    = Freeze(new(Color.FromArgb(0x60, 0xFF, 0xFF, 0xFF)));
-    private static readonly SolidColorBrush CtrlIdleBrush     = Freeze(new(Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF)));
     private static readonly SolidColorBrush ItemHoverBrush    = Freeze(new(Color.FromArgb(0x18, 0xFF, 0xFF, 0xFF)));
     static SolidColorBrush Freeze(SolidColorBrush b) { b.Freeze(); return b; }
+
+    // ── 内容视图：网格(画布) / 列表 ──
+    // ponytail 2026-10: 与面板标题栏那对 ▦/≡ 同款。网格 = 历史行为（画布自由/自动排列），
+    // 列表 = 单列「图标 + 名称」（见 ZoneWindow.xaml 的 ZoneItemListTemplate）。
+    // 只切显示：不写 item.X/Y，列表里也不挂拖拽（没有落点概念）。
+    private bool _isGridView = true;
+    /// <summary>▦/≡ 选中态的底盘方块（与面板同色）。</summary>
+    private static readonly SolidColorBrush ViewToggleIdleBrush = Freeze(new(Color.FromArgb(0x20, 0xFF, 0xFF, 0xFF)));
+    /// <summary>当前「按钮颜色」原色 —— 两枚切换图标按选中/未选中在此之上加/减亮度。</summary>
+    private Brush _viewToggleBrush = Brushes.White;
+    /// <summary>列表视图的排序视图（见 EnsureListViewSource）。</summary>
+    private System.Windows.Data.ListCollectionView? _listView;
 
     // 图标文字（ItemNameText / 次级文件夹名称）固定颜色。声明式绑定到该 DP：
     // 容器实例化瞬间即取到正确颜色，避免先渲染默认 #E0FFFFFF 再在 Loaded 之后
@@ -168,6 +178,11 @@ public partial class ZoneWindow : Window
     int _flyoutOpenToken;
     // 当前打开的 SubFolder 图标容器 — 供 FlyoutPlacementCallback / 动画原点计算使用。
     FrameworkElement? _flyoutOriginContainer;
+    // ponytail 2026-10: 点击时记住被点的那个元素（网格里的图标格 / 列表里的图标），
+    // 打开浮层时优先拿它当锚点 —— 面板那边就是直接把被点的卡片传给
+    // SubfolderFlyout.ComputePosAndAnchor。列表视图里容器在 ItemsListHost 而不是
+    // 网格画布，只按网格容器找会拿到 null，浮层就落到屏幕左上角 (8,8)。
+    FrameworkElement? _flyoutAnchorOverride;
 
     public ZoneWindow(Zone zone, ZoneManager mgr, ShellIconService icons)
     {
@@ -206,6 +221,8 @@ public partial class ZoneWindow : Window
             if (TryHandleFlyoutKeys(e)) e.Handled = true;
         };
         _vm = new ZoneViewModel(zone, mgr, icons);
+        // 视图模式跟随分区模型（标题栏 ▦/≡ 会写回 Zone.IsGridView 并落盘）。
+        _isGridView = zone.IsGridView;
         _vm.IsLocked = zone.IsLocked;
         DataContext = _vm;
         Left = zone.X; Top = zone.Y;
@@ -832,6 +849,9 @@ public partial class ZoneWindow : Window
 
     void OpenSubfolderFlyout(ZoneItem sub)
     {
+        // 先把「点击时抓到的锚点」取走并清掉：后面任何一条 early-return 都不会留下脏锚点。
+        var clickAnchor = _flyoutAnchorOverride;
+        _flyoutAnchorOverride = null;
         DzTrace.Log($"[SubEdit] OpenSubfolderFlyout: id={sub.Id.ToString("N")[..8]} FillFollows={sub.FillFollowsZone} Corner={sub.CornerRounded} Hover={sub.HoverAutoExpand} Fill={sub.FillColorOverride}");
         // 默认按"点击/菜单打开"处理 — 不参与自动收回;悬停打开在 OnFlyoutHoverTick
         // 打开后置 true 并启动轮询。
@@ -862,7 +882,9 @@ public partial class ZoneWindow : Window
         sub.PropertyChanged += _subItemsChangedHandler;
 
         // 记住图标容器:定位 + 动画原点都要用它的屏幕位置。
-        _flyoutOriginContainer = FindContainerFor(sub);
+        // 优先用「点击时抓到的那个图标元素」（与面板把被点卡片传进 ComputePosAndAnchor 同一思路），
+        // 列表视图里网格容器根本不存在，只有这条路径才拿得到正确锚点。
+        _flyoutOriginContainer = clickAnchor ?? FindContainerFor(sub);
 
         // 先复位到关闭态(缩放 0 / 不透明 0),避免上次关闭残留的中间态一闪而过。
         SubfolderFlyoutView.ResetToClosed();
@@ -1169,20 +1191,20 @@ public partial class ZoneWindow : Window
         container.RenderTransformOrigin = new Point(0, 0);
     }
 
-    /// <summary>Lookup the FrameworkElement container that hosts <paramref name="sub"/>
-    /// inside ItemsHost. Returns null if the container hasn't been generated yet
-    /// (which would also mean the item isn't visible).
+    /// <summary>Lookup the FrameworkElement container that hosts <paramref name="sub"/>.
+    /// 网格视图的容器在 ItemsHost 画布里；列表视图的容器在 ItemsListHost 里（此时画布
+    /// 是 Collapsed 的，容器可能压根没生成）。两个宿主都查一遍，谁在当时可见就用谁。
+    /// 返回 null = 容器还没生成（调用方应改用点击时抓到的元素）。
     /// ponytail 2026-08-26: ItemsHost binds ObservableCollection&lt;ZoneItemViewModel&gt;,
     /// so ContainerFromItem(raw ZoneItem) never matches — resolve the VM first.</summary>
     FrameworkElement? FindContainerFor(ZoneItem sub)
     {
-        if (ItemsHost == null) return null;
-        foreach (var vm in _vm.Items)
-        {
-            if (vm.Id == sub.Id)
-                return ItemsHost.ItemContainerGenerator.ContainerFromItem(vm) as FrameworkElement;
-        }
-        return null;
+        var vm = _vm.Items.FirstOrDefault(v => v.Id == sub.Id);
+        if (vm == null) return null;
+        if (ItemsListHost != null && ItemsListHost.Visibility == Visibility.Visible
+            && ItemsListHost.ItemContainerGenerator.ContainerFromItem(vm) is FrameworkElement listRow)
+            return listRow;
+        return ItemsHost?.ItemContainerGenerator.ContainerFromItem(vm) as FrameworkElement;
     }
 
     void SubfolderFlyout_EditStyleRequested(SubfolderFlyout flyout)
@@ -1765,6 +1787,8 @@ public partial class ZoneWindow : Window
         }
 
         // 直接拖拽空白 = 框选（原 Ctrl+拖拽行为，用户要求"反一下"）。
+        // 列表视图里没有可框选的画布（图标不按 X/Y 摆），空白处按下就不起框选。
+        if (!_isGridView) return;
         _selectMode = SelectMode.Draw;
         _selectTarget = SelectTarget.ZoneItems;
         _selectStart = e.GetPosition(this);
@@ -2828,8 +2852,9 @@ public partial class ZoneWindow : Window
     void Restore_Enter(object s, MouseEventArgs e) { RestoreButton.SetResourceReference(Border.BackgroundProperty, "Menu.Bg.Hover"); }
     void Restore_Leave(object s, MouseEventArgs e) { RestoreButton.SetResourceReference(Border.BackgroundProperty, "Menu.Bg.Surface"); }
 
-    void Ctrl_Enter(object s, MouseEventArgs e) { if (s is Border b) b.Background = CtrlHoverBrush; }
-    void Ctrl_Leave(object s, MouseEventArgs e) { if (s is Border b) b.Background = CtrlIdleBrush; }
+    // ponytail: 小按钮悬停高光已收口到 Helpers/HoverHighlight.cs（全应用唯一配方 #30FFFFFF，
+    // 平时透明、悬停铺高光、不改字色）。原来的 Ctrl_Enter/Ctrl_Leave + CtrlHoverBrush/
+    // CtrlIdleBrush（常驻 #30FFFFFF 底 + 悬停变 #60FFFFFF）已删除。
     void HideButton_Click(object s, MouseButtonEventArgs e) { HideZone(); e.Handled = true; }
 
     void LockBtn_Click(object sender, MouseButtonEventArgs e)
@@ -2881,6 +2906,194 @@ public partial class ZoneWindow : Window
         _mgr.SaveConfig();
         e.Handled = true;
     }
+
+    // ── 内容视图切换（标题栏 ▦/≡，参照面板 PanelWindow.GridToggle/ListToggle）──
+
+    /// <summary>标题栏一量出尺寸就把标题输入框的宽度上限夹到「栏宽 − 右侧按钮排」——
+    /// 那排是横向 StackPanel，子元素按无限宽测量，不夹一下窄分区里标题会压到 ▦/≡ 下面。</summary>
+    void TitleBarBg_SizeChanged(object s, SizeChangedEventArgs e) => UpdateTitleMaxWidth();
+
+    void UpdateTitleMaxWidth()
+    {
+        if (ZoneTitleText == null || TitleBarBg == null) return;
+        double bar = TitleBarBg.ActualWidth;
+        if (bar <= 0) return;
+        double buttons = ControlPoint != null && ControlPoint.Visibility == Visibility.Visible
+            ? ControlPoint.ActualWidth + ControlPoint.Margin.Right : 0;
+        // 8 左距 + 图标(12) + 图标间距(4) + 一点点余量
+        double avail = bar - buttons - 28;
+        var capped = Math.Clamp(Math.Round(avail), 28, 160);
+        if (Math.Abs(ZoneTitleText.MaxWidth - capped) > 0.5) ZoneTitleText.MaxWidth = capped;
+    }
+
+    void GridToggle_Click(object s, MouseButtonEventArgs e)
+    {
+        SetGridView(true, save: true);
+        e.Handled = true;
+    }
+
+    void ListToggle_Click(object s, MouseButtonEventArgs e)
+    {
+        SetGridView(false, save: true);
+        e.Handled = true;
+    }
+
+    /// <summary>切到网格(<paramref name="grid"/>=true)或列表视图。只切显示，不动任何
+    /// 图标的 X/Y —— 切回网格时还是原来那个摆法。</summary>
+    void SetGridView(bool grid, bool save)
+    {
+        if (_isGridView == grid)
+        {
+            // 同一态再点一次也要把底盘刷对（防止悬停高光残留）。
+            ApplyViewToggleBackgrounds();
+            return;
+        }
+        _isGridView = grid;
+        _zone.IsGridView = grid;
+        ApplyItemHostsVisibility();
+        ApplyViewToggleBackgrounds();
+        if (grid)
+        {
+            // 切回网格：重找一次画布实例（宿主显隐后容器可能被重建），再补一次画布尺寸，
+            // 否则 UpdateCanvasSize 可能还在给旧 Canvas 设 Width/Height。
+            _itemCanvas = FindVisualChild<Canvas>(this);
+            UpdateCanvasSize();
+        }
+        else
+        {
+            // 进列表前按当前 X/Y 重排一次（网格里拖过图标 → 顺序变了，VM 不发通知）。
+            _listView?.Refresh();
+        }
+        // 刚显隐的宿主要下一次布局才生成容器 —— 名称隐藏状态在布局完成后补一遍。
+        Dispatcher.BeginInvoke(new Action(() => ApplyHideAppName(_zone.HideAppName)),
+            System.Windows.Threading.DispatcherPriority.Loaded);
+        if (save) ScheduleSave();
+    }
+
+    /// <summary>网格画布 / 列表宿主二选一（自定义图标模式两个都藏）。</summary>
+    void ApplyItemHostsVisibility()
+    {
+        EnsureListViewSource();
+        if (ItemsHost != null)
+            ItemsHost.Visibility = (!_customIconOpenFirst && _isGridView) ? Visibility.Visible : Visibility.Collapsed;
+        if (ItemsListHost != null)
+            ItemsListHost.Visibility = (!_customIconOpenFirst && !_isGridView) ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>列表视图的数据源 = Items 的排序视图（按 Y 再按 X，等价于网格里的「从上到下、
+    /// 从左到右」阅读顺序），否则列表顺序会和画布对不上。
+    ///
+    /// 只在首次建视图（或集合被换掉）时设一次 ItemsSource；排序在被切进列表时由
+    /// <c>SetGridView</c> 里的 Refresh 触发 —— 不能每次 ApplyStyle 都刷，否则拖动
+    /// 外观滑块（每帧一次 ApplyStyle）会不停重建整列行容器。</summary>
+    void EnsureListViewSource()
+    {
+        if (ItemsListHost == null) return;
+        if (_listView != null && ReferenceEquals(_listView.SourceCollection, _vm.Items)) return;
+        var view = new System.Windows.Data.ListCollectionView(_vm.Items);
+        view.SortDescriptions.Add(new System.ComponentModel.SortDescription(
+            nameof(ZoneItemViewModel.Y), System.ComponentModel.ListSortDirection.Ascending));
+        view.SortDescriptions.Add(new System.ComponentModel.SortDescription(
+            nameof(ZoneItemViewModel.X), System.ComponentModel.ListSortDirection.Ascending));
+        _listView = view;
+        ItemsListHost.ItemsSource = view;
+    }
+
+    /// <summary>▦/≡ 的选中态底盘 + 悬停结束复位色（HoverHighlight.BaseBackground）。</summary>
+    void ApplyViewToggleBackgrounds()
+    {
+        if (GridToggleBtn != null)
+        {
+            GridToggleBtn.Background = _isGridView ? ViewToggleIdleBrush : Brushes.Transparent;
+            Helpers.HoverHighlight.SetBaseBackground(GridToggleBtn, GridToggleBtn.Background);
+        }
+        if (ListToggleBtn != null)
+        {
+            ListToggleBtn.Background = _isGridView ? Brushes.Transparent : ViewToggleIdleBrush;
+            Helpers.HoverHighlight.SetBaseBackground(ListToggleBtn, ListToggleBtn.Background);
+        }
+        ApplyViewToggleGlyphColor();
+    }
+
+    /// <summary>选中那枚用「按钮颜色」原色，另一枚压到 45% —— 与面板 ▦/≡ 的亮/暗区分一致。
+    /// 只动字色，不动 Border.Opacity（那口子归 HoverHighlight 的按钮透明度管）。</summary>
+    void ApplyViewToggleGlyphColor()
+    {
+        var full = _viewToggleBrush ?? Brushes.White;
+        var dim = DimBrush(full);
+        if (GridToggleText != null) GridToggleText.Foreground = _isGridView ? full : dim;
+        if (ListToggleText != null) ListToggleText.Foreground = _isGridView ? dim : full;
+    }
+
+    static Brush DimBrush(Brush b)
+    {
+        if (b is SolidColorBrush sb)
+        {
+            var c = sb.Color;
+            return Freeze(new SolidColorBrush(Color.FromArgb((byte)(c.A * 0.45), c.R, c.G, c.B)));
+        }
+        return b;
+    }
+
+    // ── 列表视图的行交互（列表模板里挂的是这几个，网格模板挂 Item_MouseDown 等）──
+
+    void ListRow_MouseDown(object s, MouseButtonEventArgs e)
+    {
+        if (s is not FrameworkElement fe || fe.DataContext is not ZoneItemViewModel vm) return;
+        // 浮层锚点 = 这一行里的图标（与面板把「被点的卡片」传给 ComputePosAndAnchor 同一思路）。
+        // 列表行整行都很宽，拿整行当锚点会把浮层甩到窗口外面去。
+        if (vm.Type == ItemType.SubFolder)
+            _flyoutAnchorOverride = IconOfListRow(fe) ?? fe;
+        // 双击 = 打开（次级分区没有可启动路径 → 弹浮层），与网格视图一致。
+        if (e.ClickCount == 2)
+        {
+            if (vm.Type == ItemType.SubFolder)
+            {
+                var sub = ResolveSourceZoneItem(vm);
+                if (sub != null) { OpenSubfolderFlyout(sub); e.Handled = true; return; }
+            }
+            Open(vm);
+            e.Handled = true;
+            return;
+        }
+        // Ctrl+点击 = 多选开关（与网格视图同规则）。
+        if ((Keyboard.Modifiers & ModifierKeys.Control) != 0)
+        {
+            vm.IsSelected = !vm.IsSelected;
+            e.Handled = true;
+            return;
+        }
+        // 普通点击 = 单选；已选中的保持多选（Explorer 习惯）。
+        if (!vm.IsSelected)
+        {
+            foreach (var o in _vm.Items) o.IsSelected = false;
+            vm.IsSelected = true;
+        }
+        // 次级分区：单击即弹浮层（网格视图是「按下-抬起没拖动」才弹，列表里没有拖拽）。
+        if (vm.Type == ItemType.SubFolder)
+        {
+            var sub = ResolveSourceZoneItem(vm);
+            if (sub != null) OpenSubfolderFlyout(sub);
+        }
+        e.Handled = true;
+    }
+
+    /// <summary>列表行里那颗图标（次级分区 = 2×2 预览控件，普通项 = Image）。浮层锚点用。</summary>
+    FrameworkElement? IconOfListRow(FrameworkElement row) =>
+        FindVisualChild<FrameworkElement>(row, f => f.Name == "RowIcon");
+
+    void ListRow_Enter(object s, MouseEventArgs e)
+    {
+        if (s is Grid g && FindVisualChild<Border>(g, b => b.Name == "RowHoverBox") is { } box)
+            box.Background = ItemHoverBrush;
+    }
+
+    void ListRow_Leave(object s, MouseEventArgs e)
+    {
+        if (s is Grid g && FindVisualChild<Border>(g, b => b.Name == "RowHoverBox") is { } box)
+            box.Background = Brushes.Transparent;
+    }
+
     void EditButton_Click(object s, MouseButtonEventArgs e)
     {
         // ponytail: pass `this` so the popped-out panel anchors at the zone's
@@ -3893,6 +4106,7 @@ public partial class ZoneWindow : Window
         string BorderColor,
         double BorderThickness,
         string TitleBarFillColor,
+        double TitleBarOpacity,
         string TitleTextColor,
         string IconColor,
         string ButtonColor,
@@ -3931,6 +4145,7 @@ public partial class ZoneWindow : Window
             BorderColor:      _zone.BorderColor,
             BorderThickness:  _zone.BorderThickness,
             TitleBarFillColor: _zone.TitleBarFillColor,
+            TitleBarOpacity:  _zone.TitleBarOpacity,
             TitleTextColor:   _zone.TitleTextColor,
             IconColor:        _zone.IconColor,
             ButtonColor:      _zone.ButtonColor,
@@ -3960,6 +4175,7 @@ public partial class ZoneWindow : Window
                 BorderColor =      _zone.MergedGroupStyle.BorderColor,
                 BorderThickness =  _zone.MergedGroupStyle.BorderThickness,
                 TitleBarFillColor = _zone.MergedGroupStyle.TitleBarFillColor,
+                TitleBarOpacity =  _zone.MergedGroupStyle.TitleBarOpacity,
                 TitleTextColor =   _zone.MergedGroupStyle.TitleTextColor,
                 IconColor =        _zone.MergedGroupStyle.IconColor,
                 ButtonColor =      _zone.MergedGroupStyle.ButtonColor,
@@ -4001,6 +4217,7 @@ public partial class ZoneWindow : Window
             BorderColor =      _zone.MergedGroupStyle.BorderColor,
             BorderThickness =  _zone.MergedGroupStyle.BorderThickness,
             TitleBarFillColor = _zone.MergedGroupStyle.TitleBarFillColor,
+            TitleBarOpacity =  _zone.MergedGroupStyle.TitleBarOpacity,
             TitleTextColor =   _zone.MergedGroupStyle.TitleTextColor,
             IconColor =        _zone.MergedGroupStyle.IconColor,
             ButtonColor =      _zone.MergedGroupStyle.ButtonColor,
@@ -4121,12 +4338,29 @@ public partial class ZoneWindow : Window
         EditBtnText.Foreground = btnBrush;
         ImportBtnText.Foreground = btnBrush;
         HideBtnText.Foreground = btnBrush;
+        // ▦/≡ 的字色跟同一个「按钮颜色」，选中/未选中在 ApplyViewToggleGlyphColor 里分亮暗。
+        _viewToggleBrush = btnBrush;
+        ApplyViewToggleBackgrounds();
 
         // Control-point opacity + TileMode visibility
-        ControlPoint.Opacity = Math.Max(0.05, s.ControlOpacity / 100.0);
+        // ponytail: 不透明度改成逐按钮下放(HoverHighlight.ApplyControlOpacity) —— 原来整排
+        // ControlPoint 设 0.4 会把悬停高光一起压到 ≈7.5% 白, 与组件(18.8%)差 7 倍,
+        // 表现为「分区的高光几乎看不见」。容器保持不透明, 只让按钮自己跟随 ControlOpacity；
+        // 合并拖拽时的整排变淡(0.6)仍然由容器负责, 两者相乘不冲突。
+        HoverHighlight.ApplyControlOpacity(s.ControlOpacity,
+            new UIElement[] { GridToggleBtn, ListToggleBtn, LockBtn, ImportBtn, EditBtn, HideBtn, FolderMapUpBtn, FolderMapRefreshBtn, FolderMapCloseBtn });
+        // 容器本身恢复全不透明：明暗已下放到按钮，容器只承担「合并拖拽时整排变淡 0.6」。
+        ControlPoint.Opacity = 1.0;
         var vis = s.TileMode ? Visibility.Collapsed : Visibility.Visible;
         TitleBarBg.Visibility = vis;
         ControlPoint.Visibility = vis;
+        // ponytail 2026-10: 标题栏透明度 = 整条标题栏(含拖拽区与右侧按钮)的 Opacity,
+        // 与「按钮透明度」同一套语义 —— 0% = 整条淡出到底 (0)，而不是只把填充色变透明。
+        // 之前这行滑块去改 TitleBarFillColor 的 alpha，调 0 后标题栏背景没了、按钮和
+        // 命中区还在，所以"看起来没变透明"。上限 1、下限 0（真正的 0）。
+        TitleBarBg.Opacity = Math.Clamp(s.TitleBarOpacity / 100.0, 0.0, 1.0);
+        // 磁贴模式把右侧按钮排藏了 → 标题可用宽度变大，重新夹一次上限。
+        UpdateTitleMaxWidth();
         _tileVisual = s.TileMode;
 
         // 磁贴模式 = 隐藏底部 8px 分割条。
@@ -4146,18 +4380,25 @@ public partial class ZoneWindow : Window
         ApplyItemTextColor(s.TextColor);
     }
 
-    /// <summary>遍历 ItemsHost 内的 ContentPresenter，根据 hide 切换名称 TextBlock
-    /// （x:Name="ItemNameText"）可见性。次级分区名称走 SubfolderItemView.HideName
-    /// 声明式绑定,不在此重复处理。容器未生成时无操作 — StatusChanged 处理器会在
-    /// 容器生成后补一次。</summary>
+    /// <summary>遍历 ItemsHost / ItemsListHost 内的容器，根据 hide 切换名称 TextBlock
+    /// （x:Name="ItemNameText"）可见性。两个宿主各走一遍：模板里的 DataTrigger 只在
+    /// DataContext 变化时求值，勾选/取消「隐藏应用名」是同实例改属性，必须显式刷
+    /// （局部值优先级高于模板触发器，所以来回切都能覆盖）。容器未生成时无操作 —
+    /// StatusChanged / SetGridView 会在容器就绪后补一次。</summary>
     void ApplyHideAppName(bool hide)
     {
-        if (ItemsHost == null) return;
         var target = hide ? Visibility.Collapsed : Visibility.Visible;
-        for (int i = 0; i < ItemsHost.Items.Count; i++)
+        ApplyHideAppNameTo(ItemsHost, target);
+        ApplyHideAppNameTo(ItemsListHost, target);
+    }
+
+    void ApplyHideAppNameTo(ItemsControl? host, Visibility target)
+    {
+        if (host == null) return;
+        for (int i = 0; i < host.Items.Count; i++)
         {
-            if (ItemsHost.ItemContainerGenerator.ContainerFromIndex(i) is not DependencyObject container) continue;
-            var tb = FindVisualChild<TextBlock>(container, tb => tb.Name == "ItemNameText");
+            if (host.ItemContainerGenerator.ContainerFromIndex(i) is not DependencyObject container) continue;
+            var tb = FindVisualChild<TextBlock>(container, t => t.Name == "ItemNameText");
             if (tb != null) tb.Visibility = target;
         }
     }
@@ -4165,12 +4406,13 @@ public partial class ZoneWindow : Window
     bool _customIconOpenFirst;
 
     /// <summary>自定义图标模式：ItemsHost 隐藏，整窗双击（Window_MouseDoubleClick）
-    /// 打开 Items[0]。</summary>
+    /// 打开 Items[0]。与列表视图互斥，两个宿主的可见性统一由
+    /// <see cref="ApplyItemHostsVisibility"/> 算。</summary>
     void ApplyCustomIcon(bool on)
     {
         if (ItemsHost == null) return;
-        ItemsHost.Visibility = on ? Visibility.Collapsed : Visibility.Visible;
         _customIconOpenFirst = on;
+        ApplyItemHostsVisibility();
     }
 
     /// <summary>图标列表变化后重应用磁贴相关的 item 视觉（隐藏应用名 + 自定义图标）。</summary>
@@ -4576,6 +4818,8 @@ public partial class ZoneWindow : Window
         // happy without touching the Items collection.
         _vm.Zone = zone;
         ZoneTitleText.Text = zone.Name;
+        // 视图模式也从模型回读（应用预设/重新加载配置可能改了 IsGridView）。
+        _isGridView = zone.IsGridView;
         SetRestoreIcon();
         // ponytail: ApplyStyle rebuilds sub-zone tabs internally with the resolved title
         // text color — no separate RebuildSubZoneTabs call needed here.

@@ -365,17 +365,16 @@
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="*"/>
                                 <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
-                            <!-- FillColor spans all 5 rows (matches CalendarWidget.ApplyAcrylic setting FillColor on the whole CalendarBorder). -->
-                            <Rectangle Grid.RowSpan="5" Stretch="Fill" IsHitTestVisible="False">
+                            <!-- FillColor spans all 4 rows (matches CalendarWidget.ApplyAcrylic setting FillColor on the whole CalendarBorder). -->
+                            <Rectangle Grid.RowSpan="4" Stretch="Fill" IsHitTestVisible="False">
                                 <Rectangle.Fill>
                                     <SolidColorBrush Color="{Binding Payload.FillColor, Converter={StaticResource Hex2Color}, FallbackValue=#08000000}"/>
                                 </Rectangle.Fill>
                             </Rectangle>
-                            <Image Grid.RowSpan="5" Source="{Binding Payload.BackgroundImagePath}" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality">
+                            <Image Grid.RowSpan="4" Source="{Binding Payload.BackgroundImagePath}" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality">
                                 <Image.Opacity>
                                     <Binding Path="Payload.BackgroundImageOpacity" Converter="{StaticResource PercentToOpacity}" FallbackValue="0.3"/>
                                 </Image.Opacity>
@@ -413,12 +412,8 @@
                                         BorderThickness="0" Cursor="Hand" HorizontalAlignment="Right" Margin="0,0,16,0"
                                         Foreground="#AAFFFFFF"/>
                             </Grid>
-                            <!-- Row 1: Today button (matches CalendarWidget TodayBtn) -->
-                            <Button Grid.Row="1" Content="Today" FontSize="6" Foreground="#6C63FF"
-                                    Background="Transparent" BorderBrush="#406C63FF" BorderThickness="1"
-                                    Padding="4,1" Cursor="Hand" HorizontalAlignment="Center" Margin="0,0,0,2"/>
-                            <!-- Row 2: Weekday headers -->
-                            <ItemsControl Grid.Row="2" ItemsSource="{Binding WeekdayLabels}" Margin="0,0,0,1">
+                            <!-- Row 1: Weekday headers (今天按钮已从组件移除，预览也不再模拟那一行) -->
+                            <ItemsControl Grid.Row="1" ItemsSource="{Binding WeekdayLabels}" Margin="0,0,0,1">
                                 <ItemsControl.ItemsPanel>
                                     <ItemsPanelTemplate>
                                         <UniformGrid Rows="1" Columns="7"/>
@@ -430,8 +425,8 @@
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
-                            <!-- Row 3: Day cells grid (6 rows × 7 cols) -->
-                            <ItemsControl Grid.Row="3" ItemsSource="{Binding Days}">
+                            <!-- Row 2: Day cells grid (6 rows × 7 cols) -->
+                            <ItemsControl Grid.Row="2" ItemsSource="{Binding Days}">
                                 <ItemsControl.ItemsPanel>
                                     <ItemsPanelTemplate>
                                         <UniformGrid Rows="6" Columns="7"/>
@@ -480,12 +475,12 @@
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
-                            <Border Grid.RowSpan="5" IsHitTestVisible="False">
+                            <Border Grid.RowSpan="4" IsHitTestVisible="False">
                                 <Border.Background><Binding Path="Payload.GlassColorMode" Converter="{StaticResource GlassMode2Brush}"/></Border.Background>
                                 <Border.Opacity><Binding Path="Payload.GlassTintOpacity" Converter="{StaticResource PercentToOpacity}" FallbackValue="0.7"/></Border.Opacity>
                             </Border>
-                            <!-- Row 4: Notes panel (matches CalendarWidget NotesPanel — 120/404 ≈ 30% body height) -->
-                            <Border Grid.Row="4" Background="#15FFFFFF" CornerRadius="4" Margin="3,3,3,3" Padding="5,4" MinHeight="70">
+                            <!-- Row 3: Notes panel (matches CalendarWidget NotesPanel — 120/404 ≈ 30% body height) -->
+                            <Border Grid.Row="3" Background="#15FFFFFF" CornerRadius="4" Margin="3,3,3,3" Padding="5,4" MinHeight="70">
                                 <Grid>
                                     <Grid.RowDefinitions>
                                         <RowDefinition Height="Auto"/>

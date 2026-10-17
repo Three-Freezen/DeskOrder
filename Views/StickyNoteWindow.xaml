@@ -2,6 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:loc="clr-namespace:DesktopZones.Helpers"
+        xmlns:h="clr-namespace:DesktopZones.Helpers"
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
@@ -83,27 +84,31 @@
                                      KeyDown="TitleBox_KeyDown"/>
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,4,0">
+                            <!-- ponytail: 小按钮统一口径 —— 平时无底盘方块, 悬停铺一层 #30FFFFFF
+                                 高光(就是便签原来的那个高光色, 现在做成全应用唯一配方), 字色不随
+                                 悬停变化(用户要求)。原来的 PinBtn_Enter/Leave 等手工换色已删。 -->
                             <Button x:Name="LockBtn" Content="🔓" Width="20" Height="20"
                                     FontSize="10"
                                     Background="Transparent" BorderThickness="0"
+                                    Template="{x:Static h:HoverHighlight.RoundedButtonTemplate}" h:HoverHighlight.IsEnabled="True"
                                     Cursor="Hand" Click="LockBtn_Click" Margin="3,0,0,0"
-                                    Foreground="#80FFFFFF"
-                                    MouseEnter="LockBtn_Enter" MouseLeave="LockBtn_Leave"/>
+                                    Foreground="#80FFFFFF"/>
                             <Button x:Name="SaveBtn" Content="💾" Width="20" Height="20"
                                     FontSize="10"
                                     Background="Transparent" BorderThickness="0"
+                                    Template="{x:Static h:HoverHighlight.RoundedButtonTemplate}" h:HoverHighlight.IsEnabled="True"
                                     Cursor="Hand" Click="SaveBtn_Click" Margin="3,0,0,0"
-                                    Foreground="#80FFFFFF"
-                                    MouseEnter="SaveBtn_Enter" MouseLeave="SaveBtn_Leave"/>
+                                    Foreground="#80FFFFFF"/>
                             <Button x:Name="PinBtn" Content="📌" Width="20" Height="20"
                                     FontSize="10"
                                     Background="Transparent" BorderThickness="0"
+                                    Template="{x:Static h:HoverHighlight.RoundedButtonTemplate}" h:HoverHighlight.IsEnabled="True"
                                     Cursor="Hand" Click="PinBtn_Click" Margin="3,0,0,0"
-                                    Foreground="#80FFFFFF"
-                                    MouseEnter="PinBtn_Enter" MouseLeave="PinBtn_Leave"/>
+                                    Foreground="#80FFFFFF"/>
                             <Button x:Name="HideBtn" Content="─" Width="20" Height="20"
-                                    FontSize="11" Foreground="#80FFFFFF"
+                                    FontSize="10" Foreground="#80FFFFFF"
                                     Background="Transparent" BorderThickness="0"
+                                    Template="{x:Static h:HoverHighlight.RoundedButtonTemplate}" h:HoverHighlight.IsEnabled="True"
                                     Cursor="Hand" Click="HideBtn_Click" Margin="3,0,0,0"/>
                         </StackPanel>
                     </Grid>
@@ -141,6 +146,7 @@
                                 Foreground="#E0E0E0"
                                 Background="Transparent" BorderThickness="0"
                                 Focusable="False"
+                                Template="{x:Static h:HoverHighlight.RoundedButtonTemplate}" h:HoverHighlight.IsEnabled="True"
                                 Cursor="Hand" Click="BoldBtn_Click">
                             <Button.Resources>
                                 <Style TargetType="Border">
@@ -155,6 +161,7 @@
                                 Foreground="#E0E0E0"
                                 Background="Transparent" BorderThickness="0"
                                 Focusable="False"
+                                Template="{x:Static h:HoverHighlight.RoundedButtonTemplate}" h:HoverHighlight.IsEnabled="True"
                                 Cursor="Hand" Click="ItalicBtn_Click">
                             <Button.Resources>
                                 <Style TargetType="Border">
@@ -169,6 +176,7 @@
                                 Foreground="#E0E0E0"
                                 Background="Transparent" BorderThickness="0"
                                 Focusable="False"
+                                Template="{x:Static h:HoverHighlight.RoundedButtonTemplate}" h:HoverHighlight.IsEnabled="True"
                                 Cursor="Hand" Click="UnderlineBtn_Click">
                             <Button.Resources>
                                 <Style TargetType="Border">
@@ -194,6 +202,7 @@
                                 Foreground="#E0E0E0"
                                 Background="Transparent" BorderThickness="0"
                                 Focusable="False"
+                                Template="{x:Static h:HoverHighlight.RoundedButtonTemplate}" h:HoverHighlight.IsEnabled="True"
                                 Cursor="Hand" Click="FontColorBtn_Click">
                             <Button.Resources>
                                 <Style TargetType="Border">

@@ -44,11 +44,16 @@ public partial class MotionSettingsDialog : Window
         SelectOrigin(origin);
         SelectAnimation(animation);
         SpeedSlider.Value = Math.Clamp(speed, SpeedSlider.Minimum, SpeedSlider.Maximum);
-        SpeedValueText.Text = $"{SpeedSlider.Value:F2}x";
+        // ponytail: 滑块右侧数字去掉多余小数 —— 整数显示整数(1x / 2x), 非整数才带小数(0.25x / 1.5x)。
+        // 不用 "0" 格式: 速度范围是 0.25~2.0, 取整会把 0.25 显示成 0。
+        SpeedValueText.Text = SpeedText(SpeedSlider.Value);
 
         SpeedSlider.ValueChanged += (_, _) =>
-            SpeedValueText.Text = $"{SpeedSlider.Value:F2}x";
+            SpeedValueText.Text = SpeedText(SpeedSlider.Value);
     }
+
+    /// <summary>动效速度显示:整数不带小数点, 其余按最简小数(0.25 / 1.25 / 1.5)。</summary>
+    static string SpeedText(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + "x";
 
     void ApplyLoc()
     {

@@ -6,6 +6,10 @@
       <ColumnDefinition Width="*"/>
       <ColumnDefinition Width="48"/>
     </Grid.ColumnDefinitions>
+    <!-- ponytail 2026-10: 原来没有吸附, 拖动时 WPF 会把像素位置换算回 33.47 / 40.32
+         这种小数, 右侧数字于是显示两位小数(用户报的问题)。
+         这里不用 IsSnapToTickEnabled —— 那会连 Tick(5) 一起吸附, 变成只能选 5 的倍数。
+         改为: Tick 只画刻度, 值的取整由 code-behind 按 1 的步长吸附。 -->
     <Slider x:Name="PART_Slider" Grid.Column="0"
             Minimum="{Binding Min, RelativeSource={RelativeSource AncestorType=UserControl}}"
             Maximum="{Binding Max, RelativeSource={RelativeSource AncestorType=UserControl}}"
@@ -20,9 +24,7 @@
                  FontSize="11"
                  Foreground="{DynamicResource Brush.Text.Secondary}"
                  HorizontalAlignment="Right" VerticalAlignment="Center"
-                 MouseLeftButtonDown="ValueText_DoubleClick"
-                 Text="{Binding Value, RelativeSource={RelativeSource AncestorType=UserControl},
-                                StringFormat={}{0:0.##}}"/>
+                 MouseLeftButtonDown="ValueText_DoubleClick"/>
     </Border>
   </Grid>
 </UserControl>

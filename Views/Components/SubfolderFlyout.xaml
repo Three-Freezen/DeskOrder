@@ -51,8 +51,10 @@
                     <!-- ponytail 2026-08-28: 改按下触发 — 实测按下能命中按钮(诊断日志
                          src=TextBlock),抬起却在浮层激活引发的失活/输入翻搅后重新命中
                          失败 → StyleBtn_Click 丢失,"⚙ 时灵时不灵"。按下即触发绕开。 -->
+                    <!-- ponytail: 小按钮统一口径 —— 去掉常驻 #30FFFFFF 方块, 平时透明、
+                         悬停铺 Helpers/HoverHighlight 的高光(#30FFFFFF), 不改字色。 -->
                     <Border DockPanel.Dock="Right" Width="32" Height="26" CornerRadius="4"
-                            Background="#30FFFFFF" Cursor="Hand"
+                            Background="Transparent" Cursor="Hand"
                             MouseLeftButtonDown="StyleBtn_Click"
                             MouseEnter="StyleBtn_Enter" MouseLeave="StyleBtn_Leave">
                         <TextBlock Text="⚙" FontSize="12" Foreground="#C0FFFFFF"

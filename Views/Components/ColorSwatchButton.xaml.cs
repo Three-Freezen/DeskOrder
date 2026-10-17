@@ -56,6 +56,14 @@ public partial class ColorSwatchButton : UserControl
         "#42A5F5", "#26C6DA", "#AB47BC", "#8D6E63",
     };
 
+    /// <summary>
+    /// 「透明」预设要写进模型的字符串。**必须是合法颜色值** —— 以前这里直接把
+    /// 字面量 "Transparent" 存进配置，后续 SetPercent 会把它切成
+    /// "ransparent" 再拼成 "#4Cransparent" 这种垃圾串，导致透明度滑块永久失效
+    /// （用户实测：分区配置里出现 "#00nsparent"）。#00FFFFFF = 全透明白。
+    /// </summary>
+    const string TransparentValue = "#00FFFFFF";
+
     public ColorSwatchButton()
     {
         InitializeComponent();
@@ -109,7 +117,9 @@ public partial class ColorSwatchButton : UserControl
             var captured = hex;
             btn.Click += (_, _) =>
             {
-                CurrentColor = captured;
+                // ponytail 2026-10: 「透明」写入合法颜色值而不是字面量 "Transparent"，
+                // 否则后续按 alpha 换算透明度时会拼出垃圾串，滑块从此失效。
+                CurrentColor = hex == "Transparent" ? TransparentValue : captured;
                 PART_Popup.IsOpen = false;
             };
             Swatches.Children.Add(btn);

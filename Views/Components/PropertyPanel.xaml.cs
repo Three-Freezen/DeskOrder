@@ -654,6 +654,13 @@ public partial class PropertyPanel : UserControl
     {
         if (FieldScroller == null) return; // pre-InitializeComponent guard
 
+        // ponytail 2026-10 (修老 BUG): 退掉「上一棵字段树」的 DP 订阅必须在这里做,
+        // 不能放在 SetFieldRoot 里 —— 所有 Build*Fields 都是「先把行建好(行里注册订阅)、
+        // 最后才 SetFieldRoot(root)」, 在 SetFieldRoot 里退订阅会把同一批刚注册的订阅
+        // 一起退掉。后果正是用户报的现象: 滑块能拖、右侧数字在变, 但 onChange 永不触发
+        // → Preview 不跑 → 窗口外观毫无变化(实测 Preview 调用数 = 0; 手动挂同一描述符则命中 1 次)。
+        ReleaseDpHooks();
+
         // ponytail: capture snapshot BEFORE building the field tree so Cancel
         // restores the model state the user saw when they opened the panel.
         // PanelConfig lacks a Clone(); route through PanelPresetConfig round-trip.
@@ -793,7 +800,12 @@ public partial class PropertyPanel : UserControl
     // wired by the host page. If not wired, updates stay in-memory only.
 
     /// <summary>重新渲染字段树以反映 TileMode / HideAppName / CustomIcon 的依赖更新。</summary>
-    void Rebuild(Zone z) => BuildZoneFields(z);
+    /// <remarks>整棵树重建 → 旧行的 DP 订阅必须先退掉，否则每重建一次就漏一批。</remarks>
+    void Rebuild(Zone z)
+    {
+        ReleaseDpHooks();
+        BuildZoneFields(z);
+    }
 
     // ── 状态区（顶部实时状态条）──
     //
@@ -1347,8 +1359,8 @@ public partial class PropertyPanel : UserControl
         tb.Children.Add(MakeColorRow(_loc["ZoneProp.TitleBarColor"], z.TitleBarFillColor,
             v => { z.TitleBarFillColor = v; Save(z); }));
         tb.Children.Add(MakeSliderRow(_loc["ZoneProp.TitleBarOpacity"], 0, 100, 5,
-            ParsePercent(z.TitleBarFillColor, 6),
-            p => { z.TitleBarFillColor = SetPercent(z.TitleBarFillColor, p, "FFFFFF"); Save(z); }));
+            z.TitleBarOpacity,
+            v => { z.TitleBarOpacity = v; Save(z); }));
         tb.Children.Add(MakeColorRow(_loc["ZoneProp.ButtonColor"], z.ButtonColor,
             v => { z.ButtonColor = v; Save(z); }));
         tb.Children.Add(MakeSliderRow(_loc["ZoneProp.ButtonOpacity"], 5, 100, 5,
@@ -3128,12 +3140,16 @@ public partial class PropertyPanel : UserControl
         _dpHooks.Clear();
     }
 
-    /// <summary>换上新的字段树:先退订旧树的 DP 记账,再挂新的。
-    /// 所有 `FieldScroller.Content = root` 都必须走这里 —— 挂在方法里收口,
-    /// 将来新增的构建器就不会漏退订。</summary>
+    /// <summary>换上新的字段树。</summary>
+    /// <remarks>
+    /// ponytail 2026-10 (修老 BUG): 这里**绝对不能**再调 ReleaseDpHooks()。
+    /// 所有 Build*Fields 都是「行先建好并注册 DP 订阅, 最后一行才 SetFieldRoot」,
+    /// 在这里退订阅会把同一批订阅当场退掉 —— 于是所有滑块的 onChange 都不触发
+    /// (滑块能拖、数字在变、窗口不变)。退上一棵树的责任已移交
+    /// <see cref="OnTargetChanged"/> 的开头。
+    /// </remarks>
     void SetFieldRoot(FrameworkElement root)
     {
-        ReleaseDpHooks();
         FieldScroller.Content = root;
     }
 
@@ -3587,16 +3603,28 @@ public partial class PropertyPanel : UserControl
 
     // ── Color alpha helpers ──
 
+    /// <summary>
+    /// 校验颜色串是否为合法值：<c>#RRGGBB</c> 或 <c>#AARRGGBB</c>。
+    /// </summary>
+    /// <remarks>
+    /// ponytail 2026-10 (修「标题栏透明度滑块失效」)：历史配置里存在
+    /// <c>"#00nsparent"</c> 这种被写坏的串（旧版 ColorSwatchButton 把字面量
+    /// <c>"Transparent"</c> 直接存进了模型，后续按 alpha 换算出这种垃圾）。
+    /// 换算前必须先验真伪，否则 <c>Substring</c> 取到的是字母，滑块怎么拖都拼不出合法颜色。
+    /// </remarks>
+    static bool IsValidColorHex(string? hex) =>
+        hex != null && System.Text.RegularExpressions.Regex.IsMatch(hex, "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$");
+
     static double ParsePercent(string hex, double fallback)
     {
-        if (string.IsNullOrEmpty(hex) || hex.Length < 3 || hex[0] != '#') return fallback;
+        if (!IsValidColorHex(hex)) return fallback;
         try
         {
             // ponytail 2026-08-25: 兼容 #AARRGGBB（9 字符）和 #RRGGBB（7 字符）两种格式。
             // 模型默认 "#08000000" 是 #AARRGGBB，但 ColorSwatchButton 预设（"#FFA726" 等）
             // 和 ColorPickerDialog 返回的都是 #RRGGBB — 这俩混用导致拖透明度滑块改色相的 bug。
             // #RRGGBB 没显式 alpha，按 100% 不透明对待（这也是 WPF ColorConverter 的默认）。
-            var a = hex.Length >= 9
+            var a = hex!.Length >= 9
                 ? byte.Parse(hex.Substring(1, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture)
                 : (byte)255;
             return Math.Round(a / 255.0 * 100);
@@ -3612,13 +3640,15 @@ public partial class PropertyPanel : UserControl
         // 之前 length>=7 一律从 Substring(3) 取，把 #RRGGBB 的 R 通道当 alpha 吞了，
         // 用户拖滑块时 R 被砍半 → "橙色变绿色"。
         // 输出统一归一化为 #AARRGGBB，下一次 ParsePercent / ColorConverter 都不会再误读。
+        // ponytail 2026-10: 非法串（历史脏数据 "#00nsparent" / "Transparent"）一律
+        // 回落到 fallbackRgb —— 否则会把垃圾字节继续拼进配置，滑块永远修不回来。
         string rgb;
-        if (hex != null && hex.Length >= 9)
-            rgb = hex.Substring(3);
-        else if (hex != null && hex.Length >= 7)
-            rgb = hex.Substring(1);
-        else
+        if (!IsValidColorHex(hex))
             rgb = fallbackRgb;
+        else if (hex!.Length >= 9)
+            rgb = hex.Substring(3);
+        else
+            rgb = hex.Substring(1);
         var a = (int)Math.Clamp(Math.Round(percent / 100.0 * 255), 0, 255);
         return $"#{a:X2}{rgb}";
     }

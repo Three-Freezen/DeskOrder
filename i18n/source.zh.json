@@ -153,6 +153,8 @@
   "Common.SwitchTheme": "切换主题",
   "Common.SortByName": "⇅ 名称",
   "Common.SortTooltip": "排序方式",
+  "Common.GridView": "网格视图",
+  "Common.ListView": "列表视图",
   "Common.Notes": "备注",
   "Common.Transparent": "透明",
 
@@ -448,7 +450,6 @@
   "Preset.DeleteMenuItem": "删除",
   "Preset.OverwritePrompt": "已存在同名预设「{0}」，是否覆盖？",
 
-  "Calendar.Today": "今天",
   "Calendar.AddNote": "添加备注",
   "Calendar.Delete": "删除日历",
   "Calendar.Priority": "优先级：",
