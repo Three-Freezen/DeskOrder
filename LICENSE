@@ -2,36 +2,10 @@ DeskOrder（秩序桌面）
 Copyright 2026 Three Freeze (Three-Freezen)
 https://github.com/Three-Freezen/DeskOrder
 
-Licensed under the Apache License, Version 2.0 (the full text follows below).
+Licensed under the Apache License, Version 2.0 — the full text follows below.
 You may obtain a copy of the License at
 
     http://www.apache.org/licenses/LICENSE-2.0
-
-## 许可声明
-
-DeskOrder 自 **v1.0.19** 起采用 **Apache License 2.0**。作者是本项目全部代码的版权
-所有者，因此同时将**此前发布的所有版本（含 v1.0.18 及更早版本）一并按 Apache
-License 2.0 提供**，替代原有授权。已经依据旧许可获得的权利不受影响；此后获取或
-使用本项目的任何版本，均以本许可为准。
-
-Apache License 2.0 允许商业使用（包括随商业产品分发、企业内部生产环境使用、以本
-软件提供收费服务），只需保留版权与许可声明、并标注修改过的文件；它不授予商标使用
-权，“DeskOrder” 名称与图标仍归作者所有。后续如调整许可，会在仓库与官网提前公告。
-
-## License statement
-
-DeskOrder is licensed under the **Apache License 2.0** as of **v1.0.19**. As the
-copyright holder of all code in this project, the author also licenses **every
-earlier release, including v1.0.18 and before, under the Apache License 2.0**,
-replacing the previous terms for all future use. Rights already granted under the
-old license are unaffected; from now on, obtaining or using any version of this
-project is governed by this license.
-
-The Apache License 2.0 permits commercial use (bundling with commercial products,
-internal production use, paid services built on the software), provided copyright
-and license notices are kept and modified files are marked. It does not grant
-trademark rights — the "DeskOrder" name and logo remain with the author. Any future
-license change will be announced in the repository and on the website in advance.
 
 ---
 

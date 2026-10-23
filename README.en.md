@@ -249,6 +249,4 @@ Release notes: [Releases](https://github.com/Three-Freezen/DeskOrder/releases).
 
 [Apache License 2.0](LICENSE) · Three-Freeze
 
-DeskOrder is licensed under the **Apache License 2.0** as of **v1.0.19**. As the copyright holder of all code in this project, the author also licenses **every earlier release, including v1.0.18 and before, under Apache-2.0**, replacing the previous terms for all future use. Rights already granted under the old license are unaffected; from now on, obtaining or using any version is governed by Apache-2.0.
-
-Apache-2.0 permits commercial use (bundling with commercial products, internal production use, paid services built on the software); the obligations are to keep copyright and license notices and to mark modified files. It does **not** grant trademark rights — the "DeskOrder" name and logo remain with the author, so forks must pick their own name. Any future license change will be announced here and on the [website](https://three-freezen.github.io/DeskOrder/) in advance.
+Apache-2.0 applies from v1.0.19; earlier releases are covered by the same license.
