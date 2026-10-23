@@ -543,24 +543,7 @@ html.lang-fading main{animation:langIn .22s ease}
           <li><b data-i18n="cl17_i1t"></b><span data-i18n="cl17_i1d"></span></li>
           <li><b data-i18n="cl17_i2t"></b><span data-i18n="cl17_i2d"></span></li>
         </ul>
-        <div class="cl-head cl-prev"><span class="rm-ver">v1.0.16</span></div>
-        <ul class="cl-list">
-          <li><b data-i18n="cl16_i1t"></b><span data-i18n="cl16_i1d"></span></li>
-          <li><b data-i18n="cl16_i2t"></b><span data-i18n="cl16_i2d"></span></li>
-        </ul>
-        <div class="cl-head cl-prev"><span class="rm-ver">v1.0.15</span></div>
-        <ul class="cl-list">
-          <li><b data-i18n="cl15_i1t"></b><span data-i18n="cl15_i1d"></span></li>
-          <li><b data-i18n="cl15_i2t"></b><span data-i18n="cl15_i2d"></span></li>
-          <li><b data-i18n="cl15_i3t"></b><span data-i18n="cl15_i3d"></span></li>
-          <li><b data-i18n="cl15_i4t"></b><span data-i18n="cl15_i4d"></span></li>
-          <li><b data-i18n="cl15_i5t"></b><span data-i18n="cl15_i5d"></span></li>
-        </ul>
-        <div class="cl-head cl-prev"><span class="rm-ver">v1.0.14</span></div>
-        <ul class="cl-list">
-          <li><b data-i18n="cl14_i1t"></b><span data-i18n="cl14_i1d"></span></li>
-          <li><b data-i18n="cl14_i2t"></b><span data-i18n="cl14_i2d"></span></li>
-        </ul>
+
         <div class="cl-foot">
           <a href="https://github.com/Three-Freezen/DeskOrder/releases" target="_blank" rel="noopener" data-od-id="cl-link" data-i18n="cl_link">完整更新记录见 Releases →</a>
           <span data-i18n="cl_req">适用于 Windows 10 1809+ · 自包含运行时，无需安装 .NET</span>
@@ -675,21 +658,10 @@ zh:{
   cl18_i3t:"次级分区浮层定位修复：",cl18_i3d:"分区与面板的列表模式下点开次级分区，浮层不再跑到屏幕角落或整行最右侧，改为紧贴被点的图标弹出；面板的 2×2 图标底边框也不再被裁。",
   cl18_i4t:"样式设置与滑块修复：",cl18_i4d:"修好「标题栏下面的设置都不能调」（预览钩子被清空）、标题栏透明度改为整体淡出、所有滑块只显示整数；配置里被写坏的非法颜色载入时自动修正。",
   cl18_i5t:"面板与日历打磨：",cl18_i5d:"面板列表视图的悬停/选中高光铺满整行、行距与分区统一，次级分区图标与分区同源；日历去掉「今天」按钮，首行高度压到原来的 2/3。",
-  cl16_i1t:"触屏设备启动崩溃修复：",cl16_i1d:"修复微软商店审核在 Surface 等触屏设备上发现的启动即崩溃问题。本应用不使用墨迹与触控笔势，现已跳过 WPF 笔/触控栈初始化，触屏点按仍作为普通鼠标输入工作。",
-  cl16_i2t:"崩溃日志落盘：",cl16_i2d:"应用未处理异常（含后台线程）现在会写入 logs 目录的 crash-*.log，含版本、运行形态、异常链与堆栈，出问题不再无声无息。",
+
   cl17_i1t:"启动稳定性加固：",cl17_i1d:"自包含运行时升级至 .NET 10.0.12（含四轮服务修复）；启动用隐藏窗口不再创建为分层透明窗口，绕开部分核显驱动上的渲染线程雷区。",
   cl17_i2t:"启动分步追踪：",cl17_i2d:"启动 10 个里程碑逐步落盘 startup-trace.log，若再出现启动问题，日志最后一行即死亡边界。",
-  cl15_i1t:"液态玻璃材质预设（8 种）：",cl15_i1d:"亚克力、烟雾、毛玻璃、液态玻璃、深色玻璃等一键套用整套背板配方，与颜色预设互不干扰；材质选择改为显式开关并新增「默认」。",
-  cl15_i2t:"壁纸采样渲染（新方案）：",cl15_i2d:"背板改为采样当前壁纸自行模糊，模糊半径变成真实像素、材质全部生效；自动适配 Wallpaper Engine 等动态壁纸软件，1:1 物理像素采样，换壁纸后点「重新采样」即可刷新。",
-  cl15_i3t:"标题栏改名修复：",cl15_i3d:"窗口标题栏里改名字即时生效并同步到设置界面；点别处、停手、关窗也会提交，不再出现界面新名字、配置旧名字。",
-  cl15_i4t:"便签固定位置打开：",cl15_i4d:"快捷键唤出便签可选按原位置打开，不再强制居中。",
-  cl15_i5t:"性能与细节：",cl15_i5d:"拖模糊滑块不再卡顿（大半径预模糊最快约 7 倍加速），修复多处内存泄漏，启动不再同步扫描桌面快捷方式；次级分区浮层与回收站细节优化。",
-  cl14_i1t:"修复更新后安装包残留：",cl14_i1d:"安装器在新版首启时仍在运行并锁住安装包，删除失败且标记已被一次性消费。现在删除成功才消费标记，被占用时后台自动重试，下次启动也会再试。",
-  cl14_i2t:"下载完成即登记待清理：",cl14_i2d:"原来只在点「重启并更新」时登记；现在下载完成即写入标记，下载后手动运行安装包装完同样会被自动清理。",
-  cl13_i1t:"备注弹窗深浅色同步：",cl13_i1d:"日历备注弹窗的优先级下拉与提醒勾选框跟随系统深浅色（新增 Menu.CheckBox 样式）。",
-  cl13_i2t:"面板搜索增强：",cl13_i2d:"支持按内部项目名搜到次级分区（子分区）里的图标。",
-  cl13_i3t:"样式预设更聪明：",cl13_i3d:"加载预设只套用外观，不再覆盖目标已有的名称与图标（分区/组合/时钟/日历/便签/次级分区）。",
-  cl13_i4t:"标题栏实时同步：",cl13_i4d:"分区与便签窗口重命名时标题栏即时更新。",
+
   cl_link:"完整更新记录见 Releases →",cl_req:"适用于 Windows 10 1809+ · 自包含运行时，无需安装 .NET",
   sec_au_t:"关于作者",au_d:"DeskOrder 的开发者，项目以 Apache-2.0 协议开源。",au_license:"Apache License 2.0",
   au_license_note:"自 v1.0.19 起采用 Apache-2.0，并溯及此前所有版本（含 v1.0.18 及更早）。可自由使用、修改与商用分发，保留版权与许可声明、标注改动即可；许可不包含商标权，二次分发请另起名称。",
@@ -753,21 +725,10 @@ en:{
   cl18_i3t:"Subfolder flyout placement fixed: ",cl18_i3d:"in list mode the flyout no longer jumps to a screen corner or to the far right of a full-width row — it opens right next to the icon you clicked. The panel's 2×2 icon frame is no longer clipped at the bottom.",
   cl18_i4t:"Style settings and sliders fixed: ",cl18_i4d:"settings under the title bar respond again (the live-preview hooks were being cleared), title-bar opacity now fades the whole bar, every slider shows whole numbers only, and invalid colors written by older builds are repaired on load.",
   cl18_i5t:"Panel and calendar polish: ",cl18_i5d:"panel list highlights span the full row with row spacing matching zones, secondary-zone icons share the same control as zones, and the calendar drops its Today button with the top row at two-thirds height.",
-  cl16_i1t:"Touch-device launch crash fixed: ",cl16_i1d:"fixes the launch crash that Microsoft Store certification found on touch devices such as the Surface family. The app never uses ink or stylus gestures and now skips WPF's stylus/touch stack initialization entirely; touch taps still work as plain mouse input.",
-  cl16_i2t:"Crash logs on disk: ",cl16_i2d:"unhandled exceptions (including background threads) are now written to crash-*.log in the logs folder, with version, run mode, exception chain and stack traces — no more silent deaths.",
+
   cl17_i1t:"Launch stability hardening: ",cl17_i1d:"the self-contained runtime upgrades to .NET 10.0.12 (four servicing rounds of fixes); the startup helper window is no longer a layered transparent window, sidestepping a render-thread danger zone on some integrated-GPU drivers.",
   cl17_i2t:"Step-by-step startup trace: ",cl17_i2d:"ten startup milestones are appended to startup-trace.log and flushed at every step — if a launch issue ever reappears, the last log line marks the exact death boundary.",
-  cl15_i1t:"Liquid glass material presets (8): ",cl15_i1d:"Acrylic, Smoke, Frosted, Liquid Glass, Dark Glass and more apply a whole backdrop recipe in one click, independent of color presets; picking a material is now an explicit toggle with a new \"Default\" entry.",
-  cl15_i2t:"Wallpaper sampling rendering (new): ",cl15_i2d:"the backdrop is sampled from the current wallpaper and blurred in-app — the blur radius becomes real pixels and material presets take full effect; auto-adapts to Wallpaper Engine and other dynamic-wallpaper apps at native 1:1 pixels, with a Resample button for wallpaper changes.",
-  cl15_i3t:"Title-bar rename fixed: ",cl15_i3d:"renames in window title bars apply instantly and sync across the management UI; clicking elsewhere, pausing or closing the window commits too — no more new name on screen, old name in the config.",
-  cl15_i4t:"Sticky notes open in place: ",cl15_i4d:"hotkey-summoned notes can reopen at their last position instead of being forced to screen center.",
-  cl15_i5t:"Performance & polish: ",cl15_i5d:"dragging the blur slider no longer stutters (large-radius pre-blur up to ~7× faster), several memory leaks fixed, and startup no longer scans desktop shortcuts; subfolder flyout and recycle-bin refinements.",
-  cl14_i1t:"Leftover installer after updates — fixed: ",cl14_i1d:"the setup launcher is still running when the new version first starts, holding a lock on the downloaded installer, so the delete failed after the marker had already been consumed. The marker is now consumed only after a successful delete, with automatic background retries and another attempt on the next launch.",
-  cl14_i2t:"Registered as soon as the download completes: ",cl14_i2d:"the cleanup marker is now written right after downloading (previously only when clicking Restart & Update), so manually running the downloaded installer is also cleaned up after the update.",
-  cl13_i1t:"Note dialog follows light/dark: ",cl13_i1d:"the priority dropdown and reminder checkbox in the calendar note popup now track the system theme (new Menu.CheckBox style).",
-  cl13_i2t:"Better panel search: ",cl13_i2d:"search now matches icons inside secondary zones (sub-zones) by their item names.",
-  cl13_i3t:"Smarter style presets: ",cl13_i3d:"applying a preset only changes appearance — it no longer overwrites the target's existing name and icon (zones, groups, clock, calendar, notes, secondary zones).",
-  cl13_i4t:"Live title bar sync: ",cl13_i4d:"zone and sticky note windows update their title bar instantly on rename.",
+
   cl_link:"Full history in Releases →",cl_req:"For Windows 10 1809+ · self-contained runtime, no .NET needed",
   sec_au_t:"About",au_d:"Developer of DeskOrder. The project is open source under Apache-2.0.",au_license:"Apache License 2.0",
   au_license_note:"Apache-2.0 applies from v1.0.19 and also covers every earlier release (v1.0.18 and before). Use, modify and redistribute freely, including commercially — just keep the copyright and license notices and mark modified files. The license grants no trademark rights, so forks need their own name.",
