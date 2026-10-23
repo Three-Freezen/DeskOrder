@@ -32,7 +32,33 @@ public partial class SubfolderFlyout : UserControl
                 // (Loaded 只触发一次,后续 reopen 不会重跑,所以这里每次赋值都延后重排)。
                 Dispatcher.BeginInvoke(RefreshGrid, System.Windows.Threading.DispatcherPriority.Loaded);
             }
+            // 正方形次级分区:每次换 VM 都按当前设置重断言一次(浮层在分区窗口里是复用
+            // 的同一个控件,不重断言就会继承上一次打开的形态)。
+            ApplySquareMode();
         }
+    }
+
+    // ── 设置 → 次级分区 的两项全局设置 ──
+    // 每次用到时读一次 ConfigService(进程内静态缓存,零 IO):设置页改完立刻生效,
+    // 不需要重启,也不需要把配置对象一路传进浮层。
+    // 「默认展开位置」的读取见下方 PreferredCorner(AppConfig.SubfolderExpandCorner)。
+
+    /// <summary>「正方形次级分区」= 展开后不显示名称与 ⚙ 按钮?</summary>
+    public static bool SquareFlyout
+    {
+        get
+        {
+            try { return new DesktopZones.Services.ConfigService().Load().SubfolderSquare; }
+            catch { return false; }
+        }
+    }
+
+    /// <summary>按「正方形次级分区」显示/隐藏标题行(名称 + ⚙)。
+    /// 隐藏后浮层只剩正方形的图标网格。</summary>
+    public void ApplySquareMode()
+    {
+        if (HeaderRow == null) return;
+        HeaderRow.Visibility = SquareFlyout ? Visibility.Collapsed : Visibility.Visible;
     }
 
     /// <summary>ponytail 2026-08-29: 宿主 SubFolder 模型变化 — 圆角/尖角切换时同步
@@ -144,6 +170,9 @@ public partial class SubfolderFlyout : UserControl
     {
         try
         {
+            // 正方形次级分区:标题行(含 ⚙)整行隐藏 → 这块区域现在是图标网格,不能再
+            // 按"⚙ 的固定布局矩形"抢命中,否则点右上角那颗图标会打开样式设置。
+            if (HeaderRow == null || HeaderRow.Visibility != Visibility.Visible) return false;
             var hs = System.Windows.Interop.HwndSource.FromVisual(this) as System.Windows.Interop.HwndSource;
             if (hs == null || hs.Handle == IntPtr.Zero) return false;
             if (!GetWindowRect(hs.Handle, out var r)) return false;
@@ -804,7 +833,16 @@ public partial class SubfolderFlyout : UserControl
 
     /// <summary>把 Flyout 复位到关闭态(scale 0,不透明 0),供打开前调用,避免残留动画帧。
     /// 不透明度取 0 而非 1:Fade 动效的打开要从 0 淡入(NormalizeFor 里非 Fade kind
-    /// 会自行把 Opacity 抬回 1,只有 Fade 保留 0 作为 from)。</summary>
+    /// 会自行把 Opacity 抬回 1,只有 Fade 保留 0 作为 from)。
+    ///
+    /// ponytail 2026-10 —— 「浮层离图标老远」的真正根因就在这里:
+    /// Popup 是**按子控件 RenderTransform 之后的包围盒**来定位窗口的。带着上一次打开
+    /// 留下的缩放锚点 c 打开,窗口就落在 (offset − c) 而不是 offset;而两个宿主窗口随后
+    /// 写回的 offset 往往与上次**相同**(同一个次级分区反复点开、位置一模一样),依赖属性
+    /// 值没变 → WPF 不会重新定位 → 这个 −c 的偏差就固定留在那里。
+    /// 分区窗口是**复用同一个** SubfolderFlyout 控件(锚点跨次残留),所以它每次都偏;
+    /// 面板每次 new 一个(c 从 0 开始),所以面板一直是对的 —— 这就是"分区位置不对、
+    /// 面板一直准"的由来。开层前把锚点清零,打开那一刻变换是恒等的,定位才精确。</summary>
     public void ResetToClosed()
     {
         var st = FlyoutScale;
@@ -813,6 +851,7 @@ public partial class SubfolderFlyout : UserControl
         st.ScaleX = 0; st.ScaleY = 0;
         BeginAnimation(UIElement.OpacityProperty, null);
         Opacity = 0;
+        SetAnchor(default);   // 必须:见上面这段说明(否则窗口被 −c 带偏)
     }
 
     /// <summary>把缩放锚点 c 写入 TransformGroup 的 [移至原点(-c), Scale, 移回(+c)] —
@@ -1001,55 +1040,216 @@ public partial class SubfolderFlyout : UserControl
         st.BeginAnimation(ScaleTransform.ScaleYProperty, bounce);
     }
 
-    /// <summary>确定性展开定位 + 动画原点。返回 (屏幕位置 pos, 缩放锚点 c):
-    /// pos 以图标右上角 + 8px 向右下展开,横向放不下翻到图标左侧、纵向放不下翻到图标
-    /// 上方,并夹在屏幕工作区内;c = 图标中心 - pos(flyout 局部坐标,允许负值)。
-    /// 全程只用图标容器的 PointToScreen(容器在可见分区/面板窗口里,必然连着
-    /// PresentationSource),不再读 flyout 自身的 PointToScreen — 那会因 popup 重排
-    /// 时序拿到错误位置,或在 visual 未连接时抛异常回落到 (0,0)。
-    /// ponytail: 全程统一到 DIP。PointToScreen 返回物理像素,需除以 DPI 缩放;
-    /// SystemParameters.WorkArea 本身已是 DIP(与 Popup AbsolutePoint offset 同单位),
-    /// 不要再除 — 否则 125%/150% 缩放下工作区被缩小,翻侧判定过早:分区靠屏幕边/
-    /// 靠其他分区时浮层会翻到错误一侧,表现为展开位置偏移很大。</summary>
-    public static (Point pos, Point c) ComputePosAndAnchor(FrameworkElement? container, Size flyoutSize)
+    /// <summary>浮层与图标的间距(DIP) —— 贴着图标展开,只留一条缝。</summary>
+    public const double FlyoutGap = 8;
+
+    /// <summary>浮层贴在图标哪个方位展开。设置 → 次级分区 → 默认展开位置。</summary>
+    public enum FlyoutCorner
     {
-        const double gap = 8;
+        TopLeft,
+        BottomLeft,
+        TopRight,
+        BottomRight,
+    }
+
+    /// <summary>设置里的「默认展开位置」(默认左下;非法值也回落到左下)。</summary>
+    public static FlyoutCorner PreferredCorner
+    {
+        get
+        {
+            try { return ParseCorner(new DesktopZones.Services.ConfigService().Load().SubfolderExpandCorner); }
+            catch { return FlyoutCorner.BottomLeft; }
+        }
+    }
+
+    /// <summary>配置字符串 → 方位。"TopLeft"/"BottomLeft"/"TopRight"/"BottomRight";
+    /// 其余一律左下(默认值)。</summary>
+    public static FlyoutCorner ParseCorner(string? raw) => raw switch
+    {
+        "TopLeft" => FlyoutCorner.TopLeft,
+        "TopRight" => FlyoutCorner.TopRight,
+        "BottomRight" => FlyoutCorner.BottomRight,
+        _ => FlyoutCorner.BottomLeft,
+    };
+
+    /// <summary>方位 → 配置字符串(设置页保存用)。</summary>
+    public static string CornerToString(FlyoutCorner c) => c switch
+    {
+        FlyoutCorner.TopLeft => "TopLeft",
+        FlyoutCorner.TopRight => "TopRight",
+        FlyoutCorner.BottomRight => "BottomRight",
+        _ => "BottomLeft",
+    };
+
+    /// <summary>确定性展开定位 + 动画原点。返回 (屏幕位置 pos, 缩放锚点 c)。
+    ///
+    /// 四个方位(以图标为参照):左上 / 左下 / 右上 / 右下 —— 浮层整个落在图标那一角,
+    /// 与图标间距恒为 gap。首选方位放不下工作区时**逐级换向**:
+    ///   ① 首选方位
+    ///   ② 先左右翻(例:右下放不下 → 左下)
+    ///   ③ 再上下翻(例:右下放不下 → 右上)
+    ///   ④ 最后斜对角(左上)
+    /// 四个都放不下工作区时,取"可见面积最大"的那一个再夹进工作区(不会甩到很远)。
+    /// c = 图标中心 - pos(浮层局部坐标,允许负值)。
+    ///
+    /// ponytail 2026-10:几个反复踩过的坑都写在这:
+    /// ① 锚点必须是**图标元素本身**(名字 ItemIcon),不能是图标格/列表行/卡片容器 ——
+    ///    容器宽度会被当成"图标宽度",格子越大浮层离图标越远。
+    /// ② 工作区取**图标所在显示器**的(GetMonitorInfo.rcWork),不是只有主屏的
+    ///    SystemParameters.WorkArea。
+    /// ③ 调用方打开前必须先 ResetToClosed() 清掉缩放锚点,否则 Popup 会按上一次
+    ///    变换后的包围盒定位,窗口被 −c 带偏(见 ResetToClosed 的说明)。
+    /// 全程 DIP:PointToScreen 返回物理像素要除以 DPI 缩放;rcWork 也是物理像素,同样除;
+    /// Popup 的 AbsolutePoint offset 本身就是 DIP。</summary>
+    /// <param name="corner">首选方位。</param>
+    /// <param name="gap">与图标的间距(DIP),四个方位一致。</param>
+    /// <param name="alignToIconTop">true = "下方"方位改用「浮层顶边 = 图标顶边 + gap」
+    /// 的历史口径(列表视图用它保持先前观感);false = 浮层整个在图标下方。</param>
+    public static (Point pos, Point c) ComputePosAndAnchor(
+        FrameworkElement? container, Size flyoutSize, FlyoutCorner corner, double gap, bool alignToIconTop = false)
+    {
+        const double margin = 8;  // 与工作区边缘的留白
+        const double eps = 0.5;   // 浮点容差(算"放得下"时用)
+        gap = Math.Max(0, gap);
         double sx = 1, sy = 1;
         try
         {
             var d = VisualTreeHelper.GetDpi((System.Windows.Media.Visual?)container!);
-            sx = d.DpiScaleX; sy = d.DpiScaleY;
+            if (d.DpiScaleX > 0) sx = d.DpiScaleX;
+            if (d.DpiScaleY > 0) sy = d.DpiScaleY;
         }
         catch { }
-        var wa = SystemParameters.WorkArea;
-        Point iconTL = new(0, 0);
-        double iconW = 0, iconH = 0;
-        if (container != null)
+
+        // 锚点矩形(DIP)。拿不到(未连 PresentationSource / 尺寸为 0)就退到光标处 ——
+        // 绝不回落到"工作区中心"那种一眼可见的大跳。
+        Rect a;
+        if (!TryGetAnchorRect(container, sx, sy, out a))
         {
-            try
+            var fallback = TryGetCursorDip(sx, sy, out var cur)
+                ? cur
+                : new Point(SystemParameters.WorkArea.Left + SystemParameters.WorkArea.Width / 2,
+                            SystemParameters.WorkArea.Top + SystemParameters.WorkArea.Height / 2);
+            a = new Rect(fallback.X, fallback.Y, 0, 0);
+        }
+
+        var wa = WorkAreaOf(a, sx, sy);
+        double w = Math.Max(0, flyoutSize.Width), h = Math.Max(0, flyoutSize.Height);
+        var bounds = new Rect(wa.Left + margin, wa.Top + margin,
+                              Math.Max(0, wa.Width - margin * 2), Math.Max(0, wa.Height - margin * 2));
+
+        // 某个方位的候选矩形(right = 图标右侧,down = 图标下方)。
+        Rect Candidate(bool right, bool down)
+        {
+            double x = right ? a.Right + gap : a.Left - gap - w;
+            double y = down
+                ? (alignToIconTop ? a.Top + gap : a.Bottom + gap)
+                : a.Top - gap - h;
+            return new Rect(x, y, w, h);
+        }
+
+        bool preferRight = corner is FlyoutCorner.TopRight or FlyoutCorner.BottomRight;
+        bool preferDown = corner is FlyoutCorner.BottomLeft or FlyoutCorner.BottomRight;
+        // 顺序:首选 → 左右翻 → 上下翻 → 斜对角
+        (bool right, bool down)[] order =
+        {
+            (preferRight, preferDown),
+            (!preferRight, preferDown),
+            (preferRight, !preferDown),
+            (!preferRight, !preferDown),
+        };
+
+        Rect chosen = Candidate(preferRight, preferDown);
+        double bestVisible = -1;
+        bool fitted = false;
+        foreach (var (right, down) in order)
+        {
+            var r = Candidate(right, down);
+            bool inside = r.Left >= bounds.Left - eps && r.Top >= bounds.Top - eps
+                       && r.Right <= bounds.Right + eps && r.Bottom <= bounds.Bottom + eps;
+            if (inside) { chosen = r; fitted = true; break; }
+            double visible = VisibleArea(r, bounds);
+            if (visible > bestVisible) { bestVisible = visible; chosen = r; }
+        }
+
+        // 夹进工作区(四个方位都放不下时,这一步保证浮层仍然完整可见/尽量可见)
+        double cx = Math.Min(Math.Max(chosen.Left, bounds.Left), Math.Max(bounds.Left, bounds.Right - w));
+        double cy = Math.Min(Math.Max(chosen.Top, bounds.Top), Math.Max(bounds.Top, bounds.Bottom - h));
+
+        var pos = new Point(cx, cy);
+        var iconCenter = new Point(a.Left + a.Width / 2, a.Top + a.Height / 2);
+        var c = new Point(iconCenter.X - pos.X, iconCenter.Y - pos.Y);
+        DzTrace.Log($"[SubFlyout] 定位候选: corner={corner} gap={gap:F0} 图标=({a.Left:F0},{a.Top:F0}){a.Width:F0}x{a.Height:F0} " +
+                    $"浮层={w:F0}x{h:F0} fitted={fitted} pos=({pos.X:F1},{pos.Y:F1})");
+        return (pos, c);
+    }
+
+    /// <summary>两个矩形相交面积(全放不下时用来挑"最能看清"的那个方位)。</summary>
+    static double VisibleArea(Rect r, Rect bounds)
+    {
+        double l = Math.Max(r.Left, bounds.Left), t = Math.Max(r.Top, bounds.Top);
+        double rr = Math.Min(r.Right, bounds.Right), b = Math.Min(r.Bottom, bounds.Bottom);
+        return rr <= l || b <= t ? 0 : (rr - l) * (b - t);
+    }
+
+    /// <summary>锚点元素在屏幕上的矩形(DIP)。用两个角点换算再相减,比
+    /// "左上角 + ActualWidth"更贴近真实渲染尺寸(LayoutRounding/缩放取整)。
+    /// 返回 false = 元素还没连上 PresentationSource 或尺寸为 0。</summary>
+    static bool TryGetAnchorRect(FrameworkElement? el, double sx, double sy, out Rect rect)
+    {
+        rect = Rect.Empty;
+        if (el == null || !el.IsVisible) return false;
+        try
+        {
+            double w = el.ActualWidth, h = el.ActualHeight;
+            if (w <= 0 || h <= 0) return false;
+            var tl = el.PointToScreen(new Point(0, 0));
+            var br = el.PointToScreen(new Point(w, h));
+            double left = Math.Min(tl.X, br.X) / sx, top = Math.Min(tl.Y, br.Y) / sy;
+            double right = Math.Max(tl.X, br.X) / sx, bottom = Math.Max(tl.Y, br.Y) / sy;
+            if (right - left <= 0 || bottom - top <= 0) return false;
+            rect = new Rect(left, top, right - left, bottom - top);
+            return true;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>锚点所在**显示器**的工作区(DIP,已排除任务栏)。多屏下
+    /// SystemParameters.WorkArea 只描述主屏,拿它判翻侧会让副屏上的浮层永远判成
+    /// "放不下";GetMonitorInfo 的 rcWork 是物理像素,按同一块屏的 DPI 缩放换成 DIP。
+    /// 任何一步失败都退回 SystemParameters.WorkArea(至少不会比旧行为更差)。</summary>
+    static Rect WorkAreaOf(Rect anchor, double sx, double sy)
+    {
+        try
+        {
+            var probe = new Win32Point
             {
-                var tl = container.PointToScreen(new Point(0, 0));
-                iconTL = new Point(tl.X / sx, tl.Y / sy);
-                iconW = container.ActualWidth;
-                iconH = container.ActualHeight;
-            }
-            catch
+                X = (int)Math.Round((anchor.Left + Math.Max(1, anchor.Width) / 2) * sx),
+                Y = (int)Math.Round((anchor.Top + Math.Max(1, anchor.Height) / 2) * sy)
+            };
+            var mon = MonitorFromPoint(probe, MONITOR_DEFAULTTONEAREST);
+            if (mon != IntPtr.Zero)
             {
-                var center = new Point(wa.Left + (wa.Width - flyoutSize.Width) / 2,
-                                       wa.Top + (wa.Height - flyoutSize.Height) / 2);
-                return (center, new Point(flyoutSize.Width / 2, flyoutSize.Height / 2));
+                var mi = new MONITORINFO { cbSize = System.Runtime.InteropServices.Marshal.SizeOf(typeof(MONITORINFO)) };
+                if (GetMonitorInfo(mon, ref mi))
+                {
+                    var r = mi.rcWork;
+                    double rw = r.Right - r.Left, rh = r.Bottom - r.Top;
+                    if (rw > 0 && rh > 0)
+                        return new Rect(r.Left / sx, r.Top / sy, rw / sx, rh / sy);
+                }
             }
         }
-        double x = iconTL.X + iconW + gap;
-        double y = iconTL.Y + gap;
-        if (x + flyoutSize.Width > wa.Right - 8)
-            x = Math.Max(wa.Left + 8, iconTL.X - flyoutSize.Width - gap);
-        if (y + flyoutSize.Height > wa.Bottom - 8)
-            y = Math.Max(wa.Top + 8, iconTL.Y - flyoutSize.Height - gap);
-        var pos = new Point(x, y);
-        var iconCenter = new Point(iconTL.X + iconW / 2, iconTL.Y + iconH / 2);
-        var c = new Point(iconCenter.X - pos.X, iconCenter.Y - pos.Y);
-        return (pos, c);
+        catch { }
+        return SystemParameters.WorkArea;
+    }
+
+    /// <summary>物理光标 → DIP 屏幕坐标(锚点不可用时的兜底定位)。</summary>
+    static bool TryGetCursorDip(double sx, double sy, out Point pt)
+    {
+        pt = default;
+        if (!GetCursorPos(out var p)) return false;
+        pt = new Point(p.X / sx, p.Y / sy);
+        return true;
     }
 
     // ── Click-outside(打开 flyout 后挂上,关闭时拆掉;捕获子树防止 Flyout 内按下被误判) ──
@@ -1156,6 +1356,25 @@ public partial class SubfolderFlyout : UserControl
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool GetCursorPos(out Win32Point pt);
+
+    // 浮层定位用「锚点所在显示器」的工作区(见 WorkAreaOf):SystemParameters.WorkArea
+    // 只有主屏,多屏下会把副屏上的浮层判成"放不下"然后翻到错误一侧。
+    private const uint MONITOR_DEFAULTTONEAREST = 2;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromPoint(Win32Point pt, uint dwFlags);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct MONITORINFO
+    {
+        public int cbSize;
+        public Win32Rect rcMonitor;
+        public Win32Rect rcWork;
+        public uint dwFlags;
+    }
 
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
     private struct Win32Rect

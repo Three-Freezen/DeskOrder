@@ -26,6 +26,16 @@ public class AppConfig
     // ── 分区图片预览：导入的图片文件显示内容缩略图而非默认图标 ──
     public bool ImagePreviewEnabled { get; set; } = true;
 
+    // ── 次级分区浮层（设置 → 次级分区） ──
+    /// <summary>次级分区展开的默认方位:"TopLeft" / "BottomLeft" / "TopRight" / "BottomRight",
+    /// 默认左下。首选方位放不下时先左右翻、再上下翻、最后斜对角,间距不变
+    /// (见 SubfolderFlyout.ComputePosAndAnchor)。</summary>
+    public string SubfolderExpandCorner { get; set; } = "BottomLeft";
+
+    /// <summary>正方形次级分区：展开后不显示名称与 ⚙ 设置按钮，只剩图标网格
+    /// （网格本身是正方形 → 整个浮层是正方形）。默认关闭。</summary>
+    public bool SubfolderSquare { get; set; } = false;
+
     // ── 更新 ──
     // 启动后台检查更新（24h 节流，UpdateService.AutoCheckIfDueAsync 消费）。
     public bool AutoCheckUpdate { get; set; } = true;

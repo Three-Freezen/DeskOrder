@@ -882,9 +882,10 @@ public partial class ZoneWindow : Window
         sub.PropertyChanged += _subItemsChangedHandler;
 
         // 记住图标容器:定位 + 动画原点都要用它的屏幕位置。
-        // 优先用「点击时抓到的那个图标元素」（与面板把被点卡片传进 ComputePosAndAnchor 同一思路），
-        // 列表视图里网格容器根本不存在，只有这条路径才拿得到正确锚点。
-        _flyoutOriginContainer = clickAnchor ?? FindContainerFor(sub);
+        // 优先用「点击时抓到的那个图标元素」;另外两条路径(网格视图点击、悬停自动
+        // 展开)拿到的容器是图标格/列表行,必须再往下一层取模板里那颗图标 —— 容器
+        // 的宽度会被当成"图标宽度"参与定位,格子越大浮层离图标就越远。
+        _flyoutOriginContainer = clickAnchor ?? FlyoutAnchorOf(FindContainerFor(sub));
 
         // 先复位到关闭态(缩放 0 / 不透明 0),避免上次关闭残留的中间态一闪而过。
         SubfolderFlyoutView.ResetToClosed();
@@ -908,6 +909,12 @@ public partial class ZoneWindow : Window
 
     void TryOpenFlyoutAnimated(ZoneItem sub)
     {
+        // ponytail 2026-10: 先让布局把「这一次」的尺寸算完再定位。浮层是复用的单个控件,
+        // 尺寸随内容(图标数量 → 2×2/3×3…、次级分区的 GridSize、名字长度)变化;旧代码在
+        // Loaded 优先级直接读 ActualWidth/Height,读到的可能还是上一次打开时留下的旧尺寸 ——
+        // 翻侧判定用的是假尺寸,浮层就落到"不该翻"的那一侧,而且偏得很远(次级分区越大、
+        // 两次打开的尺寸差越大越明显)。UpdateLayout 强制按新内容完成一次测量/排布。
+        try { SubfolderFlyoutView.UpdateLayout(); } catch { }
         if (SubfolderFlyoutView.ActualWidth <= 0 || SubfolderFlyoutView.ActualHeight <= 0)
         {
             Dispatcher.BeginInvoke(new Action(() => TryOpenFlyoutAnimated(sub)),
@@ -915,10 +922,18 @@ public partial class ZoneWindow : Window
             return;
         }
         // 位置 + 锚点一次性定死(纯函数:图标位置、flyout 尺寸、工作区):
-        //   pos = 图标右上 + 8px,越界翻侧并夹工作区 → AbsolutePoint 的屏幕 offset
+        //   pos = 贴着图标展在设置里的那个方位(默认左下),放不下时先左右翻、再上下翻、
+        //         最后斜对角,间距恒为 FlyoutGap
         //   c   = 图标中心 - pos → TransformGroup 缩放锚点(以图标为原点)
-        var container = _flyoutOriginContainer ?? FindContainerFor(sub);
-        var (pos, c) = SubfolderFlyout.ComputePosAndAnchor(container, new Size(SubfolderFlyoutView.ActualWidth, SubfolderFlyoutView.ActualHeight));
+        // 列表视图沿用先前观感:永远先朝图标右侧、浮层顶边与图标顶边齐平。
+        var container = _flyoutOriginContainer ?? FlyoutAnchorOf(FindContainerFor(sub));
+        var flyoutSize = new Size(SubfolderFlyoutView.ActualWidth, SubfolderFlyoutView.ActualHeight);
+        var corner = _isGridView ? SubfolderFlyout.PreferredCorner : SubfolderFlyout.FlyoutCorner.BottomRight;
+        var (pos, c) = SubfolderFlyout.ComputePosAndAnchor(
+            container, flyoutSize, corner, SubfolderFlyout.FlyoutGap, alignToIconTop: !_isGridView);
+        DzTrace.Log($"[SubFlyout] 定位: anchor={(container?.GetType().Name ?? "null")}#{container?.Name} " +
+                    $"flyout={flyoutSize.Width:F0}x{flyoutSize.Height:F0} pos=({pos.X:F1},{pos.Y:F1}) " +
+                    $"grid={_isGridView} corner={corner} anchorCenter={c}");
         SubfolderFlyoutPopup.HorizontalOffset = pos.X;
         SubfolderFlyoutPopup.VerticalOffset = pos.Y;
         SubfolderFlyoutView.SetAnchor(c);
@@ -3040,10 +3055,11 @@ public partial class ZoneWindow : Window
     void ListRow_MouseDown(object s, MouseButtonEventArgs e)
     {
         if (s is not FrameworkElement fe || fe.DataContext is not ZoneItemViewModel vm) return;
-        // 浮层锚点 = 这一行里的图标（与面板把「被点的卡片」传给 ComputePosAndAnchor 同一思路）。
-        // 列表行整行都很宽，拿整行当锚点会把浮层甩到窗口外面去。
+        // 浮层锚点 = 这一行里的图标（与面板把「被点的卡片」里的图标传给
+        // ComputePosAndAnchor 同一思路）。列表行整行都很宽，拿整行当锚点会把浮层
+        // 甩到窗口外面去。
         if (vm.Type == ItemType.SubFolder)
-            _flyoutAnchorOverride = IconOfListRow(fe) ?? fe;
+            _flyoutAnchorOverride = FlyoutAnchorOf(fe);
         // 双击 = 打开（次级分区没有可启动路径 → 弹浮层），与网格视图一致。
         if (e.ClickCount == 2)
         {
@@ -3078,9 +3094,15 @@ public partial class ZoneWindow : Window
         e.Handled = true;
     }
 
-    /// <summary>列表行里那颗图标（次级分区 = 2×2 预览控件，普通项 = Image）。浮层锚点用。</summary>
-    FrameworkElement? IconOfListRow(FrameworkElement row) =>
-        FindVisualChild<FrameworkElement>(row, f => f.Name == "RowIcon");
+    /// <summary>浮层锚点 = 模板里那颗图标(网格 = Image / 次级分区的 2×2 预览;
+    /// 列表 = 行内图标),名字统一叫 ItemIcon(与面板卡片同名)。
+    /// **不能**把图标格/列表行的容器当锚点 —— 容器宽度会被当作"图标宽度"参与定位,
+    /// 格子越大浮层离图标越远(见 SubfolderFlyout.ComputePosAndAnchor)。
+    /// 找不到就退回容器本身。</summary>
+    FrameworkElement? FlyoutAnchorOf(FrameworkElement? container)
+        => container == null
+            ? null
+            : FindVisualChild<FrameworkElement>(container, f => f.Name == "ItemIcon") ?? container;
 
     void ListRow_Enter(object s, MouseEventArgs e)
     {

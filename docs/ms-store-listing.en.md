@@ -6,7 +6,7 @@ DeskOrder reorganizes your desktop with "zones": drag files, folders and shortcu
 
 - Category: Personalization / Utilities
 - Requirements: Windows 10 or later (x64), self-contained runtime, no .NET installation needed
-- Price: Free, open source under MIT
+- Price: Free; open source under Apache-2.0
 
 ## Screenshots
 

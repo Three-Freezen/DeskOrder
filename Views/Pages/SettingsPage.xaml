@@ -49,6 +49,38 @@
         </StackPanel>
       </Border>
 
+      <!-- 次级分区 -->
+      <TextBlock Text="{loc:Loc Key=Settings.Subfolder}" FontSize="11" FontWeight="SemiBold" Margin="0,4,0,8"
+                 Foreground="{DynamicResource Brush.Text.Tertiary}"/>
+      <Border Background="{DynamicResource Brush.Bg.Surface}"
+              BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1"
+              CornerRadius="6" Padding="14,8" Margin="0,0,0,16">
+        <StackPanel>
+          <Grid Margin="0,6,0,6">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="{loc:Loc Key=Settings.Subfolder.ExpandCorner}" VerticalAlignment="Center"
+                       Foreground="{DynamicResource Brush.Text.Primary}"/>
+            <ComboBox x:Name="ExpandCornerCombo" Grid.Column="1" Width="120"
+                      SelectionChanged="ExpandCorner_Changed">
+              <ComboBoxItem Content="{loc:Loc Key=Settings.Subfolder.Corner.TopLeft}" Tag="TopLeft"/>
+              <ComboBoxItem Content="{loc:Loc Key=Settings.Subfolder.Corner.BottomLeft}" Tag="BottomLeft"/>
+              <ComboBoxItem Content="{loc:Loc Key=Settings.Subfolder.Corner.TopRight}" Tag="TopRight"/>
+              <ComboBoxItem Content="{loc:Loc Key=Settings.Subfolder.Corner.BottomRight}" Tag="BottomRight"/>
+            </ComboBox>
+          </Grid>
+          <TextBlock Text="{loc:Loc Key=Settings.Subfolder.ExpandCorner.Hint}" FontSize="11" Margin="0,2,0,10"
+                     Foreground="{DynamicResource Brush.Text.Tertiary}" TextWrapping="Wrap"/>
+          <CheckBox x:Name="SquareSubfolderBox" Content="{loc:Loc Key=Settings.Subfolder.Square}" Margin="0,4,0,2"
+                    Foreground="{DynamicResource Brush.Text.Primary}"
+                    Checked="SquareSubfolder_Changed" Unchecked="SquareSubfolder_Changed"/>
+          <TextBlock Text="{loc:Loc Key=Settings.Subfolder.Square.Hint}" FontSize="11" Margin="24,0,0,8"
+                     Foreground="{DynamicResource Brush.Text.Tertiary}" TextWrapping="Wrap"/>
+        </StackPanel>
+      </Border>
+
       <!-- 外观 -->
       <TextBlock Text="{loc:Loc Key=Settings.Appearance}" FontSize="11" FontWeight="SemiBold" Margin="0,4,0,8"
                  Foreground="{DynamicResource Brush.Text.Tertiary}"/>

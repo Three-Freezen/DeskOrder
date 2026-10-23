@@ -10,7 +10,7 @@
   <p>
     <a href="https://github.com/Three-Freezen/DeskOrder/releases/latest"><img src="https://img.shields.io/github/v/release/Three-Freezen/DeskOrder" alt="Release" /></a>
     <a href="https://github.com/Three-Freezen/DeskOrder/releases"><img src="https://img.shields.io/github/downloads/Three-Freezen/DeskOrder/total" alt="下载量" /></a>
-    <a href="LICENSE"><img src="https://img.shields.io/github/license/Three-Freezen/DeskOrder" alt="License" /></a>
+    <a href="LICENSE"><img src="https://img.shields.io/github/license/Three-Freezen/DeskOrder" alt="License: Apache-2.0" /></a>
     <img src="https://img.shields.io/badge/Windows-10%2B%20x64-0078D4" alt="平台" />
     <img src="https://img.shields.io/badge/.NET-10.0%20%E8%87%AA%E5%8C%85%E5%90%AB-512BD4" alt=".NET" />
     <a href="https://three-freezen.github.io/DeskOrder/"><img src="https://img.shields.io/badge/官网-three--freezen.github.io-1E88E5" alt="官网" /></a>
@@ -153,7 +153,7 @@ irm https://github.com/Three-Freezen/DeskOrder/releases/latest/download/DeskOrde
 - 自包含发布，不依赖系统里装没装 .NET
 - 内存和渲染做过专项优化
 - 配置全部存本地，不上传数据
-- MIT 开源
+- Apache-2.0 开源
 
 ## 技术架构
 
@@ -247,4 +247,8 @@ dotnet publish DesktopZones.csproj -c Release -r win-x64 --self-contained
 
 ## 许可证
 
-[MIT License](LICENSE) · Three-Freeze
+[Apache License 2.0](LICENSE) · Three-Freeze
+
+项目自 **v1.0.19** 起采用 **Apache License 2.0**。作者是本项目全部代码的版权所有者，因此同时将**此前发布的所有版本（含 v1.0.18 及更早版本）一并按 Apache-2.0 提供**，替代原有授权；已经依据旧许可获得的权利不受影响，此后获取或使用本项目的任何版本均以 Apache-2.0 为准。
+
+Apache-2.0 允许商用（随商业产品分发、企业内部生产使用、以本软件提供收费服务都可以），义务是保留版权与许可声明、并显著标注修改过的文件。它**不授予商标使用权**，"DeskOrder" 名称与图标仍归作者所有，二次分发请另起名字。后续如调整许可，会在这里与[官网](https://three-freezen.github.io/DeskOrder/)提前公告。

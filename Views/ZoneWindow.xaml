@@ -58,7 +58,10 @@
                             Background="Transparent" CornerRadius="6" IsHitTestVisible="False"/>
                     <!-- 图标+名称整体垂直居中(面板对齐):80 格子里 40px 图标居中,名称在下方。 -->
                     <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" IsHitTestVisible="False">
-                        <Image Source="{Binding Icon}" Width="{Binding IconSize}" Height="{Binding IconSize}"
+                        <!-- x:Name="ItemIcon"：次级分区浮层的锚点（与面板同一套命名）。
+                             浮层只能贴着这颗图标定位，绝不能拿整格容器当锚点 —— 见
+                             SubfolderFlyout.ComputePosAndAnchor 的说明。 -->
+                        <Image x:Name="ItemIcon" Source="{Binding Icon}" Width="{Binding IconSize}" Height="{Binding IconSize}"
                                Stretch="Uniform"
                                RenderOptions.BitmapScalingMode="HighQuality"
                                HorizontalAlignment="Center" Margin="0,0,0,4"/>
@@ -107,7 +110,8 @@
                             <MenuItem x:Name="CtxSubDelete" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.Delete]}" Click="SubfolderDelete_Click" Foreground="#FF6666"/>
                         </ContextMenu>
                     </Grid.ContextMenu>
-                    <c:SubfolderItemView HideName="{Binding DataContext.Zone.HideAppName, RelativeSource={RelativeSource AncestorType=Window}}"
+                    <c:SubfolderItemView x:Name="ItemIcon"
+                                         HideName="{Binding DataContext.Zone.HideAppName, RelativeSource={RelativeSource AncestorType=Window}}"
                                          HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     <!-- 方形 hover 高光(次级分区图标格区域) -->
                     <Border x:Name="SubHoverBox" Width="{Binding ItemSize}" Height="{Binding ItemSize}"
@@ -158,7 +162,7 @@
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
-                        <Image x:Name="RowIcon" Source="{Binding Icon}" Width="20" Height="20" Stretch="Uniform"
+                        <Image x:Name="ItemIcon" Source="{Binding Icon}" Width="20" Height="20" Stretch="Uniform"
                                RenderOptions.BitmapScalingMode="HighQuality"
                                VerticalAlignment="Center" Margin="0,0,8,0"/>
                         <TextBlock x:Name="ItemNameText" Grid.Column="1" Text="{Binding Name}"
@@ -205,7 +209,7 @@
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <c:SubfolderPreview x:Name="RowIcon" Source="{Binding Source}" BoxSize="28" ThumbSize="12"
+                        <c:SubfolderPreview x:Name="ItemIcon" Source="{Binding Source}" BoxSize="28" ThumbSize="12"
                                             HorizontalAlignment="Left" VerticalAlignment="Center"
                                             Margin="0,0,8,0"/>
                         <TextBlock x:Name="ItemNameText" Grid.Column="1" Text="{Binding Name}"

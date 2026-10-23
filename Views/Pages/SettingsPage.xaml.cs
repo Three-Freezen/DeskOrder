@@ -47,6 +47,11 @@ public partial class SettingsPage : UserControl
         _configService = configService;
         _updates = updateService;
         BuildHotkeys();
+        // 下拉初值:等 Loaded 里的 SyncFromConfig 也不迟,但先填上避免"空框"闪一下。
+        bool prevSuppress = _suppress;
+        _suppress = true;
+        try { SelectExpandCorner(_configService.Load().SubfolderExpandCorner); }
+        finally { _suppress = prevSuppress; }
         _onLangChanged = _ => RebuildHotkeys();
         LocalizationService.Instance.LanguageChanged += _onLangChanged;
         // ponytail: two-way bind to ThemeService so the title-bar cycle button
@@ -133,6 +138,40 @@ public partial class SettingsPage : UserControl
         BuildHotkeys();
     }
 
+    // ── 次级分区:默认展开方位 / 正方形次级分区 ──
+
+    void ExpandCorner_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppress) return;
+        var cfg = _configService.Load();
+        cfg.SubfolderExpandCorner = ExpandCornerCombo.SelectedItem is ComboBoxItem ci && ci.Tag is string tag && tag.Length > 0
+            ? tag
+            : "BottomLeft";
+        _configService.Save(cfg);
+    }
+
+    /// <summary>配置里的方位字符串 → 下拉项(非法值回落到左下 = 默认)。</summary>
+    void SelectExpandCorner(string? corner)
+    {
+        foreach (var item in ExpandCornerCombo.Items)
+        {
+            if (item is ComboBoxItem ci && (ci.Tag as string) == corner) { ExpandCornerCombo.SelectedItem = ci; return; }
+        }
+        foreach (var item in ExpandCornerCombo.Items)
+        {
+            if (item is ComboBoxItem ci && (ci.Tag as string) == "BottomLeft") { ExpandCornerCombo.SelectedItem = ci; return; }
+        }
+        ExpandCornerCombo.SelectedIndex = 1;
+    }
+
+    void SquareSubfolder_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_suppress) return;
+        var cfg = _configService.Load();
+        cfg.SubfolderSquare = SquareSubfolderBox.IsChecked == true;
+        _configService.Save(cfg);
+    }
+
     UIElement MakeHotkeyRow(string label, Func<string> getCurrent, Action<FrameworkElement>? onButtonClick = null)
     {
         var grid = new Grid { Margin = new Thickness(0, 8, 0, 8) };
@@ -187,6 +226,8 @@ public partial class SettingsPage : UserControl
             AutoAlignBox.IsChecked = cfg.AutoAlign;
             ReverseSyncBox.IsChecked = cfg.ReverseSyncEnabled;
             ImagePreviewBox.IsChecked = cfg.ImagePreviewEnabled;
+            SquareSubfolderBox.IsChecked = cfg.SubfolderSquare;
+            SelectExpandCorner(cfg.SubfolderExpandCorner);
             AutoCheckUpdateBox.IsChecked = cfg.AutoCheckUpdate;
             DeleteSetupAfterUpdateBox.IsChecked = cfg.DeleteSetupAfterUpdate;
             SelectComboByTag(LanguageCombo, cfg.Language);

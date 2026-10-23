@@ -45,6 +45,8 @@ public partial class PanelWindow : Window
     private bool _recycleStateInit;
     private bool _recycleFullLast;
     private bool _isGridView = true;
+    /// <summary>网格视图卡片边长 —— 也是次级分区浮层的间距("让出一个网格的宽度")。</summary>
+    private const double PanelGridCellSize = 80;
     private Zone? _selectedZone;
     private Action<string>? _langChanged;
 
@@ -671,7 +673,7 @@ public partial class PanelWindow : Window
         if (isGrid)
         {
             // Grid view: icon centered, name below
-            card.Width = 80; card.Height = 80;
+            card.Width = PanelGridCellSize; card.Height = PanelGridCellSize;
             card.Margin = new Thickness(4);
             var stack = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
             var iconImg = new Image
@@ -752,7 +754,7 @@ public partial class PanelWindow : Window
         FrameworkElement content;
         if (isGrid)
         {
-            card.Width = 80; card.Height = 80;
+            card.Width = PanelGridCellSize; card.Height = PanelGridCellSize;
             card.Margin = new Thickness(4);
             var sv = new SubfolderItemView
             {
@@ -1320,9 +1322,17 @@ public partial class PanelWindow : Window
 
     void OpenFlyoutAnimated(Popup popup, SubfolderFlyout flyout, Border card)
     {
+        // ponytail 2026-10: 先强制一次布局再读尺寸 —— 浮层尺寸随内容(图标数量/格子大小)
+        // 变化,读到旧尺寸会让翻侧判定用错宽度,浮层落到"不该翻"的一侧且偏得很远。
+        try { flyout.UpdateLayout(); } catch { }
         // ponytail 2026-10: 锚点取「卡片里那颗图标」，不再用整张卡片 —— 列表视图的卡片是
-        // 整行宽，用它当锚点浮层会跑到最右侧（与分区不一致）。分区那边锚的就是图标元素。
-        var (pos, c) = SubfolderFlyout.ComputePosAndAnchor(FlyoutAnchorOf(card), new Size(flyout.ActualWidth, flyout.ActualHeight));
+        // 整行宽，用它当锚点浮层会跑到最右侧（与分区不一致）。分区那边锚的也是图标元素。
+        // 方位:网格视图用设置里的默认方位(默认左下),列表视图沿用先前观感
+        // (朝图标右侧、顶边齐平)。
+        var corner = _isGridView ? SubfolderFlyout.PreferredCorner : SubfolderFlyout.FlyoutCorner.BottomRight;
+        var (pos, c) = SubfolderFlyout.ComputePosAndAnchor(
+            FlyoutAnchorOf(card), new Size(flyout.ActualWidth, flyout.ActualHeight),
+            corner, SubfolderFlyout.FlyoutGap, alignToIconTop: !_isGridView);
         popup.HorizontalOffset = pos.X;
         popup.VerticalOffset = pos.Y;
         flyout.SetAnchor(c);

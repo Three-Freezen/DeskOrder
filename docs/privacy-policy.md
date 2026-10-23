@@ -114,7 +114,7 @@ DeskOrder 是一个开源项目，源代码与说明文档均公开在项目仓�
 
 DeskOrder is an open-source project; its source code and documentation are publicly available in the repository. **Please read the repository carefully before use** (<https://github.com/Three-Freezen/DeskOrder>) and make sure you understand what the software does before deciding to use it.
 
-本软件按「现状」提供，不附带任何明示或暗示的担保。**在法律允许的最大范围内，对于因使用本软件而产生的任何直接或间接损失，开发者概不负责**，包括但不限于数据丢失、利润损失或业务中断。使用本软件即表示你已阅读并同意本政策及随软件分发的许可条款（MIT License）。
+本软件按「现状」提供，不附带任何明示或暗示的担保。**在法律允许的最大范围内，对于因使用本软件而产生的任何直接或间接损失，开发者概不负责**，包括但不限于数据丢失、利润损失或业务中断。使用本软件即表示你已阅读并同意本政策及随软件分发的许可条款（**Apache License 2.0**，自 v1.0.19 起溯及本项目所有版本）。
 
-The software is provided "as is", without warranty of any kind, express or implied. **To the maximum extent permitted by applicable law, the developer shall not be liable for any direct or indirect loss arising from the use of this software**, including but not limited to data loss, lost profits, or business interruption. By using the software, you acknowledge that you have read and agreed to this policy and the license terms distributed with it (MIT License).
+The software is provided "as is", without warranty of any kind, express or implied. **To the maximum extent permitted by applicable law, the developer shall not be liable for any direct or indirect loss arising from the use of this software**, including but not limited to data loss, lost profits, or business interruption. By using the software, you acknowledge that you have read and agreed to this policy and the license terms distributed with it (**Apache License 2.0**, applied retroactively to all versions as of v1.0.19).
 
