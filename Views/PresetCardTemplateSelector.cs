@@ -23,6 +23,9 @@ public class PresetCardTemplateSelector : DataTemplateSelector
     public DataTemplate? PanelTemplate { get; set; }
     // ponytail 2026-08-26: SubFolder 预设卡(样式预览 + 下方名称/日期信息栏)。
     public DataTemplate? SubfolderTemplate { get; set; }
+    /// <summary>播放器（律动条 / 唱片机）预设卡。两种形态共用一张卡，
+    /// 卡片内部按 <see cref="PresetKind"/> 画条子或唱盘。</summary>
+    public DataTemplate? MediaPlayerTemplate { get; set; }
 
     public override DataTemplate? SelectTemplate(object item, DependencyObject container)
     {
@@ -38,6 +41,8 @@ public class PresetCardTemplateSelector : DataTemplateSelector
             PresetKind.MergedGroup => MergedGroupTemplate,
             PresetKind.Panel => PanelTemplate,
             PresetKind.Subfolder => SubfolderTemplate,
+            PresetKind.MediaPlayerBars => MediaPlayerTemplate,
+            PresetKind.MediaPlayerVinyl => MediaPlayerTemplate,
             _ => null
         };
     }

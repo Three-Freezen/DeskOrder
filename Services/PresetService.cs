@@ -137,6 +137,8 @@ public class PresetService
                         PresetKind.MergedGroup => MigrateMergedGroupPreset(JsonSerializer.Deserialize<MergedGroupPreset>(text, Opts)),
                         PresetKind.Panel => JsonSerializer.Deserialize<PanelPreset>(text, Opts),
                         PresetKind.Subfolder => JsonSerializer.Deserialize<SubfolderPreset>(text, Opts),
+                        PresetKind.MediaPlayerBars or PresetKind.MediaPlayerVinyl
+                            => JsonSerializer.Deserialize<MediaPlayerPreset>(text, Opts),
                         _ => JsonSerializer.Deserialize<ZonePreset>(text, Opts)
                     };
                 }
@@ -298,6 +300,9 @@ public class PresetService
             // SaveSubfolderPreset convenience method already did this; the dispatch
             // here was cloning the payload with SubItems intact).
             PresetKind.Subfolder => BuildSubfolderPreset(id, trimmedName, createdAt, (ZoneItem)payload),
+            // 律动条 / 唱片机：整套外观（含当前形态的尺寸）都进预设，但形态本身不会被预设改掉。
+            PresetKind.MediaPlayerBars or PresetKind.MediaPlayerVinyl
+                => new MediaPlayerPreset { Id = id, Name = trimmedName, CreatedAt = createdAt, Player = ((DesktopMediaPlayer)payload).Clone() },
             _ => throw new InvalidOperationException($"Unknown preset kind {_kind}")
         };
         preset.Kind = _kind;
@@ -359,6 +364,7 @@ public class PresetService
         MergedGroupPreset m => m.Zone,
         PanelPreset p => p.Config,
         SubfolderPreset s => s.Subfolder,
+        MediaPlayerPreset m => m.Player,
         _ => throw new InvalidOperationException($"Unknown preset type {record.GetType().Name}")
     };
 

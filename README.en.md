@@ -92,6 +92,18 @@ Updates: open Settings → Check for updates. The app downloads, installs and re
 - Calendar: to-do reminders via tray notifications
 - Sticky notes: bind a global hotkey to each note
 
+### Player
+
+The "now playing" on your desktop: bars or vinyl, picked at creation and fixed afterwards.
+
+- **Two shapes**: bars are a row of bouncing spectrum bars; vinyl is a black record with the album cover spinning on it. Both support tile mode (content only — no background or border)
+- **Real spectrum**: follows the actual system mix by default (WASAPI loopback + hand-written FFT; the simulated motion is still switchable in the property panel). Silence drops the bars back down, pausing freezes them
+- **Track and artwork**: reads the title, artist, album and cover of whatever is playing, with prev / play-pause / next; the cover follows track changes
+- **Accent from cover**: takes the dominant colour of the album artwork for the bar colour, the divider and the vinyl centre label — and falls back to your own colours when the cover has no usable colour
+- **Follow one app**: with several players around, a widget can follow a single app (the other one can follow a different one), and the transport buttons only go to that session
+- **Two preset sets**: bars presets and vinyl presets are stored separately, never mixed, and apply with one click
+- **Recognised even without SMTC**: players that never register a system media session (e.g. NetEase Cloud Music) are recognised through audio-session level, window title and their own play-queue cache, with controls sent as system media keys. When nothing can be identified, the bars/record still react — just without track text
+
 ### Quick panel
 
 Summoned with a global hotkey; keeps all zone cards in one place, with file search, new document/folder creation and system item import. Popup position and motion are configurable.
@@ -240,7 +252,7 @@ Releasing is `tools/release.ps1`: push the branch, tag `v<version>`, wait for Ac
 
 ## Future Plans
 
-- Media playback display widget
+- More player themes and per-app audio capture (P2)
 - Performance optimizations
 
 Release notes: [Releases](https://github.com/Three-Freezen/DeskOrder/releases).

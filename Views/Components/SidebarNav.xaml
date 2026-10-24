@@ -183,6 +183,15 @@
               <TextBlock Text="{loc:Loc Key=Manage.Clocks}" VerticalAlignment="Center"/>
             </StackPanel>
           </Button>
+          <Button x:Name="NavMedia" Style="{StaticResource NavItem}" Tag="media" Click="NavItem_Click">
+            <StackPanel Orientation="Horizontal">
+              <Path Width="16" Height="16" Margin="0,0,12,0" Stretch="Uniform"
+                    Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                    StrokeThickness="1.5" StrokeLineJoin="Round"
+                    Data="{StaticResource Icon.Media}"/>
+              <TextBlock Text="{loc:Loc Key=Manage.MediaPlayers}" VerticalAlignment="Center"/>
+            </StackPanel>
+          </Button>
           <Button x:Name="NavSticky" Style="{StaticResource NavItem}" Tag="sticky" Click="NavItem_Click">
             <StackPanel Orientation="Horizontal">
               <Path Width="16" Height="16" Margin="0,0,12,0" Stretch="Uniform"

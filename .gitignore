@@ -5,6 +5,8 @@ obj/
 *.suo
 debug_clock.log
 *.log
+# WPF 构建过程会临时生成 <项目名>_<随机>_wpftmp.csproj，别提交
+*_wpftmp.csproj
 
 # Velopack 打包产物
 publish/

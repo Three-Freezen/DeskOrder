@@ -112,6 +112,13 @@ public class AppConfig
         get => _calendars;
         set => _calendars = value ?? new();
     }
+    private List<DesktopMediaPlayer> _mediaPlayers = new();
+    /// <summary>「播放器」组件（律动条 / 唱片机）。旧配置没有该字段 → 空列表，零迁移。</summary>
+    public List<DesktopMediaPlayer> MediaPlayers
+    {
+        get => _mediaPlayers;
+        set => _mediaPlayers = value ?? new();
+    }
 
     // ── Property window (per-instance design system, spec §7.1 #6) ──
     public double PropertyWindowX { get; set; } = double.NaN;

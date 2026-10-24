@@ -16,6 +16,9 @@ public class ConfigService
 
     private static string ConfigPath => Path.Combine(ConfigDir, "config.json");
 
+    /// <summary>配置文件绝对路径（诊断 / 关于页展示用）。</summary>
+    public static string FilePath => ConfigPath;
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
@@ -281,10 +284,11 @@ public class ConfigService
         {
             // 先推进内存真相再落盘：写盘失败时内存态仍一致，错误经 SaveFailed 通知 UI。
             _cached = config;
+            string? json = null;
             try
             {
                 Directory.CreateDirectory(ConfigDir);
-                var json = JsonSerializer.Serialize(config, JsonOptions);
+                json = JsonSerializer.Serialize(config, JsonOptions);
                 // temp + Move(overwrite) 原子替换：崩溃/断电不会留下半截 JSON
                 // (旧实现直接 WriteAllText，只能靠 Load 侧 quarantine 兜底)。
                 var tmpPath = ConfigPath + ".tmp";
@@ -294,6 +298,22 @@ public class ConfigService
             catch (Exception ex)
             {
                 Debug.WriteLine($"[ConfigService] Save failed: {ex}");
+                Helpers.DzTrace.Always($"[Config] 保存失败: {ex.GetType().Name} {ex.Message}");
+                // 原子写失败常见于：临时文件被同步盘 / 杀软抢先占用、目标目录权限异常。
+                // 这时再试一次直接覆盖 —— 宁可少一层原子性，也别让整次保存被静默吞掉
+                // （历史症状：改了设置、重启全丢，日志里只有一行 Debug.WriteLine）。
+                if (json != null)
+                {
+                    try
+                    {
+                        File.WriteAllText(ConfigPath, json);
+                        Helpers.DzTrace.Always("[Config] 原子写失败，改用直接覆盖成功");
+                    }
+                    catch (Exception ex2)
+                    {
+                        Helpers.DzTrace.Always($"[Config] 直接覆盖也失败: {ex2.GetType().Name} {ex2.Message}");
+                    }
+                }
                 SaveFailed?.Invoke(ex);
             }
         }

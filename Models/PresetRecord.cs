@@ -15,6 +15,12 @@ public enum PresetKind
     MergedGroup,
     Panel,
     Subfolder,
+
+    /// <summary>播放器（律动条）预设。与唱片机分开存放，互不混用。</summary>
+    MediaPlayerBars,
+
+    /// <summary>播放器（唱片机）预设。与律动条分开存放，互不混用。</summary>
+    MediaPlayerVinyl,
 }
 
 /// <summary>
@@ -41,6 +47,9 @@ public class PresetRecord
         PresetKind.MergedGroup => "MergedGroups",
         PresetKind.Panel => "Panels",
         PresetKind.Subfolder => "Subfolders",
+        // 律动条 / 唱片机分开存放：两个形态的外形字段完全不同，混在一起只会互相干扰。
+        PresetKind.MediaPlayerBars => "MediaPlayersBars",
+        PresetKind.MediaPlayerVinyl => "MediaPlayersVinyl",
         _ => "Zones"
     };
 }

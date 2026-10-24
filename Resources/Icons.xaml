@@ -74,4 +74,19 @@
   <Geometry x:Key="Icon.Sun">M 8,4 A 4,4 0 1 0 8,12 A 4,4 0 1 0 8,4 Z M 8,1 V 3 M 8,13 V 15 M 1,8 H 3 M 13,8 H 15 M 3,3 L 4,4 M 12,12 L 13,13 M 3,13 L 4,12 M 12,4 L 13,3</Geometry>
   <Geometry x:Key="Icon.Moon">M 11,5 A 5,5 0 1 0 11,13 A 4,4 0 0 1 11,5 Z</Geometry>
 
+  <!-- ============================================================ -->
+  <!--  Media player (播放器)：唱片 + 唱臂 / 传输控制                  -->
+  <!-- ============================================================ -->
+
+  <!-- 2026-10-24 播放器组件图标（方案 A）：黑胶唱片 + 中心标 + 唱臂扫过盘面。
+       与其它导航图标同一规范：16x16 网格、描边 1.5、圆角端点、单色无填充。 -->
+  <Geometry x:Key="Icon.Media">M 1.8,9 A 5.2,5.2 0 1 0 12.2,9 A 5.2,5.2 0 1 0 1.8,9 Z M 6,9 A 1,1 0 1 0 8,9 A 1,1 0 1 0 6,9 Z M 11.75,4.5 A 0.6,0.6 0 1 0 12.95,4.5 A 0.6,0.6 0 1 0 11.75,4.5 Z M 12.05,4.85 L 10.2,6.35 L 8.85,7.4 M 9.57,6.86 L 8.13,7.94</Geometry>
+  <Geometry x:Key="Icon.Media.Fill">M 2,4 H 14 V 14 H 2 Z</Geometry>
+
+  <!-- 传输控制（上一曲 / 下一曲 / 播放 / 暂停），同样走描边 -->
+  <Geometry x:Key="Icon.MediaPrev">M 4.5,3.5 V 12.5 M 12.5,3.5 L 5.5,8 L 12.5,12.5 Z</Geometry>
+  <Geometry x:Key="Icon.MediaNext">M 11.5,3.5 V 12.5 M 3.5,3.5 L 10.5,8 L 3.5,12.5 Z</Geometry>
+  <Geometry x:Key="Icon.MediaPlay">M 5,3 L 12.5,8 L 5,13 Z</Geometry>
+  <Geometry x:Key="Icon.MediaPause">M 6,3.5 V 12.5 M 10,3.5 V 12.5</Geometry>
+
 </ResourceDictionary>

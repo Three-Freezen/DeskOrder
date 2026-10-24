@@ -40,6 +40,7 @@ public partial class SidebarNav : UserControl
         _sectionKeys[NavPanel]    = "panel";
         _sectionKeys[NavCalendar] = "calendar";
         _sectionKeys[NavClock]    = "clock";
+        _sectionKeys[NavMedia]    = "media";
         _sectionKeys[NavSticky]   = "sticky";
         _sectionKeys[NavSettings] = "settings";
         _sectionKeys[NavAbout]    = "about";
@@ -55,6 +56,7 @@ public partial class SidebarNav : UserControl
             "panel"    => NavPanel,
             "calendar" => NavCalendar,
             "clock"    => NavClock,
+            "media"    => NavMedia,
             "sticky"   => NavSticky,
             "about"    => NavAbout,
             "settings" => NavSettings,

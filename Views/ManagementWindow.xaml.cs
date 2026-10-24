@@ -28,6 +28,7 @@ public partial class ManagementWindow : Window
     // Track widget windows opened from management window
     private readonly Dictionary<Guid, Window> _openClockWindows = new();
     private readonly Dictionary<Guid, Window> _openCalendarWindows = new();
+    private readonly Dictionary<Guid, Window> _openMediaWindows = new();
 
     private bool IsNoteWindowOpen(Guid id) => ((App)System.Windows.Application.Current).IsNoteWindowOpen(id);
     private Window? GetNoteWindow(Guid id) => _notesService?.Windows.TryGetValue(id, out var w) == true ? w : null;
@@ -100,6 +101,10 @@ public partial class ManagementWindow : Window
         RefreshDynamicText();
 
         _zoneManager.ZoneVisibilityChanged += OnZoneVisibilityChanged;
+
+        // 播放器：系统"正在播放"变化时刷新属性面板状态区的播放/暂停 chip
+        // （属性面板只在打开时才会重建字段树，这里做增量刷新）。
+        MediaSessionService.Instance.Changed += OnMediaSessionChanged;
 
         if (_panelService != null)
             _panelService.WindowClosed += () =>
@@ -514,6 +519,9 @@ public partial class ManagementWindow : Window
                 case DesktopCalendar cal:
                     _widgetService?.UpdateCalendar(cal);
                     break;
+                case DesktopMediaPlayer media:
+                    _widgetService?.UpdateMediaPlayer(media);
+                    break;
                 case StickyNote n:
                     _notesService?.UpdateNote(n);
                     break;
@@ -581,6 +589,9 @@ public partial class ManagementWindow : Window
                 case DesktopCalendar cal:
                     _widgetService?.GetCalendarWindow(cal.Id)?.RefreshAppearance(cal);
                     break;
+                case DesktopMediaPlayer media:
+                    _widgetService?.GetMediaPlayerWindow(media.Id)?.RefreshAppearance(media);
+                    break;
                 case StickyNote n:
                     if (_notesService?.Windows.TryGetValue(n.Id, out var nw) == true)
                         nw.RefreshAppearance(n);
@@ -620,6 +631,7 @@ public partial class ManagementWindow : Window
                     break;
                 case DesktopClock c: ToggleClockWindowImpl(c); break;
                 case DesktopCalendar cal: ToggleCalendarWindowImpl(cal); break;
+                case DesktopMediaPlayer media: ToggleMediaPlayerWindowImpl(media); break;
                 case StickyNote n: ToggleNoteWindow(n); break;
                 case PanelConfig p:
                     p.PanelEnabled = !p.PanelEnabled;
@@ -654,6 +666,12 @@ public partial class ManagementWindow : Window
                             _loc["CalendarPage.DeleteTitle"],
                             MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
                         DeleteCalendar(cal);
+                    break;
+                case DesktopMediaPlayer media:
+                    if (MessageBox.Show(_loc["Media.DeleteConfirm"],
+                            _loc["Media.DeleteTitle"],
+                            MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
+                        DeleteMediaPlayer(media);
                     break;
                 case StickyNote n:
                     if (MessageBox.Show(_loc.Get("StickyNotePage.DeleteConfirm", n.Title),
@@ -710,6 +728,7 @@ public partial class ManagementWindow : Window
             nameof(Zone) => _zoneManager.Zones.FirstOrDefault(z => z.Id == id),
             nameof(DesktopClock) => _widgetService?.Clocks.FirstOrDefault(c => c.Id == id),
             nameof(DesktopCalendar) => _widgetService?.Calendars.FirstOrDefault(c => c.Id == id),
+            nameof(DesktopMediaPlayer) => _widgetService?.MediaPlayers.FirstOrDefault(p => p.Id == id),
             nameof(StickyNote) => _notesService?.Notes.FirstOrDefault(n => n.Id == id),
             _ => null,
         };
@@ -760,6 +779,13 @@ public partial class ManagementWindow : Window
     }
     public void ToggleClockWindow(DesktopClock clock) => ToggleClockWindowImpl(clock);
     public void ToggleCalendarWindow(DesktopCalendar cal) => ToggleCalendarWindowImpl(cal);
+    public void ToggleMediaPlayerWindow(DesktopMediaPlayer player) => ToggleMediaPlayerWindowImpl(player);
+
+    void OnMediaSessionChanged()
+    {
+        // 状态区 chip 里读的是 MediaSessionService.Now，增量刷新即可（不重建字段树）。
+        try { if (DockedPanel?.Target is DesktopMediaPlayer) DockedPanel.RefreshStatusArea(); } catch { }
+    }
 
     public void DeleteNote(StickyNote note)
     {
@@ -779,6 +805,31 @@ public partial class ManagementWindow : Window
     {
         if (_openCalendarWindows.TryGetValue(cal.Id, out var w)) w.Close();
         _widgetService?.DeleteCalendar(cal.Id);
+    }
+
+    public void DeleteMediaPlayer(DesktopMediaPlayer player)
+    {
+        if (_openMediaWindows.TryGetValue(player.Id, out var w)) w.Close();
+        _widgetService?.DeleteMediaPlayer(player.Id);
+    }
+
+    /// <summary>新建播放器：先弹形态选择框（律动条 / 唱片机，创建后不可改），再落窗。</summary>
+    public void NewMediaPlayer()
+    {
+        if (_widgetService == null) return;
+        var dlg = new MediaModePickerDialog { Owner = this };
+        if (dlg.ShowDialog() != true) return;
+        var wa = SystemParameters.WorkArea;
+        double w = dlg.SelectedMode == MediaDisplayMode.Vinyl
+            ? DesktopMediaPlayer.DefaultVinylWidth
+            : DesktopMediaPlayer.DefaultBarsWidth;
+        double h = dlg.SelectedMode == MediaDisplayMode.Vinyl
+            ? DesktopMediaPlayer.DefaultVinylHeight
+            : DesktopMediaPlayer.DefaultBarsHeight;
+        var player = _widgetService.CreateMediaPlayer(dlg.SelectedMode,
+            wa.Left + (wa.Width - w) / 2,
+            wa.Top + (wa.Height - h) / 2);
+        OpenMediaPlayerWindow(player);
     }
 
     public void NewNote()
@@ -861,6 +912,7 @@ public partial class ManagementWindow : Window
         {
             count += _widgetService.Clocks.Count;
             count += _widgetService.Calendars.Count;
+            count += _widgetService.MediaPlayers.Count;
         }
         if (_notesService != null) count += _notesService.Notes.Count;
         return count;
@@ -998,6 +1050,35 @@ public partial class ManagementWindow : Window
                         System.Diagnostics.Debug.WriteLine($"[ShowAllWidgets] cal {cal.Id} failed: {ex}");
                     }
                 }
+                // 播放器：与时钟/日历同款快照迭代 + 级联动画
+                int m = 0;
+                foreach (var media in _widgetService.MediaPlayers.OrderBy(c => c.Y).ThenBy(c => c.X).ToList())
+                {
+                    double delay = staggered ? baseDelayMs + m * HoverExpandBehavior.BatchStaggerMs : 0;
+                    m++;
+                    try
+                    {
+                        if (_openMediaWindows.TryGetValue(media.Id, out var w) && w is MediaPlayerWidget mpw)
+                        {
+                            bool collapsed = !mpw.IsVisible
+                                || mpw.MainContent.Visibility != Visibility.Visible
+                                || mpw.RestoreButton.Visibility == Visibility.Visible;
+                            if (!media.IsVisible || collapsed)
+                                mpw.ShowPlayer(false, delay);
+                        }
+                        else
+                        {
+                            media.IsVisible = true;
+                            OpenMediaPlayerWindow(media);
+                            if (delay > 0 && _openMediaWindows.TryGetValue(media.Id, out var nw) && nw is MediaPlayerWidget nmw)
+                                nmw.PlayEntranceAnimation(delay);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[ShowAllWidgets] media {media.Id} failed: {ex}");
+                    }
+                }
             }
         }
         catch { }
@@ -1023,7 +1104,7 @@ public partial class ManagementWindow : Window
             // animation at its stagger slot (sorted by screen position), mirroring the
             // "Show All" cascade.
             var live = System.Windows.Application.Current.Windows.OfType<Window>()
-                .Where(w => w is ClockWidget or CalendarWidget or StickyNoteWindow)
+                .Where(w => w is ClockWidget or CalendarWidget or StickyNoteWindow or MediaPlayerWidget)
                 .OrderBy(w => w.Top).ThenBy(w => w.Left)
                 .ToList();
             int i = 0;
@@ -1043,6 +1124,9 @@ public partial class ManagementWindow : Window
                             break;
                         case StickyNoteWindow snw when snw.MainContent.Visibility == Visibility.Visible:
                             snw.HideNote(delay);
+                            break;
+                        case MediaPlayerWidget mpw when mpw.MainContent.Visibility == Visibility.Visible:
+                            mpw.HidePlayer(delay);
                             break;
                     }
                 }
@@ -1070,10 +1154,13 @@ public partial class ManagementWindow : Window
                 try { w.Close(); } catch { }
             foreach (var w in System.Windows.Application.Current.Windows.OfType<CalendarWidget>().ToList())
                 try { w.Close(); } catch { }
+            foreach (var w in System.Windows.Application.Current.Windows.OfType<MediaPlayerWidget>().ToList())
+                try { w.Close(); } catch { }
             foreach (var w in System.Windows.Application.Current.Windows.OfType<StickyNoteWindow>().ToList())
                 try { w.Close(); } catch { }
             _openClockWindows.Clear();
             _openCalendarWindows.Clear();
+            _openMediaWindows.Clear();
             _notesService?.Windows.Clear();
             // ponytail: snapshot iteration — UpdateNote/UpdateClock/UpdateCalendar
             // replace the enumerated element and would abort the remaining loop
@@ -1095,6 +1182,11 @@ public partial class ManagementWindow : Window
                 {
                     cal.IsVisible = false;
                     _widgetService.UpdateCalendar(cal);
+                }
+                foreach (var media in _widgetService.MediaPlayers.ToList())
+                {
+                    media.IsVisible = false;
+                    _widgetService.UpdateMediaPlayer(media);
                 }
             }
         }
@@ -1145,6 +1237,28 @@ public partial class ManagementWindow : Window
         window.Activate();
     }
 
+    public void OpenMediaPlayerWindow(DesktopMediaPlayer player)
+    {
+        if (_openMediaWindows.ContainsKey(player.Id)) return;
+        var window = new MediaPlayerWidget(player, _widgetService!);
+        // Release 也记：重启后"播放器不见了"时，这行和 WidgetService 的载入行一起
+        // 能区分"配置里没有"还是"窗口没恢复"。
+        DesktopZones.Helpers.DzTrace.Always(
+            $"[Widgets] 打开播放器窗口 {player.Id} mode={player.Mode} pos=({player.X:0},{player.Y:0}) visible={player.IsVisible}");
+        window.Closed += (_, _) =>
+        {
+            _openMediaWindows.Remove(player.Id);
+            _widgetService!.MediaWindows.Remove(player.Id);
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (MainContent.Content is MediaPlayerPage mp) mp.RefreshList();
+            }), System.Windows.Threading.DispatcherPriority.Loaded);
+        };
+        _openMediaWindows[player.Id] = window;
+        _widgetService!.MediaWindows[player.Id] = window;
+        window.Show();
+    }
+
     /// <summary>启动时恢复可见的小组件窗口（位置 + 显示状态持久化，与分区一致）。
     /// 只打开模型里 IsVisible=true 且尚未开窗的组件；隐藏组件保持隐藏。</summary>
     public void RestoreVisibleWidgets()
@@ -1181,6 +1295,15 @@ public partial class ManagementWindow : Window
                         OpenCalendarWindow(cal);
                 }
                 catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[RestoreVisibleWidgets] calendar {cal.Id} failed: {ex}"); }
+            }
+            foreach (var media in _widgetService.MediaPlayers.Where(c => c.IsVisible).ToList())
+            {
+                try
+                {
+                    if (!_openMediaWindows.ContainsKey(media.Id))
+                        OpenMediaPlayerWindow(media);
+                }
+                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[RestoreVisibleWidgets] media {media.Id} failed: {ex}"); }
             }
         }
     }
@@ -1942,6 +2065,21 @@ public partial class ManagementWindow : Window
         }
     }
 
+    void ToggleMediaPlayerWindowImpl(DesktopMediaPlayer player)
+    {
+        if (_openMediaWindows.TryGetValue(player.Id, out var w) && w is MediaPlayerWidget mpw)
+        {
+            bool show = !mpw.IsVisible || mpw.RestoreButton.Visibility == Visibility.Visible;
+            if (show) mpw.ShowPlayer();
+            else mpw.HidePlayer();
+        }
+        else
+        {
+            player.IsVisible = true;
+            OpenMediaPlayerWindow(player);
+        }
+    }
+
     // ── Page navigation ──
 
     public void ShowSection(string section)
@@ -1953,6 +2091,7 @@ public partial class ManagementWindow : Window
             "panel"    => new PanelPage(this, _configService, _panelService),
             "calendar" => new CalendarPage(this, _viewModel, _widgetService),
             "clock"    => new ClockPage(this, _viewModel, _widgetService),
+            "media"    => new MediaPlayerPage(this, _viewModel, _widgetService),
             "sticky"   => new StickyNotePage(this, _viewModel, _notesService),
             "about"    => new AboutPage(),
             "settings" => BuildSettingsPage(),
@@ -1979,6 +2118,7 @@ public partial class ManagementWindow : Window
         int notes = _notesService?.Notes?.Count ?? 0;
         int clocks = _widgetService?.Clocks?.Count ?? 0;
         int calendars = _widgetService?.Calendars?.Count ?? 0;
+        int mediaPlayers = _widgetService?.MediaPlayers?.Count ?? 0;
         return section switch
         {
             "zones"    => _loc.Get("Manage.Sidebar.Zones", zones),
@@ -1986,6 +2126,7 @@ public partial class ManagementWindow : Window
             "panel"    => _loc["Manage.Sidebar.Panel"],
             "calendar" => _loc.Get("Manage.Sidebar.Calendars", calendars),
             "clock"    => _loc.Get("Manage.Sidebar.Clocks", clocks),
+            "media"    => _loc.Get("Manage.Sidebar.MediaPlayers", mediaPlayers),
             "sticky"   => _loc.Get("Manage.Sidebar.Notes", notes),
             "about"    => _loc["Manage.Sidebar.About"],
             "settings" => _loc["Manage.Sidebar.Settings"],

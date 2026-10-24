@@ -1,8 +1,13 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <!-- 2026-10-24 播放器组件：需要 Windows.Media.Control（SMTC）读系统"正在播放"，
+         故把 TFM 从 net10.0-windows 提到带 Windows SDK 投影的目标框架。
+         最低运行系统仍锁 10.0.17763（Win10 1809，与 MSIX 清单 / Inno 安装器一致），
+         SMTC 本身也是 1809 起可用。 -->
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
@@ -22,7 +27,7 @@
          时属性根本不会生成（曾导致全程序集版本 0.0.0、更新检查永远误报新版）。
          其余属性（Title/Company/Product 等）仍由 props 的 false 单独关闭。 -->
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
-    <Version>1.0.19</Version>
+    <Version>1.0.24</Version>
     <GenerateAssemblyVersionAttribute>true</GenerateAssemblyVersionAttribute>
     <GenerateAssemblyFileVersionAttribute>true</GenerateAssemblyFileVersionAttribute>
     <GenerateAssemblyInformationalVersionAttribute>true</GenerateAssemblyInformationalVersionAttribute>

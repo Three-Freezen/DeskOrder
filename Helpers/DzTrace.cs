@@ -25,7 +25,18 @@ public static class DzTrace
     static string TracePath => Path.Combine(TraceDir, "dz_trace.log");
 
     [Conditional("DEBUG")]
-    public static void Log(string msg)
+    public static void Log(string msg) => WriteCore(msg);
+
+    /// <summary>
+    /// **Release 也保留**的诊断日志。
+    ///
+    /// 只给"出问题必须能事后定位、且没法现场调试"的少数事件用：
+    /// 媒体识别状态切换、配置保存失败、播放器持久化。普通调试输出继续用
+    /// <see cref="Log"/>（Release 编译期清空，零开销），别往这里塞流程日志。
+    /// </summary>
+    public static void Always(string msg) => WriteCore(msg);
+
+    static void WriteCore(string msg)
     {
         try
         {

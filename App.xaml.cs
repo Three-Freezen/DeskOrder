@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.Text;
 using System.Threading;
 using System.Windows;
 using System.Windows.Interop;
@@ -34,6 +35,14 @@ public partial class App : System.Windows.Application
     private static EventWaitHandle? _activateEvent;
     private static Thread? _activateThread;
     private const string SingleInstanceMutexName = "DeskOrder_SingleInstance";
+
+    /// <summary>实际用的互斥体名。允许用环境变量 <c>DESKORDER_MUTEX</c> 覆盖 ——
+    /// 开发和用户自己的安装版是两份 exe，默认共用同一个名字：先启动的那个占住，
+    /// 后启动的立刻退出（看起来像"新版本启动没反应"）。自测时给个独立名字即可并行跑。</summary>
+    static string InstanceMutexName =>
+        Environment.GetEnvironmentVariable("DESKORDER_MUTEX") is { Length: > 0 } custom
+            ? custom
+            : SingleInstanceMutexName;
     private const string ActivateEventName = "DeskOrder_Activate";
 
     // Public accessors for live preview lookup (forward to services — windows
@@ -164,7 +173,7 @@ public partial class App : System.Windows.Application
         bool createdNew;
         try
         {
-            _mutex = new Mutex(false, SingleInstanceMutexName, out createdNew);
+            _mutex = new Mutex(false, InstanceMutexName, out createdNew);
         }
         catch (UnauthorizedAccessException)
         {
@@ -291,6 +300,19 @@ public partial class App : System.Windows.Application
         ShellIconService.ImagePreviewEnabled = _configService.Load().ImagePreviewEnabled;
 
         var config = _configService.Load();
+
+        // 一眼定位"我改的设置去哪了 / 播放器怎么不见了"：Release 也写。
+        // 用户机器上经常同时存在安装版和开发版两份 exe，数据落点（便携 Data 还是
+        // %APPDATA%）不一样，配置也就不是同一份 —— 这一行直接写清楚。
+        Helpers.DzTrace.Always(
+            $"[Boot] ver={AppVersion.Current} portable={Services.DataLocator.IsPortable} " +
+            $"il={Helpers.ProcessIntegrity.Describe} appcontainer={Helpers.ProcessIntegrity.IsAppContainer} " +
+            $"config={Services.ConfigService.FilePath} zones={config.Zones.Count} " +
+            $"clocks={config.Clocks.Count} calendars={config.Calendars.Count} " +
+            $"players={config.MediaPlayers.Count}");
+        if (Helpers.ProcessIntegrity.IsRestricted)
+            Helpers.DzTrace.Always("[Boot] ⚠ " + Helpers.ProcessIntegrity.RestrictionHint);
+
         // Apply persisted language preference
         if (!string.IsNullOrEmpty(config.Language))
         {
@@ -305,9 +327,74 @@ public partial class App : System.Windows.Application
         _notesService.Load(config);
         _widgetService.Load(config);
 
+#if DEBUG
+        // 自测用：--probe-media=<输出文件> 把「音频会话兜底」探针跑几轮，结果写文件后退出。
+        // 用来验证没有 SMTC 会话的播放器（网易云等）能不能被识别出来。
+        var probeMediaOut = ParseArgValue(e.Args, "--probe-media=");
+        if (probeMediaOut != null)
+        {
+            Dispatcher.BeginInvoke(new Action(async () =>
+            {
+                var sb = new StringBuilder();
+                try
+                {
+                    for (int i = 0; i < 3; i++)
+                    {
+                        var trace = new List<string>();
+                        var p = await Task.Run(() => Helpers.AudioNowPlayingProbe.FindPlaying(trace));
+                        sb.AppendLine($"[{i}] FindPlaying => " + (p == null ? "<null>" :
+                            $"pid={p.Pid} proc={p.ProcessName} app='{p.AppName}' audible={p.Audible} " +
+                            $"title='{p.Title}' artist='{p.Artist}' hwnd=0x{p.Window.ToInt64():X}"));
+                        foreach (var line in trace) sb.AppendLine("     · " + line);
+                        if (p != null)
+                        {
+                            int pid = p.Pid;
+                            var byPid = await Task.Run(() => Helpers.AudioNowPlayingProbe.FindByPid(pid));
+                            sb.AppendLine("     FindByPid => " + (byPid == null ? "<null>" :
+                                $"title='{byPid.Title}' artist='{byPid.Artist}' app='{byPid.AppName}'"));
+                        }
+                        await Task.Delay(600);
+                    }
+
+                    MediaSessionService.Instance.EnsureStarted();
+                    await Task.Delay(2500);
+                    var now = MediaSessionService.Instance.Now;
+                    sb.AppendLine($"service Now => state={now.State} fallback={now.FromFallback} " +
+                                  $"title='{now.Title}' artist='{now.Artist}' app='{now.SourceApp}'");
+                }
+                catch (Exception ex)
+                {
+                    sb.AppendLine("ERROR " + ex);
+                }
+                try { System.IO.File.WriteAllText(probeMediaOut, sb.ToString()); } catch { }
+                Shutdown();
+            }), DispatcherPriority.ApplicationIdle);
+            return;
+        }
+
+        // 自测用：--render-media-preview=<目录> 把两种形态各渲染一张 PNG 后退出。
+        // 只走内存模型，不写配置、不加进 MediaPlayers 集合。
+        var previewDir = ParseRenderMediaPreviewArg(e.Args);
+        if (previewDir != null)
+        {
+            Dispatcher.BeginInvoke(new Action(async () =>
+            {
+                try { await RenderMediaPreviewsAsync(previewDir); }
+                catch (Exception ex) { try { System.IO.File.WriteAllText(previewDir + "\\render-error.txt", ex.ToString()); } catch { } }
+                Shutdown();
+            }), DispatcherPriority.ApplicationIdle);
+            return;
+        }
+#endif
+
         // Subscribe to change events for cross-component sync
         _notesService.NotesChanged += SyncNotes;
         _notesService.NotesChanged += RefreshNoteHotkeys;
+
+        // 网易云这类不把播放信息交给系统（SMTC）的播放器：认出了是它、正在放、但拿不到
+        // 歌名/封面 → 托盘提示一次"去它自己的设置里打开系统媒体控制"。
+        // 只提示一次，且只在确实认不出来的时候提示（有 SMTC 的情况下走不到这里）。
+        MediaSessionService.Instance.Changed += MaybeHintMissingSmtc;
 
         // Register hotkeys for notes that have them enabled
         RefreshNoteHotkeys();
@@ -354,6 +441,21 @@ public partial class App : System.Windows.Application
             _reminderService.Start();
         }
         StartupTrace("10 startup complete");
+
+        // 以受限（低完整性 / 沙箱）方式启动时：托盘图标、%APPDATA% 写入、CoreAudio 枚举
+        // 都会失败，但表面上只是"图标不见了 / 设置在重启后丢了"。直接说清楚，别让人去猜 BUG。
+        if (Helpers.ProcessIntegrity.IsRestricted)
+        {
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                try
+                {
+                    MessageBox.Show(_loc["Sandbox.Body"], _loc["Sandbox.Title"],
+                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
+                catch { }
+            }), DispatcherPriority.ApplicationIdle);
+        }
 
         // ponytail 2026-08-28: 后台更新检查（24h 节流，设置里可关）。延迟到空闲优先级，
         // 不占启动路径；发现新版本只发托盘气泡，不自动下载（交互定为「提示后更新」）。
@@ -481,6 +583,24 @@ public partial class App : System.Windows.Application
                     case "stickynote":
                         var note = _notesService?.CreateNote(wa.Left + 200, wa.Top + 100);
                         if (note != null) OpenNoteWindow(note);
+                        break;
+                    case "media":
+                        var mp = _widgetService?.CreateMediaPlayer(MediaDisplayMode.Bars, wa.Left + 200, wa.Top + 100);
+                        if (mp != null)
+                        {
+                            var mpw = new MediaPlayerWidget(mp, _widgetService!);
+                            _widgetService!.MediaWindows[mp.Id] = mpw;
+                            mpw.Show();
+                        }
+                        break;
+                    case "vinyl":
+                        var vp = _widgetService?.CreateMediaPlayer(MediaDisplayMode.Vinyl, wa.Left + 200, wa.Top + 100);
+                        if (vp != null)
+                        {
+                            var vpw = new MediaPlayerWidget(vp, _widgetService!);
+                            _widgetService!.MediaWindows[vp.Id] = vpw;
+                            vpw.Show();
+                        }
                         break;
                     case "panel":
                         _panelService?.Show(_configService!.Load());
@@ -749,6 +869,205 @@ public partial class App : System.Windows.Application
     }
 
 #if DEBUG
+    private static string? ParseRenderMediaPreviewArg(string[] args)
+        => ParseArgValue(args, "--render-media-preview=");
+
+    /// <summary><c>--名字=值</c> 形式的命令行参数取值，没有就返回 null。</summary>
+    private static string? ParseArgValue(string[] args, string prefix)
+    {
+        foreach (var a in args)
+        {
+            if (a.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                return a.Substring(prefix.Length);
+        }
+        return null;
+    }
+
+    /// <summary>自测：把播放器两种形态各渲染成 PNG（离屏窗口 + RenderTargetBitmap），
+    /// 用于在没有桌面交互的情况下检查布局/封面/字体是否正常。</summary>
+    async Task RenderMediaPreviewsAsync(string dir)
+    {
+        System.IO.Directory.CreateDirectory(dir);
+        MediaSessionService.Instance.EnsureStarted();
+        await Task.Delay(1200);   // 等 SMTC 会话 + 封面解码
+        MediaSessionService.Instance.SuspendRefresh(true);   // 预览期间别让真实会话覆盖注入状态
+
+        var cover = MakePreviewCover();
+        await RenderMediaOneAsync(dir, MediaDisplayMode.Bars, 380, 190, false, "media-bars.png", cover);
+        await RenderMediaOneAsync(dir, MediaDisplayMode.Bars, 380, 190, true, "media-bars-tile.png", cover);
+        // 隐藏下半部分：条区高度应与上一张完全一致（下方留空）
+        await RenderMediaOneAsync(dir, MediaDisplayMode.Bars, 380, 190, false, "media-bars-nopan.png", cover,
+            showTrackInfo: false);
+        await RenderMediaOneAsync(dir, MediaDisplayMode.Vinyl, 500, 320, false, "media-vinyl.png", cover);
+        await RenderMediaOneAsync(dir, MediaDisplayMode.Vinyl, 500, 320, true, "media-vinyl-tile.png", cover);
+
+        // 属性面板冒烟：两种形态各构建一次字段树，任何 XAML/字段绑定问题都会在这里抛出来
+        try
+        {
+            var panel = new DesktopZones.Views.Components.PropertyPanel();
+            panel.Width = 360;
+            panel.Height = 900;
+            foreach (var mode in new[] { MediaDisplayMode.Bars, MediaDisplayMode.Vinyl })
+            {
+                var probe = new DesktopMediaPlayer
+                {
+                    Mode = mode,
+                    TileMode = mode == MediaDisplayMode.Bars,
+                };
+                panel.Target = probe;
+                panel.Measure(new System.Windows.Size(360, 900));
+                panel.Arrange(new Rect(0, 0, 360, 900));
+                panel.UpdateLayout();
+            }
+            System.IO.File.AppendAllText(System.IO.Path.Combine(dir, "panel-smoke.txt"), "panel-build-ok\n");
+        }
+        catch (Exception ex)
+        {
+            System.IO.File.AppendAllText(System.IO.Path.Combine(dir, "panel-smoke.txt"),
+                "panel-build-FAILED:\n" + ex + "\n");
+        }
+    }
+
+    /// <summary>预览用封面：一小块渐变+光斑的"唱片封面"。</summary>
+    static System.Windows.Media.Imaging.BitmapSource MakePreviewCover()
+    {
+        var dv = new System.Windows.Media.DrawingVisual();
+        using (var dc = dv.RenderOpen())
+        {
+            var bg = new System.Windows.Media.RadialGradientBrush(
+                System.Windows.Media.Color.FromRgb(0x37, 0x7E, 0xA6),
+                System.Windows.Media.Color.FromRgb(0x12, 0x1B, 0x33))
+            { RadiusX = 0.9, RadiusY = 0.9 };
+            bg.Freeze();
+            dc.DrawRectangle(bg, null, new Rect(0, 0, 320, 320));
+
+            var sunBrush = new System.Windows.Media.SolidColorBrush(
+                System.Windows.Media.Color.FromRgb(0xF6, 0xD9, 0x8A));
+            sunBrush.Freeze();
+            dc.DrawEllipse(sunBrush, null, new System.Windows.Point(158, 112), 58, 58);
+
+            var hillBrush = new System.Windows.Media.SolidColorBrush(
+                System.Windows.Media.Color.FromRgb(0x1B, 0x3A, 0x4A));
+            hillBrush.Freeze();
+            var hill = new System.Windows.Media.StreamGeometry();
+            using (var g = hill.Open())
+            {
+                g.BeginFigure(new System.Windows.Point(-10, 330), true, true);
+                g.LineTo(new System.Windows.Point(96, 196), true, false);
+                g.LineTo(new System.Windows.Point(198, 330), true, false);
+            }
+            hill.Freeze();
+            dc.DrawGeometry(hillBrush, null, hill);
+
+            var hill2 = new System.Windows.Media.StreamGeometry();
+            using (var g = hill2.Open())
+            {
+                g.BeginFigure(new System.Windows.Point(120, 330), true, true);
+                g.LineTo(new System.Windows.Point(228, 214), true, false);
+                g.LineTo(new System.Windows.Point(330, 330), true, false);
+            }
+            hill2.Freeze();
+            var hill2Brush = new System.Windows.Media.SolidColorBrush(
+                System.Windows.Media.Color.FromRgb(0x13, 0x2B, 0x38));
+            hill2Brush.Freeze();
+            dc.DrawGeometry(hill2Brush, null, hill2);
+
+            var dot = new System.Windows.Media.SolidColorBrush(
+                System.Windows.Media.Color.FromRgb(0xEC, 0xB4, 0x60));
+            dot.Freeze();
+            dc.DrawEllipse(dot, null, new System.Windows.Point(250, 250), 26, 26);
+        }
+        var rtb = new System.Windows.Media.Imaging.RenderTargetBitmap(320, 320, 96, 96,
+            System.Windows.Media.PixelFormats.Pbgra32);
+        rtb.Render(dv);
+        rtb.Freeze();
+        return rtb;
+    }
+
+    async Task RenderMediaOneAsync(string dir, MediaDisplayMode mode,
+        double width, double height, bool tileMode, string fileName,
+        System.Windows.Media.Imaging.BitmapSource cover, bool showTrackInfo = true)
+    {
+        var player = new DesktopMediaPlayer
+        {
+            Mode = mode,
+            TileMode = tileMode,
+            IsVisible = true,
+            X = -6000,
+            Y = -6000,
+            Width = width,
+            Height = height,
+            EnableLiquidGlass = false,
+            ShowTrackInfo = showTrackInfo,
+        };
+        if (mode == MediaDisplayMode.Bars)
+        {
+            player.BarsModeWidth = width;
+            player.BarsModeHeight = height;
+            // 预览图要有底才看得见内容（磁贴模式本来就是全透明）
+            if (!tileMode) player.FillColor = "#B3101418";
+        }
+        else
+        {
+            player.VinylModeWidth = width;
+            player.VinylModeHeight = height;
+            player.FillColor = "#B3101418";
+        }
+
+        var win = new MediaPlayerWidget(player, _widgetService!)
+        {
+            Left = -6000,
+            Top = -6000,
+            Width = width,
+            Height = height,
+            ShowInTaskbar = false,
+        };
+        win.Show();
+        await Task.Delay(900);
+        // 先把姿态/电平摆好，再注入媒体状态（注入会触发 SetPlaying(true)），
+        // 最后只等一小会儿就截图 —— 躲开 1s 轮询把注入状态覆盖掉。
+        try { win.Disc.PrimePreviewPose(); } catch { }
+        try { win.Arm.PrimePreviewPose(); } catch { }
+        try { win.Bars.PrimePreviewLevels(); } catch { }
+        MediaSessionService.Instance.InjectPreview(new MediaNowPlaying
+        {
+            Title = "夜航星",
+            Artist = "不才",
+            Album = "示例专辑",
+            SourceApp = "preview",
+            State = MediaPlaybackState.Playing,
+        }, cover);
+        await Task.Delay(120);
+        try { win.Disc.PrimePreviewPose(); } catch { }
+        try { win.Arm.PrimePreviewPose(); } catch { }
+        try { win.Bars.PrimePreviewLevels(); } catch { }
+        win.UpdateLayout();
+        try
+        {
+            System.IO.File.AppendAllText(System.IO.Path.Combine(dir, "preview-dims.txt"),
+                $"{fileName}: win={win.ActualWidth:F0}x{win.ActualHeight:F0} " +
+                $"bars={win.Bars.ActualWidth:F0}x{win.Bars.ActualHeight:F0} " +
+                $"disc={win.Disc.ActualWidth:F0}x{win.Disc.ActualHeight:F0} " +
+                $"playing={MediaSessionService.Instance.Now.IsPlaying} " +
+                $"hasSession={MediaSessionService.Instance.Now.HasSession} " +
+                $"art={(MediaSessionService.Instance.Artwork != null)}\n");
+        }
+        catch { }
+
+        int pw = Math.Max(1, (int)Math.Round(win.ActualWidth * 2));
+        int ph = Math.Max(1, (int)Math.Round(win.ActualHeight * 2));
+        var rtb = new System.Windows.Media.Imaging.RenderTargetBitmap(pw, ph, 192, 192,
+            System.Windows.Media.PixelFormats.Pbgra32);
+        rtb.Render(win);
+        var enc = new System.Windows.Media.Imaging.PngBitmapEncoder();
+        enc.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(rtb));
+        using (var fs = System.IO.File.Create(System.IO.Path.Combine(dir, fileName)))
+            enc.Save(fs);
+        win.Close();
+    }
+#endif
+
+#if DEBUG
     void RunContextMenuDiagnostic()
     {
         try
@@ -829,13 +1148,23 @@ public partial class App : System.Windows.Application
         _trayIcon.Exit -= TrayExit;
 
         _trayIcon.LeftClick += TrayLeftClick;
-        _trayIcon.NotifyError += msg => _trayIcon?.ShowBalloonTip(_loc["Toast.TrayError.Title"], msg);
+        // 只挂一次：UpdateTrayEvents 在切语言 / 更新 tooltip 时也会调用，
+        // 以前每次都 += 而从不 -=，通知错误会越弹越多。
+        _trayIcon.NotifyError -= OnTrayError;
+        _trayIcon.NotifyError += OnTrayError;
         // ponytail 2026-08-24: 给非 App 内部代码（SettingsPage 等）一个走托盘气泡的入口，
         // 避免 SettingsPage 还要反射 / 强转才能拿到 _trayIcon。失败时静默 return。
         App.Notify = (title, body) => _trayIcon?.ShowBalloonTip(title, body);
         _trayIcon.DoubleClick += TrayDoubleClick;
         _trayIcon.ManageZones += TrayManage;
         _trayIcon.Exit += TrayExit;
+    }
+
+    /// <summary>托盘出错：写日志（Release 也写）+ 尝试弹气泡（图标没注册上时气泡也会失败）。</summary>
+    void OnTrayError(string msg)
+    {
+        Helpers.DzTrace.Always("[Tray] " + msg);
+        try { _trayIcon?.ShowBalloonTip(_loc["Toast.TrayError.Title"], msg); } catch { }
     }
 
     private void TrayLeftClick() { /* no-op: don't auto-restore zones */ }
@@ -846,6 +1175,29 @@ public partial class App : System.Windows.Application
     // route through the management window's batch methods when it exists (those also
     // open never-opened widgets on Show All), otherwise sweep the live app windows
     // directly so the behavior holds even with StartMinimized.
+    /// <summary>「拿不到播放信息」的托盘提示是否已经弹过（整个进程只弹一次）。</summary>
+    bool _missingSmtcHintShown;
+
+    /// <summary>
+    /// 网易云音乐默认不把播放信息交给 Windows（SMTC），系统里就查不到歌名 / 封面 ——
+    /// 不是本程序能"修"的（FluentFlyout 作者的回复也是同一句话：他们没把播放信息共享给系统），
+    /// 但它自己的设置里有一个开关。认出来的时候提示一次，比让用户猜为什么只有动画没有字有用。
+    /// </summary>
+    void MaybeHintMissingSmtc()
+    {
+        if (_missingSmtcHintShown) return;
+        try
+        {
+            var now = MediaSessionService.Instance.Now;
+            if (!now.IsPlaying || !now.FromFallback) return;
+            if (now.Title.Length > 0) return;                       // 有歌名就不用提示
+            if (!MediaArtworkFallback.LooksLikeNetEase("", now.SourceApp)) return;
+            _missingSmtcHintShown = true;
+            _trayIcon?.ShowBalloonTip(_loc["Toast.SmtcHint.Title"], _loc["Toast.SmtcHint.Body"], 9000);
+        }
+        catch { }
+    }
+
     private void TrayShowAll(bool staggered = true)
     {
         _zoneManager?.ShowAll(staggered);
@@ -862,6 +1214,8 @@ public partial class App : System.Windows.Application
                     w.ShowClock();
                 foreach (var w in System.Windows.Application.Current.Windows.OfType<CalendarWidget>().ToList())
                     w.ShowCalendar();
+                foreach (var w in System.Windows.Application.Current.Windows.OfType<MediaPlayerWidget>().ToList())
+                    w.ShowPlayer();
                 foreach (var w in System.Windows.Application.Current.Windows.OfType<StickyNoteWindow>().ToList())
                     w.ShowNote();
             }
@@ -883,6 +1237,8 @@ public partial class App : System.Windows.Application
                     if (w.MainContent.Visibility == Visibility.Visible) w.HideClock();
                 foreach (var w in System.Windows.Application.Current.Windows.OfType<CalendarWidget>().ToList())
                     if (w.MainContent.Visibility == Visibility.Visible) w.HideCalendar();
+                foreach (var w in System.Windows.Application.Current.Windows.OfType<MediaPlayerWidget>().ToList())
+                    if (w.MainContent.Visibility == Visibility.Visible) w.HidePlayer();
                 foreach (var w in System.Windows.Application.Current.Windows.OfType<StickyNoteWindow>().ToList())
                     if (w.MainContent.Visibility == Visibility.Visible) w.HideNote();
             }
@@ -913,6 +1269,8 @@ public partial class App : System.Windows.Application
                     if (!c.IsVisible) return true;
                 foreach (var cal in _widgetService.Calendars)
                     if (!cal.IsVisible) return true;
+                foreach (var media in _widgetService.MediaPlayers)
+                    if (!media.IsVisible) return true;
             }
             if (_notesService != null)
             {
@@ -1095,6 +1453,9 @@ public partial class App : System.Windows.Application
         _reminderService?.Dispose();
         AutoOrganizeService.Instance.Dispose();
         FileSyncService.Instance.Dispose();
+        MediaSessionService.Instance.Shutdown();
+        AudioLevelMeter.Shutdown();
+        AudioSpectrumCapture.Shutdown();
         _zoneManager?.Shutdown();
         _trayIcon?.Dispose();
         // ponytail 2026-08-27: 拆卸桌面双击钩子,避免 DLL 注入残留。
@@ -1117,6 +1478,9 @@ public partial class App : System.Windows.Application
         _reminderService?.Dispose();
         AutoOrganizeService.Instance.Dispose();
         FileSyncService.Instance.Dispose();
+        MediaSessionService.Instance.Shutdown();
+        AudioLevelMeter.Shutdown();
+        AudioSpectrumCapture.Shutdown();
         _zoneManager?.Shutdown();
         _trayIcon?.Dispose();
         // ponytail 2026-08-27: 拆卸桌面双击钩子,避免 DLL 注入残留。
@@ -1212,3 +1576,6 @@ static class AppDesktopDoubleClick
         return DesktopHook.CallNextHookEx(_hook, nCode, wParam, lParam);
     }
 }
+
+
+

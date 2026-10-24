@@ -376,6 +376,7 @@ public partial class PropertyPanel : UserControl
             case Zone z when _snapshot is Zone sz: CopyZoneFields(sz, z); break;
             case DesktopClock c when _snapshot is DesktopClock sc: CopyClockFields(sc, c); break;
             case DesktopCalendar cal when _snapshot is DesktopCalendar scal: CopyCalendarFields(scal, cal); break;
+            case DesktopMediaPlayer media when _snapshot is DesktopMediaPlayer smp: CopyMediaPlayerFields(smp, media); break;
             case StickyNote n when _snapshot is StickyNote sn: CopyNoteFields(sn, n); break;
             case PanelConfig p when _snapshot is PanelPresetConfig sp: CopyPanelConfigFields(sp, p); break;
             case MergedGroupTarget g when _snapshot is Zone sz: CopyMergedGroupFields(sz, g.Master); break;
@@ -423,6 +424,7 @@ public partial class PropertyPanel : UserControl
             case MergedGroupTarget g when snapshot is Zone sz: CopyMergedGroupFields(sz, g.Master); break;
             case DesktopClock c when snapshot is DesktopClock sc: CopyClockFields(sc, c); break;
             case DesktopCalendar cal when snapshot is DesktopCalendar scal: CopyCalendarFields(scal, cal); break;
+            case DesktopMediaPlayer media when snapshot is DesktopMediaPlayer smp: CopyMediaPlayerFields(smp, media); break;
             case StickyNote n when snapshot is StickyNote sn: CopyNoteFields(sn, n); break;
             case PanelConfig p when snapshot is PanelPresetConfig sp: CopyPanelConfigFields(sp, p); break;
             case ZoneItem sub when sub.Type == ItemType.SubFolder && snapshot is ZoneItem ssub: CopySubfolderFields(ssub, sub); break;
@@ -446,6 +448,10 @@ public partial class PropertyPanel : UserControl
         MergedGroupTarget g => (PresetKind.Zone, (object?)g.Master.Clone()),
         DesktopClock c => (PresetKind.Clock, (object?)c.Clone()),
         DesktopCalendar cal => (PresetKind.Calendar, (object?)cal.Clone()),
+        // 播放器：律动条 / 唱片机是两套独立预设（不同目录、不同对话框标题），按当前形态分流。
+        DesktopMediaPlayer mp => (mp.Mode == MediaDisplayMode.Bars
+            ? PresetKind.MediaPlayerBars
+            : PresetKind.MediaPlayerVinyl, (object?)mp.Clone()),
         StickyNote n => (PresetKind.StickyNote, (object?)n.Clone()),
         PanelConfig p => (PresetKind.Panel, (object?)PanelPresetConfig.FromConfig(new AppConfig { Panel = p })),
         // ponytail 2026-08-26: SubFolder preset — PresetKind.Subfolder 走 PresetService
@@ -538,6 +544,15 @@ public partial class PropertyPanel : UserControl
                 // config (no disk write; Apply commits later).
                 app?.PanelService?.RefreshAppearance();
                 break;
+            // 播放器预设：整套外观（含该形态的尺寸）套用，但身份/位置/形态/显隐保持不动。
+            case DesktopMediaPlayer mp when record is MediaPlayerPreset mpp:
+            {
+                var mode = mp.Mode;
+                CopyMediaPlayerFields(mpp.Player, mp);
+                mp.Mode = mode;
+                app?.WidgetService?.GetMediaPlayerWindow(mp.Id)?.RefreshAppearance(mp);
+                break;
+            }
             // ponytail 2026-08-26: SubFolder preset — 镜像 preset.Subfolder 的字段到当前 ZoneItem,
             // SubItems 内容不动 (SubfolderPreset.Clone 不含 SubItems,符合 spec §4.5)。
             case ZoneItem sub when sub.Type == ItemType.SubFolder && record is SubfolderPreset sp:
@@ -670,6 +685,7 @@ public partial class PropertyPanel : UserControl
             MergedGroupTarget g => g.Master.Clone(),
             DesktopClock c => c.Clone(),
             DesktopCalendar cal => cal.Clone(),
+            DesktopMediaPlayer mp => mp.Clone(),
             StickyNote n => n.Clone(),
             PanelConfig p => PanelPresetConfig.FromConfig(new AppConfig { Panel = p }).Clone(),
             // ponytail 2026-08-26: SubFolder 用 ZoneItem.Clone() (已有,深拷贝 SubItems + 所有专属字段)。
@@ -677,6 +693,8 @@ public partial class PropertyPanel : UserControl
             _ => null,
         };
         UpdateButtonBarEnabled();
+        // 播放器的预设卡分两套（律动条 / 唱片机，各存各的目录），由 BuildCurrentPayload
+        // 按当前形态决定走哪一套；这里不再置灰。
 
         switch (Target)
         {
@@ -702,6 +720,11 @@ public partial class PropertyPanel : UserControl
                 InstanceName = $"{_loc["Breadcrumb.Calendar"]} {cal.DisplayYear}-{cal.DisplayMonth:D2}";
                 SetInstanceIcon("Icon.Calendar");
                 BuildCalendarFields(cal);
+                break;
+            case DesktopMediaPlayer media:
+                InstanceName = $"{_loc["Manage.MediaPlayers"]} ({(media.Mode == MediaDisplayMode.Bars ? _loc["Media.ModeBars"] : _loc["Media.ModeVinyl"])})";
+                SetInstanceIcon("Icon.Media");
+                BuildMediaPlayerFields(media);
                 break;
             case StickyNote note:
                 InstanceName = string.IsNullOrEmpty(note.Title) ? _loc["StickyNotePage.FallbackTitle"] : note.Title;
@@ -807,6 +830,13 @@ public partial class PropertyPanel : UserControl
         BuildZoneFields(z);
     }
 
+    /// <summary>播放器字段树重渲染（换色模式等联动行）。</summary>
+    void Rebuild(DesktopMediaPlayer media)
+    {
+        ReleaseDpHooks();
+        BuildMediaPlayerFields(media);
+    }
+
     // ── 状态区（顶部实时状态条）──
     //
     // 替代原「边框+横杠」占位。内容跟随目标真实状态实时变化：
@@ -831,6 +861,7 @@ public partial class PropertyPanel : UserControl
             case MergedGroupTarget g: BuildMergedGroupStatus(g); break;
             case DesktopClock c: BuildClockStatus(c); break;
             case DesktopCalendar cal: BuildCalendarStatus(cal); break;
+            case DesktopMediaPlayer media: BuildMediaPlayerStatus(media); break;
             case StickyNote n: BuildNoteStatus(n); break;
             case PanelConfig p: BuildPanelStatus(p); break;
             default:
@@ -864,6 +895,9 @@ public partial class PropertyPanel : UserControl
                 break;
             case DesktopCalendar cal:
                 if (_statusVisibleCb != null) _statusVisibleCb.IsChecked = cal.IsVisible;
+                break;
+            case DesktopMediaPlayer media:
+                if (_statusVisibleCb != null) _statusVisibleCb.IsChecked = media.IsVisible;
                 break;
             case StickyNote n:
                 if (_statusVisibleCb != null) _statusVisibleCb.IsChecked = n.IsVisible;
@@ -1029,6 +1063,43 @@ public partial class PropertyPanel : UserControl
             _ => ToggleVisibility?.Invoke(cal));
         StatusHost.Children.Add(row1);
         AddDeleteRow(_loc["CalendarPage.Delete"], cal);
+    }
+
+    // ── 播放器状态区 ──
+
+    void BuildMediaPlayerStatus(DesktopMediaPlayer media)
+    {
+        var row1 = new DockPanel { LastChildFill = false };
+        _statusVisibleCb = AddStatusSwitch(row1, _loc["PropertyPanel.Status.Visible"], media.IsVisible,
+            _ => ToggleVisibility?.Invoke(media));
+        StatusHost.Children.Add(row1);
+
+        // 形态 + 实时播放状态 chips（播放中 / 已暂停 / 未检测到媒体）
+        var chips = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Margin = new Thickness(0, 10, 0, 0),
+        };
+        chips.Children.Add(MakeStatusChip(
+            media.Mode == MediaDisplayMode.Bars ? _loc["Media.ModeBars"] : _loc["Media.ModeVinyl"], true));
+
+        var playChip = MakeStatusChip(_loc["Media.Playing"],
+            MediaSessionService.Instance.Now.IsPlaying && !media.Paused);
+        _statusChips.Add((playChip, () => MediaSessionService.Instance.Now.IsPlaying && !media.Paused));
+        chips.Children.Add(playChip);
+
+        var pausedChip = MakeStatusChip(_loc["Media.Paused"],
+            media.Paused || (MediaSessionService.Instance.Now.HasSession && !MediaSessionService.Instance.Now.IsPlaying));
+        _statusChips.Add((pausedChip, () =>
+            media.Paused || (MediaSessionService.Instance.Now.HasSession && !MediaSessionService.Instance.Now.IsPlaying)));
+        chips.Children.Add(pausedChip);
+
+        var idleChip = MakeStatusChip(_loc["Media.Idle"], !MediaSessionService.Instance.Now.HasSession);
+        _statusChips.Add((idleChip, () => !MediaSessionService.Instance.Now.HasSession));
+        chips.Children.Add(idleChip);
+
+        StatusHost.Children.Add(chips);
+        AddDeleteRow(_loc["Media.Delete"], media);
     }
 
     void AddDeleteRow(string label, object target)
@@ -1214,6 +1285,7 @@ public partial class PropertyPanel : UserControl
         MergedGroupTarget g => g.Master.MergedGroupStyle.TileMode,
         DesktopClock c => c.TileMode,
         DesktopCalendar cal => cal.TileMode,
+        DesktopMediaPlayer media => media.TileMode,
         StickyNote n => n.TileMode,
         _ => false,
     };
@@ -2097,6 +2169,70 @@ public partial class PropertyPanel : UserControl
         return seg;
     }
 
+    /// <summary>
+    /// 行显隐动画（淡入 + 6px 上移 / 淡出后折叠）。给「切换后该出现/消失的字段行」用：
+    /// 和直接 <c>Rebuild()</c> 重建整棵树相比，控件实例留下来 → 三段式单选的滑块高亮
+    /// 能像「圆角/尖角」那行一样滑过去，下面的行也不会闪一下。
+    /// 时长/曲线沿用设置界面通用口径（出现在 160ms、消失 120ms，cubic ease-out）。
+    /// </summary>
+    void SetRowShown(FrameworkElement row, bool show, bool animate)
+    {
+        if (row == null) return;
+        bool shown = row.Visibility == Visibility.Visible;
+        if (show == shown && (!show || row.Opacity > 0.99)) return;
+
+        row.BeginAnimation(OpacityProperty, null);
+
+        if (!animate)
+        {
+            row.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+            row.Opacity = show ? 1 : 0;
+            if (row.RenderTransform is TranslateTransform tt) tt.Y = 0;
+            return;
+        }
+
+        if (show)
+        {
+            row.Visibility = Visibility.Visible;
+            row.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(160))
+            {
+                EasingFunction = new System.Windows.Media.Animation.CubicEase
+                {
+                    EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut,
+                },
+            });
+            if (row.RenderTransform is not TranslateTransform slide)
+            {
+                slide = new TranslateTransform(0, 6);
+                row.RenderTransform = slide;
+            }
+            slide.BeginAnimation(TranslateTransform.YProperty,
+                new System.Windows.Media.Animation.DoubleAnimation(6, 0, TimeSpan.FromMilliseconds(160))
+                {
+                    EasingFunction = new System.Windows.Media.Animation.CubicEase
+                    {
+                        EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut,
+                    },
+                });
+        }
+        else
+        {
+            var fade = new System.Windows.Media.Animation.DoubleAnimation(
+                row.Opacity, 0, TimeSpan.FromMilliseconds(120))
+            {
+                EasingFunction = new System.Windows.Media.Animation.CubicEase
+                {
+                    EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut,
+                },
+            };
+            fade.Completed += (_, _) =>
+            {
+                if (row.Opacity <= 0.01) row.Visibility = Visibility.Collapsed;
+            };
+            row.BeginAnimation(OpacityProperty, fade);
+        }
+    }
+
     /// <summary>Fade + disable the unified-fill-only rows (填充/液态玻璃/背景图片).
     /// 统一填充 → opacity 1, enabled; 保留原有填充 → opacity 0.4, disabled, 160ms ease-out.</summary>
     void SetUnifiedGating(bool unified, bool animate)
@@ -2510,6 +2646,405 @@ public partial class PropertyPanel : UserControl
 
         SetFieldRoot(root);
         ApplyTileGating(cal.TileMode);
+    }
+
+    // ── 播放器字段树 ──
+    //
+    // 结构与时钟一致：开关区 / 基本 / 边框与填充 / 液态玻璃 / 背景图片 / 主体内容，
+    // 末尾按形态追加「律动条样式」（仅 Bars）或「唱片机设置」（仅 Vinyl）。
+    // 磁贴模式下律动条连背景边框一起透明 → 把「边框与填充 / 液态玻璃 / 背景图片」
+    // 三组注册进 _tileGated 灰显。
+    void BuildMediaPlayerFields(DesktopMediaPlayer media)
+    {
+        _tileGated.Clear();
+        bool bars = media.Mode == MediaDisplayMode.Bars;
+        var root = new StackPanel { Margin = new Thickness(16, 12, 16, 12) };
+
+        // 开关区
+        var switches = MakeSection(_loc["ZoneProp.Section.Switches"]);
+        switches.Children.Add(MakeCheckRow(_loc["ZoneProp.TileMode"], media.TileMode,
+            v =>
+            {
+                media.TileMode = v;
+                Save(media);
+                ApplyTileGating(v);
+            }));
+        switches.Children.Add(MakeCheckRowWithSideBtn(_loc["ZoneProp.RestoreButton"], media.EnableRestoreButton,
+            v => { media.EnableRestoreButton = v; Save(media); },
+            _loc["Motion.SettingsEllipsis"], _ => OpenMotionDialog(media, () => BuildMediaPlayerFields(media))));
+        switches.Children.Add(MakeCheckRow(_loc["Motion.HoverAutoExpand"], media.HoverAutoExpand,
+            v => { media.HoverAutoExpand = v; Save(media); }));
+        switches.Children.Add(MakeCheckRow(_loc["Media.ClickToToggle"], media.ClickToToggle,
+            v => { media.ClickToToggle = v; Save(media); }));
+        switches.Children.Add(MakeCornerStyleRow(media.CornerRadius > 0, rounded =>
+        {
+            media.CornerRadius = rounded ? (media.CornerRadius > 0 ? media.CornerRadius : 12) : 0;
+            Save(media);
+        }));
+        switches.Children.Add(MakeCheckRow(_loc["MediaProp.Pause"], media.Paused,
+            v => { media.Paused = v; Save(media); }));
+        root.Children.Add(switches);
+
+        // 基本：图标 + 当前形态的窗口尺寸
+        var basic = MakeSection(_loc["ZoneProp.Section.Basic"]);
+        // 形态只读展示（创建后不可改，所以这里不是可编辑控件）
+        var modeRow = new DockPanel { LastChildFill = true, Margin = new Thickness(0, 2, 0, 4) };
+        var modeLabel = new TextBlock
+        {
+            Text = _loc["Media.ModeLocked"],
+            FontSize = 11,
+            Foreground = (Brush)FindResource("Brush.Text.Secondary"),
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 8, 0),
+        };
+        DockPanel.SetDock(modeLabel, Dock.Left);
+        modeRow.Children.Add(modeLabel);
+        modeRow.Children.Add(new TextBlock
+        {
+            Text = media.Mode == MediaDisplayMode.Bars ? _loc["Media.ModeBars"] : _loc["Media.ModeVinyl"],
+            FontSize = 11,
+            Foreground = (Brush)FindResource("Brush.Text.Primary"),
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        basic.Children.Add(modeRow);
+        basic.Children.Add(MakeIconRow(_loc["ZoneProp.Icon"], media.IconChar,
+            v => { media.IconChar = v; Save(media); }, Helpers.IconGlyph.Media));
+        basic.Children.Add(MakeColorRow(_loc["ZoneProp.IconColor"],
+            string.IsNullOrEmpty(media.IconColor) ? "#FFFFFF" : media.IconColor,
+            v => { media.IconColor = v; Save(media); }));
+
+        double curW = bars ? media.BarsModeWidth ?? media.Width : media.VinylModeWidth ?? media.Width;
+        double curH = bars ? media.BarsModeHeight ?? media.Height : media.VinylModeHeight ?? media.Height;
+        var sizeGrid = MakeSizeGrid(
+            curW, v =>
+            {
+                if (bars) media.BarsModeWidth = v; else media.VinylModeWidth = v;
+                media.Width = v;
+                Save(media);
+            },
+            curH, v =>
+            {
+                if (bars) media.BarsModeHeight = v; else media.VinylModeHeight = v;
+                media.Height = v;
+                Save(media);
+            });
+        basic.Children.Add(sizeGrid);
+        root.Children.Add(basic);
+
+        // 边框与填充（律动条磁贴模式下不可用）
+        var bf = MakeSection(_loc["ZoneProp.Section.BorderFill"]);
+        bf.Children.Add(MakeTextRow(_loc["ZoneProp.BorderThickness"],
+            media.BorderThickness.ToString("0.0", CultureInfo.InvariantCulture),
+            v =>
+            {
+                if (double.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out var d))
+                { media.BorderThickness = d; Save(media); }
+            }));
+        bf.Children.Add(MakeColorRow(_loc["ZoneProp.BorderColor"], media.BorderColor,
+            v => { media.BorderColor = v; Save(media); }));
+        bf.Children.Add(MakeSliderRow(_loc["ZoneProp.BorderOpacity"], 0, 100, 5,
+            ParsePercent(media.BorderColor, 25),
+            p => { media.BorderColor = SetPercent(media.BorderColor, p, "FFFFFF"); Save(media); }));
+        bf.Children.Add(MakeColorRow(_loc["ZoneProp.FillColor"], media.FillColor,
+            v => { media.FillColor = v; Save(media); }));
+        bf.Children.Add(MakeSliderRow(_loc["ZoneProp.FillOpacity"], 0, 100, 5,
+            ParsePercent(media.FillColor, 8),
+            p => { media.FillColor = SetPercent(media.FillColor, p, "000000"); Save(media); }));
+        root.Children.Add(bf);
+        if (bars) _tileGated.Add(bf);
+
+        // 液态玻璃
+        var lg = MakeSection(_loc["ZoneProp.Section.LiquidGlass"]);
+        lg.Children.Add(MakeCheckRowWithSideBtn(_loc["ZoneProp.LiquidGlass"], media.EnableLiquidGlass,
+            v => { media.EnableLiquidGlass = v; Save(media); },
+            _loc["ZoneProp.LiquidGlassSettingsEllipsis"], _ => OpenLiquidGlassDialog(media)));
+        root.Children.Add(lg);
+        if (bars) _tileGated.Add(lg);
+
+        // 背景图片
+        var bg = MakeSection(_loc["ZoneProp.Section.BgImage"]);
+        bg.Children.Add(MakeBgImageRow(_loc["ZoneProp.Section.BgImage"], new BgImageBinding
+        {
+            GetPath = () => media.BackgroundImagePath,
+            SetPath = v => media.BackgroundImagePath = v ?? "",
+            GetOpacity = () => media.BackgroundImageOpacity,
+            SetOpacity = v => media.BackgroundImageOpacity = v,
+            GetZoom = () => media.BgImageZoom,
+            SetZoom = v => media.BgImageZoom = v,
+            GetOffsetX = () => media.BgImageOffsetX,
+            SetOffsetX = v => media.BgImageOffsetX = v,
+            GetOffsetY = () => media.BgImageOffsetY,
+            SetOffsetY = v => media.BgImageOffsetY = v,
+            GetWidth = () => media.BarsModeWidth ?? media.Width,
+            GetHeight = () => media.BarsModeHeight ?? media.Height,
+            CropShape = "Rectangle",
+            OnSave = () => Save(media),
+            SetZoneSize = (w, h) =>
+            {
+                media.Width = w; media.Height = h;
+                if (media.Mode == MediaDisplayMode.Bars)
+                { media.BarsModeWidth = w; media.BarsModeHeight = h; }
+                else
+                { media.VinylModeWidth = w; media.VinylModeHeight = h; }
+                Save(media);
+            },
+        }));
+        root.Children.Add(bg);
+        if (bars) _tileGated.Add(bg);
+
+        // 主体内容
+        var bodyContent = MakeSection(_loc["ZoneProp.Section.BodyContent"]);
+        bodyContent.Children.Add(MakeColorRow(_loc["ZoneProp.BodyContentColor"], media.TextColor,
+            v => { media.TextColor = v; Save(media); }));
+        bodyContent.Children.Add(MakeSliderRow(_loc["ZoneProp.BodyContentOpacity"], 0, 100, 5,
+            ParsePercent(media.TextColor, 100),
+            p => { media.TextColor = SetPercent(media.TextColor, p, "FFFFFF"); Save(media); }));
+        bodyContent.Children.Add(MakeColorRow(_loc["ZoneProp.ButtonColor"], media.ButtonColor,
+            v => { media.ButtonColor = v; Save(media); }));
+        bodyContent.Children.Add(MakeSliderRow(_loc["ZoneProp.ButtonOpacity"], 5, 100, 5,
+            media.ControlOpacity,
+            v => { media.ControlOpacity = v; Save(media); }));
+        if (bars)
+        {
+            // 分割线不再跟着主体内容色走：独立颜色 + 独立透明度（只存在于律动条形态）
+            bodyContent.Children.Add(MakeColorRow(_loc["MediaProp.DividerColor"], media.DividerColor,
+                v => { media.DividerColor = v; Save(media); }));
+            bodyContent.Children.Add(MakeSliderRow(_loc["MediaProp.DividerOpacity"], 0, 100, 5,
+                ParsePercent(media.DividerColor, 24),
+                p => { media.DividerColor = SetPercent(media.DividerColor, p, "FFFFFF"); Save(media); }));
+        }
+        root.Children.Add(bodyContent);
+
+        // 播放与显示（P2）：跟随哪个应用 / 封面取色 —— 两种形态都有
+        var playback = MakeSection(_loc["MediaProp.Section.Playback"]);
+        playback.Children.Add(MakeFollowSessionRow(media));
+        playback.Children.Add(MakeCheckRow(_loc["MediaProp.AccentFromCover"], media.AccentFromCover,
+            v => { media.AccentFromCover = v; Save(media); }));
+        playback.Children.Add(new TextBlock
+        {
+            Text = _loc["MediaProp.AccentHint"],
+            FontSize = 10,
+            Foreground = (Brush)FindResource("Brush.Text.Tertiary"),
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 4, 0, 0),
+        });
+        root.Children.Add(playback);
+
+        // 形态专属
+        if (bars)
+        {
+            var barsSection = MakeSection(_loc["MediaProp.Section.Bars"]);
+            // 律动来源：真频谱（WASAPI 环回 + FFT）或旧的模拟律动 —— 与「圆角/尖角」同款三段式按钮
+            barsSection.Children.Add(MakeBarsSourceRow(media.BarsSource, v =>
+            {
+                media.BarsSource = v;
+                Save(media);
+            }));
+            barsSection.Children.Add(MakeSliderRow(_loc["MediaProp.BarsCount"], 0, 100, 1,
+                media.BarsCount, v => { media.BarsCount = (int)Math.Round(v); Save(media); }));
+            barsSection.Children.Add(MakeSliderRow(_loc["MediaProp.BarsWidth"], 1, 12, 1,
+                media.BarsBarWidth, v => { media.BarsBarWidth = v; Save(media); }));
+            barsSection.Children.Add(MakeCornerStyleRow(media.BarsRounded,
+                rounded => { media.BarsRounded = rounded; Save(media); }));
+            // 跳动幅度 / 灵敏度：面板上统一 1–100 的细调刻度，真实倍率由模型侧映射
+            // （DesktopMediaPlayer.AmplitudeFromLevel / SensitivityFromLevel）。
+            barsSection.Children.Add(MakeSliderRow(_loc["MediaProp.Amplitude"], 1, 100, 1,
+                media.BarsAmplitude, v => { media.BarsAmplitude = Math.Round(v); Save(media); }));
+            barsSection.Children.Add(MakeSliderRow(_loc["MediaProp.Sensitivity"], 1, 100, 1,
+                media.BarsSensitivity, v => { media.BarsSensitivity = Math.Round(v); Save(media); }));
+            barsSection.Children.Add(MakeCheckRow(_loc["MediaProp.Reflection"], media.BarsReflection,
+                v => { media.BarsReflection = v; Save(media); }));
+
+            // 颜色模式相关的三行一次建好，切换时只做显隐动画：
+            // 不重建整棵字段树 → 三段式控件的滑块能像「圆角/尖角」那行一样滑过去。
+            var color1Row = MakeColorRow(_loc["MediaProp.Color"], media.BarsColor,
+                v => { media.BarsColor = v; Save(media); });
+            var color2Row = MakeColorRow(_loc["MediaProp.Color2"], media.BarsColor2,
+                v => { media.BarsColor2 = v; Save(media); });
+            var autoIntervalRow = MakeSliderRow(_loc["MediaProp.AutoInterval"], 1, 10, 1,
+                media.BarsAutoIntervalSec, v => { media.BarsAutoIntervalSec = v; Save(media); });
+
+            void SyncColorRows(bool animate)
+            {
+                SetRowShown(color1Row, media.BarsColorMode != "Auto", animate);
+                SetRowShown(color2Row, media.BarsColorMode == "Gradient", animate);
+                SetRowShown(autoIntervalRow, media.BarsColorMode == "Auto", animate);
+            }
+
+            barsSection.Children.Add(MakeColorModeRow(media.BarsColorMode, v =>
+            {
+                media.BarsColorMode = v;
+                SyncColorRows(animate: true);
+                Save(media);
+            }));
+            barsSection.Children.Add(color1Row);
+            barsSection.Children.Add(color2Row);
+            barsSection.Children.Add(autoIntervalRow);
+            SyncColorRows(animate: false);
+
+            barsSection.Children.Add(MakeCheckRow(_loc["MediaProp.ShowDivider"], media.ShowDivider,
+                v => { media.ShowDivider = v; Save(media); }));
+            barsSection.Children.Add(MakeCheckRow(_loc["MediaProp.ShowTrackInfo"], media.ShowTrackInfo,
+                v => { media.ShowTrackInfo = v; Save(media); }));
+            barsSection.Children.Add(MakeCheckRow(_loc["MediaProp.ShowControls"], media.ShowControls,
+                v => { media.ShowControls = v; Save(media); }));
+            root.Children.Add(barsSection);
+        }
+        else
+        {
+            var vinylSection = MakeSection(_loc["MediaProp.Section.Vinyl"]);
+            vinylSection.Children.Add(MakeSliderRow(_loc["MediaProp.SpinSpeed"], 2, 20, 1,
+                media.VinylSpinSeconds, v => { media.VinylSpinSeconds = v; Save(media); }));
+            vinylSection.Children.Add(MakeCheckRow(_loc["MediaProp.ShowVinylTrackPanel"], media.ShowVinylTrackPanel,
+                v => { media.ShowVinylTrackPanel = v; Save(media); }));
+            vinylSection.Children.Add(MakeCheckRow(_loc["MediaProp.ShowControls"], media.ShowControls,
+                v => { media.ShowControls = v; Save(media); }));
+            // 没有 SMTC 缩略图的播放器（网易云）→ 读它自己的播放队列缓存拿封面链接并下载
+            vinylSection.Children.Add(MakeCheckRow(_loc["MediaProp.FetchCover"], media.FetchCover,
+                v => { media.FetchCover = v; Save(media); }));
+            vinylSection.Children.Add(new TextBlock
+            {
+                Text = _loc["MediaProp.FetchCoverHint"],
+                FontSize = 10,
+                Foreground = (Brush)FindResource("Brush.Text.Tertiary"),
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 6, 0, 0),
+            });
+            root.Children.Add(vinylSection);
+        }
+
+        SetFieldRoot(root);
+        ApplyTileGating(media.TileMode);
+    }
+
+    /// <summary>「跟随的应用」下拉：自动 / 具体的 SMTC 会话。
+    /// 列表是打开面板那一刻的快照（会话会变，实时刷新会让下拉乱跳；重开面板即刷新）。
+    /// 这一行用**上下排布**（标签 → 下拉 → 提示），下拉要占满宽度 —— 会话名字可能很长，
+    /// 用「左控件右提示」那种横排会被提示文字挤成一小条。</summary>
+    FrameworkElement MakeFollowSessionRow(DesktopMediaPlayer media)
+    {
+        var stack = new StackPanel { Margin = new Thickness(0, 2, 0, 2) };
+
+        stack.Children.Add(new TextBlock
+        {
+            Text = _loc["MediaProp.FollowSession"],
+            FontSize = 11,
+            Foreground = (Brush)FindResource("Brush.Text.Secondary"),
+            Margin = new Thickness(0, 0, 0, 4),
+        });
+
+        var combo = ComboBoxHelper.Create();
+        combo.HorizontalAlignment = HorizontalAlignment.Stretch;
+        combo.MinWidth = 140;
+
+        // 面板可能是第一个碰到播放器的地方（没开过组件窗时服务还没接到 SMTC）——
+        // 这里叫一下懒启动，列表里至少能尽快看到会话。
+        IReadOnlyList<MediaSessionChoice> choices = Array.Empty<MediaSessionChoice>();
+        bool suppress = false;   // 程序改 SelectedIndex 时不写模型
+
+        // 每次展开下拉都重新读一遍系统会话：会话随时会变（换 app / 开始播放），
+        // 只在打开面板时读一次的话，用户必须"关掉设置界面再打开"才看得到新会话。
+        void Rebuild()
+        {
+            MediaSessionService.Instance.EnsureStarted();
+            var list = MediaSessionService.Instance.ListSessions();
+            string current = media.FollowSession ?? "";
+
+            suppress = true;
+            try
+            {
+                combo.Items.Clear();
+                combo.Items.Add(_loc["MediaProp.FollowAuto"]);
+                int selected = 0;
+                for (int i = 0; i < list.Count; i++)
+                {
+                    var c = list[i];
+                    combo.Items.Add($"{c.AppLabel}{(c.IsPlaying ? " · " + _loc["MediaProp.FollowPlaying"] : "")}");
+                    if (string.Equals(c.Aumid, current, StringComparison.OrdinalIgnoreCase))
+                        selected = i + 1;
+                }
+                // 存着的那个应用当前没有会话（没开 / 没在放）→ 补一项，别让用户以为自己没设置过
+                if (selected == 0 && current.Length > 0)
+                {
+                    combo.Items.Add($"{MediaSessionService.FriendlyAppLabel(current)} · {_loc["MediaProp.FollowMissing"]}");
+                    selected = combo.Items.Count - 1;
+                }
+                choices = list;
+                combo.SelectedIndex = selected;
+            }
+            finally
+            {
+                suppress = false;
+            }
+        }
+
+        combo.DropDownOpened += (_, _) => Rebuild();
+        combo.SelectionChanged += (_, _) =>
+        {
+            if (suppress) return;
+            int idx = combo.SelectedIndex;
+            if (idx <= 0)
+            {
+                media.FollowSession = "";
+            }
+            else if (idx - 1 < choices.Count)
+            {
+                media.FollowSession = choices[idx - 1].Aumid;
+            }
+            else
+            {
+                return;   // "当前没有会话"那一项：保留原设置，别替用户清掉
+            }
+            Save(media);
+            // 预览回调之外再保底推一次：改完立刻生效，不用关掉设置界面再打开
+            (Application.Current as App)?.WidgetService?
+                .GetMediaPlayerWindow(media.Id)?.RefreshFollow();
+        };
+
+        Rebuild();
+
+        stack.Children.Add(combo);
+        stack.Children.Add(new TextBlock
+        {
+            Text = _loc["MediaProp.FollowHint"],
+            FontSize = 10,
+            Foreground = (Brush)FindResource("Brush.Text.Tertiary"),
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 4, 0, 0),
+        });
+        return stack;
+    }
+
+    /// <summary>律动来源：真频谱 / 模拟 —— 与「圆角/尖角」同一套 Segmented（滑块高亮会滑过去）。</summary>
+    FrameworkElement MakeBarsSourceRow(string value, Action<string> onChange)    {
+        var seg = new Segmented
+        {
+            Margin = new Thickness(0, 4, 0, 2),
+            HorizontalAlignment = HorizontalAlignment.Left,
+        };
+        seg.Items.Add(new SegmentItem { Text = _loc["MediaProp.SourceSpectrum"] });
+        seg.Items.Add(new SegmentItem { Text = _loc["MediaProp.SourceSimulated"] });
+        seg.SelectedIndex = value == "Simulated" ? 1 : 0;
+        seg.SelectedIndexChanged += (_, _) =>
+            onChange(seg.SelectedIndex == 1 ? "Simulated" : "Spectrum");
+        return MakeRowWithHint(seg, _loc["MediaProp.Source"]);
+    }
+
+    /// <summary>三段式单选（单色 / 渐变 / 自动换色），复用 Segmented 控件。</summary>
+    FrameworkElement MakeColorModeRow(string value, Action<string> onChange)
+    {
+        var seg = new Segmented
+        {
+            Margin = new Thickness(0, 4, 0, 2),
+            HorizontalAlignment = HorizontalAlignment.Left,
+        };
+        seg.Items.Add(new SegmentItem { Text = _loc["MediaProp.ColorModeSingle"] });
+        seg.Items.Add(new SegmentItem { Text = _loc["MediaProp.ColorModeGradient"] });
+        seg.Items.Add(new SegmentItem { Text = _loc["MediaProp.ColorModeAuto"] });
+        seg.SelectedIndex = value switch { "Single" => 0, "Auto" => 2, _ => 1 };
+        seg.SelectedIndexChanged += (_, _) =>
+            onChange(seg.SelectedIndex switch { 0 => "Single", 2 => "Auto", _ => "Gradient" });
+        return MakeRowWithHint(seg, _loc["MediaProp.ColorMode"]);
     }
 
     // ── Field tree for StickyNote ──
@@ -3487,8 +4022,52 @@ public partial class PropertyPanel : UserControl
         dst.Height = src.Height;
     }
 
-    // ponytail: StickyNote has too many fields for an explicit whitelist.
-    // Use reflection over public mutable properties, skipping user data and
+    void CopyMediaPlayerFields(DesktopMediaPlayer src, DesktopMediaPlayer dst)
+    {
+        // 播放器「取消」回退：全部外观 + 两种形态的私有字段。
+        // 身份/位置/显隐/锁定不在编辑器里，保持不动。
+        CloneHelper.CopyBaseProperties<AppearanceModel>(src, dst);
+        dst.Mode = src.Mode;                     // 形态不可改，这里只是保持一致
+        dst.TileMode = src.TileMode;
+        dst.Opacity = src.Opacity;
+        dst.CornerRadius = src.CornerRadius;
+        dst.BorderThickness = src.BorderThickness;
+        dst.ControlOpacity = src.ControlOpacity;
+        dst.TextColor = src.TextColor;
+        dst.ButtonColor = src.ButtonColor;
+        dst.BackgroundImageOpacity = src.BackgroundImageOpacity;
+        dst.BarsCount = src.BarsCount;
+        dst.BarsBarWidth = src.BarsBarWidth;
+        dst.BarsRounded = src.BarsRounded;
+        dst.BarsAmplitude = src.BarsAmplitude;
+        dst.BarsSensitivity = src.BarsSensitivity;
+        dst.BarsScaleV2 = src.BarsScaleV2;      // 档位刻度标记也要跟着回退，否则下次加载会误迁移
+        dst.BarsSource = src.BarsSource;
+        dst.BarsReflection = src.BarsReflection;
+        dst.BarsColorMode = src.BarsColorMode;
+        dst.BarsColor = src.BarsColor;
+        dst.BarsColor2 = src.BarsColor2;
+        dst.BarsAutoIntervalSec = src.BarsAutoIntervalSec;
+        dst.ShowDivider = src.ShowDivider;
+        dst.DividerColor = src.DividerColor;
+        dst.ShowTrackInfo = src.ShowTrackInfo;
+        dst.ShowControls = src.ShowControls;
+        dst.ClickToToggle = src.ClickToToggle;
+        dst.Paused = src.Paused;
+        dst.ShowVinylTrackPanel = src.ShowVinylTrackPanel;
+        dst.VinylSpinSeconds = src.VinylSpinSeconds;
+        dst.FetchCover = src.FetchCover;
+        dst.AccentFromCover = src.AccentFromCover;
+        dst.FollowSession = src.FollowSession;
+        dst.Width = src.Width;
+        dst.Height = src.Height;
+        dst.BarsModeWidth = src.BarsModeWidth;
+        dst.BarsModeHeight = src.BarsModeHeight;
+        dst.VinylModeWidth = src.VinylModeWidth;
+        dst.VinylModeHeight = src.VinylModeHeight;
+    }
+
+    // ponytail: StickyNote has too many fields for an explicit whitelist.    // Use reflection over public mutable properties, skipping user data and
     // identity. _noteExcluded is the same whitelist used historically in
     // WidgetSettingsDialog; cleaned up to drop hotkey fields that no longer
     // exist (commit e4bd2cf removed the global appearance + cleanup pass).

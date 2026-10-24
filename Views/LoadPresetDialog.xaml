@@ -4,6 +4,7 @@
         xmlns:local="clr-namespace:DesktopZones.Views"
         xmlns:Models="clr-namespace:DesktopZones.Models"
         xmlns:vm="clr-namespace:DesktopZones.ViewModels"
+        xmlns:components="clr-namespace:DesktopZones.Views.Components"
         Title="Load Preset"
         Width="640" Height="540"
         MinWidth="560" MinHeight="460"
@@ -921,6 +922,32 @@
             </Border>
         </DataTemplate>
 
+        <DataTemplate x:Key="MediaPlayerCardTemplate">
+            <!-- 播放器预设卡：律动条 / 唱片机两种形态共用。卡面是自绘缩略图
+                 （按预设的颜色/条数/圆角/进度画），名称+日期在下方信息栏，
+                 和次级文件夹卡同一套版式。 -->
+            <Border Style="{StaticResource CardFrameStyle}"
+                    MouseEnter="Card_MouseEnter"
+                    MouseLeave="Card_MouseLeave"
+                    MouseLeftButtonDown="Card_MouseLeftButtonDown"
+                    Loaded="Card_Loaded">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Border Margin="10,10,10,2" CornerRadius="8" ClipToBounds="True"
+                            BorderBrush="#24FFFFFF" BorderThickness="1">
+                        <components:MediaPresetPreview Player="{Binding Payload}" Kind="{Binding Kind}"/>
+                    </Border>
+                    <StackPanel Grid.Row="1" Margin="12,4,12,8" VerticalAlignment="Top">
+                        <TextBlock Text="{Binding Name}" Foreground="{DynamicResource Brush.Text.Tertiary}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Text="{Binding CreatedAt, StringFormat=yyyy-MM-dd}" Foreground="{DynamicResource Brush.Text.Tertiary}" FontSize="10" Margin="0,2,0,0"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </DataTemplate>
+
         <local:PresetCardTemplateSelector x:Key="CardSelector"
                 ZoneTemplate="{StaticResource ZoneCardTemplate}"
                 ClockAnalogTemplate="{StaticResource ClockAnalogCardTemplate}"
@@ -929,7 +956,8 @@
                 StickyNoteTemplate="{StaticResource StickyNoteCardTemplate}"
                 MergedGroupTemplate="{StaticResource MergedGroupCardTemplate}"
                 PanelTemplate="{StaticResource PanelCardTemplate}"
-                SubfolderTemplate="{StaticResource SubfolderCardTemplate}"/>
+                SubfolderTemplate="{StaticResource SubfolderCardTemplate}"
+                MediaPlayerTemplate="{StaticResource MediaPlayerCardTemplate}"/>
     </Window.Resources>
 
     <Border Background="{DynamicResource Brush.Bg.Chrome}" CornerRadius="12" BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1">

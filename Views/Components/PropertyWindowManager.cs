@@ -493,6 +493,9 @@ public class PropertyWindowManager
                 ? $"{loc["Breadcrumb.Clock"]} ({loc["ClockProp.Digital"]})"
                 : $"{loc["Breadcrumb.Clock"]} ({loc["ClockProp.Analog"]})",
             DesktopCalendar cal => $"{loc["Breadcrumb.Calendar"]} {cal.DisplayYear}-{cal.DisplayMonth:D2}",
+            DesktopMediaPlayer mp => mp.Mode == MediaDisplayMode.Bars
+                ? $"{loc["Manage.MediaPlayers"]} ({loc["Media.ModeBars"]})"
+                : $"{loc["Manage.MediaPlayers"]} ({loc["Media.ModeVinyl"]})",
             StickyNote => loc["StickyNotePage.FallbackTitle"],
             PanelConfig => loc["PanelPage.PanelTitle"],
             // ponytail 2026-08-26: SubFolder 编辑面板的标题直接取 ZoneItem.Name
@@ -508,6 +511,7 @@ public class PropertyWindowManager
         MergedGroupTarget => "Icon.Merged",
         DesktopClock => "Icon.Clock",
         DesktopCalendar => "Icon.Calendar",
+        DesktopMediaPlayer => "Icon.Media",
         StickyNote => "Icon.Sticky",
         // ponytail 2026-08-24: Panel singleton gets its own tab icon instead
         // of the generic Settings gear so the docked/undocked panel tab is
