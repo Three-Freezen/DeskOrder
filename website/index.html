@@ -547,11 +547,6 @@ html.lang-fading main{animation:langIn .22s ease}
           <li><b data-i18n="cl18_i4t"></b><span data-i18n="cl18_i4d"></span></li>
           <li><b data-i18n="cl18_i5t"></b><span data-i18n="cl18_i5d"></span></li>
         </ul>
-        <div class="cl-head cl-prev"><span class="rm-ver">v1.0.17</span></div>
-        <ul class="cl-list">
-          <li><b data-i18n="cl17_i1t"></b><span data-i18n="cl17_i1d"></span></li>
-          <li><b data-i18n="cl17_i2t"></b><span data-i18n="cl17_i2d"></span></li>
-        </ul>
 
         <div class="cl-foot">
           <a href="https://github.com/Three-Freezen/DeskOrder/releases" target="_blank" rel="noopener" data-od-id="cl-link" data-i18n="cl_link">完整更新记录见 Releases →</a>
@@ -671,9 +666,6 @@ zh:{
   cl18_i4t:"样式设置与滑块修复：",cl18_i4d:"修好「标题栏下面的设置都不能调」（预览钩子被清空）、标题栏透明度改为整体淡出、所有滑块只显示整数；配置里被写坏的非法颜色载入时自动修正。",
   cl18_i5t:"面板与日历打磨：",cl18_i5d:"面板列表视图的悬停/选中高光铺满整行、行距与分区统一，次级分区图标与分区同源；日历去掉「今天」按钮，首行高度压到原来的 2/3。",
 
-  cl17_i1t:"启动稳定性加固：",cl17_i1d:"自包含运行时升级至 .NET 10.0.12（含四轮服务修复）；启动用隐藏窗口不再创建为分层透明窗口，绕开部分核显驱动上的渲染线程雷区。",
-  cl17_i2t:"启动分步追踪：",cl17_i2d:"启动 10 个里程碑逐步落盘 startup-trace.log，若再出现启动问题，日志最后一行即死亡边界。",
-
   cl_link:"完整更新记录见 Releases →",cl_req:"适用于 Windows 10 1809+ · 自包含运行时，无需安装 .NET",
   sec_au_t:"关于作者",au_d:"DeskOrder 的开发者，项目以 Apache-2.0 协议开源。",au_license:"Apache License 2.0",
   ft_line:"Apache-2.0 开源 · 配置仅存本地",ft_releases:"Releases",ft_license:"LICENSE",
@@ -740,9 +732,6 @@ en:{
   cl18_i3t:"Subfolder flyout placement fixed: ",cl18_i3d:"in list mode the flyout no longer jumps to a screen corner or to the far right of a full-width row — it opens right next to the icon you clicked. The panel's 2×2 icon frame is no longer clipped at the bottom.",
   cl18_i4t:"Style settings and sliders fixed: ",cl18_i4d:"settings under the title bar respond again (the live-preview hooks were being cleared), title-bar opacity now fades the whole bar, every slider shows whole numbers only, and invalid colors written by older builds are repaired on load.",
   cl18_i5t:"Panel and calendar polish: ",cl18_i5d:"panel list highlights span the full row with row spacing matching zones, secondary-zone icons share the same control as zones, and the calendar drops its Today button with the top row at two-thirds height.",
-
-  cl17_i1t:"Launch stability hardening: ",cl17_i1d:"the self-contained runtime upgrades to .NET 10.0.12 (four servicing rounds of fixes); the startup helper window is no longer a layered transparent window, sidestepping a render-thread danger zone on some integrated-GPU drivers.",
-  cl17_i2t:"Step-by-step startup trace: ",cl17_i2d:"ten startup milestones are appended to startup-trace.log and flushed at every step — if a launch issue ever reappears, the last log line marks the exact death boundary.",
 
   cl_link:"Full history in Releases →",cl_req:"For Windows 10 1809+ · self-contained runtime, no .NET needed",
   sec_au_t:"About",au_d:"Developer of DeskOrder. The project is open source under Apache-2.0.",au_license:"Apache License 2.0",
