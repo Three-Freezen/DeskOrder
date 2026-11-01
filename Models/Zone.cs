@@ -53,6 +53,56 @@ public class Zone : AppearanceModel
     public bool IsGridView { get; set; } = true;
     /// <summary>自定义图标 — 单图标模式，需 TileMode=true 且 Items.Count&lt;=1 才能启用。</summary>
     public bool CustomIcon { get; set; } = false;
+
+    // ── 快捷栏（Dock）形态 ────────────────────────────────────────────────
+    /// <summary>
+    /// 快捷栏形态：单行排列、无标题栏/按钮/缩放柄，宽高由内容算出来。
+    /// **创建时选定，之后不可改**（所以不进 <see cref="Clone()"/>，否则「套用分区预设」
+    /// 会把普通分区变成快捷栏）。
+    /// </summary>
+    public bool DockMode { get; set; } = false;
+
+    /// <summary>悬停放大 + 相邻推让总开关（快捷栏专属）。</summary>
+    public bool DockAnimate { get; set; } = true;
+
+    /// <summary>悬停放大倍数（1.1–1.8），只在 <see cref="DockAnimate"/> 开时生效。</summary>
+    public double DockMagnify { get; set; } = 1.4;
+
+    /// <summary>放大/回弹动画时长（毫秒，80–300）。</summary>
+    public int DockAnimMs { get; set; } = 160;
+
+    /// <summary>倒影开关：在图标带下方画一条镜像 + 渐隐（与律动条同款做法）。</summary>
+    public bool DockReflection { get; set; } = false;
+
+    /// <summary>倒影强度（0–100，百分比）：既是倒影层的整体不透明度，也是渐变起点。</summary>
+    public double DockReflectionOpacity { get; set; } = 55;
+
+    /// <summary>单击打开（默认）／双击打开（与分区一致）。</summary>
+    public bool DockClickOnce { get; set; } = true;
+
+    /// <summary>
+    /// 运行状态指示（Windows 任务栏那套）：条目对应的应用有可见窗口时，图标下方画一条
+    /// 短横线 —— 在后台是灰色短线、是当前前台应用是蓝色稍长的线（同一时刻只有一条蓝色，
+    /// 因为「前台」本身只有一个）。需要 <see cref="DockMode"/>。
+    /// </summary>
+    public bool DockRunIndicator { get; set; } = true;
+
+    /// <summary>蓝/灰条切换时的宽度 + 颜色动画开关（关掉则瞬时切换）。</summary>
+    public bool DockRunAnim { get; set; } = true;
+
+    /// <summary>左侧显示 Windows 开始菜单按钮（与图标区之间有一条半透明竖线分隔）。</summary>
+    public bool DockStartButton { get; set; } = true;
+
+    /// <summary>
+    /// 最小化后「鼠标悬停 36×36 恢复按钮就自动展开」。
+    ///
+    /// 刻意不复用 <see cref="HoverAutoExpand"/>：那个开关在分区里的语义是"光标进窗 350ms
+    /// 展开整扇窗"，而快捷栏收起后窗口里只剩那颗小方块，两者触发条件不同，共用一个
+    /// 布尔值会互相干扰。默认 **true** —— 快捷栏没有全局热键、没有托盘图标，恢复按钮
+    /// 是唯一入口，让它悬停即开（而不是必须点）更符合直觉。
+    /// </summary>
+    public bool DockHoverRestore { get; set; } = true;
+
     private List<ZoneItem> _items = new();
     public List<ZoneItem> Items
     {
@@ -160,6 +210,17 @@ public class Zone : AppearanceModel
             HideAppName = HideAppName,
             IsGridView = IsGridView,
             CustomIcon = CustomIcon,
+            // 快捷栏外观参数进 Clone（预设卡只该带「长什么样」）；DockMode 是形态，不进。
+            DockAnimate = DockAnimate,
+            DockMagnify = DockMagnify,
+            DockAnimMs = DockAnimMs,
+            DockReflection = DockReflection,
+            DockReflectionOpacity = DockReflectionOpacity,
+            DockClickOnce = DockClickOnce,
+            DockRunIndicator = DockRunIndicator,
+            DockRunAnim = DockRunAnim,
+            DockStartButton = DockStartButton,
+            DockHoverRestore = DockHoverRestore,
             TitleBarFillIndependent = TitleBarFillIndependent,
             FolderMappingEnabled = FolderMappingEnabled,
             FolderMappingPath = FolderMappingPath,

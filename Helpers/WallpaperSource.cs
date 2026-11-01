@@ -99,6 +99,7 @@ public static class WallpaperSource
     /// 返回 null = 壁纸不可用(调用方回退 DWM 玻璃)。</summary>
     public static BitmapSource? GetDesktop()
     {
+        EnsureWatch();
         lock (_lock)
         {
             // 先用轻量指纹判断要不要重新检测 —— 检测本身可能包含一次抓屏(约 100ms),
@@ -179,6 +180,53 @@ public static class WallpaperSource
     {
         Invalidate();
         return GetDesktop();
+    }
+
+    // ── 壁纸变更监视（A：换壁纸后玻璃要立刻跟上，不能等窗口被拖动） ──
+
+    static System.Threading.Timer? _watch;
+    static string _watchSig = "";
+    static readonly object _watchLock = new();
+
+    /// <summary>ponytail 2026-11-01(第 7 轮 A)：给「换壁纸」装一双眼睛。
+    ///
+    /// 系统静态壁纸：`SystemEvents.UserPreferenceChanged(Desktop)` 能收到；但
+    /// **Wallpaper Engine 换壁纸不发任何系统通知**，只能靠比对指纹。所以这里每 5 秒比一次
+    /// <see cref="ComputeSignature"/>(实测 4~5ms，纯读注册表/进程表/文件时间，不碰位图)。
+    /// 只在「渲染方案 = 壁纸采样」开着时才有意义 —— DWM 方案下采样根本不用。
+    /// 指纹一变就 <see cref="WallpaperBackdrop.Invalidate"/>：缓存作废 + 世代号 +1 +
+    /// 抛 `Changed`，已挂载的图层（分区/时钟/日历/便签/面板/快捷栏）一起自己重取。</summary>
+    static void EnsureWatch()
+    {
+        if (_watch != null) return;
+        lock (_watchLock)
+        {
+            if (_watch != null) return;
+            _watchSig = ComputeSignature();
+            _watch = new System.Threading.Timer(_ => PollSignature(), null, 5000, 5000);
+        }
+    }
+
+    static void PollSignature()
+    {
+        try
+        {
+            if (!Enabled) return;
+            var sig = ComputeSignature();
+            if (sig == _watchSig) return;
+            DzTrace.Log($"[WallpaperSource] 指纹变化 → 壁纸重采 ({_watchSig} → {sig})");
+            _watchSig = sig;
+            WallpaperBackdrop.Invalidate();
+        }
+        catch { }
+    }
+
+    /// <summary>系统主题/桌面设置变了（含经典路径的换壁纸）。同样按指纹判断，避免
+    /// 主题色一类的无关变更把整块桌面重模糊一遍。</summary>
+    static void OnUserPreferenceChanged(object? sender, UserPreferenceChangedEventArgs e)
+    {
+        if (e.Category != UserPreferenceCategory.Desktop) return;
+        PollSignature();
     }
 
     /// <summary>只认系统静态壁纸(开关关闭 / 没检测到宿主时的路径)。</summary>
@@ -487,7 +535,8 @@ public static class WallpaperSource
         try
         {
             Microsoft.Win32.SystemEvents.DisplaySettingsChanged += (_, _) => WallpaperBackdrop.Invalidate();
-            DzTrace.Log("[WallpaperSource] 已订阅 DisplaySettingsChanged");
+            Microsoft.Win32.SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
+            DzTrace.Log("[WallpaperSource] 已订阅 DisplaySettingsChanged / UserPreferenceChanged");
         }
         catch (Exception ex)
         {

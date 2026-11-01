@@ -27,6 +27,10 @@ public class PresetCardTemplateSelector : DataTemplateSelector
     /// 卡片内部按 <see cref="PresetKind"/> 画条子或唱盘。</summary>
     public DataTemplate? MediaPlayerTemplate { get; set; }
 
+    /// <summary>快捷栏预设卡：卡面是一根长条（<c>DockPresetPreview</c>），
+    /// 和分区那种方块卡完全不同的观感。</summary>
+    public DataTemplate? DockTemplate { get; set; }
+
     public override DataTemplate? SelectTemplate(object item, DependencyObject container)
     {
         if (item is not PresetCardItem ci) return null;
@@ -43,6 +47,7 @@ public class PresetCardTemplateSelector : DataTemplateSelector
             PresetKind.Subfolder => SubfolderTemplate,
             PresetKind.MediaPlayerBars => MediaPlayerTemplate,
             PresetKind.MediaPlayerVinyl => MediaPlayerTemplate,
+            PresetKind.Dock => DockTemplate,
             _ => null
         };
     }

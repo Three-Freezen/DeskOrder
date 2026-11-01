@@ -232,7 +232,9 @@ public static class WallpaperBackdrop
 
     /// <summary>清缓存(壁纸变更/显示器拓扑变化/手动重采时调用)。
     /// 同时自增 <see cref="Generation"/> —— 已挂载的图层靠它察觉"图换了"。
-    /// 线程安全:`SystemEvents.DisplaySettingsChanged` 会在别的线程上回调到这里。</summary>
+    /// 线程安全:`SystemEvents.DisplaySettingsChanged` 会在别的线程上回调到这里。
+    /// ponytail 2026-11-01(第 7 轮 A): 顺带抛 <see cref="Changed"/> —— 已挂载的图层自己
+    /// 重新取图,不必等到"窗口被拖动/重开"才更新(这就是"换壁纸后玻璃一直是旧图"的根治)。</summary>
     public static void Invalidate()
     {
         lock (_lock)
@@ -241,7 +243,12 @@ public static class WallpaperBackdrop
             _generation++;
         }
         WallpaperSource.Invalidate();
+        try { Changed?.Invoke(); } catch { }
     }
+
+    /// <summary>壁纸来源/缓存被作废了(换壁纸、点「重新采样」、显示器拓扑变化)。
+    /// 已挂载的图层订阅它自行重取；可能在**非 UI 线程**触发，订阅方要自己切 Dispatcher。</summary>
+    public static event Action? Changed;
 
     /// <summary>窗口在虚拟桌面里的裁剪 Viewbox(图像像素空间)。
     /// windowPx = 窗口的屏幕物理矩形(Win32 GetWindowRect 口径)。
@@ -381,6 +388,33 @@ public sealed class WallpaperBackdropLayer
         _root.Children.Add(_tint);
         _root.Children.Add(_noise);
         _noise.Opacity = 0;
+        // 壁纸换了就自己重取（换壁纸/重新采样/显示器拓扑变化都走 WallpaperBackdrop.Invalidate）。
+        // 生命周期：窗口关掉时可视树 Unloaded → 退订，避免静态事件把整棵树钉住。
+        WallpaperBackdrop.Changed += OnWallpaperChanged;
+        _root.Unloaded += OnRootUnloaded;
+    }
+
+    void OnRootUnloaded(object sender, RoutedEventArgs e)
+    {
+        _root.Unloaded -= OnRootUnloaded;
+        WallpaperBackdrop.Changed -= OnWallpaperChanged;
+    }
+
+    /// <summary>壁纸换了：按上次的半径/着色/噪点重取（世代号一变 SetAppearance 就会重裁）。
+    /// 事件可能在非 UI 线程触发，这里切回宿主线程。</summary>
+    void OnWallpaperChanged()
+    {
+        var dispatcher = _root.Dispatcher;
+        if (dispatcher == null || dispatcher.HasShutdownStarted) return;
+        try
+        {
+            dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (_host == null || _bound == null || _attachedRadius < 0) return;
+                SetAppearance(_bound, _attachedRadius, _attachedTint, Math.Max(0, _attachedNoise));
+            }));
+        }
+        catch { }
     }
 
     /// <summary>壁纸可用就返回一个层实例(实际元素延迟到 <see cref="Attach"/> 才插进树)。</summary>
@@ -431,6 +465,34 @@ public sealed class WallpaperBackdropLayer
         return null;
     }
 
+    /// <summary>把一个**指定的**面板当宿主(快捷栏用:胶囊那块 Grid)。
+    /// 与 <see cref="Attach"/> 的区别是不去猜根面板 —— 快捷栏的窗口里还有放大带/倒影带,
+    /// 猜错一格图层就铺到胶囊外面去了。幂等。</summary>
+    public void AttachTo(Panel host)
+    {
+        if (host == null) { DzTrace.Log("[WallpaperBackdrop] AttachTo 跳过: host=null"); return; }
+        if (ReferenceEquals(_host, host)) return;
+        Detach();
+        _host = host;
+        _root.Margin = new Thickness(0);
+        host.Children.Insert(0, _root);
+        DzTrace.Log($"[WallpaperBackdrop] AttachTo ok: panel={host.GetType().Name} children={host.Children.Count}");
+    }
+
+    /// <summary>自测用：图层内部状态摘录（半径/世代/着色/取到的位图/裁剪框）。</summary>
+    public string DebugState()
+    {
+        string desk = _wallpaper.Fill is ImageBrush ib && ib.ImageSource is BitmapSource b
+            ? $"{b.PixelWidth}x{b.PixelHeight}" : "none";
+        string viewbox = _wallpaper.Fill is ImageBrush ib2
+            ? $"{ib2.Viewbox.X:F0},{ib2.Viewbox.Y:F0} {ib2.Viewbox.Width:F0}x{ib2.Viewbox.Height:F0}" : "-";
+        return $"hosted={_host != null} bound={(_bound != null)} radius={_attachedRadius} gen={_attachedGeneration} " +
+               $"tint=#{_attachedTint.A:X2}{_attachedTint.R:X2}{_attachedTint.G:X2}{_attachedTint.B:X2} " +
+               $"noise={_attachedNoise:F3} desk={desk} viewbox={viewbox} " +
+               $"inset={(_sourceInset is { } i ? $"{i.X:F0},{i.Y:F0} {i.Width:F0}x{i.Height:F0}" : "window")} " +
+               $"visible={_root.Visibility}";
+    }
+
     /// <summary>显隐(收起态/玻璃关闭时隐藏;它本来就在 MainContent 里,缩放动画会带着它走)。</summary>
     public void SetVisible(bool visible)
         => _root.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
@@ -450,6 +512,30 @@ public sealed class WallpaperBackdropLayer
 
     Window? _bound;
 
+    /// <summary>「壁纸裁剪源」在窗口内偏移/尺寸(物理像素)。null = 整窗(分区/时钟/日历/便签/面板)。
+    /// ponytail 2026-11-01(第 7 轮 A)：快捷栏的图层只铺在**可见胶囊**里，而壁纸必须按胶囊的
+    /// 屏幕矩形裁 —— 否则玻璃里透出的是整窗那一块(含上方放大带/下方倒影带)，位置整体偏上。
+    /// 存的是"窗口内偏移"而不是屏幕矩形：这样窗口一移动，源矩形跟着走，不用重新计算。</summary>
+    Rect? _sourceInset;
+
+    /// <summary>设定「壁纸裁剪源 = 窗口内这一块」。null = 恢复整窗。</summary>
+    public void SetSourceInset(Rect? windowLocalPx)
+    {
+        if (Nullable.Equals(_sourceInset, windowLocalPx)) return;
+        _sourceInset = windowLocalPx;
+        _attachedWindow = Rect.Empty;   // 源变了 → 下一次一定要重设 Viewbox
+        RefreshViewbox();
+    }
+
+    /// <summary>当前的裁剪源(屏幕物理像素)：整窗矩形按 <see cref="_sourceInset"/> 收窄。</summary>
+    Rect SourcePx(Window window)
+    {
+        var r = WindowPx(window);
+        if (r.IsEmpty || _sourceInset is not { } ins) return r;
+        return new Rect(r.X + ins.X, r.Y + ins.Y,
+                        Math.Max(1, ins.Width), Math.Max(1, ins.Height));
+    }
+
     /// <summary>订阅窗口的移动/缩放 —— 背板只需要改 Viewbox,不重解码不重模糊。</summary>
     public void BindWindow(Window window)
     {
@@ -466,12 +552,20 @@ public sealed class WallpaperBackdropLayer
 
     void OnWindowGeometryChanged(object? sender, EventArgs e) => RefreshViewbox();
 
-    /// <summary>窗口移动/缩放后只刷新裁剪框(裁剪图/模糊图都不动)。</summary>
+    /// <summary>窗口移动/缩放后只刷新裁剪框(裁剪图/模糊图都不动)。
+    /// ponytail 2026-11-01(第 7 轮 A)：顺带比对壁纸世代号 —— 换过壁纸(或点过「重新采样」)
+    /// 之后哪怕只是挪了一下窗口，也按新图重裁；分区与快捷栏共用这一段，行为一致。</summary>
     public void RefreshViewbox()
     {
         if (_host == null || _bound == null) return;
+        if (WallpaperBackdrop.Generation != _attachedGeneration)
+        {
+            if (_attachedRadius >= 0)
+                SetAppearance(_bound, _attachedRadius, _attachedTint, Math.Max(0, _attachedNoise));
+            return;
+        }
         if (_wallpaper.Fill is not ImageBrush ib || ib.ImageSource is not BitmapSource desk) return;
-        var rect = WindowPx(_bound);
+        var rect = SourcePx(_bound);
         if (rect.IsEmpty || rect == _attachedWindow) return;
         ib.Viewbox = WallpaperBackdrop.GetCropViewbox(desk, rect);
         _attachedWindow = rect;
@@ -486,7 +580,7 @@ public sealed class WallpaperBackdropLayer
             return;
         }
         int radius = WallpaperBackdrop.QuantizeRadius(blurRadiusPx);
-        var rect = WindowPx(window);
+        var rect = SourcePx(window);
         if (rect.IsEmpty)
         {
             DzTrace.Log("[WallpaperBackdrop] SetAppearance 跳过: 窗口矩形为空(句柄未就绪?)");

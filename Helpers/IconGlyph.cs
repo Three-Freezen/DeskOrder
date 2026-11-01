@@ -30,11 +30,13 @@ public static class IconGlyph
     public const string Settings = "@settings";
     /// <summary>「播放器」组件图标（唱片 + 唱臂）。</summary>
     public const string Media    = "@media";
+    /// <summary>「快捷栏」图标（胶囊 + 三个图标位）。</summary>
+    public const string Dock     = "@dock";
 
-    /// <summary>图标预设（26 个）：前 8 个为软件原生矢量图标，后 18 个为常用 emoji。</summary>
+    /// <summary>图标预设（27 个）：前 9 个为软件原生矢量图标，后 18 个为常用 emoji。</summary>
     public static readonly string[] PresetIcons =
     {
-        Zones, Merged, Panel, Clock, Calendar, Sticky, Media, Settings,
+        Zones, Merged, Panel, Clock, Calendar, Sticky, Media, Dock, Settings,
         "🎮", "💬", "🌐", "📁", "📝", "📊", "📈", "🎵", "🎬", "📷",
         "🛒", "✉️", "🔒", "⚙️", "🧮", "🗂️", "💻", "📱",
     };
@@ -53,6 +55,7 @@ public static class IconGlyph
         Calendar => "Icon.Calendar",
         Sticky   => "Icon.Sticky",
         Media    => "Icon.Media",
+        Dock     => "Icon.DockBar",
         Settings => "Icon.Settings",
         _ => null,
     };
@@ -74,6 +77,7 @@ public static class IconGlyph
         "calendar" => Calendar,
         "sticky" => Sticky,
         "media"  => Media,
+        "dock"   => Dock,
         _ => Zones,
     };
 

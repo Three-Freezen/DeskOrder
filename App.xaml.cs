@@ -170,10 +170,18 @@ public partial class App : System.Windows.Application
         // marker; a second launch signals the activation event so the running
         // instance surfaces its management window instead of silently dying into
         // an unreaped zombie under a handle-holding launcher.
+        // 自测台（--dock-lab）允许和正式实例并存：正式实例可能正被用户开着（甚至更高完整性，
+        // 那样下面会直接 UnauthorizedAccessException 退出），自测台就没法跑。给自测台一个
+        // 带 PID 的独立名字，既不干扰正式实例，也不会被它的锁挡住。
+        string mutexName = InstanceMutexName;
+#if DEBUG
+        if (ParseDockLabArg(e.Args) != null) mutexName += "-lab" + Environment.ProcessId;
+#endif
+
         bool createdNew;
         try
         {
-            _mutex = new Mutex(false, InstanceMutexName, out createdNew);
+            _mutex = new Mutex(false, mutexName, out createdNew);
         }
         catch (UnauthorizedAccessException)
         {
@@ -381,6 +389,33 @@ public partial class App : System.Windows.Application
             {
                 try { await RenderMediaPreviewsAsync(previewDir); }
                 catch (Exception ex) { try { System.IO.File.WriteAllText(previewDir + "\\render-error.txt", ex.ToString()); } catch { } }
+                Shutdown();
+            }), DispatcherPriority.ApplicationIdle);
+            return;
+        }
+
+        // 自测用：--render-dock-preview=<目录> 把快捷栏几种状态渲染成 PNG 后退出。
+        var dockPreviewDir = ParseRenderDockPreviewArg(e.Args);
+        if (dockPreviewDir != null)
+        {
+            Dispatcher.BeginInvoke(new Action(async () =>
+            {
+                try { await RenderDockPreviewsAsync(dockPreviewDir); }
+                catch (Exception ex) { try { System.IO.File.WriteAllText(dockPreviewDir + "\\dock-render-error.txt", ex.ToString()); } catch { } }
+                Shutdown();
+            }), DispatcherPriority.ApplicationIdle);
+            return;
+        }
+        // 自测台：--dock-lab=<目录> 在真桌面上复现快捷栏的几个问题（残影 / 悬停抽搐 /
+        // 拖动卡住），抓屏幕差分 + 内部状态。详见 App.DockLab.cs。
+        var dockLabDir = ParseDockLabArg(e.Args);
+        if (dockLabDir != null)
+        {
+            var labCase = ParseDockLabCase(e.Args);
+            Dispatcher.BeginInvoke(new Action(async () =>
+            {
+                try { await RunDockLabAsync(dockLabDir, labCase); }
+                catch (Exception ex) { try { System.IO.File.WriteAllText(dockLabDir + "\\dock-lab-error.txt", ex.ToString()); } catch { } }
                 Shutdown();
             }), DispatcherPriority.ApplicationIdle);
             return;
@@ -851,6 +886,7 @@ public partial class App : System.Windows.Application
                     "stickynote" => PresetKind.StickyNote,
                     "mergedgroup" => PresetKind.MergedGroup,
                     "panel" => PresetKind.Panel,
+                    "dock" => PresetKind.Dock,
                     _ => null
                 };
             }
@@ -871,6 +907,401 @@ public partial class App : System.Windows.Application
 #if DEBUG
     private static string? ParseRenderMediaPreviewArg(string[] args)
         => ParseArgValue(args, "--render-media-preview=");
+
+    private static string? ParseRenderDockPreviewArg(string[] args)
+        => ParseArgValue(args, "--render-dock-preview=");
+
+    /// <summary>
+    /// 自测：把「快捷栏」三种状态（无动画 / 悬停放大 / 倒影）各渲染成 PNG。
+    /// 离屏窗口 + RenderTargetBitmap，不需要真桌面交互，用来检查单行排列、放大位移、
+    /// 倒影的落点是否对。<c>--render-dock-preview=&lt;dir&gt;</c>
+    /// </summary>
+    async Task RenderDockPreviewsAsync(string dir)
+    {
+        System.IO.Directory.CreateDirectory(dir);
+        var zones = _zoneManager ?? throw new InvalidOperationException("zone manager missing");
+        var apps = new[]
+        {
+            @"C:\Windows\System32\notepad.exe",
+            @"C:\Windows\System32\mspaint.exe",
+            @"C:\Windows\System32\calc.exe",
+            @"C:\Windows\explorer.exe",
+            @"C:\Windows\System32\cmd.exe",
+            @"C:\Windows\System32\control.exe",
+        };
+
+        Zone MakeDock(bool animate, bool reflection, double magnify = 1.4,
+                      bool showName = false, bool tile = false, bool withSubfolder = false,
+                      bool startButton = true, bool liveRun = false, bool glass = false,
+                      string? folderPath = null)
+        {
+            var z = new Zone
+            {
+                Name = "Dock preview",
+                DockMode = true,
+                HideAppName = !showName,
+                GridSize = 48,
+                CornerRadius = 12,
+                BorderThickness = 1.0,
+                IsVisible = true,
+                X = -6000,
+                Y = -6000,
+                EnableLiquidGlass = glass,
+                // 与用户那条快捷栏的玻璃配置一致（材质 AcrylicThin、模糊 18、着色 30、海洋蓝），
+                // 用来验证「胶囊只铺玻璃、两条透明带不参与」。
+                GlassMaterial = glass ? "AcrylicThin" : "",
+                GlassBlurAmount = 18,
+                GlassTintOpacity = 30,
+                GlassColorMode = "OceanBlue",
+                FillColor = glass ? "#08000000" : "#CC101418",
+                BorderColor = "#66FFFFFF",
+                DockAnimate = animate,
+                DockMagnify = magnify,
+                DockReflection = reflection,
+                DockReflectionOpacity = 74,
+                DockAnimMs = 80,
+                EnableRestoreButton = true,
+                TileMode = tile,
+                DockStartButton = startButton,
+            };
+            foreach (var path in apps)
+            {
+                if (!System.IO.File.Exists(path)) continue;
+                var (target, type, iconLoc) = DesktopZones.Helpers.ShortcutResolver
+                    .NormalizeItem(path, ItemType.Application);
+                var item = new ZoneItem(System.IO.Path.GetFileNameWithoutExtension(path), target, type, 0, 0)
+                { IconPath = iconLoc };
+                DesktopZones.Services.ShellIconService.Instance.GetIcon(item.TargetPath, item.Type, item.IconPath);
+                z.Items.Add(item);
+            }
+            if (withSubfolder)
+            {
+                // 次级分区在快捷栏里也是合法条目（2×2 缩略图，排在同一行里）。
+                var sub = new ZoneItem("工具", "", ItemType.SubFolder, 0, 0);
+                sub.SubItems.Add(new ZoneItem("记事本", @"C:\Windows\System32\notepad.exe", ItemType.Application, 0, 0));
+                sub.SubItems.Add(new ZoneItem("画图", @"C:\Windows\System32\mspaint.exe", ItemType.Application, 0, 0));
+                z.Items.Insert(Math.Min(2, z.Items.Count), sub);
+            }
+            if (liveRun)
+            {
+                // 换成一串「本机大概率正在跑」的 exe：真轮询要能认出前台/后台。
+                z.Items.Clear();
+                foreach (var path in new[]
+                         {
+                             @"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+                             @"C:\Windows\explorer.exe",
+                             @"C:\Windows\System32\notepad.exe",
+                             @"C:\Windows\System32\mspaint.exe",
+                         })
+                {
+                    if (!System.IO.File.Exists(path)) continue;
+                    var (t2, ty2, ic2) = DesktopZones.Helpers.ShortcutResolver
+                        .NormalizeItem(path, ItemType.Application);
+                    var it2 = new ZoneItem(System.IO.Path.GetFileNameWithoutExtension(path), t2, ty2, 0, 0)
+                    { IconPath = ic2 };
+                    DesktopZones.Services.ShellIconService.Instance.GetIcon(it2.TargetPath, it2.Type, it2.IconPath);
+                    z.Items.Add(it2);
+                }
+            }
+            if (folderPath != null)
+            {
+                // 文件夹快捷方式（快捷栏里的「文件夹」条目）：验证"资源管理器正开着它 → 下面亮横条"。
+                var (ft, fy, fi) = DesktopZones.Helpers.ShortcutResolver
+                    .NormalizeItem(folderPath, ItemType.Folder);
+                var fi2 = new ZoneItem(System.IO.Path.GetFileName(folderPath), ft, fy, 0, 0) { IconPath = fi };
+                DesktopZones.Services.ShellIconService.Instance.GetIcon(fi2.TargetPath, fi2.Type, fi2.IconPath);
+                z.Items.Insert(Math.Min(1, z.Items.Count), fi2);
+            }
+            DesktopZones.Helpers.ZoneLayout.ApplyDockSize(z);
+            return z;
+        }
+
+        var log = new System.Text.StringBuilder();
+        bool menuLogged = false;
+        async Task RenderOneAsync(Zone zone, string fileName, int hoverIndex,
+                                  Action<DesktopZones.Views.ZoneWindow>? setup = null,
+                                  Action<DesktopZones.Views.ZoneWindow>? after = null,
+                                  bool onScreen = false)
+        {
+            // onScreen=true 只给"液态玻璃"那几张用：玻璃是采样**窗口所在屏幕位置的壁纸**，
+            // 窗口放在 -6000 时裁到的是壁纸左上角（深色），看不出玻璃感。放在真实位置跑一秒
+            // 再离屏截，采样才是真实的（窗口会闪一下，只用在生成文档图时）。
+            double left = -6000, top = -6000;
+            if (onScreen)
+            {
+                var wa = SystemParameters.WorkArea;
+                left = wa.Left + Math.Max(0, (wa.Width - zone.Width) / 2);
+                top = wa.Top + Math.Max(0, wa.Height - zone.Height - 60);
+            }
+            var win = new DesktopZones.Views.ZoneWindow(zone, zones, DesktopZones.Services.ShellIconService.Instance)
+            {
+                Left = left,
+                Top = top,
+                ShowInTaskbar = false,
+            };
+            win.Show();
+            await Task.Delay(700);
+            win.UpdateLayout();
+            if (hoverIndex >= 0)
+            {
+                win.PreviewDockHover(hoverIndex);
+                await Task.Delay(260);
+                win.UpdateLayout();
+            }
+            if (setup != null)
+            {
+                setup(win);
+                await Task.Delay(120);
+                win.UpdateLayout();
+            }
+            if (after != null)
+            {
+                after(win);
+                await Task.Delay(120);
+                win.UpdateLayout();
+            }
+            log.AppendLine($"{fileName}: model={zone.Width:F0}x{zone.Height:F0} win={win.ActualWidth:F0}x{win.ActualHeight:F0} items={zone.Items.Count}");
+            log.AppendLine("  state=" + win.DebugDockState());
+            // 右键菜单只在第一张图上打印一次（验证与分区菜单对齐）
+            if (!menuLogged)
+            {
+                menuLogged = true;
+                log.AppendLine("  menu= " + win.DebugOpenZoneMenu());
+            }
+            int pw = Math.Max(1, (int)Math.Round(win.ActualWidth * 3));
+            int ph = Math.Max(1, (int)Math.Round(win.ActualHeight * 3));
+            var rtb = new System.Windows.Media.Imaging.RenderTargetBitmap(pw, ph, 288, 288,
+                System.Windows.Media.PixelFormats.Pbgra32);
+            rtb.Render(win);
+            var enc = new System.Windows.Media.Imaging.PngBitmapEncoder();
+            enc.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(rtb));
+            using (var fs = System.IO.File.Create(System.IO.Path.Combine(dir, fileName)))
+                enc.Save(fs);
+            log.AppendLine($"{fileName}: model={zone.Width:F0}x{zone.Height:F0} win={win.ActualWidth:F0}x{win.ActualHeight:F0} items={zone.Items.Count}");
+            win.Close();
+        }
+
+        await RenderOneAsync(MakeDock(animate: false, reflection: false), "dock-a-static.png", -1);
+        await RenderOneAsync(MakeDock(animate: true, reflection: false), "dock-b-hover.png", 2);
+        await RenderOneAsync(MakeDock(animate: true, reflection: true, magnify: 1.4), "dock-c-reflection.png", -1);
+        await RenderOneAsync(MakeDock(animate: true, reflection: true, magnify: 1.4), "dock-d-hover-reflect.png", 3);
+        // 显示名称（图标缩小一号、名字挂在下方）／磁贴模式（全透明）／次级分区同行
+        await RenderOneAsync(MakeDock(animate: false, reflection: false, showName: true), "dock-e-names.png", 2);
+        await RenderOneAsync(MakeDock(animate: true, reflection: true, tile: true), "dock-f-tile.png", 2);
+        await RenderOneAsync(MakeDock(animate: false, reflection: false, withSubfolder: true), "dock-g-subfolder.png", 2);
+        // 运行状态（后台灰短线 / 前台蓝长线）+ 开始菜单按钮
+        await RenderOneAsync(MakeDock(animate: true, reflection: false), "dock-h-run.png", 1,
+            w => w.PreviewDockRunStates(focusedIndex: 1, backgroundIndex: 3));
+        // 关掉开始按钮的对照（条体应该短一截）
+        await RenderOneAsync(MakeDock(animate: false, reflection: false, startButton: false),
+            "dock-i-nostart.png", -1);
+        // 大倍数 + 端点格悬停（方案 A）：只放大悬停格、两侧让位，检查不重合、不被窗口裁掉、
+        // 两端各多出的透明余量是否够（窗口比胶囊宽 = DockSideOverflow×2）。
+        await RenderOneAsync(MakeDock(animate: true, reflection: false, magnify: 1.8), "dock-j-boost-end.png", 0);
+        await RenderOneAsync(MakeDock(animate: true, reflection: true, magnify: 1.8), "dock-k-boost-mid.png", 2);
+        // 倒影 + 次级分区（次级分区以前完全不出倒影）：验证方框也有镜像、且贴着方框底边。
+        await RenderOneAsync(MakeDock(animate: false, reflection: true, withSubfolder: true),
+            "dock-l-reflect-sub.png", -1);
+        // 真·运行状态：条目指向系统里正在跑的 exe，跑一轮真轮询再截图（不是手摆的假状态）。
+        await RenderOneAsync(MakeDock(animate: false, reflection: false, liveRun: true),
+            "dock-m-live-run.png", -1, null, w =>
+            {
+                log.AppendLine("  " + w.PreviewDockLiveRun());
+                log.AppendLine("  " + w.PreviewDockToggle(1));
+            });
+        // 液态玻璃（用户那条配置的配方）+ 倒影 + 次级分区 + 开始按钮倒影：
+        // 验证玻璃只铺在胶囊里、开始按钮和 2×2 方框都出镜像。
+        await RenderOneAsync(MakeDock(animate: false, reflection: true, withSubfolder: true, glass: true),
+            "dock-n-glass.png", -1,
+            null, w => log.AppendLine("  " + w.DebugDockGlass()), onScreen: true);
+        // 判定自测：点图标「切前台 / 最小化」、文件夹横条（资源管理器打开位置匹配）
+        await RenderOneAsync(MakeDock(animate: false, reflection: false),
+            "dock-p-diag.png", -1, null, w =>
+            {
+                log.AppendLine("  " + w.PreviewDockFolders());
+                log.AppendLine("  " + w.PreviewDockToggle(0));
+                log.AppendLine("  " + w.PreviewDockToggle(1));
+            });
+        // 文件夹快捷方式：资源管理器开着那个文件夹时，图标下面要亮横条（真开一个窗口再判）
+        var folderForTest = System.IO.Path.GetFullPath(System.IO.Path.Combine(dir, "..", "foldertest"));
+        try { System.IO.Directory.CreateDirectory(folderForTest); } catch { }
+        await RenderOneAsync(MakeDock(animate: false, reflection: false, folderPath: folderForTest),
+            "dock-q-folderbar.png", -1, null, w =>
+            {
+                w.RefreshDockRunStatesForTest();
+                log.AppendLine("  folderItem=" + folderForTest);
+                log.AppendLine("  " + w.PreviewDockFolders());
+                log.AppendLine("  " + w.PreviewDockToggle(1));
+            });
+        // 玻璃 + 悬停 1.8（玻璃不该跟着放大，胶囊宽度也不变）
+        await RenderOneAsync(MakeDock(animate: true, reflection: true, magnify: 1.8, glass: true),
+            "dock-o-glass-hover.png", 2,
+            null, w => log.AppendLine("  " + w.DebugDockGlass()), onScreen: true);
+
+        // 悬停恢复按钮自动展开（item 7）：开关开 → 合成 MouseEnter 后应自动展开；关 → 不展开。
+        try
+        {
+            var hz = MakeDock(animate: false, reflection: false);
+            var hw = new DesktopZones.Views.ZoneWindow(hz, zones, DesktopZones.Services.ShellIconService.Instance)
+            { Left = -6000, Top = -6000, ShowInTaskbar = false };
+            hw.Show();
+            await Task.Delay(400);
+            log.AppendLine("hoverRestore(on):  " + await hw.PreviewHoverRestoreAsync());
+            hz.DockHoverRestore = false;
+            await Task.Delay(120);
+            log.AppendLine("hoverRestore(off): " + await hw.PreviewHoverRestoreAsync());
+            hw.Close();
+        }
+        catch (Exception ex) { log.AppendLine("hoverRestore FAILED: " + ex.Message); }
+
+        // 高光门控自测：动效**关** → 悬停要铺高光（#18FFFFFF）；
+        // 动效**开** → 不铺（上面几张 hover 变体打出来是 #00FFFFFF），避免和放大打架。
+        try
+        {
+            var noFx = MakeDock(animate: false, reflection: false);
+            var noFxWin = new DesktopZones.Views.ZoneWindow(
+                noFx, zones, DesktopZones.Services.ShellIconService.Instance)
+            { Left = -6000, Top = -6000, ShowInTaskbar = false };
+            noFxWin.Show();
+            await Task.Delay(500);
+            noFxWin.UpdateLayout();
+            noFxWin.PreviewDockHover(1);
+            await Task.Delay(120);
+            log.AppendLine("hover(animate=off): " + noFxWin.DebugDockState());
+            noFxWin.Close();
+        }
+        catch (Exception ex)
+        {
+            log.AppendLine("hover(animate=off) FAILED: " + ex);
+        }
+
+        // 属性面板冒烟 + 截图（字段树/文案：悬停动效 / 显示倒影 / 磁贴模式）
+        await RenderDockPanelShotAsync(dir, MakeDock(animate: true, reflection: true));
+
+        // 预设卡截图：确认「一根长条」的缩略图观感
+        try
+        {
+            RenderDockPresetCards(dir, () => MakeDock(animate: true, reflection: false));
+            log.AppendLine("preset cards: ok");
+        }
+        catch (Exception ex)
+        {
+            log.AppendLine("preset cards FAILED: " + ex);
+        }
+
+        // 预设对话框截图：真开一次 LoadPresetDialog(PresetKind.Dock)，验证卡片选择器、
+        // 标题文案、卡片版式都接上了（临时预设，截完就删）。
+        try
+        {
+            await RenderDockPresetDialogAsync(dir, () => MakeDock(animate: true, reflection: false), log);
+        }
+        catch (Exception ex)
+        {
+            log.AppendLine("preset dialog FAILED: " + ex);
+        }
+
+        // 管理器链路冒烟：新建 → 加图标（宽高要跟着变）→ 最小化（恢复按钮）→ 显示 → 删除。
+        // 用便携数据目录跑，别碰真实配置（见 _scratch 里的 Data\portable.flag）。
+        try
+        {
+            var dock = zones.CreateDock("Dock smoke");
+            await Task.Delay(400);
+            log.AppendLine($"smoke/create: visible={dock.IsVisible} size={dock.Width:F0}x{dock.Height:F0} " +
+                           $"win={(zones.GetZoneWindow(dock.Id) != null)} showHint={zones.IsZoneShown(dock.Id)}");
+            zones.AddItem(dock.Id, @"C:\Windows\System32\notepad.exe");
+            await Task.Delay(300);
+            log.AppendLine($"smoke/add: size={dock.Width:F0}x{dock.Height:F0} items={dock.Items.Count} " +
+                           $"x0={dock.Items[0].X:F0} y0={dock.Items[0].Y:F0}");
+
+            // 运行状态数据源冒烟：真的枚举一次窗口，确认「有多少应用在跑 / 谁在前台」
+            try
+            {
+                var snap = DesktopZones.Services.AppActivityService.Snapshot();
+                var sample = string.Join(",", System.Linq.Enumerable.Take(snap.Keys, 6));
+                var fgName = "";
+                foreach (var v in snap.Values) if (v.IsForeground) fgName = v.ExeName;
+                log.AppendLine($"smoke/activity: running={snap.Count} sample=[{sample}] " +
+                               $"foreground={(fgName.Length > 0 ? fgName : "(none)")}");
+            }
+            catch (Exception ex)
+            {
+                log.AppendLine("smoke/activity FAILED: " + ex.Message);
+            }
+
+            // 次级分区：追加到末尾（单行），条体宽度要长一格
+            double beforeW = dock.Width;            var subSmoke = zones.CreateSubfolder(dock, "smoke-sub");
+            await Task.Delay(250);
+            log.AppendLine($"smoke/subfolder: type={subSmoke.Type} x={subSmoke.X:F0} y={subSmoke.Y:F0} " +
+                           $"w {beforeW:F0}->{dock.Width:F0} items={dock.Items.Count}");
+
+            // 快捷栏预设：独立目录（Presets/Docks）+ 独立 Kind，存/读/取载荷一圈
+            try
+            {
+                var presetSvc = DesktopZones.Services.PresetService.For(PresetKind.Dock);
+                var saved = presetSvc.Save("smoke-dock-preset", dock.Clone());
+                var back = presetSvc.LoadAll().FirstOrDefault(p => p.Name == "smoke-dock-preset");
+                var payload = back == null ? null : DesktopZones.Services.PresetService.GetPayload(back)
+                    as Zone;
+                log.AppendLine($"smoke/preset: kind={saved.Kind} folder={presetSvc.Folder.Replace('\\', '/')} " +
+                               $"loaded={(back != null)} payloadDock={payload?.DockMode} " +
+                               $"grid={payload?.GridSize} tile={payload?.TileMode}");
+                if (back != null) presetSvc.Delete(back.Id);
+            }
+            catch (Exception ex)
+            {
+                log.AppendLine("smoke/preset FAILED: " + ex);
+            }
+
+            // 管理界面冒烟：打开「快捷栏」页并截图（验证侧栏条目 + 列表行 + 副标题都正常）
+            try
+            {
+                EnsureManagementWindow();
+                if (_managementWindow != null)
+                {
+                    _managementWindow.Show();
+                    _managementWindow.Activate();
+                    await Task.Delay(500);
+                    // 先让窗口 Loaded 里的默认导航跑完，再切到「快捷栏」页，否则会被它盖回去。
+                    _managementWindow.ShowSection("docks");
+                    await Task.Delay(700);
+                    _managementWindow.UpdateLayout();
+                    int mw = Math.Max(1, (int)Math.Round(_managementWindow.ActualWidth));
+                    int mh = Math.Max(1, (int)Math.Round(_managementWindow.ActualHeight));
+                    var rtb2 = new System.Windows.Media.Imaging.RenderTargetBitmap(mw, mh, 96, 96,
+                        System.Windows.Media.PixelFormats.Pbgra32);
+                    rtb2.Render(_managementWindow);
+                    var enc2 = new System.Windows.Media.Imaging.PngBitmapEncoder();
+                    enc2.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(rtb2));
+                    using (var fs2 = System.IO.File.Create(System.IO.Path.Combine(dir, "dock-manager.png")))
+                        enc2.Save(fs2);
+                    log.AppendLine($"smoke/manager: section=docks size={mw}x{mh} ok");
+                }
+            }
+            catch (Exception ex)
+            {
+                log.AppendLine("smoke/manager FAILED: " + ex);
+            }
+
+            zones.HideZone(dock.Id);
+            await Task.Delay(500);
+            log.AppendLine($"smoke/hide: visible={dock.IsVisible} minimized={zones.IsZoneMinimized(dock.Id)}");
+            zones.ShowZone(dock);
+            await Task.Delay(500);
+            log.AppendLine($"smoke/show: visible={dock.IsVisible} minimized={zones.IsZoneMinimized(dock.Id)} " +
+                           $"size={dock.Width:F0}x{dock.Height:F0}");
+            zones.FullHideZone(dock.Id);
+            await Task.Delay(200);
+            log.AppendLine($"smoke/fullhide: visible={dock.IsVisible} shown={zones.IsZoneShown(dock.Id)}");
+            zones.DeleteZone(dock.Id);
+            log.AppendLine($"smoke/delete: zones={zones.Zones.Count(z => z.DockMode)} docks-left");
+        }
+        catch (Exception ex)
+        {
+            log.AppendLine("smoke/FAILED: " + ex);
+        }
+
+        System.IO.File.WriteAllText(System.IO.Path.Combine(dir, "dock-preview-dims.txt"), log.ToString());
+    }
 
     /// <summary><c>--名字=值</c> 形式的命令行参数取值，没有就返回 null。</summary>
     private static string? ParseArgValue(string[] args, string prefix)

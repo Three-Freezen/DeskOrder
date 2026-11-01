@@ -107,6 +107,14 @@ public partial class ZoneWindow : Window
     const double TileTitleBarCut = 24;
     bool _tileVisual;
 
+    // ── 快捷栏（Dock）──
+    /// <summary>当前窗口是否为快捷栏形态。形态由 <see cref="Zone.DockMode"/> 定死，
+    /// 关窗重开也不变；与分区的所有分支用这一个判据。</summary>
+    bool IsDock => _zone.DockMode;
+
+    /// <summary>正在按内容重算宽高 —— 期间 <see cref="OnSize"/> 不回写模型、不重排。</summary>
+    bool _applyingDockGeometry;
+
     double TileWindowHeight() => _tileVisual ? Math.Max(36, _zone.Height - TileTitleBarCut) : _zone.Height;
     double FullHeightFromWindowHeight() => _tileVisual ? Height + TileTitleBarCut : Height;
 
@@ -226,7 +234,16 @@ public partial class ZoneWindow : Window
         _vm.IsLocked = zone.IsLocked;
         DataContext = _vm;
         Left = zone.X; Top = zone.Y;
-        Width = SanitizeW(zone.Width); Height = SanitizeW(zone.Height);
+        // 快捷栏比分区的兜底小得多（高 60~100），不能走 SanitizeW（<100 会被撑成 400/300）。
+        if (zone.DockMode)
+        {
+            Width = Math.Max(40, zone.Width);
+            Height = Math.Max(40, zone.Height);
+        }
+        else
+        {
+            Width = SanitizeW(zone.Width); Height = SanitizeW(zone.Height);
+        }
         ApplyStyle();
         // 磁贴模式:构造期即砍掉最上面一层标题栏高度(ApplyStyle 已设 _tileVisual)。
         ApplyProgrammaticHeight(TileWindowHeight());
@@ -252,7 +269,13 @@ public partial class ZoneWindow : Window
         // (点窗口内不可聚焦的空白 / 点别的窗口)都必须落盘,不能只有 Enter 才算数。
         _titleCommitDebounce.Tick += (_, _) => CommitTitleRename();
         ZoneTitleText.TextChanged += ZoneTitle_TextChanged;
-        Deactivated += (_, _) => CommitTitleRename();
+        Deactivated += (_, _) =>
+        {
+            CommitTitleRename();
+            // 窗口失去激活 = 刚启动的程序把前台抢走了：这时候的拖动状态（半透明 + 跟手位置）
+            // 没人来收尾，必须在这里结束掉（见 CancelItemDrag 的说明）。
+            if (_dv != null) CancelItemDrag("window deactivated");
+        };
         _recycleTimer.Tick += RecycleTimer_Tick;
         _recycleTimer.Start();
         _langChanged = _ => ApplyLoc();
@@ -275,6 +298,11 @@ public partial class ZoneWindow : Window
             {
                 ApplyItemTextColor();
                 ReapplyTileItemVisuals();
+                // 容器重建后短线是新实例（宽度 0、画刷透明）→ 按当前状态补一次
+                if (IsDock) RefreshDockRunBars(animate: false);
+                // 倒影要读图标的**实际渲染矩形**（TransformToAncestor），容器/布局没好时
+                // 量不到 → 容器生成后再补一次（ApplyDockGeometry 那次多半还没排好版）。
+                if (IsDock) RefreshDockReflection();
                 // ponytail 2026-08-29: 次级分区图标悬停自动展开 — 容器每次生成都
                 // 重挂(先摘后挂,幂等):悬停 350ms 且 HostSubItem.HoverAutoExpand=true
                 // 时自动打开浮层,移出取消。
@@ -302,10 +330,22 @@ public partial class ZoneWindow : Window
             () => _zone.HoverExpandAnimation,
             () => _zone.HoverExpandSpeed,
             () => _zone.HoverExpandOrigin,
-            () => _zone.HoverAutoExpand)
+            // 快捷栏用自己的开关：收起后窗口里只剩那颗 36×36 的方块，悬停即展开比"必须点"
+            // 更符合直觉（没有热键、没有托盘，它是唯一入口）；默认开。
+            () => IsDock ? _zone.DockHoverRestore : _zone.HoverAutoExpand)
         { IsEnabled = _zone.EnableRestoreButton };
         // ponytail: 2026-08-21 — pick up live changes from MotionSettingsDialog.
         _zone.HoverExpandSettingsChanged += OnHoverExpandSettingsChanged;
+        // ponytail 2026-11-01「拖动卡住」修复 — 拖动途中被别的窗口抢走鼠标捕获时，
+        // 系统不会再派发 WM_LBUTTONUP，Item_MouseUp 永远等不到 → 在这里兜住收尾。
+        AddHandler(Mouse.LostMouseCaptureEvent,
+            new MouseEventHandler(OnAnyLostMouseCapture), handledEventsToo: true);
+        // ponytail 2026-11-01 「显示名称时悬停缩放抽搐」修复 — 指针脱离对账（见 DockHoverBegin）。
+        _dockHoverWatch = new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(200)
+        };
+        _dockHoverWatch.Tick += (_, _) => ReconcileDockHover();
         // ponytail: ghost-glass fix — acrylic follows the expand state: enable glass when
         // content expands (hover preview / click), disable when it collapses, so a collapsed
         // zone shows ONLY the RestoreButton and never a full-window glass rectangle.
@@ -323,6 +363,10 @@ public partial class ZoneWindow : Window
         // `if (!_zone.IsVisible) ApplyHidden()` symmetry: if visible at construction,
         // snap the hover-expand state to expanded so the first Hide actually fires.
         if (_zone.IsVisible) _hover.SnapToExpanded();
+
+        // ponytail: 快捷栏形态在构造末尾统一落到窗口上（隐藏标题栏/按钮/底条、
+        // 换图标模板、按图标数算宽高、画倒影）。放在 _hover 之后，收起/展开逻辑已就位。
+        if (IsDock) ApplyDockMode();
 
         // ponytail: 自适应对齐 — 替换 DragMove 的手动拖拽循环。
         _snapDrag = new SnapDrag(this);
@@ -428,8 +472,21 @@ public partial class ZoneWindow : Window
         ApplyLockState();
     }
 
+    /// <summary>点击前那一瞬的前台窗口（只在 WM_MOUSEACTIVATE 里抓得到，见下面的说明）。</summary>
+    IntPtr _foregroundBeforeClick = IntPtr.Zero;
+
     IntPtr WndProc(IntPtr h, int m, IntPtr w, IntPtr l, ref bool hd)
-    { if (m == NativeMethods.WM_DROPFILES) { DoDrop(w); hd = true; } return IntPtr.Zero; }
+    {
+        if (m == NativeMethods.WM_DROPFILES) { DoDrop(w); hd = true; }
+        else if (m == NativeMethods.WM_MOUSEACTIVATE)
+        {
+            // 这一条**在窗口被激活之前**到达，所以 GetForegroundWindow() 还是"点之前那个
+            // 前台窗口"。点快捷栏图标要区分「切前台」还是「最小化」全靠它：等真正进到
+            // 点击处理时，前台已经是我们自己的条体了，判不出"刚才是不是它"。
+            try { _foregroundBeforeClick = NativeMethods.GetForegroundWindow(); } catch { }
+        }
+        return IntPtr.Zero;
+    }
 
     void DoDrop(IntPtr drop)
     {
@@ -531,6 +588,17 @@ public partial class ZoneWindow : Window
     /// </summary>
     void AddItem(ZoneItem item, double x, double y)
     {
+        // 快捷栏：一律追加到末尾（没有"找空格子"这回事），X/Y 交给几何重算写死，
+        // 跨分区拖入 / 导入文件 / 导入系统项目 / 新建文件 都走这一条路。
+        if (IsDock)
+        {
+            item.X = ZoneLayout.DockX(_zone, _zone.Items.Count);
+            item.Y = ZoneLayout.DockBandTop(_zone);
+            _vm.AddItem(item);
+            ZoneLayout.ApplyDockSize(_zone);
+            ApplyDockGeometry();
+            return;
+        }
         item.X = Math.Max(0, Math.Min(x, Math.Max(0, _zone.Width - ItemW)));
         item.Y = Math.Max(0, Math.Min(y, Math.Max(0, _zone.Height - ItemH)));
         _vm.AddItem(item);
@@ -567,8 +635,16 @@ public partial class ZoneWindow : Window
 
     // ── External file drops (WPF AllowDrop — shows "not allowed" for non-drags) ──
 
+    /// <summary>锁定的快捷栏不收外部拖入（否则拖个文件进来就会把条体撑长 —— 那是"改尺寸"，
+    /// 锁定的语义就是布局不许被误操作改动）。分区保持原有行为。</summary>
+    bool DockDropBlocked => IsDock && _zone.IsLocked;
+
     void Window_DragEnter(object s, DragEventArgs e)
     {
+#if DEBUG
+        if (IsDock) DzTrace.Log($"[WinPreview] dragEnter locked={_zone.IsLocked}");
+#endif
+        if (DockDropBlocked) { e.Effects = DragDropEffects.None; e.Handled = true; return; }
         // ponytail 2026-08-26: 内部拖拽(ZoneItemViewModel)+ 桌面文件(FileDrop)都先走
         // SubFolder 命中检测,命中则高亮目标方框;未命中再走普通 FileDrop 分支。
         if (TryRouteSubfolderDragOver(e)) return;
@@ -577,12 +653,14 @@ public partial class ZoneWindow : Window
 
     void Window_DragOver(object s, DragEventArgs e)
     {
+        if (DockDropBlocked) { e.Effects = DragDropEffects.None; e.Handled = true; return; }
         if (TryRouteSubfolderDragOver(e)) return;
         if (e.Data.GetDataPresent(DataFormats.FileDrop)) { e.Effects = DragDropEffects.Copy; e.Handled = true; }
     }
 
     void Window_Drop(object s, DragEventArgs e)
     {
+        if (DockDropBlocked) { e.Effects = DragDropEffects.None; e.Handled = true; return; }
         // ponytail 2026-08-26: drop 完成时清除 SubFolder 放大反馈(不管命中与否)。
         ClearSubfolderDragScale();
         var pos = e.GetPosition(ItemsHost);
@@ -641,6 +719,13 @@ public partial class ZoneWindow : Window
             return;
         }
         var fileTarget = FindSubfolderTarget(pos);
+        if (IsDock)
+        {
+            // 快捷栏：外部文件一律追加到末尾（没有方格可找），然后把宽高算一遍。
+            ImportDockApps(files);
+            e.Handled = true;
+            return;
+        }
         foreach (var f in files)
         {
             if (fileTarget != null) AddFileToSubfolder(f, fileTarget);
@@ -820,6 +905,8 @@ public partial class ZoneWindow : Window
         if (string.IsNullOrWhiteSpace(name)) return;
 
         _mgr.CreateSubfolder(_zone, name);
+        // 快捷栏：新条目要按单行排到末尾，条体宽度也要跟着长一格。
+        if (IsDock) { ZoneLayout.ArrangeDock(_zone); ZoneLayout.ApplyDockSize(_zone); ApplyDockGeometry(); }
         UpdateCanvasSize();
     }
 
@@ -905,6 +992,8 @@ public partial class ZoneWindow : Window
         // ponytail 2026-08-29: 悬停自动展开开关打开时启动"自动收回"轮询(光标离开
         // 浮层 450ms 收回,不受浮层鼠标捕获饿死容器事件的影响)。
         StartFlyoutAutoClosePoll();
+        // 快捷栏：这个次级分区"打开着"→ 图标下面补一条横条（等浮层真开起来再刷）
+        if (IsDock) RefreshDockRunStates();
     }
 
     void TryOpenFlyoutAnimated(ZoneItem sub)
@@ -953,6 +1042,8 @@ public partial class ZoneWindow : Window
         if (!SubfolderFlyoutPopup.IsOpen || _flyoutClosing) return;
         StopFlyoutAutoClosePoll();
         _flyoutClosing = true;
+        // 快捷栏：浮层一关，那颗图标下面的横条也该立刻消失（别等 700ms 那次轮询）
+        if (IsDock) RefreshDockRunStates();
         _flyoutCloseTimer?.Stop();
         _flyoutCloseTimer = null;
         var token = _flyoutOpenToken;
@@ -1434,7 +1525,17 @@ public partial class ZoneWindow : Window
         // UpdateZone/RefreshZone; ShowZone never re-showed it, so the zone stayed
         // invisible. Re-show symmetrically with ShowClock/ShowCalendar/ShowNote.
         if (!IsVisible) Show();
-        if (_zone.Width < 100) _zone.Width = 400; if (_zone.Height < 100) _zone.Height = 300;
+        if (IsDock)
+        {
+            // 快捷栏的宽高由内容算出来，不能走分区那套 <100 的兜底。
+            ZoneLayout.ApplyDockSize(_zone);
+            _zone.Width = Math.Max(40, _zone.Width);
+            _zone.Height = Math.Max(40, _zone.Height);
+        }
+        else
+        {
+            if (_zone.Width < 100) _zone.Width = 400; if (_zone.Height < 100) _zone.Height = 300;
+        }
         Width = _zone.Width; ApplyProgrammaticHeight(TileWindowHeight()); Left = _zone.X; Top = _zone.Y;
         // 已经展开显示的窗口不再重复播放 wave 动画(再次「全部显示」时跳过)，
         // 但仍走 SnapToExpanded 以维持「永久展开」(不会因鼠标离开而自动收起)。
@@ -1476,7 +1577,9 @@ public partial class ZoneWindow : Window
             System.Windows.Threading.DispatcherPriority.Loaded);
         RefreshFolderMapping();
         DesktopLayer.BringToFront(this);
-        NativeMethods.SetRoundedCorners(this, (int)_zone.CornerRadius);
+        // 快捷栏不做整窗圆角/边框（见 ReapplyAcrylic 里「一圈鬼影」的说明）。
+        if (IsDock) ApplyDockWindowFrame(_zone.TileMode);
+        else NativeMethods.SetRoundedCorners(this, (int)_zone.CornerRadius);
         _mgr.FireZoneVisibilityChanged(_zone.Id, true);
     }
 
@@ -1633,8 +1736,17 @@ public partial class ZoneWindow : Window
             // collapsed-to-button mode needs the full-size window back (spec §7.2:
             // the window keeps its size while collapsed; the anchor math and the
             // hover region depend on it).
-            Width = _zone.Width < 100 ? 400 : _zone.Width;
-            ApplyProgrammaticHeight(_zone.Height < 100 ? 300 : TileWindowHeight());
+            if (IsDock)
+            {
+                ZoneLayout.ApplyDockSize(_zone);
+                Width = Math.Max(ZoneLayout.DockEmptyWidth, _zone.Width);
+                ApplyProgrammaticHeight(Math.Max(40, _zone.Height));
+            }
+            else
+            {
+                Width = _zone.Width < 100 ? 400 : _zone.Width;
+                ApplyProgrammaticHeight(_zone.Height < 100 ? 300 : TileWindowHeight());
+            }
             // ponytail: keep window at full size; HoverExpandBehavior owns
             // visibility/scale from here.
             _hover?.SnapToCollapsed();
@@ -1654,6 +1766,9 @@ public partial class ZoneWindow : Window
         _saveDebounce?.Stop();
         _titleCommitDebounce.Stop();
         _recycleTimer.Stop();
+        _dockRunTimer?.Stop();
+        _dockHoverWatch?.Stop();
+        _dockHoverEndTimer?.Stop();
         _folderLoadCts?.Cancel();
         _folderLoadCts = null;
         _vm.Items.CollectionChanged -= _vmItemsChangedHandler;
@@ -1672,6 +1787,7 @@ public partial class ZoneWindow : Window
         if (_src != null) { _src.RemoveHook(WndProc); _src = null; }
         if (_langChanged != null) { _loc.LanguageChanged -= _langChanged; _langChanged = null; }
         if (h != IntPtr.Zero) NativeMethods.DragAcceptFiles(h, false);
+        if (h != IntPtr.Zero) DockStartButtonHook.Unregister(h);
         base.OnClosed(e);
     }
 
@@ -1681,6 +1797,8 @@ public partial class ZoneWindow : Window
         {
             _vm.RefreshItems();
             UpdateCanvasSize();
+            // 快捷栏：图标被别处增删（跨分区拖入、管理器加图标）也要重排 + 重算宽高。
+            if (IsDock) ApplyDockGeometry();
             // ponytail: keep the title NAME in sync on every ZonesChanged, not just on the
             // style-panel's direct RefreshZone preview. Rename/merge paths that only fire
             // ZonesChanged used to leave the title bar showing the old name (ApplyStyle
@@ -1784,12 +1902,29 @@ public partial class ZoneWindow : Window
     // 双击由 Window_MouseDoubleClick 处理（自定义图标打开）。
     void Window_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
+#if DEBUG
+        if (IsDock) DzTrace.Log($"[WinPreview] src={e.OriginalSource?.GetType().Name} main={MainContent.Visibility} pos={e.GetPosition(this)}");
+#endif
         if (e.OriginalSource is TextBox) return; // title inline editing
         // Items / list / chrome presses are owned by their own handlers.
         if (IsOnFolderEntry(e.OriginalSource) || IsOnItem(e.OriginalSource)) return;
         if (IsWithinZoneChrome(e.OriginalSource)) return;
         if (MainContent.Visibility != Visibility.Visible) return;
         if (FolderMappingView.Visibility == Visibility.Visible) return;
+
+        // 快捷栏：没有标题栏，条体空白处按下就是拖动整窗（也不做框选/多选）。
+        // 开始按钮例外：按下即弹开始菜单，不能被条体拖动吃掉这一下。
+        if (IsDock)
+        {
+            if (DockStartBtn != null && DockStartBtn.Visibility == Visibility.Visible && DockStartBtn.IsMouseOver)
+            {
+                DockStartClick();
+                e.Handled = true;
+                return;
+            }
+            StartBodyDrag(e);
+            return;
+        }
 
         // 自定义图标模式下第二次按下（ClickCount==2）不启动框选，交给双击打开。
         if (_customIconOpenFirst && e.ClickCount == 2) return;
@@ -2583,7 +2718,10 @@ public partial class ZoneWindow : Window
         if (PasteClipboardIntoMapping()) e.Handled = true;
     }
 
-    (double, double) FindFreeSpot() => ZoneLayout.FindFreeSpot(_vm.GetPlacementItems(), _zone.Width, _zone.Height, _zone.GridSize, _zone.GridSize);
+    // 快捷栏没有方格网，导入一律追加到末尾（X 由序号算，Y 是那条单行的固定值）。
+    (double, double) FindFreeSpot() => IsDock
+        ? (ZoneLayout.DockX(_zone, _zone.Items.Count), ZoneLayout.DockBandTop(_zone))
+        : ZoneLayout.FindFreeSpot(_vm.GetPlacementItems(), _zone.Width, _zone.Height, _zone.GridSize, _zone.GridSize);
 
     /// <summary>解析重排目标：合并分区选中子分区标签时用该子分区的图标与网格；否则用主分区。</summary>
     (List<Models.ZoneItem>? Items, int GridSize) ResolveRearrangeTarget()
@@ -2598,6 +2736,7 @@ public partial class ZoneWindow : Window
 
     void RearrangeAll(bool center = true)
     {
+        if (IsDock) { ArrangeDockItems(); return; }
         if (!_zone.AutoArrange) return;
         var (items, gridSize) = ResolveRearrangeTarget();
         if (items == null || items.Count == 0) return;
@@ -2681,6 +2820,65 @@ public partial class ZoneWindow : Window
         CtxPaste.Visibility = canPaste ? Visibility.Visible : Visibility.Collapsed;
         // 粘贴项上方的分割线跟粘贴项同显隐:无映射时保持菜单整洁(避免双分割线)。
         CtxPasteSep.Visibility = CtxPaste.Visibility;
+
+        // 快捷栏：和分区菜单对齐（缺的功能补齐），只去掉两条快捷栏里没有意义的东西：
+        // ①「文件夹映射」以及依赖它的「粘贴」（快捷栏不做映射/监听）
+        // ② 组合分区的「解散」（快捷栏不参与合并组）
+        // 保留：添加应用… / 导入 ▶ / 新建次级分区 / 新建 ▶ / 设置 / 锁定 / 最小化 /
+        //       完全隐藏 / 删除快捷栏。
+        if (IsDock)
+        {
+            CtxDockAddApp.Visibility = Visibility.Visible;
+            CtxDockSep.Visibility = Visibility.Visible;
+            CtxImport.Visibility = Visibility.Visible;
+            CtxImportSep.Visibility = Visibility.Visible;
+            CtxNewSubZone.Visibility = Visibility.Visible;
+            CtxNew.Visibility = Visibility.Visible;
+            CtxSettings.Visibility = Visibility.Visible;
+            CtxLock.Visibility = Visibility.Visible;
+            CtxMinimize.Visibility = Visibility.Visible;
+            CtxFullHide.Visibility = Visibility.Visible;
+            CtxMapFolderNew.Visibility = Visibility.Collapsed;
+            CtxDisbandAll.Visibility = Visibility.Collapsed;
+            CtxDisbandThis.Visibility = Visibility.Collapsed;
+            CtxMergeSep.Visibility = Visibility.Collapsed;
+            CtxPaste.Visibility = Visibility.Collapsed;
+            CtxPasteSep.Visibility = Visibility.Collapsed;
+            CtxDelete.Header = _loc["DockMenu.DeleteDock"];
+            NormalizeMenuSeparators((ContextMenu)s);
+            return;
+        }
+
+        // 分区：把快捷栏专用的两项收回去（同一个 ContextMenu 只在一种形态下用，
+        // 这里仍显式复位，避免将来两条路径复用同一个菜单时串味）。
+        CtxDockAddApp.Visibility = Visibility.Collapsed;
+        CtxDockSep.Visibility = Visibility.Collapsed;
+        CtxFullHide.Visibility = Visibility.Collapsed;
+    }
+
+    /// <summary>收拾右键菜单里的空段：开头/结尾的分隔线与相邻重复的分隔线都藏起来。
+    /// 快捷栏隐藏掉一半菜单项之后，不收拾会看到「菜单第一项就是一条横线」。</summary>
+    static void NormalizeMenuSeparators(ContextMenu cm)
+    {
+        bool lastWasSeparator = true;   // 开头视作已有分隔线 → 首个分隔线会被隐藏
+        foreach (var entry in cm.Items)
+        {
+            if (entry is Separator sep)
+            {
+                sep.Visibility = lastWasSeparator ? Visibility.Collapsed : Visibility.Visible;
+                lastWasSeparator = sep.Visibility == Visibility.Visible;
+            }
+            else if (entry is UIElement ui && ui.Visibility == Visibility.Visible)
+            {
+                lastWasSeparator = false;
+            }
+        }
+        // 结尾的分隔线也藏掉
+        for (int i = cm.Items.Count - 1; i >= 0; i--)
+        {
+            if (cm.Items[i] is Separator tail) { tail.Visibility = Visibility.Collapsed; break; }
+            if (cm.Items[i] is UIElement t && t.Visibility == Visibility.Visible) break;
+        }
     }
 
     static bool IsOnFolderEntry(object s)
@@ -2824,6 +3022,9 @@ public partial class ZoneWindow : Window
 
     void Restore_MouseDown(object s, MouseButtonEventArgs e)
     {
+#if DEBUG
+        DzTrace.Log($"[Restore] down pos={e.GetPosition(this)} main={MainContent.Visibility} hover={_hover?.IsExpanded}");
+#endif
         _restoreDragging = false;
         _restoreDown = e.GetPosition(this);
         RestoreButton.CaptureMouse();
@@ -2833,6 +3034,8 @@ public partial class ZoneWindow : Window
     void Restore_MouseMove(object s, MouseEventArgs e)
     {
         if (!RestoreButton.IsMouseCaptured) return;
+        // 锁定的窗口不许通过恢复按钮拖动整窗（锁 = 位置别动）。
+        if (_zone.IsLocked) return;
         var d = e.GetPosition(this) - _restoreDown;
         if (Math.Abs(d.X) > 3 || Math.Abs(d.Y) > 3)
         {
@@ -2848,6 +3051,9 @@ public partial class ZoneWindow : Window
 
     void Restore_MouseUp(object s, MouseButtonEventArgs e)
     {
+#if DEBUG
+        DzTrace.Log($"[Restore] up dragging={_restoreDragging}");
+#endif
         RestoreButton.ReleaseMouseCapture();
         // ponytail: click = permanent expand (no auto-collapse); the hover path
         // (1 s on RestoreButton) is the temporary preview with 3 s auto-collapse.
@@ -2901,14 +3107,19 @@ public partial class ZoneWindow : Window
         ApplyLockState();
     }
 
+    /// <summary>上一次真正画到界面上的锁定态（用于 RefreshZone 时按需重刷，不重复 Pin）。</summary>
+    bool? _appliedLock;
+
     void ApplyLockState()
     {
         var vm = DataContext as ZoneViewModel;
         if (vm == null) return;
+        _appliedLock = _zone.IsLocked;
         LockBtnText.Text = vm.IsLocked ? "🔒" : "🔓";
         TitleBarBg.Cursor = vm.IsLocked ? System.Windows.Input.Cursors.Arrow : System.Windows.Input.Cursors.SizeAll;
+        // 快捷栏没有缩放柄（条体尺寸由内容算），锁定切换不许把它们放出来。
         GripTL.Visibility = GripTR.Visibility = GripBL.Visibility = GripBR.Visibility =
-            vm.IsLocked ? Visibility.Collapsed : Visibility.Visible;
+            (vm.IsLocked || IsDock) ? Visibility.Collapsed : Visibility.Visible;
         // ponytail 2026-08-27: 锁定态变化时同步右键菜单 Header,切语言后下次打开也会刷新。
         CtxLock.Header = vm.IsLocked ? _loc["Common.Unlock"] : _loc["Common.Lock"];
         if (vm.IsLocked) NativeMethods.PinBelowProgman(this);
@@ -2988,6 +3199,13 @@ public partial class ZoneWindow : Window
     /// <summary>网格画布 / 列表宿主二选一（自定义图标模式两个都藏）。</summary>
     void ApplyItemHostsVisibility()
     {
+        if (IsDock)
+        {
+            // 快捷栏永远是「网格画布」那一套：没有列表视图，也没有单图标模式。
+            if (ItemsHost != null) ItemsHost.Visibility = Visibility.Visible;
+            if (ItemsListHost != null) ItemsListHost.Visibility = Visibility.Collapsed;
+            return;
+        }
         EnsureListViewSource();
         if (ItemsHost != null)
             ItemsHost.Visibility = (!_customIconOpenFirst && _isGridView) ? Visibility.Visible : Visibility.Collapsed;
@@ -3151,7 +3369,9 @@ public partial class ZoneWindow : Window
 
     void Item_MouseDown(object s, MouseButtonEventArgs e)
     {
-        if (e.ClickCount == 2)
+        // 快捷栏：单击打开（默认）时，双击不再额外触发一次打开 —— 交给 MouseUp 判定。
+        bool dockSingleClick = IsDock && _zone.DockClickOnce;
+        if (e.ClickCount == 2 && !dockSingleClick)
         {
             if (s is FrameworkElement fe && fe.DataContext is ZoneItemViewModel iv)
             {
@@ -3164,6 +3384,17 @@ public partial class ZoneWindow : Window
                 Open(iv);
             }
             e.Handled = true;
+            return;
+        }
+        // 快捷栏：不做多选/框选，只记录拖拽起点（拖=换位，松开时若没拖就打开）。
+        if (IsDock)
+        {
+            if (s is FrameworkElement del && del.DataContext is ZoneItemViewModel dvm)
+            {
+                _dv = dvm; _de = del; _ds = e.GetPosition(this);
+                _is = new Point(dvm.X, dvm.Y); _dragging = false; del.CaptureMouse();
+                e.Handled = true;
+            }
             return;
         }
         // Ctrl+click toggles selection (multi-select) — no drag, no flyout.
@@ -3194,6 +3425,16 @@ public partial class ZoneWindow : Window
     }
     void Item_MouseMove(object s, MouseEventArgs e)
     {
+        // ponytail 2026-11-01「拖动卡住」修复 —— 拖动途中左键已经抬起却没收到 MouseUp
+        // （最常见：点了图标启动程序 → 前台被那个程序抢走 → 系统把我们的鼠标捕获收走，
+        //  WM_LBUTTONUP 从此派发不到这个元素）。老代码不检查按键状态，`_dragging` 会永远是
+        // true，于是之后每次移动光标都把图标拖过去 —— 用户看到的就是"图标卡在动画里、
+        // 要再拖一次才恢复"。这里一旦发现左键不在按下态就立刻收尾。
+        if (_dv != null && e.LeftButton != MouseButtonState.Pressed)
+        {
+            CancelItemDrag("left button no longer pressed");
+            return;
+        }
         // A move before the long-press completes hands the gesture back to the
         // move-drag (cancels the pending marquee).
         if (_selectMode == SelectMode.Hold)
@@ -3209,8 +3450,13 @@ public partial class ZoneWindow : Window
         {
             if (Math.Abs(d.X) < SystemParameters.MinimumHorizontalDragDistance && Math.Abs(d.Y) < SystemParameters.MinimumVerticalDragDistance) return;
             _dragging = true;
-            _de.Opacity = 0.7;
+            // 锁定的快捷栏：图标不跟手（拖了就只是"划了一下"），透明/位置都不动。
+            _de.Opacity = (IsDock && _zone.IsLocked) ? 1.0 : 0.7;
         }
+
+        // 锁定的快捷栏：整排布局不许改 —— 不跟手、不换位、不做跨分区幽灵。
+        // （_dragging 已经置 true，所以松手时不会把这次拖动当成一次单击去启动程序。）
+        if (IsDock && _zone.IsLocked) return;
 
         // 跨分区拖动:光标悬停到其它分区窗口 → 幽灵预览落到目标格位,源内指示器
         // 全部隐藏;移回源分区(或悬停在应用窗口上)则恢复正常预览路径。
@@ -3235,6 +3481,11 @@ public partial class ZoneWindow : Window
         }
 
         // live X/Y preview — icon tracks cursor; Item_MouseUp commits reorder/move.
+        if (IsDock)
+        {
+            DockDragFollow(d, e.GetPosition(ItemsHost));
+            return;
+        }
         _dv.X = Math.Max(0, Math.Min(_is.X + d.X, _zone.Width - ItemW));
         _dv.Y = Math.Max(0, Math.Min(_is.Y + d.Y, _zone.Height - ItemH));
 
@@ -3253,6 +3504,24 @@ public partial class ZoneWindow : Window
         }
     }
 
+    /// <summary>
+    /// 快捷栏的单行跟手：只允许左右换位，垂直方向固定（图标不许飞出条体）；
+    /// 压到同条快捷栏里的次级分区上时放大它（松手移入）。
+    /// 锁定状态下**整段不执行** —— 布局不许被拖动改掉（见 Item_MouseMove 的说明）。
+    /// </summary>
+    void DockDragFollow(Vector d, Point posInItems)
+    {
+        if (_dv == null) return;
+        if (_zone.IsLocked) return;
+        _dv.X = Math.Max(0, Math.Min(_is.X + d.X, Math.Max(0, _zone.Width - ItemW)));
+        if (_dv.Type != ItemType.SubFolder)
+        {
+            var overSubDock = FindSubfolderTarget(posInItems);
+            if (overSubDock != null) SetSubfolderDragScale(FindContainerFor(overSubDock));
+            else ClearSubfolderDragScale();
+        }
+    }
+
     void Item_MouseUp(object s, MouseButtonEventArgs e)
     {
         // A click (no move) released before the long-press completed → no marquee.
@@ -3262,34 +3531,99 @@ public partial class ZoneWindow : Window
             _selectMode = SelectMode.None;
             _selectTarget = SelectTarget.None;
         }
-        if (_dv == null) return;
-        if (_de != null) { _de.ReleaseMouseCapture(); _de.Opacity = 1.0; }
-        if (_dragging)
+        var dv = _dv;
+        var de = _de;
+        bool dragged = _dragging;
+        if (dv == null) return;
+        // 先把状态清空、再放捕获 —— 否则 ReleaseMouseCapture 会同步触发 LostMouseCapture，
+        // 收尾逻辑看到 _de 还在就会把这次"正常松手"当成丢捕获取消掉。
+        _dv = null; _de = null; _dragging = false;
+        if (de != null)
+        {
+            try { de.ReleaseMouseCapture(); } catch { }
+            de.Opacity = 1.0;
+        }
+        if (dragged)
         {
             // 跨分区提交优先:悬停在其它分区上释放 → 移动到该分区;拒收/未悬停
             // 则回退本地换位/移动(次级文件夹图标与普通图标同规则)。
             var ext = _externalTarget;
             _externalTarget = null;
             ext?.HideExternalDropGhost();
-            if (ext == null || !CommitCrossZoneMove(ext, PointToScreen(e.GetPosition(this))))
+            if (ext == null || !CommitCrossZoneMove(ext, PointToScreen(e.GetPosition(this)), dv))
             {
-                // 命中 SubFolder → 移入;否则普通换位/移动(次级文件夹图标与普通图标同规则)。
-                var overSub = FindSubfolderTarget(e.GetPosition(ItemsHost));
-                if (overSub != null && _dv.Type != ItemType.SubFolder)
-                    MoveIntoSubfolder(_dv, overSub);
-                else if (_zone.SnapToGrid) ReorderItemInto(_dv, _dv.X, _dv.Y);
-                else { _vm.MoveItem(_dv.Id, _dv.X, _dv.Y, snapToGrid: false); _vm.RefreshMergedItems(); }
+                if (IsDock)
+                {
+                    // 快捷栏：压到次级分区上 → 移入；否则按落点算目标序号换位
+                    // （单行只有 X 有意义，不走分区的方格吸附）。
+                    var overSubDock = dv.Type == ItemType.SubFolder
+                        ? null : FindSubfolderTarget(e.GetPosition(ItemsHost));
+                    if (overSubDock != null) MoveIntoSubfolder(dv, overSubDock);
+                    else CommitDockReorder(dv);
+                }
+                else
+                {
+                    // 命中 SubFolder → 移入;否则普通换位/移动(次级文件夹图标与普通图标同规则)。
+                    var overSub = FindSubfolderTarget(e.GetPosition(ItemsHost));
+                    if (overSub != null && dv.Type != ItemType.SubFolder)
+                        MoveIntoSubfolder(dv, overSub);
+                    else if (_zone.SnapToGrid) ReorderItemInto(dv, dv.X, dv.Y);
+                    else { _vm.MoveItem(dv.Id, dv.X, dv.Y, snapToGrid: false); _vm.RefreshMergedItems(); }
+                }
             }
         }
-        else if (_dv.Type == ItemType.SubFolder)
+        else if (IsDock && _zone.DockClickOnce && dv.Type != ItemType.SubFolder)
+        {
+            // 快捷栏：松开时没拖动 = 单击 → 打开（与任务栏一致）。
+            Open(dv);
+        }
+        else if (dv.Type == ItemType.SubFolder)
         {
             // 单击未拖动 → 打开 flyout(点击 vs 拖拽消歧;Ctrl+click 已在 MouseDown 拦下)。
-            var sub = ResolveSourceZoneItem(_dv);
+            var sub = ResolveSourceZoneItem(dv);
             if (sub != null) OpenSubfolderFlyout(sub);
         }
         HideDropIndicator();
         ClearSubfolderDragScale();
+    }
+
+    /// <summary>
+    /// 取消一次还没收尾的图标拖动（幂等）。什么时候会用到：拖动途中丢了鼠标捕获
+    /// （`LostMouseCapture`）、左键已经不在按下态（`Item_MouseMove` 的前置检查）、
+    /// 窗口失去激活（点了图标启动程序，前台被那个程序抢走 —— 就是用户报的
+    /// 「打开软件的同时拖动图标，图标卡在动画里」）。
+    ///
+    /// 只回滚快捷栏的落点：快捷栏的位置由顺序算出来（`ArrangeDock`），拖到一半的
+    /// X 是"跟手"的临时值，不回滚图标就会停在半路。分区仍然保持"拖动即落点"的老行为，
+    /// 免得改变桌面分区的既有手感。
+    /// </summary>
+    void CancelItemDrag(string why)
+    {
+        var de = _de;
         _dv = null; _de = null; _dragging = false;
+        if (de != null)
+        {
+            try { de.ReleaseMouseCapture(); } catch { }
+            de.Opacity = 1.0;
+        }
+        HideDropIndicator();
+        ClearSubfolderDragScale();
+        if (IsDock)
+        {
+            ZoneLayout.ArrangeDock(_zone);
+            ArrangeDockItems();
+            ResetDockRowTransforms();
+            RefreshDockReflection();
+        }
+        DzTrace.Log($"[Dock drag] cancel: {why}");
+    }
+
+    /// <summary>鼠标捕获在拖动途中被系统收走（别的窗口被激活时会这样）→ 取消拖动。</summary>
+    void OnAnyLostMouseCapture(object s, MouseEventArgs e)
+    {
+        if (_dv == null || _de == null) return;                  // 正常松手已经先清过了
+        if (!ReferenceEquals(e.OriginalSource, _de)) return;     // 不是我们拖的那一格
+        CancelItemDrag("lost mouse capture");
     }
 
     /// <summary>屏幕点下的可接收分区窗口(排除自身;最小化成恢复按钮的分区不可接收)。
@@ -3315,13 +3649,16 @@ public partial class ZoneWindow : Window
 
     /// <summary>跨分区移动提交:把拖拽图标从其所属分区(合并时可能是子分区)移除,
     /// 加入目标窗口当前显示的分区并统一落盘刷新(两个窗口都经 ZonesChanged 重建)。
-    /// 返回 false = 目标拒收,调用方回退本地换位。</summary>
-    bool CommitCrossZoneMove(ZoneWindow target, Point screenPt)
+    /// 返回 false = 目标拒收,调用方回退本地换位。
+    /// ponytail 2026-11-01: 被拖的条目改成**参数**传进来 —— 调用点（Item_MouseUp）现在会
+    /// 先清 `_dv` 再提交（为了不让 ReleaseMouseCapture 触发的 LostMouseCapture 把这次正常
+    /// 松手当成丢捕获取消），继续读 `_dv` 会永远是 null、跨分区拖拽全部失效。</summary>
+    bool CommitCrossZoneMove(ZoneWindow target, Point screenPt, ZoneItemViewModel dragged)
     {
-        if (_dv == null) return false;
-        var raw = ResolveSourceZoneItem(_dv);
+        if (dragged == null) return false;
+        var raw = ResolveSourceZoneItem(dragged);
         if (raw == null) return false;
-        var owner = OwnerZoneOf(_dv) ?? _zone;
+        var owner = OwnerZoneOf(dragged) ?? _zone;
         if (!target.ReceiveExternalItem(raw, screenPt)) return false;
         owner.Items.Remove(raw);
         _mgr.SaveConfig();
@@ -3942,6 +4279,8 @@ public partial class ZoneWindow : Window
     {
         var recv = CurrentReceiveZone();
         if (recv == null || !AcceptsExternalDrop) return false;
+        // 锁定的快捷栏拒收（拖进来的图标会把条体撑长 = 改布局）。
+        if (recv.DockMode && recv.IsLocked) return false;
         HideExternalDropGhost();
 
         var local = PointFromScreen(screenPt);
@@ -3960,25 +4299,50 @@ public partial class ZoneWindow : Window
 
         raw.X = x; raw.Y = y;
         recv.Items.Add(raw);
+        if (recv.DockMode)
+        {
+            // 拖进快捷栏 = 追加到末尾（不做方格落位），宽高跟着重算。
+            ZoneLayout.ArrangeDock(recv);
+            ZoneLayout.ApplyDockSize(recv);
+            if (ReferenceEquals(recv, _zone)) ApplyDockGeometry();
+        }
         return true;
     }
 
     void Item_Enter(object s, MouseEventArgs e)
     {
-        if (s is Grid g)
+#if DEBUG
+        // 自测用：悬停抽搐 = Enter/Leave 在同一个图标上来回打。记时间 + 序号 + 光标位置，
+        // 复现时看两件事：① 同一格短时间反复 enter/leave；② 每次都在光标没动的时候发生。
+        if (IsDock) HoverNote($"enter [{DockIndexOf(s)}] over={ItemIsOver(s)} pos={Mouse.GetPosition(this)}");
+#endif
+        // 快捷栏开了「悬停动效」（放大）就不铺高光：放大 + 相邻推让本身已经是反馈，
+        // 再叠一层高光会和被推开的图标底色打架（属性面板里这两个也不再同时生效）。
+        bool highlight = !(IsDock && _zone.DockAnimate);
+        if (highlight && s is Grid g)
         {
             var hover = FindVisualChild<Border>(g, b => b.Name is "HoverBox" or "SubHoverBox");
             if (hover != null) hover.Background = ItemHoverBrush;
+        }
+        if (IsDock)
+        {
+            DockHoverBegin(s);
+            // 只有真实鼠标事件才启动对账轮询（离屏自测传 null，不该被它复原放大态）。
+            if (e != null && _dockHoverIndex >= 0) StartDockHoverWatch();
         }
     }
 
     void Item_Leave(object s, MouseEventArgs e)
     {
+#if DEBUG
+        if (IsDock) HoverNote($"leave [{DockIndexOf(s)}] over={ItemIsOver(s)} pos={Mouse.GetPosition(this)}");
+#endif
         if (s is Grid g)
         {
             var hover = FindVisualChild<Border>(g, b => b.Name is "HoverBox" or "SubHoverBox");
             if (hover != null) hover.Background = Brushes.Transparent;
         }
+        if (IsDock) DockHoverEnd();
     }
 
     // ── Context menu ──
@@ -4104,14 +4468,56 @@ public partial class ZoneWindow : Window
     }
 
     static ZoneItemViewModel? VM(object s) => s is MenuItem mi && mi.Parent is ContextMenu cm && cm.PlacementTarget is FrameworkElement fe && fe.DataContext is ZoneItemViewModel vm ? vm : null;
-    static void Open(ZoneItemViewModel v)
+
+    void Open(ZoneItemViewModel v)
     {
+        // 快捷栏 + 运行状态指示开着：程序已经在跑 → 和 Windows 任务栏同一套语义：
+        //   · 它已经是前台 → **最小化**
+        //   · 否则 → 切到前台
+        // 功能关掉就退回普通「启动」语义。
+        if (IsDock && _zone.DockRunIndicator && TryToggleRunningApp(v)) return;
         try { ShellLocationResolver.Open(v.TargetPath, v.Type); }
         catch (Exception ex)
         {
             var loc = LocalizationService.Instance;
             MessageBox.Show($"{loc["Item.FailedToOpen"]}\n{ex.Message}", loc["Item.FailedToOpen.Title"], MessageBoxButton.OK, MessageBoxImage.Warning);
         }
+    }
+
+    /// <summary>
+    /// 条目已经在运行 → 切前台 / 再点最小化。返回 true 表示已处理（不用再启动）。
+    ///
+    /// 「刚才是不是它」不能现问 GetForegroundWindow()：点击已经把我们的窗口激活了。
+    /// 优先用 WM_MOUSEACTIVATE 抓到的那个窗口，其次用轮询记下的「最近一个别人的前台窗口」。
+    /// </summary>
+    bool TryToggleRunningApp(ZoneItemViewModel v)
+    {
+        if (v.Type is ItemType.SubFolder or ItemType.Folder or ItemType.ShellLocation) return false;
+        var exe = AppActivityService.ExeNameForPath(v.TargetPath);
+        if (exe.Length == 0) return false;
+        try
+        {
+            // "点击前的前台窗口"只在两种情况下可信：
+            //   ① WM_MOUSEACTIVATE 抓到的那个（最准，激活之前）；
+            //   ② 我们的窗口本来就已经是活动窗口（比如刚点开一个文件夹、焦点还在条体上）
+            //      —— 这时系统不会再发 MOUSEACTIVATE，退一步用轮询记下的"最近一个别人的
+            //      前台窗口"。如果两条都不是（我们本来不是活动窗口却没收到消息），宁可不猜：
+            //      猜错会把别的程序收起来（"显示桌面"后点图标结果被最小化）。
+            var hint = _foregroundBeforeClick;
+            if (hint == IntPtr.Zero && IsActive) hint = AppActivityService.LastOtherForeground;
+            bool handled = AppActivityService.TryToggle(exe, hint, out bool minimized);
+            if (handled)
+            {
+                // 这一下已经用掉了"点击前的前台窗口"。清掉它 —— 下一次点击如果我们的窗口
+                // 还是活动窗口（例如刚点开一个文件夹），系统不会再发 WM_MOUSEACTIVATE，
+                // 留着这个旧值会拿上一次的前台去判"要不要最小化"（会误最小化）。
+                // 清掉后走兜底：轮询记下的"最近一个别人的前台窗口"，那个是持续的、不会过期太久。
+                _foregroundBeforeClick = IntPtr.Zero;
+                DzTrace.Log($"[Dock click] exe={exe} hint=0x{hint.ToInt64():X} → {(minimized ? "minimize" : "activate")}");
+            }
+            return handled;
+        }
+        catch { return false; }
     }
 
     // ── Style (CRITICAL: updates _zone reference) ──
@@ -4315,14 +4721,15 @@ public partial class ZoneWindow : Window
         // 展开路径(ShowZone / ReapplyAcrylic)会各自恢复圆角。
         bool collapsed = RestoreButton.Visibility == Visibility.Visible
                          || _hover is { IsExpanded: false };
-        if (PresentationSource.FromVisual(this) != null && !collapsed)
+        // 快捷栏不做整窗圆角（胶囊的圆角由 WPF 自己画，见 ApplyDockWindowFrame）。
+        if (PresentationSource.FromVisual(this) != null && !collapsed && !IsDock)
             NativeMethods.SetRoundedCorners(this, s.CornerRadius);
 
         // Body fill — 分区本体一体化:玻璃开且填充铺满整窗时,填充并入玻璃 tint;
         // 玻璃关(或收起)时保持纯填充照旧。标题栏独立填充(组合分区「保留原有填充」
         // 会强制开启)时填充必须留在独立的 WPF 层,才能被裁剪到标题栏之下 — 此时
         // 只把纯玻璃着色交给 DWM accent,填充仍走 FillRect。
-        bool fillIndependent = s.TitleBarFillIndependent && !s.TileMode;
+        bool fillIndependent = s.TitleBarFillIndependent && !s.TileMode && !IsDock;
         bool glassCarriesFill = s.EnableLiquidGlass && (_hover?.IsExpanded ?? false) && !fillIndependent;
         // ponytail 2026-09-26: 非亚克力材质(毛玻璃/清透/液态/深色玻璃)的 DWM 背板不认着色
         // (实测 state3 完全不着色),合成着色改由填充层承担;亚克力系仍返回 null → 填充层保持
@@ -4345,6 +4752,23 @@ public partial class ZoneWindow : Window
 
         // Background image.
         ApplyBackgroundImage(s);
+
+        // 快捷栏「磁贴模式」= 全透明（与律动条同一个语义）：只留图标本身，
+        // 填充 / 边框 / 背景图 / 液态玻璃全部撤掉，条体看起来是"浮在壁纸上的一排图标"。
+        // 放在填充与背景图之后覆盖它们（顺序即优先级）。
+        if (IsDock && s.TileMode)
+        {
+            AcrylicHelper.DisableBlur(this);
+            _wallpaperBackdrop?.SetVisible(false);
+            FillRect.Fill = Brushes.Transparent;
+            FillRect.Opacity = 1.0;
+            BgImageBorder.Visibility = Visibility.Collapsed;
+            ZoneBorder.BorderThickness = new Thickness(0);
+        }
+
+        // 快捷栏：填充 / 背景图 / 边框全部收进「可见胶囊」那一条带，窗口上方那条
+        // 透明带专门给放大溢出用（图标可以长到胶囊外面而不会被窗口边界裁掉）。
+        if (IsDock) ApplyDockBarVisuals(s);
 
         // Title text — always the resolved TitleTextColor.
         try { ZoneTitleText.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.TitleTextColor)!); } catch { }
@@ -4373,9 +4797,10 @@ public partial class ZoneWindow : Window
             new UIElement[] { GridToggleBtn, ListToggleBtn, LockBtn, ImportBtn, EditBtn, HideBtn, FolderMapUpBtn, FolderMapRefreshBtn, FolderMapCloseBtn });
         // 容器本身恢复全不透明：明暗已下放到按钮，容器只承担「合并拖拽时整排变淡 0.6」。
         ControlPoint.Opacity = 1.0;
-        var vis = s.TileMode ? Visibility.Collapsed : Visibility.Visible;
+        var vis = (s.TileMode || IsDock) ? Visibility.Collapsed : Visibility.Visible;
         TitleBarBg.Visibility = vis;
         ControlPoint.Visibility = vis;
+        if (IsDock && SubZoneTabsRow != null) SubZoneTabsRow.Visibility = Visibility.Collapsed;
         // ponytail 2026-10: 标题栏透明度 = 整条标题栏(含拖拽区与右侧按钮)的 Opacity,
         // 与「按钮透明度」同一套语义 —— 0% = 整条淡出到底 (0)，而不是只把填充色变透明。
         // 之前这行滑块去改 TitleBarFillColor 的 alpha，调 0 后标题栏背景没了、按钮和
@@ -4383,11 +4808,11 @@ public partial class ZoneWindow : Window
         TitleBarBg.Opacity = Math.Clamp(s.TitleBarOpacity / 100.0, 0.0, 1.0);
         // 磁贴模式把右侧按钮排藏了 → 标题可用宽度变大，重新夹一次上限。
         UpdateTitleMaxWidth();
-        _tileVisual = s.TileMode;
+        _tileVisual = s.TileMode && !IsDock;
 
-        // 磁贴模式 = 隐藏底部 8px 分割条。
+        // 磁贴模式 / 快捷栏 = 隐藏底部 8px 分割条。
         if (BottomBarBg != null)
-            BottomBarBg.Visibility = s.TileMode ? Visibility.Collapsed : Visibility.Visible;
+            BottomBarBg.Visibility = (s.TileMode || IsDock) ? Visibility.Collapsed : Visibility.Visible;
 
         // 隐藏应用名 — 遍历 item 容器切换名称 TextBlock 可见性。
         ApplyHideAppName(_zone.HideAppName);
@@ -4484,7 +4909,7 @@ public partial class ZoneWindow : Window
     void ApplyBackgroundImage(ResolvedZoneStyle s)
     {
         // 标题栏独立填充：背景图与 FillRect 一样不铺到标题栏下方（顶部裁剪）。
-        double clipTop = s.TitleBarFillIndependent && !s.TileMode ? TitleBarLayerHeight() : 0;
+        double clipTop = s.TitleBarFillIndependent && !s.TileMode && !IsDock ? TitleBarLayerHeight() : 0;
         BgImageBorder.Margin = new Thickness(0, clipTop, 0, 0);
         var bi = GetBackgroundImage(s.BgImagePath);
         if (bi != null)
@@ -4619,6 +5044,23 @@ public partial class ZoneWindow : Window
     void OnSize(object s, SizeChangedEventArgs e)
     {
         if (!IsLoaded || MainContent.Visibility != Visibility.Visible) return;
+        if (IsDock)
+        {
+            // 快捷栏：宽高是算出来的，不能反着写回模型（否则下一次算出来的尺寸会被它覆盖），
+            // 只有外部（用户手动改图标大小/倒影开关）真的改了才走 ApplyDockGeometry。
+            if (!_applyingDockGeometry)
+            {
+                _zone.Width = Width;
+                _zone.Height = Height;
+            }
+            ScheduleSave();
+            UpdateCanvasSize();
+            RefreshDockReflection();
+            RefreshDockStartReflection();
+            RefreshDockGlass();          // 胶囊高度/位置变了 → 壁纸裁剪要重铺
+            NativeMethods.UpdateRoundedCorners(this, (int)_zone.CornerRadius);
+            return;
+        }
         _zone.Width = Width;
         _zone.Height = FullHeightFromWindowHeight();
         ScheduleSave();
@@ -4651,6 +5093,14 @@ public partial class ZoneWindow : Window
     {
         if (_itemCanvas == null) return;
 
+        // 快捷栏：画布就是整窗（没有标题栏/底条可减），单行不折行。
+        if (IsDock)
+        {
+            _itemCanvas.Width = Math.Max(0, Width > 0 ? Width : _zone.Width);
+            _itemCanvas.Height = Math.Max(0, Height > 0 ? Height : _zone.Height);
+            return;
+        }
+
         // Use the actually displayed items list (sub-zone's items when a sub-zone tab is selected)
         List<Models.ZoneItem> displayItems;
         int gs = _zone.GridSize;
@@ -4672,8 +5122,7 @@ public partial class ZoneWindow : Window
         _itemCanvas.Height = Math.Max(_zone.Height - 50, maxY + 20);
     }
 
-    // ── Acrylic / frosted glass ──
-    /// <summary>
+    // ── Acrylic / frosted glass ──    /// <summary>
     /// ponytail: ghost-glass fix — re-enable liquid glass when the zone expands from the
     /// RestoreButton (hover preview or click). Routes through ApplyAcrylic so the
     /// expanded-state gate stays the single source of truth for EnableBlur.
@@ -4681,9 +5130,26 @@ public partial class ZoneWindow : Window
     void ReapplyAcrylic()
     {
         var s = ResolveStyle();
-        // ponytail 2026-08-28: 展开时把 Win11 圆角偏好一并恢复(收起时
-        // OnHoverCollapsed 关掉了它),否则恢复按钮点开的分区会一直保持尖角。
-        NativeMethods.SetRoundedCorners(this, (int)_zone.CornerRadius);
+        if (IsDock)
+        {
+            // ponytail 2026-11-01「展开后一圈鬼影」修复 — 绝对不要给快捷栏套 Win11 的整窗圆角。
+            //
+            // 原来的写法对分区/快捷栏一视同仁地 SetRoundedCorners(radius)：分区的窗口 == 可见内容，
+            // 圆角看不出来；快捷栏的窗口比可见胶囊大（上方放大带 + 下方倒影带 + 左右放大余量），
+            // 于是 DWM 会给**整个窗口**描一圈 1px 边框 + 铺一层窗口背板，屏幕上就是胶囊外面多出
+            // 一个透明的圆角面板（用户报的「从最小化展开后周围一圈鬼影，就是透明边框」）。
+            // 实测：最小化状态下 DWMWA_WINDOW_CORNER_PREFERENCE=1(DONOTROUND) 干净；
+            // 点恢复按钮展开后（走的就是这里）变成 2(ROUND)，窗口外多出 2642 个差异像素、
+            // 差异图里能直接看到那个圆角面板；窗口 Hide/Show 或走 ShowZone（后面会 ApplyStyle）
+            // 都不会出现 —— 因为 ApplyStyle 里的 ApplyDockWindowFrame 会把它关回去。
+            ApplyDockWindowFrame(_zone.TileMode);
+        }
+        else
+        {
+            // ponytail 2026-08-28: 展开时把 Win11 圆角偏好一并恢复(收起时
+            // OnHoverCollapsed 关掉了它),否则恢复按钮点开的分区会一直保持尖角。
+            NativeMethods.SetRoundedCorners(this, (int)_zone.CornerRadius);
+        }
         ApplyAcrylic(s);
     }
 
@@ -4735,6 +5201,32 @@ public partial class ZoneWindow : Window
 
     void ApplyAcrylic(ResolvedZoneStyle s)
     {
+        // 快捷栏磁贴模式（全透明）：DWM 玻璃/背板都不能上 —— 窗口比可见胶囊高，
+        // 整窗模糊会把上方那条透明带变成一块悬空毛玻璃。**但胶囊自己的玻璃照旧要铺**
+        // （磁贴模式只撤填充/边框/背景图，不撤用户显式打开的液态玻璃），由 ApplyDockGlass 决定；
+        // 以前这里直接把 FillRect 设成透明就返回了 —— 而"点恢复按钮展开"只走
+        // ReapplyAcrylic（不会再走 ApplyStyle 里的 ApplyDockBarVisuals），于是玻璃被擦掉
+        // 之后没人重画，用户看到的就是"从最小化展开后玻璃又没了"。
+        if (IsDock && _zone.TileMode)
+        {
+            AcrylicHelper.DisableBlur(this);
+            _wallpaperBackdrop?.SetVisible(false);
+            FillRect.Opacity = 1.0;
+            ApplyDockGlass(s);
+            return;
+        }
+
+        // 快捷栏的窗口比可见胶囊高（上方是放大余量、下方是倒影带）时，同样不能上 DWM 模糊 ——
+        // 那是整窗矩形的，两条带会变成悬空的毛玻璃。玻璃观感改由**胶囊区的壁纸采样背板**
+        // 承担（ApplyDockGlass）：只铺胶囊、不碰两条带。
+        if (IsDock && (ZoneLayout.DockOverflowTop(_zone) > 0 || ZoneLayout.DockReflectBand(_zone) > 0))
+        {
+            AcrylicHelper.DisableBlur(this);
+            _wallpaperBackdrop?.SetVisible(false);
+            FillRect.Opacity = 1.0;
+            ApplyDockGlass(s);
+            return;
+        }
         // ponytail: ghost-glass fix — a collapsed zone keeps its full-size window (only the
         // RestoreButton is visible), so enabling acrylic here would tint the WHOLE window
         // bounds with a ghost glass rectangle. Only enable blur while the content is
@@ -4840,6 +5332,9 @@ public partial class ZoneWindow : Window
         // happy without touching the Items collection.
         _vm.Zone = zone;
         ZoneTitleText.Text = zone.Name;
+        // 锁定态可能被管理界面（行锁按钮走 UpdateZone，不触发 LockChanged）改掉 →
+        // 这里按需补一次，保证 🔒 图标、右键菜单文字、桌面层归属都跟上。
+        if (_appliedLock != zone.IsLocked) ApplyLockState();
         // 视图模式也从模型回读（应用预设/重新加载配置可能改了 IsGridView）。
         _isGridView = zone.IsGridView;
         SetRestoreIcon();
@@ -4849,6 +5344,9 @@ public partial class ZoneWindow : Window
         UpdateMergedTitle();
         RefreshFolderMapping();
         if (zone.IsVisible) ShowZone(); else ApplyHidden();
+        // 快捷栏：属性面板改「图标大小 / 倒影 / 动画」后，宽高与排列要跟着重算
+        // （分区那条路靠 ApplyStyle + ShowZone 就够了，快捷栏还得重新排一行）。
+        if (zone.DockMode) { ApplyDockMode(); }
         // ponytail: run last so it overrides ShowZone/ApplyHidden when HoverAutoExpand=true.
         // Otherwise the post-refresh Width/Height would restore the full-size window and
         // hide the RestoreButton the user is supposed to hover.
@@ -5428,4 +5926,1811 @@ public partial class ZoneWindow : Window
         zone.Y = screenPos.Y / dpi.DpiScaleY - 12;
         _mgr.ShowZone(zone);
     }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  快捷栏（Dock）形态
+    //
+    //  形态判据只有一个：Zone.DockMode。窗口本身仍是一个 ZoneWindow —— 图标、拖放、
+    //  右键菜单、液态玻璃、预设卡、桌面层全部复用分区那套；这里只加三样东西：
+    //  ① 单行布局 + 尺寸由内容决定（窗口 = 条体）
+    //  ② 悬停放大 + 相邻推让
+    //  ③ 条体内的倒影
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// <summary>切到快捷栏形态：没有标题栏/按钮/缩放柄/底条/页面映射，图标换成 Dock 模板。</summary>
+    void ApplyDockMode()
+    {
+        TitleBarBg.Visibility = Visibility.Collapsed;
+        ControlPoint.Visibility = Visibility.Collapsed;
+        if (BottomBarBg != null) BottomBarBg.Visibility = Visibility.Collapsed;
+        if (SubZoneTabsRow != null) SubZoneTabsRow.Visibility = Visibility.Collapsed;
+        if (FolderMappingView != null) FolderMappingView.Visibility = Visibility.Collapsed;
+        GripTL.Visibility = GripTR.Visibility = GripBL.Visibility = GripBR.Visibility = Visibility.Collapsed;
+
+        // 快捷栏的尺寸完全由内容决定（图标数 × 格），没有可拉的地方；而且
+        // ResizeMode=CanResize 会让窗口带上 WS_THICKFRAME —— Win11 会沿着这条
+        // 不可见边框描一圈 1px 亮线（磁贴模式下那圈"还在的边框"就是它 + DWM 边框）。
+        ResizeMode = ResizeMode.NoResize;
+
+        // 快捷栏专用图标模板（图标+可选名称、ToolTip 显示名字；单击打开在 Item_MouseUp 里判）。
+        // 走选择器而不是单一模板：次级分区（SubFolder）在快捷栏里同样是合法条目，
+        // 要和分区里的 2×2 缩略图外观一致（DockItemSelector 见 ZoneWindow.xaml）。
+        ItemsHost.ItemTemplate = null;
+        ItemsHost.ItemTemplateSelector = (DataTemplateSelector)Resources["DockItemSelector"];
+        _customIconOpenFirst = false;
+        ApplyItemHostsVisibility();
+
+        // 胶囊的壁纸采样玻璃要跟着窗口位置走（窗口一移动，壁纸裁剪就得重算）。
+        LocationChanged -= OnDockLocationChanged;
+        LocationChanged += OnDockLocationChanged;
+
+        ApplyDockGeometry();
+    }
+
+    /// <summary>快捷栏被拖动 / 被程序挪位后重铺胶囊玻璃（位置没变时 ApplyDockGlass 自己会跳过）。</summary>
+    void OnDockLocationChanged(object? s, EventArgs e) => RefreshDockGlass();
+
+    /// <summary>按模型重算宽高 + 单行排列 + 重画倒影。图标增删、换序、改图标大小、
+    /// 开关倒影之后都走这里（ZoneManager.RecomputeDockGeometry / 属性面板调用）。</summary>
+    public void ApplyDockGeometry()
+    {
+        if (!IsDock) return;
+        ZoneLayout.ApplyDockSize(_zone);
+        double w = Math.Max(40, _zone.Width);
+        double h = Math.Max(40, _zone.Height);
+        _applyingDockGeometry = true;
+        try
+        {
+            if (Math.Abs(Width - w) > 0.5) Width = w;
+            if (Math.Abs(Height - h) > 0.5) ApplyProgrammaticHeight(h);
+            ResetDockRowTransforms();
+            ArrangeDockItems();
+            UpdateCanvasSize();
+            RefreshDockReflection();
+            ApplyItemTextColor();
+            ApplyHideAppName(_zone.HideAppName);
+            UpdateDockChrome();
+            EnsureDockRunPolling();
+            RefreshDockRunBars(animate: false);
+            RefreshDockGlass();
+            ApplyDockWindowFrame(_zone.TileMode);
+            RefreshDockStartHook();
+        }
+        finally { _applyingDockGeometry = false; }
+        ScheduleSave();
+        NativeMethods.UpdateRoundedCorners(this, (int)_zone.CornerRadius);
+    }
+
+    /// <summary>
+    /// 快捷栏的胶囊外观：填充 / 背景图 / 边框都收进「可见胶囊」那一条带。
+    ///
+    /// 为什么不像分区那样整窗画：窗口比胶囊高（上方那条透明带是给悬停放大溢出的），
+    /// 整窗画的话胶囊会跟着变高、图标看起来又"偏下"了 —— 上一轮就是这么绕回去的。
+    /// 磁贴模式（全透明）时三样全部撤掉，只剩图标。
+    /// </summary>
+    void ApplyDockBarVisuals(ResolvedZoneStyle s)
+    {
+        if (FillRect == null) return;
+        double top = ZoneLayout.DockBarTop(_zone);
+        double barH = ZoneLayout.DockBarHeight(_zone);
+        double below = Math.Max(0, ZoneLayout.DockHeight(_zone) - top - barH);
+        // 左右两侧的透明余量（放大溢出用）不属于胶囊，填充/背景图/描边都要让开。
+        double side = ZoneLayout.DockSideOverflow(_zone);
+        var band = new Thickness(side, top, side, below);
+        bool clear = _zone.TileMode;
+
+        FillRect.Margin = band;
+        FillRect.RadiusX = FillRect.RadiusY = s.CornerRadius;
+
+        // 胶囊玻璃图层也只用胶囊这一块：Margin 与 FillRect 完全一致，圆角用 Clip 切
+        // （图层内部是三块无圆角的矩形）。尺寸直接按几何算，不依赖 ActualWidth ——
+        // ApplyDockBarVisuals 可能发生在布局之前。
+        if (DockGlassHost != null)
+        {
+            DockGlassHost.Margin = band;
+            double pw = Math.Max(1, ZoneLayout.DockPillWidth(_zone, _zone.Items.Count));
+            double ph = Math.Max(1, ZoneLayout.DockBarHeight(_zone));
+            double r = Math.Max(0, s.CornerRadius);
+            DockGlassHost.Clip = new RectangleGeometry(new Rect(0, 0, pw, ph), r, r);
+        }
+        BgImageBorder.Margin = band;
+        BgImageBorder.Visibility = clear ? Visibility.Collapsed : Visibility.Visible;
+
+        // 描边单独一条：往里收半个线宽，免得被窗口/胶囊边缘切掉一半。
+        if (DockBarStroke != null)
+        {
+            double bt = clear ? 0 : Math.Max(0, s.BorderThickness);
+            DockBarStroke.StrokeThickness = bt;
+            DockBarStroke.RadiusX = DockBarStroke.RadiusY = s.CornerRadius;
+            try
+            {
+                DockBarStroke.Stroke = new SolidColorBrush(
+                    (Color)ColorConverter.ConvertFromString(s.BorderColor)!);
+            }
+            catch { }
+            double half = bt / 2;
+            DockBarStroke.Margin = new Thickness(side + half, top + half, side + half, below + half);
+            DockBarStroke.Visibility = bt > 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        // 整窗那条边框在快捷栏里不用（会画到透明带上）。
+        ZoneBorder.BorderThickness = new Thickness(0);
+
+        // 磁贴模式（全透明）：整窗都不该有 Windows 给窗口本身画的 1px 边框/圆角
+        // （窗口比胶囊高，描在窗口四周的那条线会浮在胶囊上方/下方）。
+        ApplyDockWindowFrame(clear);
+
+        // 胶囊的玻璃放在最后：它要读胶囊矩形（上面刚更新过的边距/半径）。
+        ApplyDockGlass(s);
+    }
+
+    // ── 快捷栏的液态玻璃（胶囊区壁纸采样） ─────────────────────────────────
+
+    /// <summary>上一次铺玻璃用的胶囊屏幕矩形（物理像素）。只用于状态摘录/日志。</summary>
+    Rect _dockGlassRect = Rect.Empty;
+
+    /// <summary>
+    /// 快捷栏胶囊的液态玻璃。
+    ///
+    /// **为什么不能直接上 DWM**：窗口比胶囊高（上方放大余量 + 下方倒影带），而 DWM 的
+    /// 模糊/亚克力**只能整窗**。第 7 轮用 `--dock-lab-case=dwmscope` 实测过：把分区那套
+    /// `EnableBlurComposite` 原样打上来，整窗 353×131 变成一块毛玻璃，两条带一起被糊，
+    /// 而 `SetWindowRgn` 对 `AllowsTransparency` 的分层窗口无效（裁不动）。所以只要窗口
+    /// 比胶囊大，胶囊的玻璃只能**自绘**：壁纸按胶囊屏幕矩形裁出来，铺在 DockGlassHost 里。
+    /// 窗口正好等于胶囊时（动效关 + 倒影关）才把 DWM 交给窗口本身。
+    ///
+    /// **载体**（第 7 轮 A）：自绘通道用与分区/时钟/日历/便签/面板**同一个**
+    /// <see cref="WallpaperBackdropLayer"/>，只把它挂进胶囊那一块 `DockGlassHost`
+    /// （`SetSourceInset` 让壁纸按胶囊的屏幕矩形裁）。换成图层带来两个实在的差别：
+    ///   ① 认 `WallpaperBackdrop.Generation` —— 换壁纸 / 点「重新采样」/ 显示器拓扑变化后
+    ///      自己重裁，不必等到窗口被拖动（老写法是一次性 `CreateStaticBrush` + "位置没变
+    ///      就 return"，玻璃会一直用旧图）；
+    ///   ② 窗口移动只改 ImageBrush.Viewbox（老写法每动一下都重建一张裁剪位图）。
+    ///
+    /// **跟设置走**（第 6 轮用户要求）：配方全部走分区那套解析器 ——
+    /// ① 渲染方案开关 <see cref="AcrylicHelper.ResolveSelfDrawn"/>：关掉时材质不参与
+    ///    （<see cref="AcrylicHelper.EffectiveMaterial"/> 恒 null → 无噪点、亚克力默认档），
+    ///    与分区的 DWM 方案同一个观感配方；打开时按材质（AcrylicThin 等）出噪点。
+    /// ② 模糊半径仍是 `GlassBlurAmount` 像素、着色仍是「填充 over 玻璃着色」的合成色。
+    /// ③ **磁贴模式不再吞掉玻璃**：磁贴模式只撤填充/边框/背景图（外观），用户显式打开的
+    ///    液态玻璃照旧铺 —— 老写法里 `s.TileMode` 直接 return，而用户那条快捷栏恰好是
+    ///    "磁贴 + 玻璃"，于是玻璃永远是空的（这就是"玻璃失效"的直接原因）。
+    /// </summary>
+    void ApplyDockGlass(ResolvedZoneStyle s)
+    {
+        if (FillRect == null || DockGlassHost == null) return;
+
+        // 玻璃关掉：磁贴模式什么都不铺（全透明），否则铺纯填充色；采样层一并藏掉。
+        if (!s.EnableLiquidGlass)
+        {
+            HideDockGlassLayer();
+            if (s.TileMode) FillRect.Fill = Brushes.Transparent;
+            else
+            {
+                try { FillRect.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.FillColor)!); }
+                catch { }
+            }
+            FillRect.Opacity = 1.0;
+            _dockGlassMode = "off";
+            _dockGlassRect = Rect.Empty;
+            return;
+        }
+
+        // 玻璃开着 + 窗口 == 胶囊（无放大带/倒影带/左右余量）→ 和分区一样把 DWM 直接交给
+        // 窗口本身（此时"整窗"就是"胶囊"，不存在糊到透明带的问题）。
+        if (DockWindowEqualsPill() && !AcrylicHelper.ResolveSelfDrawn())
+        {
+            var r = AcrylicHelper.EnableBlurComposite(this, _zone.GlassBlurAmount,
+                s.FillColor, 1.0, _zone.GlassColorMode, _zone.GlassTintOpacity, _zone.GlassTintLuminosity,
+                AcrylicHelper.ResolveAccentState(_zone.GlassMaterial),
+                AcrylicHelper.ResolveUseClassicBlur(_zone.GlassMaterial));
+            if (r.Success)
+            {
+                HideDockGlassLayer();
+                FillRect.Fill = AcrylicHelper.HitTestFill;
+                FillRect.Opacity = 1.0;
+                _dockGlassMode = "dwm(window==pill)";
+                _dockGlassRect = Rect.Empty;
+                DzTrace.Log("[Dock glass] scheme=dwm window==pill blur ok");
+                return;
+            }
+            DzTrace.Log($"[Dock glass] scheme=dwm EnableBlurComposite failed: {r.Error} → 采样兜底");
+        }
+
+        // ── 采样通道（第 7 轮 A：与分区/时钟/日历/便签/面板**同一个** WallpaperBackdropLayer）
+        //    以前这里是 CreateStaticBrush 的一次性静态画刷，而且"位置没变就 return"，
+        //    于是换壁纸 / 点「重新采样」之后玻璃一直用旧图。现在换成图层：
+        //    · 认 WallpaperBackdrop.Generation → 换壁纸后自己重裁（不必等窗口移动）；
+        //    · 窗口移动只改 Viewbox（不重建画刷、不重解码）；
+        //    · 只铺胶囊那块（SetSourceInset 让壁纸按胶囊屏幕矩形裁），两条透明带完全不参与。
+        AcrylicHelper.DisableBlur(this);
+
+        var pill = DockPillScreenPx();
+        if (pill.IsEmpty) return;      // 窗口还没接到 PresentationSource → 等 OnLoad/LocationChanged 再补
+
+        var tint = AcrylicHelper.ResolveBackdropTint(s.FillColor, 1.0, _zone.GlassColorMode,
+            _zone.GlassTintOpacity, _zone.GlassTintLuminosity);
+        // 噪点/材质同样受渲染方案开关约束（DWM 方案下 EffectiveMaterial=null → 0）。
+        var noise = AcrylicHelper.ResolveNoiseOpacity(_zone.GlassMaterial);
+
+        var layer = EnsureDockGlassLayer();
+        if (layer == null)
+        {
+            // 壁纸读不到（纯色壁纸 / 抓不到）→ 至少把玻璃着色铺上，别让胶囊变透明。
+            var solid = new SolidColorBrush(tint);
+            solid.Freeze();
+            FillRect.Fill = solid;
+            FillRect.Opacity = 1.0;
+            _dockGlassMode = "tint-only";
+            _dockGlassRect = pill;
+            DzTrace.Log("[Dock glass] 壁纸不可用 → 纯着色");
+            return;
+        }
+
+        layer.SetSourceInset(DockPillInsetPx());          // 壁纸只裁胶囊那一块
+        layer.Update(this, AcrylicHelper.ResolveSelfDrawnRadiusPx(_zone.GlassBlurAmount), tint, noise);
+        layer.SetVisible(true);
+        DockGlassHost.Visibility = Visibility.Visible;
+        FillRect.Fill = AcrylicHelper.HitTestFill;        // 命中留着（拖拽/右键都靠它）
+        FillRect.Opacity = 1.0;
+        _dockGlassMode = "layer";
+        _dockGlassRect = pill;
+        DzTrace.Log($"[Dock glass] layer rect={pill.X:F0},{pill.Y:F0} {pill.Width:F0}x{pill.Height:F0} " +
+                    $"r={_zone.GlassBlurAmount} noise={noise:F2} " +
+                    $"scheme={(AcrylicHelper.ResolveSelfDrawn() ? "self-drawn" : "dwm→sample")} " +
+                    $"host={DockGlassHost.ActualWidth:F0}x{DockGlassHost.ActualHeight:F0}");
+    }
+
+    // ── 胶囊玻璃图层（与分区同一套 WallpaperBackdropLayer，只铺胶囊） ──
+
+    WallpaperBackdropLayer? _dockGlassLayer;
+    string _dockGlassMode = "off";
+
+    /// <summary>懒创建胶囊玻璃图层。壁纸不可用 → null（调用方退成纯着色）。</summary>
+    WallpaperBackdropLayer? EnsureDockGlassLayer()
+    {
+        if (DockGlassHost == null) return null;
+        if (_dockGlassLayer != null)
+        {
+            _dockGlassLayer.AttachTo(DockGlassHost);      // 幂等
+            return _dockGlassLayer;
+        }
+        var layer = WallpaperBackdropLayer.TryCreate();
+        if (layer == null) return null;
+        layer.AttachTo(DockGlassHost);
+        _dockGlassLayer = layer;
+        return layer;
+    }
+
+    void HideDockGlassLayer()
+    {
+        _dockGlassLayer?.SetVisible(false);
+        if (DockGlassHost != null) DockGlassHost.Visibility = Visibility.Collapsed;
+    }
+
+    /// <summary>胶囊在**窗口内**的物理像素矩形（= 壁纸裁剪源偏移）。
+    /// 存窗口内偏移而不是屏幕矩形：窗口一移动，图层自己按新位置重裁。</summary>
+    Rect DockPillInsetPx()
+    {
+        var dpi = VisualTreeHelper.GetDpi(this);
+        double side = ZoneLayout.DockSideOverflow(_zone);
+        double top = ZoneLayout.DockBarTop(_zone);
+        double w = ZoneLayout.DockPillWidth(_zone, _zone.Items.Count);
+        double h = ZoneLayout.DockBarHeight(_zone);
+        return new Rect(side * dpi.DpiScaleX, top * dpi.DpiScaleY,
+                        Math.Max(1, w * dpi.DpiScaleX), Math.Max(1, h * dpi.DpiScaleY));
+    }
+
+
+    /// <summary>窗口矩形是否正好等于可见胶囊（此时 DWM 整窗模糊 == 胶囊模糊，可以用 DWM）。</summary>
+    bool DockWindowEqualsPill()
+        => ZoneLayout.DockSideOverflow(_zone) <= 0
+           && ZoneLayout.DockOverflowTop(_zone) <= 0
+           && ZoneLayout.DockReflectBand(_zone) <= 0;
+
+    /// <summary>胶囊在屏幕上的**物理像素**矩形（壁纸裁剪用）。窗口没就位时返回 Empty。</summary>
+    Rect DockPillScreenPx()
+    {
+        try
+        {
+            if (PresentationSource.FromVisual(this) == null) return Rect.Empty;
+            double side = ZoneLayout.DockSideOverflow(_zone);
+            double top = ZoneLayout.DockBarTop(_zone);
+            double w = ZoneLayout.DockPillWidth(_zone, _zone.Items.Count);
+            double h = ZoneLayout.DockBarHeight(_zone);
+            if (w < 2 || h < 2) return Rect.Empty;
+            var dpi = VisualTreeHelper.GetDpi(this);
+            var tl = PointToScreen(new Point(side, top));      // 设备像素
+            return new Rect(tl.X, tl.Y, w * dpi.DpiScaleX, h * dpi.DpiScaleY);
+        }
+        catch { return Rect.Empty; }
+    }
+
+    /// <summary>窗口移动/尺寸变化后重铺玻璃（胶囊的屏幕矩形变了，壁纸裁剪要跟着走）。</summary>
+    void RefreshDockGlass()
+    {
+        if (!IsDock) return;
+        try { ApplyDockGlass(ResolveStyle()); } catch { }
+    }
+
+    /// <summary>
+    /// 快捷栏的窗口外框：一律不要。
+    ///
+    /// 逐像素查过：磁贴模式下 WPF 一个字都没画（除图标外全透明），屏幕上却仍有
+    /// 一圈 1px 亮线 → 那是 Windows 给顶层窗口描的边框（DWM 的
+    /// visibleBorderThickness=1）。窗口比可见胶囊高（上方放大余量 + 下方倒影带），
+    /// 这条边框就露在胶囊外面，看起来像"胶囊上方多了一条横线""磁贴模式边框还在"。
+    /// 去掉办法：① DWMWA_BORDER_COLOR = DWMWA_COLOR_NONE（Win11 21H2+ 支持）；
+    /// ② 窗口不做 DWM 圆角 —— 胶囊的圆角由 WPF 自己画，整窗圆角只会切到倒影；
+    /// ③ 顺带把窗口设成不可调整大小（见 ApplyDockMode），去掉 WS_THICKFRAME 那条
+    ///    不可见边框带。
+    /// </summary>
+    void ApplyDockWindowFrame(bool tileMode)
+    {
+        NativeMethods.RemoveWindowBorder(this);
+        if (tileMode || ZoneLayout.DockOverflowTop(_zone) > 0 || ZoneLayout.DockBarTop(_zone) > 0
+            || ZoneLayout.DockReflectBand(_zone) > 0)
+            NativeMethods.DisableRoundedCorners(this);
+    }
+
+    /// <summary>单行排列：Y 固定在「图标带顶边」（= 条体里垂直居中），X 按序号递推；
+    /// 顺带把格子/图标尺寸同步到 VM（改「图标大小 / 显示名称」后不用重建容器）。</summary>
+    void ArrangeDockItems()
+    {
+        if (!IsDock) return;
+        double y = ZoneLayout.DockBandTop(_zone);
+        double cell = _zone.GridSize;
+        double icon = ZoneLayout.DockIconSize(_zone);
+        for (int i = 0; i < _vm.Items.Count; i++)
+        {
+            var vm = _vm.Items[i];
+            vm.ItemSize = cell;
+            vm.ItemHeight = cell;
+            vm.IconSize = icon;
+            vm.X = ZoneLayout.DockX(_zone, i);
+            vm.Y = y;
+        }
+    }
+
+    // ── 倒影（每个图标自己在格子里挂一份镜像） ──────────────────────────────
+
+    /// <summary>倒影节点的标记 —— 重画时按这个 Tag 把上一批摘掉。</summary>
+    const string DockReflectTag = "dock-reflect";
+
+    /// <summary>
+    /// 倒影：每个图标下方挂一份「垂直翻转 + 压扁 + 向下渐隐」的镜像。
+    ///
+    /// ① 挂在图标容器里（而不是一条独立图层）：镜像要跟着悬停放大一起动 ——
+    ///    容器的 Scale/Translate 会自动带着它走，不用第二套动画。
+    /// ② 位置按**图标本体的实际矩形**算（TransformToAncestor 取真实坐标），不再靠
+    ///    "图标在格子里居中"的假设：显示名称时图标会被名字顶上去，凭假设推会隔一截空白。
+    /// ③ 次级分区是自绘的 2×2 方框（SubfolderItemView，不是 Image），早先那段
+    ///    `vm.Icon is ImageSource` 直接把它跳过了 —— 现在给它**拍一张快照**再镜像
+    ///    （为什么不直接用 VisualBrush：实测那样一个像素都画不出来，见下面的注释）。
+    /// </summary>
+    void RefreshDockReflection() => RefreshDockReflection(0);
+
+    /// <param name="retry">内部用：容器/布局还没就绪时延后重试的次数（最多 5 次，防止死循环）。</param>
+    void RefreshDockReflection(int retry)
+    {
+        if (!IsDock || ItemsHost == null) return;
+        double rh = ZoneLayout.DockReflectHeight(_zone);
+        bool on = _zone.DockReflection && rh > 2;
+        double alpha = Math.Clamp(_zone.DockReflectionOpacity, 0, 100) / 100.0;
+        double boxSize = ZoneLayout.DockIconSize(_zone);
+        bool notReady = false;
+
+        for (int i = 0; i < ItemsHost.Items.Count; i++)
+        {
+            if (ItemsHost.ItemContainerGenerator.ContainerFromIndex(i) is not DependencyObject container)
+            { ReflNote($"{i}:noContainer"); notReady = true; continue; }
+            var root = FindVisualChild<Grid>(container, g => g.Name == "DockItemRoot");
+            if (root == null) { ReflNote($"{i}:noRoot"); notReady = true; continue; }
+
+            // 先摘掉上一批镜像（图标/尺寸/开关一改就整批重来）
+            for (int c = root.Children.Count - 1; c >= 0; c--)
+                if (root.Children[c] is FrameworkElement old && (old.Tag as string) == DockReflectTag)
+                    root.Children.RemoveAt(c);
+            if (!on) continue;
+
+            // 取图标本体。普通图标就是 `ItemIcon`；**次级分区取不到这个名字** —— 它的
+            // SubfolderItemView 自己的 XAML 里 `x:Name="Root"` 会把这个实例的 Name 先占掉，
+            // 模板上的 x:Name="ItemIcon" 只进了名字域、没改 Name 属性（实测 kids=…#Root）。
+            // 所以按类型兜底找那颗自绘控件，而不是只认名字。
+            var iconEl = FindVisualChild<FrameworkElement>(container, e => e.Name == "ItemIcon")
+                         ?? FindVisualChild<FrameworkElement>(container, e => e is SubfolderItemView);
+            if (iconEl == null)
+            {
+                var kids = new List<string>();
+                foreach (var ch in root.Children)
+                    kids.Add($"{ch.GetType().Name}#{(ch as FrameworkElement)?.Name}");
+                ReflNote($"{i}:noIcon kids={string.Join(",", kids)}");
+                notReady = true;
+                continue;
+            }
+            if (iconEl.ActualWidth < 2 || iconEl.ActualHeight < 2)
+            { ReflNote($"{i}:{iconEl.GetType().Name} size={iconEl.ActualWidth:F0}x{iconEl.ActualHeight:F0}"); notReady = true; continue; }
+
+            Rect iconRect;
+            try
+            {
+                iconRect = iconEl.TransformToAncestor(root)
+                    .TransformBounds(new Rect(0, 0, iconEl.ActualWidth, iconEl.ActualHeight));
+            }
+            catch { notReady = true; continue; }   // 还没接进可视树
+
+            // 镜像源有两条路：
+            //  ① 普通图标就是一张图 → 直接复用那张位图（清晰、零开销）；
+            //  ② 次级分区的 2×2 方框是**自绘控件**（不是 Image），只能拍快照。
+            //     早先这里用 VisualBrush 把控件"照"过去 —— 实测一个像素都画不出来
+            //     （Mirror 节点存在、屏幕上什么都没有），换 VisualBrush 的几种
+            //     Viewbox/Viewport 组合也没救；RenderTargetBitmap 快照是确定性的。
+            ImageSource? src;
+            double boxW, boxH, glyphBottomLocal;   // glyphBottom 在镜像框内的局部 y
+            if (iconEl is System.Windows.Controls.Image img && img.Source is ImageSource bmp)
+            {
+                var (_, gBottom) = GlyphBoundsOf(bmp);
+                src = bmp;
+                boxW = iconRect.Width;
+                boxH = iconRect.Height;
+                glyphBottomLocal = gBottom * iconRect.Height;
+            }
+            else
+            {
+                // 次级分区：只要控件第 0 行那块方框（方框边长 = 图标边长），名字行不进倒影。
+                double box = Math.Min(Math.Min(iconRect.Width, iconRect.Height), boxSize);
+                var snap = SnapshotVisual(iconEl, new Rect(0, 0, iconEl.ActualWidth, box));
+                if (snap == null) { notReady = true; continue; }
+                src = snap;
+                boxW = box;
+                boxH = box;
+                glyphBottomLocal = box;             // 方框画满整块 → 底边就是字形底
+                iconRect = new Rect(iconRect.Left, iconRect.Top, box, box);
+            }
+
+            var layer = BuildDockMirror(src, boxW, boxH, glyphBottomLocal, rh, alpha);
+            layer.Margin = new Thickness(iconRect.Left, iconRect.Top + glyphBottomLocal, 0, 0);
+            root.Children.Add(layer);
+            ReflNote($"{i}:{iconEl.GetType().Name} box={boxW:F0}x{boxH:F0} OK");
+        }
+
+        // 容器/布局/图标都还没就绪（首帧常见）→ 等布局过一轮再来一次。
+        // 不重试就永远没有倒影：ApplyDockGeometry 发生在容器生成之前。
+        if (notReady && retry < 5)
+        {
+            Dispatcher.BeginInvoke(new Action(() => RefreshDockReflection(retry + 1)),
+                System.Windows.Threading.DispatcherPriority.Loaded);
+        }
+    }
+
+    /// <summary>
+    /// 造一份倒影层（外部拿走后自己设 Margin 丢进容器）。
+    ///
+    /// 几何：把图片按「左上角为轴、垂直翻转 squash 倍」再往下平移 visible，
+    /// 然后把这个框的顶边放在「镜中字形顶正好贴住原字形底边」的位置
+    /// （原字形底边在框内的局部 y = glyphBottom → 框顶 = squash×glyphBottom − visible）。
+    /// 外层 Canvas 承担渐隐遮罩 —— 遮罩要画在**视觉坐标**里（内层已经翻转过了，
+    /// 直接罩在翻转元素上会把渐隐画反：亮的一端跑到最下面）。
+    /// 用 Canvas 而不是 Grid 装镜像：Grid 会按格子给子元素"可用高度"，
+    /// 42 高的镜像放进 23 高的格子会被夹扁（实测只剩顶上几像素、看着像没画）。
+    /// </summary>
+    static Canvas BuildDockMirror(ImageSource src, double w, double h,
+                                  double glyphBottom, double rh, double alpha)
+    {
+        double squash = Math.Min(1.0, rh / Math.Max(1, h));
+        double visible = h * squash;
+        var mi = new System.Windows.Controls.Image
+        {
+            Source = src,
+            Width = w,
+            Height = h,
+            Stretch = Stretch.Fill,
+            IsHitTestVisible = false,
+            RenderTransformOrigin = new Point(0, 0),
+        };
+        RenderOptions.SetBitmapScalingMode(mi, BitmapScalingMode.HighQuality);
+        var tg = new TransformGroup();
+        tg.Children.Add(new ScaleTransform(1, -squash));      // 以左上角为轴翻转
+        tg.Children.Add(new TranslateTransform(0, visible));  // 再压回倒影带顶部
+        mi.RenderTransform = tg;
+
+        var layer = new Canvas
+        {
+            Width = w,
+            Height = rh,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Top,
+            Opacity = alpha,
+            IsHitTestVisible = false,
+            Tag = DockReflectTag,
+            OpacityMask = BuildDockReflectMask(),
+        };
+        Canvas.SetLeft(mi, 0);
+        Canvas.SetTop(mi, squash * glyphBottom - visible);
+        layer.Children.Add(mi);
+        return layer;
+    }
+
+    /// <summary>同上的通用版：任意元素（比如用图元重画的开始徽标）当镜像内容。</summary>
+    static Canvas BuildDockMirror(FrameworkElement content, double w, double h,
+                                  double glyphBottom, double rh, double alpha)
+    {
+        double squash = Math.Min(1.0, rh / Math.Max(1, h));
+        double visible = h * squash;
+        content.IsHitTestVisible = false;
+        content.RenderTransformOrigin = new Point(0, 0);
+        var tg = new TransformGroup();
+        tg.Children.Add(new ScaleTransform(1, -squash));      // 以左上角为轴翻转
+        tg.Children.Add(new TranslateTransform(0, visible));  // 再压回倒影带顶部
+        content.RenderTransform = tg;
+
+        var layer = new Canvas
+        {
+            Width = w,
+            Height = rh,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Top,
+            Opacity = alpha,
+            IsHitTestVisible = false,
+            Tag = DockReflectTag,
+            OpacityMask = BuildDockReflectMask(),
+        };
+        Canvas.SetLeft(content, 0);
+        Canvas.SetTop(content, squash * glyphBottom - visible);
+        layer.Children.Add(content);
+        return layer;
+    }
+
+    /// <summary>开始徽标的颜色：Windows 经典蓝（和 XAML 里 DockStartGlyph 同一色）。</summary>
+    static readonly SolidColorBrush DockStartBlueBrush = MakeFrozen(Color.FromRgb(0x00, 0x78, 0xD4));
+
+    static SolidColorBrush MakeFrozen(Color c) { var b = new SolidColorBrush(c); b.Freeze(); return b; }
+
+    /// <summary>
+    /// 用图元重画一份「四格开始徽标」—— 和 XAML 里 DockStartGlyph 的 Canvas 同一套常量
+    /// （16 单位方格、四块 7.5、缝隙 1、圆角 0.6），只是边长按 <paramref name="side"/> 缩放。
+    ///
+    /// 倒影为什么不用快照：字形是 Viewbox 里的一个小 Canvas，`RenderTargetBitmap.Render`
+    /// 会带上它在按钮里的**布局偏移** —— 实测拍出来只剩右下角一块（倒影变成一个小方块）。
+    /// 直接按几何重画是确定性的，而且任意尺寸都清晰。
+    /// </summary>
+    static Canvas MakeStartGlyphCanvas(double side, Brush fill)
+    {
+        var c = new Canvas { Width = side, Height = side };
+        double u = side / 16.0;
+        foreach (var (lx, ly) in new[] { (0.0, 0.0), (8.5, 0.0), (0.0, 8.5), (8.5, 8.5) })
+        {
+            var r = new System.Windows.Shapes.Rectangle
+            {
+                Width = 7.5 * u,
+                Height = 7.5 * u,
+                RadiusX = 0.6 * u,
+                RadiusY = 0.6 * u,
+                Fill = fill,
+                IsHitTestVisible = false,
+            };
+            Canvas.SetLeft(r, lx * u);
+            Canvas.SetTop(r, ly * u);
+            c.Children.Add(r);
+        }
+        return c;
+    }
+
+    /// <summary>
+    /// 把一个可视元素当前的外观拍成位图（可只取其中一块矩形），给倒影当镜像源。
+    ///
+    /// 为什么不用 VisualBrush：实测把它罩在 Rectangle.Fill 上一个像素都没渲染出来
+    /// （节点在、屏幕上空的，用户看到的就是"次级分区没有倒影"），换 Viewbox/Viewport
+    /// 组合也无解。RTB 快照在离屏渲染和真机上表现一致，是确定性的。
+    /// 2× 像素密度：倒影本身会被压扁/缩小，留一倍余量不会糊。
+    /// </summary>
+    static BitmapSource? SnapshotVisual(FrameworkElement el, Rect region)
+    {
+        try
+        {
+            double w = el.ActualWidth, h = el.ActualHeight;
+            if (w < 2 || h < 2) { _snapDiag = $"{el.GetType().Name} size={w:F0}x{h:F0}"; return null; }
+            const double scale = 2.0;
+            int pw = Math.Max(1, (int)Math.Ceiling(w * scale));
+            int ph = Math.Max(1, (int)Math.Ceiling(h * scale));
+            var rtb = new RenderTargetBitmap(pw, ph, 96 * scale, 96 * scale, PixelFormats.Pbgra32);
+            rtb.Render(el);
+            rtb.Freeze();
+
+            int x = (int)Math.Round(region.X * scale);
+            int y = (int)Math.Round(region.Y * scale);
+            int rw = (int)Math.Round(region.Width * scale);
+            int rh2 = (int)Math.Round(region.Height * scale);
+            x = Math.Clamp(x, 0, Math.Max(0, pw - 1));
+            y = Math.Clamp(y, 0, Math.Max(0, ph - 1));
+            rw = Math.Clamp(rw, 1, pw - x);
+            rh2 = Math.Clamp(rh2, 1, ph - y);
+            var crop = new CroppedBitmap(rtb, new Int32Rect(x, y, rw, rh2));
+            crop.Freeze();
+            _snapDiag = $"{el.GetType().Name} size={w:F0}x{h:F0} → {pw}x{ph} crop={rw}x{rh2}";
+            return crop;
+        }
+        catch (Exception ex) { _snapDiag = $"{el.GetType().Name} EXC {ex.GetType().Name}: {ex.Message}"; return null; }
+    }
+
+    /// <summary>最近几次快照的结果（自测用；只保留最后 8 条）。</summary>
+    static readonly List<string> _snapLog = new();
+    static string _snapDiag
+    {
+        get => _snapLog.Count == 0 ? "" : _snapLog[^1];
+        set { _snapLog.Add(value); if (_snapLog.Count > 8) _snapLog.RemoveAt(0); }
+    }
+
+    /// <summary>倒影重画的过程日志（自测用；只保留最后 14 条）。</summary>
+    static readonly List<string> _reflLog = new();
+    static void ReflNote(string s)
+    {
+        _reflLog.Add(s);
+        if (_reflLog.Count > 14) _reflLog.RemoveAt(0);
+    }
+
+    /// <summary>倒影的渐隐遮罩：贴条体那头亮、往下淡出（1 → 0.47 → 0）。</summary>
+    static LinearGradientBrush BuildDockReflectMask()
+    {
+        var b = new LinearGradientBrush
+        {
+            StartPoint = new Point(0, 0),
+            EndPoint = new Point(0, 1),
+            MappingMode = BrushMappingMode.RelativeToBoundingBox,
+        };
+        b.GradientStops.Add(new GradientStop(Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF), 0.0));
+        b.GradientStops.Add(new GradientStop(Color.FromArgb(0x78, 0xFF, 0xFF, 0xFF), 0.55));
+        b.GradientStops.Add(new GradientStop(Color.FromArgb(0x00, 0xFF, 0xFF, 0xFF), 1.0));
+        return b;
+    }
+
+    // 图标位图「真正有像素」的上下边界（0–1），按 ImageSource 缓存。
+    static readonly Dictionary<System.Windows.Media.ImageSource, (double Top, double Bottom)> _glyphBounds = new();
+
+    /// <summary>取图标位图的 alpha 上下边界（归一化 0–1）。取不到就按整张图算。
+    /// 阈值 96（＜阈值算空白）：Shell 图标底部那一圈很淡的投影要忽略掉，否则镜像
+    /// 会从投影下沿开始、看起来离图标本体还差一截（用户反馈"文件夹的倒影有点远"）。</summary>
+    static (double Top, double Bottom) GlyphBoundsOf(System.Windows.Media.ImageSource src)
+    {
+        if (_glyphBounds.TryGetValue(src, out var cached)) return cached;
+        var result = (Top: 0.0, Bottom: 1.0);
+        try
+        {
+            if (src is BitmapSource bs && bs.PixelWidth > 0 && bs.PixelHeight > 0)
+            {
+                var conv = bs.Format == PixelFormats.Bgra32
+                    ? bs
+                    : new FormatConvertedBitmap(bs, PixelFormats.Bgra32, null, 0);
+                int w = conv.PixelWidth, h = conv.PixelHeight;
+                int stride = w * 4;
+                var buf = new byte[stride * h];
+                conv.CopyPixels(buf, stride, 0);
+                const int AlphaMin = 96;
+                int first = -1, last = -1;
+                for (int y = 0; y < h; y++)
+                {
+                    bool any = false;
+                    int row = y * stride;
+                    for (int x = 0; x < w; x++)
+                    {
+                        if (buf[row + x * 4 + 3] > AlphaMin) { any = true; break; }
+                    }
+                    if (any) { if (first < 0) first = y; last = y; }
+                }
+                if (first >= 0)
+                    result = ((double)first / h, (double)(last + 1) / h);
+            }
+        }
+        catch { }
+        if (_glyphBounds.Count > 512) _glyphBounds.Clear();   // 尺寸/图标变形会造新 key，别无限长
+        _glyphBounds[src] = result;
+        return result;
+    }
+
+    // ── 开始菜单按钮 + 分隔线 ─────────────────────────────────────────────
+
+    /// <summary>把「开始按钮 + 分隔竖线」摆到几何算出来的位置上（关掉开关就整层收起）。</summary>
+    void UpdateDockChrome()
+    {
+        if (!IsDock || DockChromeLayer == null) return;
+        bool on = _zone.DockStartButton;
+        DockChromeLayer.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
+        if (!on) return;
+
+        double cell = _zone.GridSize;
+        double bandTop = ZoneLayout.DockBandTop(_zone);
+        double barTop = ZoneLayout.DockBarTop(_zone);
+        double barH = ZoneLayout.DockBarHeight(_zone);
+
+        DockStartBtn.Width = cell;
+        DockStartBtn.Height = cell;
+        DockStartBtn.CornerRadius = new CornerRadius(Math.Min(10, Math.Round(cell * 0.2)));
+        // 四格标按原生占比取格边长的 46%（Win11 任务栏那颗开始按钮里标就这么大）。
+        if (DockStartGlyph != null)
+        {
+            double g = Math.Round(cell * 0.46);
+            DockStartGlyph.Width = g;
+            DockStartGlyph.Height = g;
+        }
+        Canvas.SetLeft(DockStartBtn, ZoneLayout.DockStartX(_zone));
+        Canvas.SetTop(DockStartBtn, bandTop);
+
+        double sepH = Math.Round(cell * 0.62);
+        DockStartSep.Height = sepH;
+        Canvas.SetLeft(DockStartSep, ZoneLayout.DockStartSepX(_zone));
+        Canvas.SetTop(DockStartSep, barTop + (barH - sepH) / 2);
+
+        // 开始按钮也要有倒影（用户反馈：图标都有，就它没有）
+        RefreshDockStartReflection();
+    }
+
+    // ── 开始按钮的倒影 ────────────────────────────────────────────────────
+
+    /// <summary>开始按钮倒影的重试计数（布局/快照没好时会延后重来）。</summary>
+    int _dockStartReflRetry;
+
+    void RefreshDockStartReflection() { _dockStartReflRetry = 0; RefreshDockStartReflection(0); }
+
+    /// <param name="retry">内部用：字形还没排好版（拍出来是空图）时延后重试，最多 5 次。</param>
+    void RefreshDockStartReflection(int retry)
+    {
+        if (!IsDock || DockChromeLayer == null || DockStartBtn == null) return;
+
+        // 先摘掉上一批（开关/尺寸/强度一改就整批重来）
+        for (int i = DockChromeLayer.Children.Count - 1; i >= 0; i--)
+            if (DockChromeLayer.Children[i] is FrameworkElement old && (old.Tag as string) == DockReflectTag)
+                DockChromeLayer.Children.RemoveAt(i);
+
+        double rh = ZoneLayout.DockReflectHeight(_zone);
+        if (!_zone.DockStartButton || !_zone.DockReflection || rh <= 2 || DockStartGlyph == null) return;
+
+        double cell = _zone.GridSize;
+        double g = DockStartGlyph.ActualWidth;
+        if (g < 2 || DockStartGlyph.ActualHeight < 2)
+        {
+            // 还没量出来就先不画（字形大小 = 格边长的 46%，量出来之前不知道画多大）。
+            if (retry < 5) ScheduleStartReflection(retry);
+            return;
+        }
+
+        // 位置按**字形**算，不是按钮框：按钮框是悬停热区（一格见方），字形只有它的 46%。
+        double bandTop = ZoneLayout.DockBandTop(_zone);
+        double left = ZoneLayout.DockStartX(_zone) + (cell - g) / 2;
+        double bottom = bandTop + (cell - g) / 2 + g;
+        double rhStart = Math.Min(rh, Math.Round(g * 0.55));
+        double alpha = Math.Clamp(_zone.DockReflectionOpacity, 0, 100) / 100.0;
+
+        var layer = BuildDockMirror(MakeStartGlyphCanvas(g, DockStartBlueBrush), g, g, g, rhStart, alpha);
+        layer.Margin = new Thickness(left, bottom, 0, 0);
+        DockChromeLayer.Children.Add(layer);
+    }
+
+    void ScheduleStartReflection(int retry)
+        => Dispatcher.BeginInvoke(new Action(() => RefreshDockStartReflection(retry + 1)),
+            System.Windows.Threading.DispatcherPriority.Loaded);
+
+    void DockStart_Enter(object s, MouseEventArgs e) => DockStartBtn.Background = ItemHoverBrush;
+
+    void DockStart_Leave(object s, MouseEventArgs e) => DockStartBtn.Background = Brushes.Transparent;
+
+    /// <summary>点开始按钮（钩子路径和 WPF 点击路径共用；<see cref="DockStartButtonHook.TryConsume"/>
+    /// 保证同一次物理点击只触发一次，见那边的说明）。</summary>
+    void DockStartClick()
+    {
+        bool pass = DockStartButtonHook.TryConsume();
+        DzTrace.Log($"[Dock start] click pass={pass}");
+        if (!pass) return;
+        AppActivityService.OpenStartMenu();
+    }
+
+    /// <summary>登记/撤销「开始按钮」的全局钩子兜底（只在开按钮 + 窗口可见时登记）。
+    /// 屏幕矩形由 DockStartBtn 自己算，钩子回调里只做比较，不碰可视树。</summary>
+    void RefreshDockStartHook()
+    {
+        if (!IsDock) return;
+        IntPtr hwnd;
+        try { hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle; }
+        catch { return; }
+        if (hwnd == IntPtr.Zero) return;
+
+        if (!_zone.DockStartButton)
+        {
+            DockStartButtonHook.Unregister(hwnd);
+            return;
+        }
+        DockStartButtonHook.Register(hwnd, DockStartScreenRect, DockStartClick);
+    }
+
+    /// <summary>开始按钮当前的屏幕矩形（不可见时返回 <see cref="Rect.Empty"/>）。</summary>
+    Rect DockStartScreenRect()
+    {
+        if (!IsDock || !_zone.DockStartButton) return Rect.Empty;
+        if (!IsVisible || MainContent.Visibility != Visibility.Visible) return Rect.Empty;
+        if (DockStartBtn == null || DockStartBtn.ActualWidth < 2 || DockStartBtn.ActualHeight < 2) return Rect.Empty;
+        try
+        {
+            var tl = DockStartBtn.PointToScreen(new Point(0, 0));
+            var br = DockStartBtn.PointToScreen(new Point(DockStartBtn.ActualWidth, DockStartBtn.ActualHeight));
+            return new Rect(tl, br);
+        }
+        catch { return Rect.Empty; }
+    }
+
+    // ── 运行状态指示（Windows 任务栏那套：后台灰短线 / 前台蓝长线） ──────────
+
+    System.Windows.Threading.DispatcherTimer? _dockRunTimer;
+
+    static readonly Color DockRunIdleColor = Color.FromArgb(0x8C, 0xC9, 0xCE, 0xD6);
+    Color? _dockRunActiveColor;
+
+    /// <summary>蓝线取「位置指示蓝条」同一个颜色（分区拖动时的插入指示用 Brush.Accent）。</summary>
+    Color DockRunActiveColor()
+    {
+        if (_dockRunActiveColor.HasValue) return _dockRunActiveColor.Value;
+        var c = Color.FromRgb(0x3B, 0x82, 0xF6);
+        try
+        {
+            if (TryFindResource("Brush.Accent") is SolidColorBrush sb) c = sb.Color;
+        }
+        catch { }
+        _dockRunActiveColor = c;
+        return c;
+    }
+
+    /// <summary>按开关起停轮询：只有「快捷栏 + 指示开」才轮询，关掉不花任何代价。</summary>
+    void EnsureDockRunPolling()
+    {
+        if (!IsDock) return;
+        if (!_zone.DockRunIndicator)
+        {
+            _dockRunTimer?.Stop();
+            foreach (var vm in _vm.Items) vm.RunState = DockRunState.None;
+            RefreshDockRunBars(animate: false);
+            return;
+        }
+        if (_dockRunTimer == null)
+        {
+            _dockRunTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(700) };
+            _dockRunTimer.Tick += (_, _) => RefreshDockRunStates();
+        }
+        if (!_dockRunTimer.IsEnabled) _dockRunTimer.Start();
+        // 属性面板拖滑块时 ApplyDockGeometry 会连发；枚举窗口别每帧都跑一遍，
+        // 400ms 内只让定时器去刷。
+        if ((DateTime.UtcNow - _dockRunLastPoll).TotalMilliseconds > 400) RefreshDockRunStates();
+    }
+
+    DateTime _dockRunLastPoll = DateTime.MinValue;
+
+    /// <summary>抓一次「谁在跑 / 谁在前台 / 哪些文件夹开着」，写到条目 VM 上，再刷短线。</summary>
+    void RefreshDockRunStates()
+    {
+        if (!IsDock || !_zone.DockRunIndicator) return;
+        _dockRunLastPoll = DateTime.UtcNow;
+        System.Collections.Generic.Dictionary<string, AppActivityService.RunningApp> snap;
+        try { snap = AppActivityService.Snapshot(); }
+        catch { return; }
+
+        IntPtr fg = ForegroundRoot();
+        foreach (var vm in _vm.Items) vm.RunState = ResolveDockRunState(vm, snap, fg);
+        RefreshDockRunBars(animate: _zone.DockRunAnim);
+    }
+
+    /// <summary>前台窗口的顶层句柄（子系统窗口常常是子窗口在前台）。</summary>
+    static IntPtr ForegroundRoot()
+    {
+        try
+        {
+            var fg = NativeMethods.GetForegroundWindow();
+            return fg == IntPtr.Zero ? IntPtr.Zero : NativeMethods.GetAncestor(fg, NativeMethods.GA_ROOT);
+        }
+        catch { return IntPtr.Zero; }
+    }
+
+    /// <summary>
+    /// 一个条目现在该亮什么线。三类来源：
+    ///  ① 普通应用 → exe 有可见窗口（前台蓝 / 后台灰）；
+    ///  ② 文件夹（含 .zip）快捷方式 → 资源管理器正开着那个文件夹（或它的子目录）；
+    ///  ③ 次级分区 → 它自己的浮层正开着。
+    /// </summary>
+    DockRunState ResolveDockRunState(ZoneItemViewModel vm,
+        System.Collections.Generic.Dictionary<string, AppActivityService.RunningApp> snap, IntPtr fg)
+    {
+        // ③ 次级分区：浮层开着 = "这一个正在被展开"（用户反馈：点开文件夹下面什么都没有）
+        if (vm.Type == ItemType.SubFolder)
+        {
+            var sub = ResolveSourceZoneItem(vm);
+            if (sub != null && SubfolderFlyoutPopup.IsOpen && !_flyoutClosing
+                && SubfolderFlyoutView.ViewModel?.HostSubItem.Id == sub.Id)
+                return DockRunState.Foreground;
+            return DockRunState.None;
+        }
+
+        // ② 文件夹 / 压缩包：资源管理器在浏览它（含子目录）
+        if (AppActivityService.IsBrowsableFolder(vm.TargetPath))
+        {
+            var hwnd = AppActivityService.FolderOpenWindow(vm.TargetPath);
+            if (hwnd == IntPtr.Zero) return DockRunState.None;
+            return hwnd == fg ? DockRunState.Foreground : DockRunState.Background;
+        }
+        if (vm.Type is ItemType.Folder or ItemType.ShellLocation) return DockRunState.None;
+
+        // ① 普通应用
+        var exe = AppActivityService.ExeNameForPath(vm.TargetPath);
+        if (exe.Length > 0 && snap.TryGetValue(exe, out var app))
+            return app.IsForeground ? DockRunState.Foreground : DockRunState.Background;
+        return DockRunState.None;
+    }
+
+    /// <summary>把每条短线的宽度/颜色推到当前状态（动画开则过渡，关则瞬切）。</summary>
+    void RefreshDockRunBars(bool animate)
+    {
+        if (!IsDock || ItemsHost == null) return;
+        double cell = _zone.GridSize;
+        double idleW = Math.Max(6, Math.Round(cell * 0.18));
+        double activeW = Math.Max(idleW + 4, Math.Round(cell * 0.34));
+        double durMs = Math.Clamp(_zone.DockAnimMs, 80, 300) + 40;
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+        var accent = DockRunActiveColor();
+
+        for (int i = 0; i < ItemsHost.Items.Count; i++)
+        {
+            if (ItemsHost.ItemContainerGenerator.ContainerFromIndex(i) is not DependencyObject container) continue;
+            var bar = FindVisualChild<Border>(container, b => b.Name == "RunBar");
+            if (bar == null) continue;
+            var vm = ItemsHost.Items[i] as ZoneItemViewModel;
+            var state = vm?.RunState ?? DockRunState.None;
+            double targetW = state switch
+            {
+                DockRunState.Foreground => activeW,
+                DockRunState.Background => idleW,
+                _ => 0,
+            };
+            var targetColor = state == DockRunState.Foreground ? accent : DockRunIdleColor;
+            var brush = EnsureRunBarBrush(bar);
+
+            if (animate)
+            {
+                bar.BeginAnimation(FrameworkElement.WidthProperty,
+                    new DoubleAnimation(targetW, TimeSpan.FromMilliseconds(durMs)) { EasingFunction = ease });
+                brush.BeginAnimation(SolidColorBrush.ColorProperty,
+                    new ColorAnimation(targetColor, TimeSpan.FromMilliseconds(durMs)) { EasingFunction = ease });
+            }
+            else
+            {
+                bar.BeginAnimation(FrameworkElement.WidthProperty, null);
+                brush.BeginAnimation(SolidColorBrush.ColorProperty, null);
+                bar.Width = targetW;
+                brush.Color = targetColor;
+            }
+        }
+    }
+
+    /// <summary>每条短线用自己的可写画刷（模板里的画刷会被冻住，动画写不进去）。</summary>
+    static SolidColorBrush EnsureRunBarBrush(Border bar)
+    {
+        if (bar.Background is SolidColorBrush sb && !sb.IsFrozen) return sb;
+        var nb = new SolidColorBrush(Colors.Transparent);
+        bar.Background = nb;
+        return nb;
+    }
+
+    // ── 悬停放大 + 相邻推让 ─────────────────────────────────────────────
+
+    /// <summary>当前被放大的是第几格（-1 = 没有）。**状态机收口**：所有放大/复原都经它比对，
+    /// 同一格重复 Enter 不会重播动画（用户报的「显示名称时悬停图标、缩放一直抽搐/反复播放」）。</summary>
+    int _dockHoverIndex = -1;
+
+    /// <summary>指针脱离对账（200ms）：真实鼠标进过条体才启动，离屏自测不会启动。</summary>
+    System.Windows.Threading.DispatcherTimer? _dockHoverWatch;
+
+    /// <summary>Leave 后延迟复核用（Enter(邻居) 常常晚于 Leave(上一个) 到达）。</summary>
+    System.Windows.Threading.DispatcherTimer? _dockHoverEndTimer;
+
+    /// <summary>
+    /// 悬停放大（方案 A：只放大悬停那一格，两侧整体平移让位）。
+    ///
+    /// 早先邻居也跟着放大（权重 1 / .55 / .22），位移却受胶囊内边距限制被夹死 ——
+    /// 倍数一开大，放大后的格子互相压在一起（用户反馈"重合在一起"）。
+    /// 现在：悬停格 ×m，同侧其余格平移 grow = 格×(m−1)/2，格间距恒定 → 永远不重合；
+    /// 整排往外撑开的那部分留在窗口两侧的透明余量里（ZoneLayout.DockSideOverflow）。
+    ///
+    /// ponytail 2026-11-01 「缩放抽搐」修复 — 以前每收到一次 MouseEnter 就重新
+    /// BeginAnimation 一遍整个条体。只要 Enter 因为任何原因重复（光标停在两格交界、
+    /// 名字/图标换命中元素、动画把邻居推到位后又弹回来…），动画就从当前值重新往目标值
+    /// 跑一遍 → 屏幕上看就是"缩放一直在抽搐、反复播放"。现在先把目标序号记下来，
+    /// 同一格重复 Enter 直接返回；换了格子才动一次；离开不立刻复原（见
+    /// <see cref="DockHoverEnd"/>），由 <see cref="ReconcileDockHover"/> 用真实命中元素对账。
+    /// </summary>
+    void DockHoverBegin(object sender)
+    {
+        if (!IsDock || !_zone.DockAnimate) return;
+        int idx = sender is FrameworkElement fe && fe.DataContext is ZoneItemViewModel hvm
+            ? _vm.Items.IndexOf(hvm) : -1;
+        if (idx < 0 || _vm.Items.Count == 0) return;
+        if (idx == _dockHoverIndex) return;      // ← 重复 Enter：不重播动画
+        SetDockHoverIndex(idx, animate: true);
+    }
+
+    /// <summary>放大到第 <paramref name="idx"/> 格（-1 = 全部复原）。
+    /// 只改 RenderTransform，不触发布局。</summary>
+    void SetDockHoverIndex(int idx, bool animate)
+    {
+        _dockHoverIndex = idx;
+        _dockHoverMiss = 0;
+        int n = _vm.Items.Count;
+        double m = Math.Clamp(_zone.DockMagnify, 1.0, 2.0);
+        double grow = ZoneLayout.DockHoverShift(_zone);
+        var scale = new double[n];
+        var off = new double[n];
+        for (int i = 0; i < n; i++)
+        {
+            bool hot = i == idx;
+            scale[i] = hot ? m : 1.0;
+            off[i] = idx < 0 ? 0.0 : (i < idx ? -grow : (i > idx ? grow : 0.0));
+        }
+        if (!_zone.DockAnimate || !animate)
+        {
+            ResetDockRowTransforms();
+            if (idx < 0) return;
+            // 无动画（关掉"悬停动效"或首次落位）：直接写值
+            for (int i = 0; i < n; i++)
+            {
+                var tg = DockItemTransform(i);
+                if (tg == null || tg.Children.Count < 2) continue;
+                if (tg.Children[0] is ScaleTransform sc) sc.ScaleX = sc.ScaleY = scale[i];
+                if (tg.Children[1] is TranslateTransform tr) tr.X = off[i];
+            }
+        }
+        else
+        {
+            AnimateDockRow(scale, off);
+        }
+        // 被放大那格要压在邻居上面（放大后它会盖住让位后的邻居）。
+        for (int i = 0; i < n; i++)
+            if (ItemsHost.ItemContainerGenerator.ContainerFromIndex(i) is FrameworkElement c)
+                Panel.SetZIndex(c, i == idx ? 10 : 0);
+    }
+
+    /// <summary>
+    /// 悬停结束。**不立刻复原**：MouseLeave 与下一个 MouseEnter 的到达顺序没有保证，
+    /// 立刻收起会变成"放大→收起→再放大"的一次抽搐。这里只排一个 70ms 后的复核，
+    /// 由真实命中元素（<see cref="DockHoveredIndex"/>）决定到底还该不该放大。
+    /// </summary>
+    void DockHoverEnd()
+    {
+        if (!IsDock) return;
+        if (_dockHoverIndex < 0 && _dockHoverEndTimer == null) return;
+#if DEBUG
+        HoverNote($"magnify leave (keep={_dockHoverIndex})");
+#endif
+        _dockHoverEndTimer ??= new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(70)
+        };
+        _dockHoverEndTimer.Tick -= DockHoverEndTick;
+        _dockHoverEndTimer.Tick += DockHoverEndTick;
+        _dockHoverEndTimer.Stop();
+        _dockHoverEndTimer.Start();
+    }
+
+    void DockHoverEndTick(object? s, EventArgs e)
+    {
+        _dockHoverEndTimer?.Stop();
+        ReconcileDockHover();
+    }
+
+    /// <summary>
+    /// 把「该放大的格子」对齐到**真实命中元素**。只在"真的被鼠标进过"之后启动
+    /// （离屏自测直接调 Item_Enter，没有真实指针，不该被它复原）。
+    /// 这样即使 Leave/Enter 漏了一条、或容器被重建，状态也会在 200ms 内自动收敛。
+    ///
+    /// **连续两次**量到"不在任何一格上"才复原：实测光标归属会在 5ms 内打一次
+    /// enter/leave 的假信号（悬浮窗/缩放动画把邻居推走都会这样），一次就复原的话
+    /// 屏幕上是"放大→缩回→再放大"的抽搐 —— 正是用户报的那条。
+    /// </summary>
+    void ReconcileDockHover()
+    {
+        if (!IsDock || !_zone.DockAnimate) return;
+        int over = DockHoveredIndex();
+        if (over >= 0)
+        {
+            _dockHoverMiss = 0;
+            if (over != _dockHoverIndex) SetDockHoverIndex(over, animate: true);
+            return;
+        }
+        if (_dockHoverIndex < 0) { _dockHoverWatch?.Stop(); return; }   // 本来就没放大
+        if (++_dockHoverMiss < 2) return;                               // 疑似瞬断，再等等
+        _dockHoverMiss = 0;
+        SetDockHoverIndex(-1, animate: true);
+        _dockHoverWatch?.Stop();
+    }
+
+    /// <summary>连续几次对账都没量到"悬停在某格上"（用于滤掉瞬时假 leave）。</summary>
+    int _dockHoverMiss;
+
+    /// <summary>真实指针现在停在第几格（-1 = 不在任何一格上）。基于命中元素往上找
+    /// DockItemRoot，再换回容器序号 —— 比"哪个格子收到过 Enter"可靠。</summary>
+    int DockHoveredIndex()
+    {
+        try
+        {
+            var d = Mouse.DirectlyOver as DependencyObject;
+            while (d != null)
+            {
+                if (d is FrameworkElement fe && fe.Name == "DockItemRoot")
+                {
+                    var p = VisualTreeHelper.GetParent(fe);
+                    while (p != null && p is not ContentPresenter)
+                        p = VisualTreeHelper.GetParent(p);
+                    if (p is ContentPresenter cp)
+                        return ItemsHost.ItemContainerGenerator.IndexFromContainer(cp);
+                    return -1;
+                }
+                d = VisualTreeHelper.GetParent(d);
+            }
+        }
+        catch { }
+        return -1;
+    }
+
+    void StartDockHoverWatch()
+    {
+        _dockHoverWatch ??= new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(200)
+        };
+        _dockHoverWatch.Tick -= DockHoverWatchTick;
+        _dockHoverWatch.Tick += DockHoverWatchTick;
+        if (!_dockHoverWatch.IsEnabled) _dockHoverWatch.Start();
+    }
+
+    void DockHoverWatchTick(object? s, EventArgs e) => ReconcileDockHover();
+
+    /// <summary>把所有格的放大/位移直接归零（不走动画）。关掉动画开关、改图标大小、
+    /// 重排之后调用 —— 否则会卡在上一次的放大态上。</summary>
+    void ResetDockRowTransforms()
+    {
+        _dockHoverIndex = -1;
+        int n = _vm.Items.Count;
+        for (int i = 0; i < n; i++)
+        {
+            var tg = DockItemTransform(i);
+            if (tg == null || tg.Children.Count < 2) continue;
+            if (tg.Children[0] is not ScaleTransform sc || tg.Children[1] is not TranslateTransform tr) continue;
+            sc.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+            sc.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+            tr.BeginAnimation(TranslateTransform.XProperty, null);
+            sc.ScaleX = sc.ScaleY = 1;
+            tr.X = 0;
+        }
+    }
+
+    /// <summary>把每一格的 Scale/Translate 一起推过去。只改 RenderTransform，
+    /// 不触发布局（和分区里 SetMergeHover / PlayTabSlideAnimations 同一个套路）。
+    /// 注意：容器（ContentPresenter）不是那个带变换的 Grid —— 变换在
+    /// DockItemTemplate 的根 Grid（x:Name="DockItemRoot"）上，必须往里找一层。</summary>
+    void AnimateDockRow(double[] scale, double[] off)
+    {
+#if DEBUG
+        _dockRowAnimCount++;   // 自测用：统计悬停动画重启次数（Release 编译掉）
+#endif
+        var dur = TimeSpan.FromMilliseconds(Math.Clamp(_zone.DockAnimMs, 80, 300));
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+        int n = Math.Min(scale.Length, _vm.Items.Count);
+        for (int i = 0; i < n; i++)
+        {
+            var tg = DockItemTransform(i);
+            if (tg == null || tg.Children.Count < 2) continue;
+            if (tg.Children[0] is not ScaleTransform sc || tg.Children[1] is not TranslateTransform tr) continue;
+            sc.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(scale[i], dur) { EasingFunction = ease });
+            sc.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(scale[i], dur) { EasingFunction = ease });
+            tr.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(off[i], dur) { EasingFunction = ease });
+        }
+    }
+
+    /// <summary>第 i 格的变换组（模板根 Grid 上的 Scale+Translate）。模板里的变换会被
+    /// 冻住（DataTemplate 封存后 TransformGroup 不可动画），所以这里在代码里挂一份可写的；
+    /// 幂等，每次拿都确保存在。</summary>
+    TransformGroup? DockItemTransform(int i)
+    {
+        if (ItemsHost.ItemContainerGenerator.ContainerFromIndex(i) is not DependencyObject container) return null;
+        var root = FindVisualChild<Grid>(container, g => g.Name == "DockItemRoot");
+        if (root == null) return null;
+        if (root.RenderTransform is TransformGroup tg0 && !tg0.IsFrozen && tg0.Children.Count >= 2) return tg0;
+        var tg = new TransformGroup();
+        tg.Children.Add(new ScaleTransform(1, 1));
+        tg.Children.Add(new TranslateTransform(0, 0));
+        root.RenderTransform = tg;
+        return tg;
+    }
+
+    // ── 拖拽排序 ─────────────────────────────────────────────────────────
+
+    /// <summary>按落点 X 算目标序号，把图标挪到那个位置，然后重排 + 重算宽高。</summary>
+    void CommitDockReorder(ZoneItemViewModel vm)
+    {
+        var raw = _zone.Items.FirstOrDefault(i => i.Id == vm.Id);
+        if (raw == null) return;
+        double pitch = _zone.GridSize + ZoneLayout.DockGap;
+        int target = (int)Math.Round((vm.X - ZoneLayout.DockPadH) / pitch);
+        target = Math.Clamp(target, 0, _zone.Items.Count - 1);
+        int from = _zone.Items.IndexOf(raw);
+        if (from == target) { ApplyDockGeometry(); return; }
+        _zone.Items.RemoveAt(from);
+        _zone.Items.Insert(target, raw);
+        _vm.RefreshItems();
+        ApplyDockGeometry();
+        _mgr.SaveConfig();
+    }
+
+    // ── 添加应用 / 完全隐藏 ───────────────────────────────────────────────
+
+    void DockAddApp_Click(object s, RoutedEventArgs e)
+    {
+        var dlg = new OpenFileDialog
+        {
+            Title = _loc["DockMenu.AddApp"],
+            Filter = $"{_loc["Filter.Exe"]}|*.exe|{_loc["Filter.Lnk"]}|*.lnk|{_loc["Filter.All"]}|*.*",
+            Multiselect = true,
+        };
+        if (dlg.ShowDialog() == true) ImportDockApps(dlg.FileNames);
+    }
+
+    /// <summary>追加到末尾（快捷栏没有方格可找），保留选择顺序，然后重算几何。</summary>
+    void ImportDockApps(string[] paths)
+    {
+        if (!IsDock || paths.Length == 0) return;
+        int added = 0;
+        foreach (var p in paths)
+        {
+            var type = Path.GetExtension(p).ToLowerInvariant() switch
+            {
+                ".lnk" => ItemType.Shortcut,
+                ".exe" => ItemType.Application,
+                _ => ItemType.Shortcut,
+            };
+            var (target, ntype, iconLoc) = ShortcutResolver.NormalizeItem(p, type);
+            if (_zone.Items.Any(i => string.Equals(i.TargetPath, target, StringComparison.OrdinalIgnoreCase)))
+                continue;
+            var item = new ZoneItem(Path.GetFileNameWithoutExtension(p), target, ntype, 0, 0)
+            {
+                IconPath = iconLoc,
+            };
+            ShellIconService.Instance.GetIcon(item.TargetPath, item.Type, item.IconPath);
+            _vm.AddItem(item);
+            added++;
+        }
+        if (added == 0) return;
+        ApplyDockGeometry();
+        _mgr.SaveConfig();
+    }
+
+    void DockFullHide_Click(object s, RoutedEventArgs e) => _mgr.FullHideZone(_zone.Id);
+
+#if DEBUG
+    /// <summary>自测入口（--render-dock-preview）：把第 index 格摆成悬停态，
+    /// 用来在离屏渲染里检查放大与邻位移是否算对。走的是真实的 Item_Enter
+    /// （悬停高光也在里面，动效开着时它会按规则被跳过）。</summary>
+    public void PreviewDockHover(int index)
+    {
+        if (!IsDock) return;
+        if (index < 0 || index >= ItemsHost.Items.Count) return;
+        if (ItemsHost.ItemContainerGenerator.ContainerFromIndex(index) is not DependencyObject container) return;
+        // 真实路径里 MouseEnter 挂在模板根 Grid 上（sender 就是那个 Grid），
+        // 这里必须同样取到 DockItemRoot，否则高光那一段（s is Grid）不会执行。
+        var root = FindVisualChild<Grid>(container, g => g.Name == "DockItemRoot");
+        Item_Enter(root ?? (object)container, null!);
+    }
+
+    /// <summary>自测用：把条体右键菜单按当前形态打开一次，返回可见项文字串
+    /// （分隔线记作 |），用来核对快捷栏菜单是否与分区对齐。</summary>
+    public string DebugOpenZoneMenu()
+    {
+        var cm = ZoneBorder.ContextMenu;
+        if (cm == null) return "no-menu";
+        var sb = new System.Text.StringBuilder();
+        try
+        {
+            cm.PlacementTarget = ZoneBorder;
+            cm.IsOpen = true;
+            foreach (var entry in cm.Items)
+            {
+                switch (entry)
+                {
+                    case Separator sep when sep.Visibility == Visibility.Visible:
+                        sb.Append(" | ");
+                        break;
+                    case MenuItem mi when mi.Visibility == Visibility.Visible:
+                        sb.Append(mi.Header?.ToString() ?? "?");
+                        if (mi.Items.Count > 0) sb.Append(" ▶");
+                        sb.Append(" · ");
+                        break;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            sb.Append("menu-error: ").Append(ex.Message);
+        }
+        finally
+        {
+            cm.IsOpen = false;
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>自测用：手动摆两个运行状态（不依赖真的开程序），离屏渲染检查灰/蓝短线。</summary>
+    public void PreviewDockRunStates(int focusedIndex, int backgroundIndex)
+    {
+        if (!IsDock) return;
+        for (int i = 0; i < _vm.Items.Count; i++)
+        {
+            _vm.Items[i].RunState = i == focusedIndex ? DockRunState.Foreground
+                : (i == backgroundIndex ? DockRunState.Background : DockRunState.None);
+        }
+        RefreshDockRunBars(animate: false);
+    }
+
+    /// <summary>自测用：真跑一轮「谁在运行 / 谁在前台」，把每个条目的 exe 名与判定结果打出来
+    /// （验证运行状态指示不是只靠手摆的假数据能渲染，而是真识别到了 exe）。</summary>
+    public string PreviewDockLiveRun()
+    {
+        if (!IsDock) return "not-dock";
+        RefreshDockRunStates();
+        var sb = new System.Text.StringBuilder();
+        sb.Append("live: ");
+        foreach (var vm in _vm.Items)
+            sb.Append($"{vm.Name}='{AppActivityService.ExeNameForPath(vm.TargetPath)}'→{vm.RunState}; ");
+        try
+        {
+            var snap = AppActivityService.Snapshot();
+            sb.Append($" snapshot={snap.Count}");
+            if (snap.TryGetValue(AppActivityService.ExeNameForPath(_vm.Items.FirstOrDefault()?.TargetPath), out var app))
+                sb.Append($" firstIsForeground={app.IsForeground}");
+        }
+        catch (Exception ex) { sb.Append(" snapshot-failed:" + ex.Message); }
+        return sb.ToString();
+    }
+
+    /// <summary>自测用：玻璃/开始按钮倒影的状态摘录（验证背板不是空的、镜像节点数对）。</summary>
+    public string DebugDockGlass()
+    {
+        string fill = FillRect?.Fill?.GetType().Name ?? "null";
+        string brush = FillRect?.Fill is SolidColorBrush sb2 ? $"solid#{sb2.Color.A:X2}{sb2.Color.R:X2}{sb2.Color.G:X2}{sb2.Color.B:X2}" : fill;
+        var pill = DockPillScreenPx();
+        int startRefl = 0;
+        if (DockChromeLayer != null)
+            foreach (var ch in DockChromeLayer.Children)
+                if (ch is FrameworkElement f && (f.Tag as string) == DockReflectTag) startRefl++;
+        var inset = DockPillInsetPx();
+        return $"glass={_dockGlassMode} fill={brush} " +
+               $"host={(DockGlassHost == null ? "null" : $"{DockGlassHost.Visibility} {DockGlassHost.ActualWidth:F0}x{DockGlassHost.ActualHeight:F0}")} " +
+               $"inset={inset.X:F0},{inset.Y:F0} {inset.Width:F0}x{inset.Height:F0} " +
+               $"pill={(pill.IsEmpty ? "empty" : $"{pill.X:F0},{pill.Y:F0} {pill.Width:F0}x{pill.Height:F0}")} " +
+               $"gen={WallpaperBackdrop.Generation} " +
+               $"startGlyph={DockStartGlyph?.ActualWidth:F0} startRefl={startRefl} " +
+               $"bands=top{ZoneLayout.DockOverflowTop(_zone):F0}/refl{ZoneLayout.DockReflectBand(_zone):F0} " +
+               $"snap=[{string.Join(" | ", _snapLog)}] refl=[{string.Join(" ", _reflLog)}]";
+    }
+
+    /// <summary>自测用：胶囊玻璃图层的内部状态（半径/世代/位图/裁剪框）。</summary>
+    public string DebugDockGlassLayer() => _dockGlassLayer?.DebugState() ?? "(no layer)";
+
+    // ── 自测用：DWM 整窗模糊 vs 窗口裁成胶囊（第 7 轮回答「为什么做不了 DWM」） ──
+
+    [DllImport("gdi32.dll")] static extern IntPtr CreateRoundRectRgn(int l, int t, int r, int b, int w, int h);
+    [DllImport("user32.dll")] static extern int SetWindowRgn(IntPtr hwnd, IntPtr hRgn, bool redraw);
+
+    /// <summary>
+    /// 绕过 <see cref="ApplyDockGlass"/> 的兜底，直接给快捷栏窗口上**真正那套 DWM 配方**
+    /// （和分区 / 律动条同一个 <see cref="AcrylicHelper.EnableBlurComposite"/>），用于实测
+    /// 「DWM 的模糊到底只盖胶囊、还是把胶囊外那两条透明带也糊上」。
+    /// mode 0 = 复原到正常路径；1 = DWM 整窗；2 = DWM + 把窗口 SetWindowRgn 裁成胶囊。
+    /// </summary>
+    public string DebugForceDwmGlass(int mode)
+    {
+        var s = ResolveStyle();
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == IntPtr.Zero) return "no-hwnd";
+        if (FillRect == null) return "no-fillrect";
+
+        SetWindowRgn(hwnd, IntPtr.Zero, true);          // 先撤掉可能存在的区域
+
+        if (mode == 0)
+        {
+            AcrylicHelper.DisableBlur(this);
+            ApplyDockGlass(s);
+            return "restored | " + DebugDockGlass();
+        }
+
+        var r = AcrylicHelper.EnableBlurComposite(this, _zone.GlassBlurAmount,
+            s.FillColor, 1.0, _zone.GlassColorMode, _zone.GlassTintOpacity, _zone.GlassTintLuminosity,
+            AcrylicHelper.ResolveAccentState(_zone.GlassMaterial),
+            AcrylicHelper.ResolveUseClassicBlur(_zone.GlassMaterial));
+        FillRect.Fill = AcrylicHelper.HitTestFill;      // 与分区走 DWM 时完全一致
+        FillRect.Opacity = 1.0;
+
+        string regionTxt = "full-window";
+        if (mode == 2)
+        {
+            var dpi = VisualTreeHelper.GetDpi(this);
+            double side = ZoneLayout.DockSideOverflow(_zone);
+            double top = ZoneLayout.DockBarTop(_zone);
+            double w = ZoneLayout.DockPillWidth(_zone, _zone.Items.Count);
+            double h = ZoneLayout.DockBarHeight(_zone);
+            int x = (int)Math.Round(side * dpi.DpiScaleX);
+            int y = (int)Math.Round(top * dpi.DpiScaleY);
+            int ww = (int)Math.Round(w * dpi.DpiScaleX);
+            int hh = (int)Math.Round(h * dpi.DpiScaleY);
+            int rad = (int)Math.Round(s.CornerRadius * dpi.DpiScaleX * 2);
+            SetWindowRgn(hwnd, CreateRoundRectRgn(x, y, x + ww, y + hh, rad, rad), true);
+            regionTxt = $"pill {x},{y} {ww}x{hh} r={rad}";
+        }
+        return $"dwm={(r.Success ? "ok" : r.Error)} region={regionTxt} | " + DebugDockGlass();
+    }
+
+    /// <summary>
+    /// 自测用：验证「最小化后鼠标悬停恢复按钮自动展开」真的接上了 —— 收起成 36×36 方块，
+    /// 合成一次 MouseEnter 打进恢复按钮，等 500ms 展开计时器跑完，看有没有自动展开。
+    /// </summary>
+    public async Task<string> PreviewHoverRestoreAsync()
+    {
+        if (!IsDock) return "not-dock";
+        bool enabled = _hover?.IsEnabled == true;
+        string result;
+        try
+        {
+            _hover?.SnapToCollapsed();
+            await Task.Delay(120);
+            bool before = _hover?.IsExpanded == true;
+            bool btnVisible = RestoreButton.Visibility == Visibility.Visible;
+            RestoreButton.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, Environment.TickCount)
+            { RoutedEvent = Mouse.MouseEnterEvent });
+            await Task.Delay(900);
+            bool after = _hover?.IsExpanded == true;
+            result = $"hoverRestore={_zone.DockHoverRestore} enabled={enabled} collapsed={!before} " +
+                     $"btnVisible={btnVisible} afterHoverEnter={after}";
+        }
+        catch (Exception ex) { result = "EXC " + ex.GetType().Name + ": " + ex.Message; }
+        _hover?.SnapToExpanded();
+        return result;
+    }
+
+    /// <summary>自测用：打印「点这个图标会切前台还是最小化」的判定，不真的动别人的窗口。</summary>
+    public string PreviewDockToggle(int index)
+    {
+        if (!IsDock || index < 0 || index >= _vm.Items.Count) return "bad-index";
+        var vm = _vm.Items[index];
+        var exe = AppActivityService.ExeNameForPath(vm.TargetPath);
+        var wins = AppActivityService.WindowsOf(exe);
+        var hint = _foregroundBeforeClick != IntPtr.Zero ? _foregroundBeforeClick : AppActivityService.LastOtherForeground;
+        string Decide(IntPtr h) => wins.Count == 0 ? "launch"
+            : AppActivityService.WindowBelongsTo(h, exe) ? "minimize" : "activate";
+        return $"toggle[{index}] name={vm.Name} exe='{exe}' wins={wins.Count} " +
+               $"hint=0x{hint.ToInt64():X} → {Decide(hint)} | " +
+               $"假设刚才前台是它自己的窗口(0x{(wins.Count > 0 ? wins[0].ToInt64() : 0):X}) → " +
+               $"{(wins.Count > 0 ? Decide(wins[0]) : "launch")}";
+    }
+
+    /// <summary>自测用：立刻跑一轮运行状态轮询（不等 700ms 定时器）。</summary>
+    public void RefreshDockRunStatesForTest() => RefreshDockRunStates();
+
+    /// <summary>自测用：资源管理器打开着的文件夹（文件夹快捷方式的横条靠它判定）。</summary>
+    public string PreviewDockFolders()
+    {
+        var sb = new System.Text.StringBuilder();
+        foreach (var vm in _vm.Items)
+        {
+            if (!AppActivityService.IsBrowsableFolder(vm.TargetPath)) continue;
+            var hwnd = AppActivityService.FolderOpenWindow(vm.TargetPath);
+            sb.Append($"folder '{vm.Name}': open={hwnd != IntPtr.Zero} state={vm.RunState}; ");
+        }
+        var locs = AppActivityService.ExplorerLocations();
+        sb.Append($"explorerWindows={locs.Count}");
+        foreach (var (p, h) in locs) sb.Append($" [{p} h=0x{h.ToInt64():X}]");
+        sb.Append(" titles=[");
+        foreach (var (t, h) in AppActivityService.ExplorerWindowTitles()) sb.Append($"'{t}' h=0x{h.ToInt64():X} ");
+        sb.Append($"] diag={AppActivityService.ExplorerDiag}");
+        return sb.ToString();
+    }
+
+    /// <summary>自测用：把当前每格的缩放/位移读出来，确认动画真的落到容器上。</summary>
+    public string DebugDockState()
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append($"items={_vm.Items.Count}; containers={ItemsHost.Items.Count}; ");
+        int refl = 0;
+        for (int i = 0; i < ItemsHost.Items.Count; i++)
+        {
+            if (ItemsHost.ItemContainerGenerator.ContainerFromIndex(i) is not DependencyObject cont) continue;
+            var rt = FindVisualChild<Grid>(cont, g => g.Name == "DockItemRoot");
+            if (rt == null) continue;
+            foreach (var ch in rt.Children)
+                if (ch is FrameworkElement f && (f.Tag as string) == DockReflectTag) refl++;
+        }
+        sb.Append($"reflectNodes={refl}; ");
+        try
+        {
+            for (int i = 0; i < ItemsHost.Items.Count; i++)
+            {
+                if (ItemsHost.ItemContainerGenerator.ContainerFromIndex(i) is not DependencyObject cont) continue;
+                var rt = FindVisualChild<Grid>(cont, g => g.Name == "DockItemRoot");
+                if (rt == null) continue;
+                FrameworkElement? w0 = null;
+                foreach (var ch in rt.Children)
+                    if (ch is FrameworkElement f && (f.Tag as string) == DockReflectTag) { w0 = f; break; }
+                if (w0 is not Grid g0) continue;
+                var pos = g0.TransformToAncestor(this).Transform(new Point(0, 0));
+                var kid = g0.Children.Count > 0 ? g0.Children[0] as FrameworkElement : null;
+                var kidPos = kid?.TransformToAncestor(this).Transform(new Point(0, 0)) ?? new Point(-1, -1);
+                sb.Append($"refl0 root={((FrameworkElement)rt).ActualWidth:F0}x{((FrameworkElement)rt).ActualHeight:F0} " +
+                          $"size={g0.ActualWidth:F0}x{g0.ActualHeight:F0} pos=({pos.X:F1},{pos.Y:F1}) op={g0.Opacity:F2} " +
+                          $"kid={kid?.GetType().Name ?? "null"} {kid?.ActualWidth:F0}x{kid?.ActualHeight:F0} kidPos=({kidPos.X:F1},{kidPos.Y:F1}); ");
+                break;
+            }
+        }
+        catch (Exception ex) { sb.Append("reflERR=" + ex.Message + "; "); }
+        for (int i = 0; i < ItemsHost.Items.Count; i++)
+        {
+            var c = ItemsHost.ItemContainerGenerator.ContainerFromIndex(i) as FrameworkElement;
+            if (c == null) { sb.Append($"[{i}]=null; "); continue; }
+            var tg = DockItemTransform(i);
+            var sc = tg?.Children.Count > 0 ? tg.Children[0] as ScaleTransform : null;
+            var tr = tg?.Children.Count > 1 ? tg.Children[1] as TranslateTransform : null;
+            var hover = FindVisualChild<Border>(c, b => b.Name is "HoverBox");
+            sb.Append($"[{i}] rt={c.RenderTransform?.GetType().Name ?? "null"} " +
+                      $"sx={(sc?.ScaleX ?? -1):F2} tx={(tr?.X ?? -999):F1} " +
+                      $"hover={(hover?.Background is SolidColorBrush b2 ? b2.Color.ToString() : "none")} " +
+                      $"pos={c.TransformToAncestor(this).Transform(new Point(0, 0)):F1}; ");
+        }
+        return sb.ToString();
+    }
+    // ── 自测台（--dock-lab）用的探针 ───────────────────────────────────────
+    // 悬停事件环形缓冲：Enter/Leave/放大开始结束都记时间戳，用来抓"同一格来回抖"。
+    readonly List<string> _hoverLog = new();
+
+    void HoverNote(string s)
+    {
+        _hoverLog.Add($"{DateTime.Now:HH:mm:ss.fff} {s}");
+        if (_hoverLog.Count > 60) _hoverLog.RemoveAt(0);
+    }
+
+    int DockIndexOf(object s)
+        => s is FrameworkElement fe && fe.DataContext is ZoneItemViewModel v ? _vm.Items.IndexOf(v) : -1;
+
+    bool ItemIsOver(object s) => s is UIElement u && u.IsMouseOver;
+
+    /// <summary>最近 60 条悬停事件（复现"抽搐"时看 Enter/Leave 有没有来回打）。</summary>
+    public string DebugHoverLog() => _hoverLog.Count == 0 ? "(empty)" : string.Join(" | ", _hoverLog);
+
+    /// <summary>每格的缩放/位移（悬停放大是否稳定在这里看）。</summary>
+    public string DebugDockScales()
+    {
+        var sb = new System.Text.StringBuilder();
+        for (int i = 0; i < _vm.Items.Count; i++)
+        {
+            var tg = DockItemTransform(i);
+            double sx = 1, tx = 0;
+            if (tg != null && tg.Children.Count > 1)
+            {
+                if (tg.Children[0] is ScaleTransform sc) sx = sc.ScaleX;
+                if (tg.Children[1] is TranslateTransform tr) tx = tr.X;
+            }
+            sb.Append($"[{i}]{sx:F2}/{tx:F1} ");
+        }
+        return sb.ToString().TrimEnd();
+    }
+
+    /// <summary>拖拽状态机快照：拖动标志、被拖条目、不透明度、鼠标捕获、每格 X。</summary>
+    public string DebugDockInteraction()
+    {
+        string cap = Mouse.Captured is FrameworkElement cf && !string.IsNullOrEmpty(cf.Name) ? cf.Name
+            : Mouse.Captured?.GetType().Name ?? "null";
+        var sb = new System.Text.StringBuilder();
+        sb.Append($"dragging={_dragging} dv={_dv?.Name ?? "-"} deOp={(_de?.Opacity ?? 1):F2} capture={cap} ");
+        for (int i = 0; i < _vm.Items.Count; i++)
+        {
+            var vm = _vm.Items[i];
+            sb.Append($"[{i}]{vm.Name}:X={vm.X:F0} ");
+        }
+        return sb.ToString().TrimEnd();
+    }
+
+    /// <summary>主体内容的可见性 + 不透明度（收起/展开后对账用）。</summary>
+    public string DebugContentState()
+        => $"main={MainContent.Visibility} op={MainContent.Opacity:F2} " +
+           $"hasTransform={(MainContent.RenderTransform is Transform ? "T" : "-")} " +
+           $"btn={RestoreButton.Visibility} hoverExpanded={_hover?.IsExpanded}";
+
+    /// <summary>当前是否处于「内容已展开」状态。</summary>
+    public bool DebugHoverExpanded() => _hover?.IsExpanded == true;
+
+    /// <summary>
+    /// 自测用：验证「拖动途中丢捕获」两条收尾路径真的接上了 ——
+    /// ① 真给图标格设鼠标捕获，再 <c>Mouse.Capture(null)</c>（= 前台窗口被激活时系统的行为）
+    ///    → LostMouseCapture 处理器应当把拖动状态清干净；
+    /// ② 直接把状态摆成"正在拖"，再喂一条左键已抬起的 MouseMove（丢捕获后最常见的残留输入）
+    ///    → Item_MouseMove 的前置检查应当收尾。
+    /// </summary>
+    public string PreviewDragWiring()
+    {
+        if (!IsDock || ItemsHost.Items.Count == 0) return "not-dock";
+        if (ItemsHost.ItemContainerGenerator.ContainerFromIndex(0) is not DependencyObject c) return "no-container";
+        var root = FindVisualChild<Grid>(c, g => g.Name == "DockItemRoot");
+        if (root == null) return "no-root";
+        var vm = _vm.Items[0];
+        double homeX = ZoneLayout.DockX(_zone, 0);
+        var sb = new System.Text.StringBuilder();
+
+        // ① 真捕获 → 夺捕获
+        bool captured = root.CaptureMouse();
+        _dv = vm; _de = root; _dragging = true; root.Opacity = 0.7;
+        vm.X = homeX + 40;
+        sb.Append($"[1] captured={captured} before: drag={_dragging} X={vm.X:F0} op={root.Opacity:F2}; ");
+        System.Windows.Input.Mouse.Capture(null);
+        sb.Append($"after: drag={_dragging} dv={(_dv?.Name ?? "-")} X={vm.X:F0} op={root.Opacity:F2}; ");
+
+        // ② 残留输入：左键已抬起的 MouseMove
+        _dv = vm; _de = root; _dragging = true; root.Opacity = 0.7;
+        vm.X = homeX + 40;
+        Item_MouseMove(root, new MouseEventArgs(System.Windows.Input.Mouse.PrimaryDevice, Environment.TickCount)
+        { RoutedEvent = UIElement.MouseMoveEvent, Source = root });
+        sb.Append($"[2] after-move: drag={_dragging} dv={(_dv?.Name ?? "-")} X={vm.X:F0} op={root.Opacity:F2}");
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// 自测用：验证悬停放大不会「同一格重复 Enter 就重播动画」——
+    /// 连续 20 次 Item_Enter 同一格，动画启动次数应当只有 1，最终缩放应当停在倍数上；
+    /// 再喂一条 Leave，70ms 后由"真实命中元素"对账复原。
+    /// </summary>
+    public string PreviewHoverIdempotence()
+    {
+        if (!IsDock || ItemsHost.Items.Count < 2) return "not-dock";
+        var roots = new List<Grid>();
+        for (int i = 0; i < 2; i++)
+        {
+            if (ItemsHost.ItemContainerGenerator.ContainerFromIndex(i) is not DependencyObject c) continue;
+            var r = FindVisualChild<Grid>(c, g => g.Name == "DockItemRoot");
+            if (r != null) roots.Add(r);
+        }
+        if (roots.Count < 2) return "no-root";
+        int before = _dockRowAnimCount;
+        for (int i = 0; i < 20; i++) DockHoverBegin(roots[1]);   // 同一格 20 次 Enter
+        int same = _dockRowAnimCount - before;
+        DockHoverBegin(roots[0]);                                 // 换到另一格
+        int switched = _dockRowAnimCount - before;
+        string mid = DebugDockScales();
+        DockHoverEnd();
+        ReconcileDockHover();   // 第一次：疑似瞬断（不复原）
+        ReconcileDockHover();   // 第二次：确认离开 → 复原
+        int afterEnd = _dockRowAnimCount - before;
+        return $"sameIdxRestarts={same}(expect 1) afterSwitch={switched}(expect 2) afterEnd={afterEnd}(expect 3) " +
+               $"mid={mid} end={DebugDockScales()}";
+    }
+
+    /// <summary>AnimateDockRow 被调用次数（自测：悬停动画重播计数）。</summary>
+    int _dockRowAnimCount;
+
+    /// <summary>自测用：把「悬停放大 / 悬停提示」清干净（自测里窗口被挪过位置时 WPF 的
+    /// 命中缓存会停在旧位置，截图上会留一颗放大的图标 + 一个 tooltip）。</summary>
+    public void PreviewResetHover()
+    {
+        _dockHoverWatch?.Stop();
+        _dockHoverEndTimer?.Stop();
+        _dockHoverIndex = -1;
+        _dockHoverMiss = 0;
+        ResetDockRowTransforms();
+        for (int i = 0; i < ItemsHost.Items.Count; i++)
+        {
+            if (ItemsHost.ItemContainerGenerator.ContainerFromIndex(i) is not DependencyObject c) continue;
+            var root = FindVisualChild<Grid>(c, g => g.Name == "DockItemRoot");
+            if (root == null) continue;
+            ToolTipService.SetIsEnabled(root, false);
+            ToolTipService.SetIsEnabled(root, true);
+        }
+    }
+
+    /// <summary>
+    /// 自测用：快捷栏锁定的三道闸 —— ① 条体不能拖 ② 图标不跟手/不换位 ③ 不收外部拖入。
+    /// </summary>
+    public string PreviewLockGuards()
+    {
+        if (!IsDock || ItemsHost.Items.Count == 0) return "not-dock";
+        if (ItemsHost.ItemContainerGenerator.ContainerFromIndex(0) is not DependencyObject c) return "no-container";
+        var root = FindVisualChild<Grid>(c, g => g.Name == "DockItemRoot");
+        if (root == null) return "no-root";
+        var vm = _vm.Items[0];
+        var sb = new System.Text.StringBuilder();
+        double homeX = ZoneLayout.DockX(_zone, 0);
+        var d = new Vector(40, 0);
+
+        void DragProbe(string tag)
+        {
+            _dv = vm; _de = root; _dragging = true; _is = new Point(homeX, vm.Y); _ds = new Point(0, 0);
+            DockDragFollow(d, new Point(0, 0));
+            sb.Append($"{tag}: X={vm.X:F0}(home={homeX:F0}) op={root.Opacity:F2}; ");
+            _dv = null; _de = null; _dragging = false; root.Opacity = 1.0;
+            ZoneLayout.ArrangeDock(_zone); ArrangeDockItems();
+        }
+
+        bool saved = _zone.IsLocked;
+        try
+        {
+            _zone.IsLocked = false; _vm.IsLocked = false; ApplyLockState();
+            DragProbe("unlocked");
+            _zone.IsLocked = true; _vm.IsLocked = true; ApplyLockState();
+            DragProbe("locked");
+            sb.Append($"dropBlocked={DockDropBlocked}; ");
+            var probe = new ZoneItem("probe", @"C:\Windows\System32\notepad.exe", ItemType.Application, 0, 0);
+            sb.Append($"receiveLocked={ReceiveExternalItem(probe, new Point(0, 0))}(expect False)");
+        }
+        finally
+        {
+            _zone.IsLocked = saved; _vm.IsLocked = saved; ApplyLockState();
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>第 <paramref name="index"/> 格图标的中心点（**设备像素**，给 SetCursorPos 用）。</summary>
+    public (int X, int Y) ItemIconCenterDevice(int index)
+    {
+        try
+        {
+            if (index < 0 || index >= ItemsHost.Items.Count) return (0, 0);
+            if (ItemsHost.ItemContainerGenerator.ContainerFromIndex(index) is not DependencyObject c) return (0, 0);
+            var fe = FindVisualChild<FrameworkElement>(c, e => e.Name == "ItemIcon")
+                     ?? FindVisualChild<Grid>(c, g => g.Name == "DockItemRoot");
+            if (fe == null || fe.ActualWidth < 1) return (0, 0);
+            var sp = fe.PointToScreen(new Point(fe.ActualWidth / 2, fe.ActualHeight / 2));
+            return ((int)Math.Round(sp.X), (int)Math.Round(sp.Y));
+        }
+        catch { return (0, 0); }
+    }
+
+    /// <summary>恢复按钮（36×36 方块）的中心点（**设备像素**）。</summary>
+    public (int X, int Y) RestoreButtonCenterDevice()
+    {
+        try
+        {
+            if (RestoreButton == null || RestoreButton.ActualWidth < 1) return (0, 0);
+            var sp = RestoreButton.PointToScreen(
+                new Point(RestoreButton.ActualWidth / 2, RestoreButton.ActualHeight / 2));
+            return ((int)Math.Round(sp.X), (int)Math.Round(sp.Y));
+        }
+        catch { return (0, 0); }
+    }
+
+    /// <summary>自测用：等价于「点恢复按钮」那一击（Restore_MouseUp 的完整效果）。
+    /// 沙箱里 SetCursorPos/mouse_event 收不到真实鼠标事件，用它复现同一状态。</summary>
+    public void PreviewRestoreClick()
+    {
+        _zone.IsVisible = true;
+        _hover?.ExpandAnimated(permanent: true);
+        _mgr.FireZoneVisibilityChanged(_zone.Id, true);
+    }
+
+    /// <summary>自测用：屏幕点上 WPF 命中到的元素链（诊断"点击没落到按钮上"）。</summary>
+    public string DebugProbeAt(int devX, int devY)
+    {
+        var sb = new System.Text.StringBuilder();
+        try
+        {
+            var local = PointFromScreen(new Point(devX, devY));
+            sb.Append($"dev=({devX},{devY}) local=({local.X:F1},{local.Y:F1}) ");
+            var chain = new List<string>();
+            var hit = InputHitTest(local) as DependencyObject;
+            for (var d = hit; d != null && chain.Count < 10; d = VisualTreeHelper.GetParent(d))
+            {
+                chain.Add($"{d.GetType().Name}#{(d as FrameworkElement)?.Name}");
+                if (d is Window) break;
+            }
+            sb.Append("hit=" + (chain.Count == 0 ? "null" : string.Join(" < ", chain)));
+        }
+        catch (Exception ex) { sb.Append("hitEXC " + ex.Message); }
+        sb.Append($" | btn={RestoreButton.Visibility} {RestoreButton.ActualWidth:F0}x{RestoreButton.ActualHeight:F0} " +
+                  $"btnOver={RestoreButton.IsMouseOver} directlyOver={Mouse.DirectlyOver?.GetType().Name ?? "null"}");
+        return sb.ToString();
+    }
+#endif
 }

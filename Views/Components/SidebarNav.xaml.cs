@@ -37,6 +37,7 @@ public partial class SidebarNav : UserControl
         VersionText.Text = "v" + DesktopZones.Helpers.AppVersion.Current;
         _sectionKeys[NavZones]    = "zones";
         _sectionKeys[NavMerged]   = "merged";
+        _sectionKeys[NavDocks]    = "docks";
         _sectionKeys[NavPanel]    = "panel";
         _sectionKeys[NavCalendar] = "calendar";
         _sectionKeys[NavClock]    = "clock";
@@ -53,6 +54,7 @@ public partial class SidebarNav : UserControl
         {
             "zones"    => NavZones,
             "merged"   => NavMerged,
+            "docks"    => NavDocks,
             "panel"    => NavPanel,
             "calendar" => NavCalendar,
             "clock"    => NavClock,

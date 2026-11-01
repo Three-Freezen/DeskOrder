@@ -137,6 +137,7 @@ public class PresetService
                         PresetKind.MergedGroup => MigrateMergedGroupPreset(JsonSerializer.Deserialize<MergedGroupPreset>(text, Opts)),
                         PresetKind.Panel => JsonSerializer.Deserialize<PanelPreset>(text, Opts),
                         PresetKind.Subfolder => JsonSerializer.Deserialize<SubfolderPreset>(text, Opts),
+                        PresetKind.Dock => JsonSerializer.Deserialize<DockPreset>(text, Opts),
                         PresetKind.MediaPlayerBars or PresetKind.MediaPlayerVinyl
                             => JsonSerializer.Deserialize<MediaPlayerPreset>(text, Opts),
                         _ => JsonSerializer.Deserialize<ZonePreset>(text, Opts)
@@ -290,6 +291,8 @@ public class PresetService
         PresetRecord preset = _kind switch
         {
             PresetKind.Zone => new ZonePreset { Id = id, Name = trimmedName, CreatedAt = createdAt, Zone = ((Zone)payload).Clone() },
+            // 快捷栏：同一个 Zone 载荷，单独的类型 + 单独的目录（见 DockPreset 的说明）。
+            PresetKind.Dock => new DockPreset { Id = id, Name = trimmedName, CreatedAt = createdAt, Zone = CloneDockZone((Zone)payload) },
             PresetKind.Clock => new ClockPreset { Id = id, Name = trimmedName, CreatedAt = createdAt, Clock = ((DesktopClock)payload).Clone() },
             PresetKind.Calendar => new CalendarPreset { Id = id, Name = trimmedName, CreatedAt = createdAt, Calendar = ((DesktopCalendar)payload).Clone() },
             PresetKind.StickyNote => BuildStickyNotePreset(id, trimmedName, createdAt, (StickyNote)payload),
@@ -310,6 +313,19 @@ public class PresetService
         var path = Path.Combine(_folder, $"{id}.json");
         File.WriteAllText(path, JsonSerializer.Serialize(preset, preset.GetType(), Opts));
         return preset;
+    }
+
+    /// <summary>
+    /// 快捷栏预设的载荷：克隆之后把形态标记补回 <c>true</c>。
+    /// <see cref="Zone.Clone"/> 有意**不带** DockMode（否则套预设会把普通分区变成快捷栏），
+    /// 但预设文件本身应该自描述「这是一条快捷栏」，读回来的人/工具不用猜。
+    /// 套用逻辑仍然只看目标对象的 DockMode，所以这个字段不会被当成"改形态"。
+    /// </summary>
+    private static Zone CloneDockZone(Zone zone)
+    {
+        var clone = zone.Clone();
+        clone.DockMode = true;
+        return clone;
     }
 
     /// <summary>
@@ -358,6 +374,7 @@ public class PresetService
     public static object GetPayload(PresetRecord record) => record switch
     {
         ZonePreset z => z.Zone,
+        DockPreset d => d.Zone,
         ClockPreset c => c.Clock,
         CalendarPreset c => c.Calendar,
         StickyNotePreset s => s.Note,

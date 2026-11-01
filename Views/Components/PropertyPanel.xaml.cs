@@ -444,6 +444,9 @@ public partial class PropertyPanel : UserControl
     /// Clone()) — the helper expects a serializable snapshot.</summary>
     (PresetKind? kind, object? payload) BuildCurrentPayload() => Target switch
     {
+        // 快捷栏：独立的 PresetKind.Dock（落 Presets/Docks，卡片是长条缩略图），
+        // 和普通分区预设互不混用 —— 两边的外观字段根本不是一个集合。
+        Zone z when z.DockMode => (PresetKind.Dock, (object?)z.Clone()),
         Zone z => (PresetKind.Zone, (object?)z.Clone()),
         MergedGroupTarget g => (PresetKind.Zone, (object?)g.Master.Clone()),
         DesktopClock c => (PresetKind.Clock, (object?)c.Clone()),
@@ -482,6 +485,18 @@ public partial class PropertyPanel : UserControl
         var app = Application.Current as App;
         switch (Target)
         {
+            // 快捷栏预设：只套外观（填充/边框/玻璃/图标大小/悬停动效/倒影/磁贴/单击/
+            // 名称显示），名称、图标、图标内容、位置都不动；形态本身也不在拷贝表里。
+            case Zone z when z.DockMode && record is DockPreset dz:
+            {
+                var zoneName = z.Name;
+                var zoneIcon = z.IconChar;
+                CopyZoneFields(dz.Zone, z);
+                z.Name = zoneName;
+                z.IconChar = zoneIcon;
+                app?.ZoneManager?.GetZoneWindow(z.Id)?.RefreshZone(z);
+                break;
+            }
             case Zone z when record is ZonePreset zp:
             {
                 // 样式预设只套用外观，不覆盖目标分区的「名称 / 图标」。
@@ -698,6 +713,13 @@ public partial class PropertyPanel : UserControl
 
         switch (Target)
         {
+            case Zone z when z.DockMode:
+                // 快捷栏：独立的一套字段树（没有宽/高、网格、标题栏、自定义图标、
+                // 文件夹映射、自动整理；形态本身创建时定死，面板里不给切）。
+                InstanceName = EditableNameOf(z);
+                SetInstanceIcon("Icon.DockBar");
+                BuildDockFields(z);
+                break;
             case Zone z:
                 InstanceName = EditableNameOf(z);
                 SetInstanceIcon("Icon.Zones");
@@ -961,6 +983,7 @@ public partial class PropertyPanel : UserControl
 
     void BuildZoneStatus(Zone z)
     {
+        if (z.DockMode) { BuildDockStatus(z); return; }
         // 行1：显示/锁定开关
         var row1 = new DockPanel { LastChildFill = false };
         _statusVisibleCb = AddStatusSwitch(row1, _loc["PropertyPanel.Status.Visible"], z.IsVisible,
@@ -988,6 +1011,43 @@ public partial class PropertyPanel : UserControl
 
         // 行3：状态词条单独一行（底部），不再与开关挤同一行
         StatusHost.Children.Add(MakeZoneStatusChips(z, topMargin: 10));
+    }
+
+    /// <summary>快捷栏的状态区：「显示」+「锁定」开关 + 删除；没有合并、没有文件夹映射。
+    /// 下面一行是形态与尺寸的只读词条（形态不可改，写出来让用户知道）。
+    ///
+    /// ponytail 2026-11-01: 锁定与分区同一条路径（<see cref="ApplyZoneLock"/> → ZoneManager.SetLocked
+    /// → LockChanged → ZoneWindow.ApplyLockState）。快捷栏没有标题栏，锁按钮不可见，但锁定后
+    /// 条体不能拖动、图标不能换位/不能接收拖入 —— 和分区"锁住就不能挪"是同一个语义。</summary>
+    void BuildDockStatus(Zone z)
+    {
+        var row1 = new DockPanel { LastChildFill = false };
+        _statusVisibleCb = AddStatusSwitch(row1, _loc["PropertyPanel.Status.Visible"], z.IsVisible,
+            _ => ApplyZoneVisibility(z));
+        _statusLockCb = AddStatusSwitch(row1, _loc["PropertyPanel.Status.Locked"], z.IsLocked,
+            on => ApplyZoneLock(z, on));
+        StatusHost.Children.Add(row1);
+
+        var row2 = new DockPanel { LastChildFill = false, Margin = new Thickness(0, 10, 0, 0) };
+        var delete = MakeStatusDangerButton(_loc["DockMenu.DeleteDock"]);
+        delete.Click += (_, _) => DeleteTarget?.Invoke(z);
+        DockPanel.SetDock(delete, Dock.Right);
+        row2.Children.Add(delete);
+        StatusHost.Children.Add(row2);
+
+        var chips = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Margin = new Thickness(0, 10, 0, 0),
+        };
+        chips.Children.Add(MakeStatusChip(_loc["Dock.ManageSubtitle"], true));
+        chips.Children.Add(MakeStatusChip($"{z.GridSize}px", true));
+        chips.Children.Add(MakeStatusChip($"{z.Items.Count} {_loc["Manage.Count.Unit"]}", z.Items.Count > 0));
+        // 锁定状态也给一个词条：快捷栏没有标题栏，那颗 🔒 按钮是不可见的，这里得能看出锁没锁。
+        var lockChip = MakeStatusChip(_loc["PropertyPanel.Status.Locked"], z.IsLocked);
+        _statusChips.Add((lockChip, () => z.IsLocked));
+        chips.Children.Add(lockChip);
+        StatusHost.Children.Add(chips);
     }
 
     FrameworkElement MakeZoneStatusChips(Zone z, double topMargin = 0)
@@ -1314,6 +1374,132 @@ public partial class PropertyPanel : UserControl
         _customIconCb.ToolTip = allowed
             ? _loc["ZoneProp.CustomIconHint"]
             : _loc["ZoneProp.CustomIconDisabledHint"];
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  快捷栏（Dock）字段树
+    //  形态在创建时定死（DockMode），所以这里没有「宽/高、网格吸附、自动排列、
+    //  自定义图标、标题栏、文件夹映射、自动整理」这些分区专属项；多出来的是
+    //  图标大小、单击打开、悬停放大、倒影。
+    // ═══════════════════════════════════════════════════════════════════════
+    void BuildDockFields(Zone z)
+    {
+        _tileGated.Clear();
+        var root = new StackPanel { Margin = new Thickness(16, 12, 16, 12) };
+
+        // 基本
+        var basic = MakeSection(_loc["DockProp.Section.Basic"]);
+        basic.Children.Add(MakeNameRow(_loc["ZoneProp.Name"], z.Name,
+            v => { z.Name = v ?? ""; Save(z); }));
+        basic.Children.Add(MakeNumberSubBlock(_loc["DockProp.CellSize"], z.GridSize,
+            v => { z.GridSize = (int)Math.Clamp(v, 24, 96); Save(z); },
+            asInt: true, hint: _loc["DockProp.CellSizeHint"]));
+        basic.Children.Add(MakeCheckRow(_loc["DockProp.ShowName"], !z.HideAppName,
+            v => { z.HideAppName = !v; Save(z); }));
+        // 磁贴模式 = 全透明（与律动条同一个语义）：去掉填充/边框/背景图，只留图标。
+        basic.Children.Add(MakeCheckRow(_loc["ZoneProp.TileMode"], z.TileMode,
+            v => { z.TileMode = v; Save(z); }));
+        basic.Children.Add(MakeCheckRow(_loc["DockProp.ClickOnce"], z.DockClickOnce,
+            v => { z.DockClickOnce = v; Save(z); }));
+        basic.Children.Add(MakeCornerStyleRow(z.CornerRadius > 0, rounded =>
+        {
+            z.CornerRadius = rounded ? (z.CornerRadius > 0 ? z.CornerRadius : 12) : 0;
+            Save(z);
+        }));
+        // 恢复按钮（最小化到 36×36 小方块）+ 动效设置
+        basic.Children.Add(MakeCheckRowWithSideBtn(_loc["ZoneProp.RestoreButton"], z.EnableRestoreButton,
+            v => { z.EnableRestoreButton = v; Save(z); },
+            _loc["Motion.SettingsEllipsis"], _ => OpenMotionDialog(z, () => BuildDockFields(z))));
+        // 左侧开始菜单按钮（与图标区之间有一条半透明竖线）
+        basic.Children.Add(MakeCheckRow(_loc["DockProp.StartButton"], z.DockStartButton,
+            v => { z.DockStartButton = v; Save(z); }));
+        // 最小化后悬停那颗 36×36 的恢复按钮就自动展开（快捷栏没有热键/托盘，方块是唯一入口）
+        basic.Children.Add(MakeCheckRow(_loc["DockProp.HoverRestore"], z.DockHoverRestore,
+            v => { z.DockHoverRestore = v; Save(z); }));
+        root.Children.Add(basic);
+
+        // 运行状态（Windows 任务栏那套：后台灰短线 / 前台蓝长线；点运行中的应用 = 切前台）
+        var run = MakeSection(_loc["DockProp.Section.Run"]);
+        run.Children.Add(MakeCheckRow(_loc["DockProp.RunIndicator"], z.DockRunIndicator,
+            v => { z.DockRunIndicator = v; Save(z); }));
+        run.Children.Add(MakeCheckRow(_loc["DockProp.RunAnim"], z.DockRunAnim,
+            v => { z.DockRunAnim = v; Save(z); }));
+        root.Children.Add(run);
+
+        // 悬停动效（放大 + 相邻推让）。名称不再叫「启用放大动画」：它同时还决定
+        // 悬停高光要不要亮（动效开着就不铺高光，两者叠在一起会互相打架）。
+        var motion = MakeSection(_loc["DockProp.Section.Motion"]);
+        var animateCb = MakeCheckRow(_loc["DockProp.Animate"], z.DockAnimate,
+            v => { z.DockAnimate = v; Save(z); });
+        motion.Children.Add(animateCb);
+        // 放大倍数：一位小数（1.1–1.8），走小数模式，右侧显示 1.4 而不是 14。
+        motion.Children.Add(MakeSliderRow(_loc["DockProp.Magnify"], 1.1, 1.8, 0.1,
+            Math.Round(Math.Clamp(z.DockMagnify, 1.1, 1.8), 1),
+            v => { z.DockMagnify = Math.Round(v, 1); Save(z); }, integer: false));
+        motion.Children.Add(MakeSliderRow(_loc["DockProp.AnimMs"], 80, 300, 20,
+            z.DockAnimMs, v => { z.DockAnimMs = (int)v; Save(z); }));
+        root.Children.Add(motion);
+
+        // 倒影
+        var refl = MakeSection(_loc["DockProp.Section.Reflection"]);
+        var reflCb = MakeCheckRow(_loc["DockProp.Reflection"], z.DockReflection,
+            v => { z.DockReflection = v; Save(z); });
+        refl.Children.Add(reflCb);
+        refl.Children.Add(MakeSliderRow(_loc["DockProp.ReflectionOpacity"], 0, 100, 5,
+            z.DockReflectionOpacity, v => { z.DockReflectionOpacity = v; Save(z); }));
+        root.Children.Add(refl);
+
+        // 边框与填充
+        var bf = MakeSection(_loc["ZoneProp.Section.BorderFill"]);
+        bf.Children.Add(MakeTextRow(_loc["ZoneProp.BorderThickness"], z.BorderThickness.ToString("0.0", CultureInfo.InvariantCulture),
+            v => { if (double.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out var d)) { z.BorderThickness = d; Save(z); } }));
+        bf.Children.Add(MakeColorRow(_loc["ZoneProp.BorderColor"], z.BorderColor,
+            v => { z.BorderColor = v; Save(z); }));
+        bf.Children.Add(MakeSliderRow(_loc["ZoneProp.BorderOpacity"], 0, 100, 5,
+            ParsePercent(z.BorderColor, 25),
+            p => { z.BorderColor = SetPercent(z.BorderColor, p, "FFFFFF"); Save(z); }));
+        bf.Children.Add(MakeColorRow(_loc["ZoneProp.FillColor"], z.FillColor,
+            v => { z.FillColor = v; Save(z); }));
+        bf.Children.Add(MakeSliderRow(_loc["ZoneProp.FillOpacity"], 0, 100, 5,
+            ParsePercent(z.FillColor, 8),
+            p => { z.FillColor = SetPercent(z.FillColor, p, "000000"); Save(z); }));
+        root.Children.Add(bf);
+
+        // 液态玻璃
+        var lg = MakeSection(_loc["ZoneProp.Section.LiquidGlass"]);
+        lg.Children.Add(MakeCheckRowWithSideBtn(_loc["ZoneProp.LiquidGlass"], z.EnableLiquidGlass,
+            v => { z.EnableLiquidGlass = v; Save(z); },
+            _loc["ZoneProp.LiquidGlassSettingsEllipsis"], _ => OpenLiquidGlassDialog(z)));
+        root.Children.Add(lg);
+
+        // 背景图片（快捷栏尺寸由内容决定，所以这里不给「按图片改窗口大小」）
+        var bg = MakeSection(_loc["ZoneProp.Section.BgImage"]);
+        bg.Children.Add(MakeBgImageRow("", new BgImageBinding
+        {
+            GetPath = () => z.BackgroundImagePath,
+            SetPath = v => z.BackgroundImagePath = v ?? "",
+            GetOpacity = () => z.BackgroundImageOpacity,
+            SetOpacity = v => z.BackgroundImageOpacity = v,
+            GetZoom = () => z.BgImageZoom,
+            SetZoom = v => z.BgImageZoom = v,
+            GetOffsetX = () => z.BgImageOffsetX,
+            SetOffsetX = v => z.BgImageOffsetX = v,
+            GetOffsetY = () => z.BgImageOffsetY,
+            SetOffsetY = v => z.BgImageOffsetY = v,
+            GetWidth = () => z.Width, GetHeight = () => z.Height,
+            CropShape = "Rectangle",
+            TitleBarHeight = 0,
+            TitleBarInnerDividerHeights = Array.Empty<double>(),
+            OnSave = () => Save(z),
+            SetZoneSize = (w, h) => { },   // 快捷栏尺寸由内容算，忽略
+        }));
+        root.Children.Add(bg);
+
+        // 主体内容（图标名字悬停才出来，但图标颜色跟着「按钮颜色/内容颜色」走）
+        root.Children.Add(BuildBodyContentSection(
+            () => z.TextColor, v => z.TextColor = v, () => Save(z)));
+
+        SetFieldRoot(root);
     }
 
     void BuildZoneFields(Zone z)
@@ -3688,7 +3874,8 @@ public partial class PropertyPanel : UserControl
         FieldScroller.Content = root;
     }
 
-    Grid MakeSliderRow(string label, double min, double max, double tick, double value, Action<double> onChange)
+    Grid MakeSliderRow(string label, double min, double max, double tick, double value, Action<double> onChange,
+        bool integer = true)
     {
         var grid = new Grid { Margin = new Thickness(0, 6, 0, 0) };
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -3702,6 +3889,10 @@ public partial class PropertyPanel : UserControl
         });
         var slider = new SliderWithValue
         {
+            // 顺序要紧：IsIntegerValue 必须在 Value 之前赋值 —— 赋值 Value 时会按当时的
+            // 整数口径取整（1.4 会被吃掉变成 1），而对象初始化器是按书写顺序跑的。
+            // integer=false 走 "0.##" 显示（放大倍数 1.4 这类一位小数参数用）。
+            IsIntegerValue = integer,
             Min = min,
             Max = max,
             Tick = tick,
@@ -3893,22 +4084,44 @@ public partial class PropertyPanel : UserControl
         // position / content / membership are never copied.
         CloneHelper.CopyBaseProperties<AppearanceModel>(src, dst);
         dst.Name = src.Name;
-        dst.Width = src.Width;
-        dst.Height = src.Height;
+        // 快捷栏的宽高/格子是算出来的：套预设或「取消」时不能把它们写成预设里的值，
+        // 否则条体会被撑成 400×300 或格子跳到 65。形态 DockMode 本来就不在这张列表里。
+        if (!dst.DockMode)
+        {
+            dst.Width = src.Width;
+            dst.Height = src.Height;
+            dst.GridSize = src.GridSize;
+            dst.AutoArrange = src.AutoArrange;
+            dst.SnapToGrid = src.SnapToGrid;
+            dst.CustomIcon = src.CustomIcon;
+        }
+        else
+        {
+            // 快捷栏的「格子」就是图标大小 —— 属于外观，预设要带上（宽高仍由内容算）。
+            dst.GridSize = Math.Clamp(src.GridSize, 24, 96);
+        }
+        // 磁贴模式（全透明）两边都有，走同一条。
+        dst.TileMode = src.TileMode;
         dst.BorderThickness = src.BorderThickness;
         dst.CornerRadius = src.CornerRadius;
-        dst.GridSize = src.GridSize;
-        dst.SnapToGrid = src.SnapToGrid;
         dst.IconChar = src.IconChar;
         dst.TitleBarFillColor = src.TitleBarFillColor;
         dst.ControlOpacity = src.ControlOpacity;
         dst.BackgroundImageOpacity = src.BackgroundImageOpacity;
-        dst.AutoArrange = src.AutoArrange;
         dst.IconColor = src.IconColor;
         dst.TitleTextColor = src.TitleTextColor;
-        dst.TileMode = src.TileMode;
         dst.HideAppName = src.HideAppName;
-        dst.CustomIcon = src.CustomIcon;
+        // 快捷栏的外观参数（放大/倒影/单击）跟着预设走 —— 它们不改几何，普通分区上也只
+        // 是存着不生效（DockMode 才是形态开关，永远不进这一层）。
+        dst.DockAnimate = src.DockAnimate;
+        dst.DockMagnify = src.DockMagnify;
+        dst.DockAnimMs = src.DockAnimMs;
+        dst.DockReflection = src.DockReflection;
+        dst.DockReflectionOpacity = src.DockReflectionOpacity;
+        dst.DockClickOnce = src.DockClickOnce;
+        dst.DockRunIndicator = src.DockRunIndicator;
+        dst.DockRunAnim = src.DockRunAnim;
+        dst.DockStartButton = src.DockStartButton;
         dst.ButtonColor = src.ButtonColor;
         dst.TextColor = src.TextColor;
         dst.TitleBarFillIndependent = src.TitleBarFillIndependent;

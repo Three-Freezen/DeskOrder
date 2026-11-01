@@ -179,6 +179,7 @@
           </Style>
         </StackPanel.Style>
         <Button Width="24" Height="24" Margin="2,0" Cursor="Hand" Click="LockBtn_Click"
+                Visibility="{Binding LockVisibility, RelativeSource={RelativeSource AncestorType=UserControl}, FallbackValue=Visible}"
                 Background="Transparent" BorderThickness="0" ToolTip="{loc:Loc Key=Common.Lock}">
           <Path Width="14" Height="14" StrokeThickness="1.5"
                 Stroke="{DynamicResource Brush.Text.Tertiary}" StrokeLineJoin="Round"

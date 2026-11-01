@@ -246,6 +246,56 @@ public class ZoneManager
         return zone;
     }
 
+    /// <summary>
+    /// 新建一条快捷栏（Dock 形态的分区）。形态在创建时定死：
+    /// <c>DockMode=true</c>、隐藏应用名、不参与分区的自动排列/网格吸附、
+    /// 宽高由 <see cref="ZoneLayout.ApplyDockSize"/> 算出来，落在主屏工作区底部居中。
+    /// </summary>
+    public Zone CreateDock(string name = "Dock")
+    {
+        var zone = new Zone
+        {
+            Name = name,
+            DockMode = true,
+            HideAppName = true,
+            CornerRadius = 12,
+            GridSize = 48,
+            BorderThickness = 1.0,
+            AutoArrange = false,     // 快捷栏走单行排列，不用分区那套折行
+            SnapToGrid = false,
+            IsGridView = true,
+            TileMode = false,
+            CustomIcon = false,
+            EnableRestoreButton = true,   // 最小化后靠 36×36 的恢复按钮回到桌面
+            HoverExpandOrigin = HoverExpandOrigin.ButtonCenter,
+        };
+        ZoneLayout.ApplyDockSize(zone);
+        var (x, y) = ZoneLayout.DockSpawnPoint(zone);
+        zone.X = x;
+        zone.Y = y;
+
+        _config.Zones.Add(zone);
+        Zones.Add(zone);
+        SaveConfig();
+        ShowZone(zone);
+        ZonesChanged?.Invoke();
+        return zone;
+    }
+
+    /// <summary>
+    /// 快捷栏几何重算：图标增删/换序后调用 —— 排好 X/Y、按图标数算宽高、
+    /// 让开着的窗口跟着变尺寸。非 dock 分区直接返回。
+    /// </summary>
+    public void RecomputeDockGeometry(Guid zoneId)
+    {
+        var zone = Zones.FirstOrDefault(z => z.Id == zoneId);
+        if (zone == null || !zone.DockMode) return;
+        ZoneLayout.ArrangeDock(zone);
+        ZoneLayout.ApplyDockSize(zone);
+        GetZoneWindow(zoneId)?.ApplyDockGeometry();
+        ScheduleSaveConfig();
+    }
+
     /// <summary>Create a new SubFolder ZoneItem under <paramref name="owner"/>'s item list.
     /// ponytail: simplified placement — append at the last item's X+GridSize, or (0,0) when the
     /// owner is empty. Replace with a real "find empty cell" sweep when AutoArrange becomes
@@ -255,10 +305,17 @@ public class ZoneManager
         // ponytail 2026-08-26: 占位走 ZoneLayout.FindFreeSpot,和正常 AddItem 同一路径,
         // 自动按方形格子(GridSize×GridSize)在当前已有 items 周围找空格子,
         // 而不是无脑追加到 last 后面导致挤到一起或越界。
-        var (x, y) = ZoneLayout.FindFreeSpot(
-            owner.Items, owner.Width, owner.Height, owner.GridSize, owner.GridSize);
+        // 快捷栏是单行:追加到末尾,宽高由内容算(和 AddItem 的 dock 分支同一套)。
+        var (x, y) = owner.DockMode
+            ? (ZoneLayout.DockX(owner, owner.Items.Count), ZoneLayout.DockBandTop(owner))
+            : ZoneLayout.FindFreeSpot(owner.Items, owner.Width, owner.Height, owner.GridSize, owner.GridSize);
         var sub = new ZoneItem(name, "", ItemType.SubFolder, x, y);
         owner.Items.Add(sub);
+        if (owner.DockMode)
+        {
+            ZoneLayout.ArrangeDock(owner);
+            ZoneLayout.ApplyDockSize(owner);
+        }
         SaveConfig();
         ZonesChanged?.Invoke();
         return sub;
@@ -294,11 +351,25 @@ public class ZoneManager
         ShellIconService.Instance.GetIcon(item.TargetPath, item.Type, item.IconPath);
 
         double itemW = zone.GridSize;
-        var (x, y) = ZoneLayout.FindFreeSpot(zone.Items, zone.Width, zone.Height, itemW, itemW);
-        item.X = x;
-        item.Y = y;
+        if (zone.DockMode)
+        {
+            // 快捷栏：追加到末尾（不做方格找空位）
+            item.X = ZoneLayout.DockX(zone, zone.Items.Count);
+            item.Y = ZoneLayout.DockBandTop(zone);
+        }
+        else
+        {
+            var (x, y) = ZoneLayout.FindFreeSpot(zone.Items, zone.Width, zone.Height, itemW, itemW);
+            item.X = x;
+            item.Y = y;
+        }
 
         zone.Items.Add(item);
+        if (zone.DockMode)
+        {
+            ZoneLayout.ApplyDockSize(zone);
+            GetZoneWindow(zone.Id)?.ApplyDockGeometry();
+        }
         SaveConfig();
         NotifyChanged();
         return true;

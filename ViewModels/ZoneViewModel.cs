@@ -46,17 +46,21 @@ public class ZoneViewModel : INotifyPropertyChanged
 
     public bool ControlPointVisible => IsEditing;
 
-    private bool _isLocked;
+    /// <summary>
+    /// 锁定状态。**直接代理模型字段**（不再单独存一份）：
+    /// 管理界面的行锁按钮走的是 <c>ZoneManager.UpdateZone</c>（不触发 LockChanged），
+    /// 以前只更新模型 → 打开着的窗口里那份 VM 会一直是旧值，锁定就"看起来没生效"
+    /// （拖得动、图标还能换位）。代理之后两边永远同一个真源。
+    /// </summary>
     public bool IsLocked
     {
-        get => _isLocked;
+        get => _zone.IsLocked;
         set
         {
-            if (_isLocked != value)
-            {
-                _isLocked = value;
-                LockChanged?.Invoke(value);
-            }
+            if (_zone.IsLocked == value) return;
+            _zone.IsLocked = value;
+            OnPropertyChanged();
+            LockChanged?.Invoke(value);
         }
     }
 
@@ -278,10 +282,35 @@ public class ZoneViewModel : INotifyPropertyChanged
     }
 }
 
+/// <summary>快捷栏条目的运行状态（Windows 任务栏那套）：没在跑 / 在后台 / 是当前前台。</summary>
+public enum DockRunState
+{
+    None = 0,
+    Background = 1,
+    Foreground = 2,
+}
+
 public class ZoneItemViewModel : INotifyPropertyChanged
 {
     private readonly ZoneItem _item;
     private readonly ShellIconService _iconService;
+
+    private DockRunState _runState = DockRunState.None;
+    /// <summary>由 <see cref="Views.ZoneWindow"/> 的轮询写入；模板/代码据此画灰/蓝短线。</summary>
+    public DockRunState RunState
+    {
+        get => _runState;
+        set
+        {
+            if (_runState == value) return;
+            _runState = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsRunning));
+            OnPropertyChanged(nameof(IsFocusedApp));
+        }
+    }
+    public bool IsRunning => _runState != DockRunState.None;
+    public bool IsFocusedApp => _runState == DockRunState.Foreground;
 
     /// <summary>ponytail 2026-08-26: expose the underlying ZoneItem so the SubFolder
     /// template selector + SubfolderItemView wiring can unwrap the VM (ItemsControl

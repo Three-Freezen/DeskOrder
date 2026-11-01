@@ -948,6 +948,31 @@
             </Border>
         </DataTemplate>
 
+        <DataTemplate x:Key="DockCardTemplate">
+            <!-- 快捷栏预设卡：卡面是一根长条（自绘，按预设的填充/边框/圆角/玻璃/倒影/
+                 磁贴画），名称+日期在下方信息栏，和其他预设卡同一套版式。 -->
+            <Border Style="{StaticResource CardFrameStyle}"
+                    MouseEnter="Card_MouseEnter"
+                    MouseLeave="Card_MouseLeave"
+                    MouseLeftButtonDown="Card_MouseLeftButtonDown"
+                    Loaded="Card_Loaded">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Border Margin="10,10,10,2" CornerRadius="8" ClipToBounds="True"
+                            BorderBrush="#24FFFFFF" BorderThickness="1">
+                        <components:DockPresetPreview Zone="{Binding Payload}"/>
+                    </Border>
+                    <StackPanel Grid.Row="1" Margin="12,4,12,8" VerticalAlignment="Top">
+                        <TextBlock Text="{Binding Name}" Foreground="{DynamicResource Brush.Text.Tertiary}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Text="{Binding CreatedAt, StringFormat=yyyy-MM-dd}" Foreground="{DynamicResource Brush.Text.Tertiary}" FontSize="10" Margin="0,2,0,0"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </DataTemplate>
+
         <local:PresetCardTemplateSelector x:Key="CardSelector"
                 ZoneTemplate="{StaticResource ZoneCardTemplate}"
                 ClockAnalogTemplate="{StaticResource ClockAnalogCardTemplate}"
@@ -957,7 +982,8 @@
                 MergedGroupTemplate="{StaticResource MergedGroupCardTemplate}"
                 PanelTemplate="{StaticResource PanelCardTemplate}"
                 SubfolderTemplate="{StaticResource SubfolderCardTemplate}"
-                MediaPlayerTemplate="{StaticResource MediaPlayerCardTemplate}"/>
+                MediaPlayerTemplate="{StaticResource MediaPlayerCardTemplate}"
+                DockTemplate="{StaticResource DockCardTemplate}"/>
     </Window.Resources>
 
     <Border Background="{DynamicResource Brush.Bg.Chrome}" CornerRadius="12" BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1">

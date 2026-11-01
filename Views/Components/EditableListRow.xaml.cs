@@ -48,6 +48,11 @@ public partial class EditableListRow : UserControl
         nameof(HasStatusBadge), typeof(bool), typeof(EditableListRow), new PropertyMetadata(false));
     public static readonly DependencyProperty StatusBadgeBrushProperty = DependencyProperty.Register(
         nameof(StatusBadgeBrush), typeof(Brush), typeof(EditableListRow));
+    /// <summary>锁定按钮的可见性。快捷栏没有「锁定」这一态，行上要把那个按钮收掉
+    /// （传 <c>Visibility.Collapsed</c>）；其它列表默认可见。</summary>
+    public static readonly DependencyProperty LockVisibilityProperty = DependencyProperty.Register(
+        nameof(LockVisibility), typeof(Visibility), typeof(EditableListRow),
+        new PropertyMetadata(Visibility.Visible));
     // ponytail: drag-source / drop-target DPs from the old indicator-style design
     // were removed in the live-shift rewrite — siblings slide via DragTranslate.Y now.
 
@@ -61,6 +66,7 @@ public partial class EditableListRow : UserControl
     public string StatusBadge      { get => (string)GetValue(StatusBadgeProperty);      set => SetValue(StatusBadgeProperty, value); }
     public bool   HasStatusBadge   { get => (bool)GetValue(HasStatusBadgeProperty);   set => SetValue(HasStatusBadgeProperty, value); }
     public Brush? StatusBadgeBrush { get => (Brush?)GetValue(StatusBadgeBrushProperty); set => SetValue(StatusBadgeBrushProperty, value); }
+    public Visibility LockVisibility { get => (Visibility)GetValue(LockVisibilityProperty); set => SetValue(LockVisibilityProperty, value); }
 
     public ICommand? EditCommand       { get; set; }
     public ICommand? LockCommand       { get; set; }

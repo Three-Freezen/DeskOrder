@@ -91,6 +91,115 @@
                     </DataTrigger>
                 </DataTemplate.Triggers>
             </DataTemplate>
+            <!-- ── 快捷栏（Dock）图标模板 ────────────────────────────────────────
+                 与分区图标同一套数据（ZoneItemViewModel），但没有选中框、没有方格名字行：
+                 图标（+ 可选的名称）整体在格子里居中 —— 条体高就是这一格 + 内边距，
+                 所以"居中"等于"在条体正中间"。名称默认隐藏，属性面板「显示名称」打开后
+                 图标缩小一号、名字挂在下面；名字同时挂在 ToolTip 上（悬停也能看全名）。
+                 单击打开由代码在 Item_MouseUp 里按「有没有拖动」判定。
+                 悬停放大用容器自己的 RenderTransform（代码直接驱动，不走绑定）。 -->
+            <DataTemplate x:Key="DockItemTemplate">
+                <Grid x:Name="DockItemRoot"
+                      Width="{Binding ItemSize}" Height="{Binding ItemHeight}"
+                      Background="Transparent" Cursor="Hand"
+                      RenderTransformOrigin="0.5,1"
+                      MouseLeftButtonDown="Item_MouseDown"
+                      MouseMove="Item_MouseMove"
+                      MouseLeftButtonUp="Item_MouseUp"
+                      MouseEnter="Item_Enter"
+                      MouseLeave="Item_Leave">
+                    <Grid.ToolTip>
+                        <ToolTip Content="{Binding Name}" Placement="Top"/>
+                    </Grid.ToolTip>
+                    <Grid.ContextMenu>
+                        <ContextMenu Opened="ItemMenu_Opened">
+                            <MenuItem x:Name="CtxOpen" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.Open]}" Click="ItemOpen_Click"/>
+                            <MenuItem x:Name="CtxOpenLocation" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.OpenLocation]}" Click="ItemOpenLocation_Click"/>
+                            <MenuItem x:Name="CtxEmptyRecycle" Visibility="Collapsed"
+                                      Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.EmptyRecycleBin]}"
+                                      Click="ItemEmptyRecycle_Click"/>
+                            <MenuItem x:Name="CtxRename" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.Rename]}" Click="ItemRename_Click"/>
+                            <Separator x:Name="CtxSep1"/>
+                            <MenuItem x:Name="CtxDelete" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.Delete]}" Click="ItemDelete_Click" Foreground="#FF6666"/>
+                        </ContextMenu>
+                    </Grid.ContextMenu>
+                    <Border x:Name="HoverBox" CornerRadius="8" Background="Transparent"
+                            IsHitTestVisible="False"/>
+                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center"
+                                IsHitTestVisible="False">
+                        <Image x:Name="ItemIcon" Source="{Binding Icon}"
+                               Width="{Binding IconSize}" Height="{Binding IconSize}"
+                               Stretch="Uniform"
+                               RenderOptions.BitmapScalingMode="HighQuality"
+                               HorizontalAlignment="Center"/>
+                        <!-- 名称行：「显示名称」打开时才出现（DataTrigger 声明式，容器实例化
+                             瞬间即生效；勾选/取消由 ApplyHideAppName 显式刷一次）。 -->
+                        <TextBlock x:Name="ItemNameText" Text="{Binding Name}" FontSize="10"
+                                   Margin="0,4,0,0"
+                                   Foreground="{Binding ItemTextBrush, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=#E0FFFFFF}"
+                                   TextAlignment="Center"
+                                   TextTrimming="CharacterEllipsis"
+                                   MaxWidth="{Binding NameMaxWidth}"
+                                   HorizontalAlignment="Center"/>
+                    </StackPanel>
+                    <!-- 运行状态短线（Windows 任务栏那套）：后台 = 灰色短、前台 = 蓝色稍长，
+                         同一时刻只有一条蓝（前台只有一个）。宽度/颜色由代码动画推进；
+                         位置贴格子底边外侧（负边距 → 落在胶囊的下内边距里，不压名字）。 -->
+                    <Border x:Name="RunBar" Height="3" Width="0" CornerRadius="1.5"
+                            VerticalAlignment="Bottom" HorizontalAlignment="Center"
+                            Margin="0,0,0,-4" Background="Transparent"
+                            IsHitTestVisible="False"/>
+                </Grid>
+                <DataTemplate.Triggers>
+                    <DataTrigger Binding="{Binding DataContext.Zone.HideAppName,
+                                                  RelativeSource={RelativeSource AncestorType=Window}}"
+                                 Value="True">
+                        <Setter TargetName="ItemNameText" Property="Visibility" Value="Collapsed"/>
+                    </DataTrigger>
+                </DataTemplate.Triggers>
+            </DataTemplate>
+            <!-- 快捷栏里的次级分区：和分区同一颗自绘控件（2×2 缩略图 + 可选名字），
+                 只是外框跟着快捷键的格子走；根 Grid 仍叫 DockItemRoot，悬停放大/拖拽
+                 换位那套代码一字不改就能落到它身上。 -->
+            <DataTemplate x:Key="DockSubfolderItemTemplate">
+                <Grid x:Name="DockItemRoot"
+                      Width="{Binding ItemSize}" Height="{Binding ItemHeight}"
+                      Background="Transparent" Cursor="Hand"
+                      RenderTransformOrigin="0.5,1"
+                      MouseLeftButtonDown="Item_MouseDown"
+                      MouseMove="Item_MouseMove"
+                      MouseLeftButtonUp="Item_MouseUp"
+                      MouseEnter="Item_Enter"
+                      MouseLeave="Item_Leave">
+                    <Grid.ToolTip>
+                        <ToolTip Content="{Binding Name}" Placement="Top"/>
+                    </Grid.ToolTip>
+                    <Grid.ContextMenu>
+                        <ContextMenu>
+                            <MenuItem x:Name="CtxSubOpen" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.Open]}" Click="SubfolderOpen_Click"/>
+                            <MenuItem x:Name="CtxSubRename" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.Rename]}" Click="SubfolderRename_Click"/>
+                            <MenuItem x:Name="CtxSubDissolve" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Subfolder.Dissolve]}" Click="SubfolderDissolve_Click"/>
+                            <Separator/>
+                            <MenuItem x:Name="CtxSubDelete" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.Delete]}" Click="SubfolderDelete_Click" Foreground="#FF6666"/>
+                        </ContextMenu>
+                    </Grid.ContextMenu>
+                    <Border x:Name="HoverBox" CornerRadius="8" Background="Transparent"
+                            IsHitTestVisible="False"/>
+                    <c:SubfolderItemView x:Name="ItemIcon"
+                                         HideName="{Binding DataContext.Zone.HideAppName, RelativeSource={RelativeSource AncestorType=Window}}"
+                                         HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    <!-- 次级分区不参与运行状态（它不是应用），但保留同一个 RunBar 位，
+                         让「刷新运行状态」那段代码在两种模板上走同一条路。 -->
+                    <Border x:Name="RunBar" Height="3" Width="0" CornerRadius="1.5"
+                            VerticalAlignment="Bottom" HorizontalAlignment="Center"
+                            Margin="0,0,0,-4" Background="Transparent"
+                            IsHitTestVisible="False"/>
+                </Grid>
+            </DataTemplate>
+            <!-- 快捷栏的模板选择器：普通图标 / 次级分区两种模板，判据与分区那套一致。 -->
+            <c:SubfolderItemTemplateSelector x:Key="DockItemSelector"
+                                             ZoneItemTemplate="{StaticResource DockItemTemplate}"
+                                             SubfolderItemTemplate="{StaticResource DockSubfolderItemTemplate}"/>
             <DataTemplate x:Key="SubfolderItemTemplate">
                 <Grid Width="{Binding ItemSize}" Height="{Binding ItemSize}"
                       Background="Transparent" Cursor="Hand"
@@ -248,6 +357,11 @@
         <Border x:Name="MainContent" Visibility="Visible" ClipToBounds="True" CornerRadius="8">
             <Grid>
                 <!-- Fill layer + bg image -->
+                <!-- 快捷栏胶囊的玻璃宿主：和分区同一个 WallpaperBackdropLayer 挂进来，
+                     只占胶囊那一条（Margin 跟随 ApplyDockBarVisuals），圆角由 Clip 切。
+                     必须在 FillRect 之前，才能垫在填充/图标之下。 -->
+                <Grid x:Name="DockGlassHost" Visibility="Collapsed" IsHitTestVisible="False"
+                      ClipToBounds="True"/>
                 <Rectangle x:Name="FillRect" Fill="#08000000"
                            RadiusX="8" RadiusY="8" IsHitTestVisible="False"/>
                 <Border x:Name="BgImageBorder" ClipToBounds="True" IsHitTestVisible="False"
@@ -256,6 +370,12 @@
                            RenderOptions.BitmapScalingMode="HighQuality"
                            Opacity="0" IsHitTestVisible="False"/>
                 </Border>
+
+                <!-- 快捷栏专用：胶囊描边。分区的边框画在 ZoneBorder 上（整窗一圈），
+                     快捷栏的窗口比可见胶囊高（上方那条透明带留给放大溢出），所以描边
+                     必须单独一条、按 Margin 收进胶囊范围里画；磁贴模式下藏掉。 -->
+                <Rectangle x:Name="DockBarStroke" Visibility="Collapsed" IsHitTestVisible="False"
+                           Stroke="#30FFFFFF" StrokeThickness="1.0"/>
 
                 <Border x:Name="ZoneBorder"
                         BorderBrush="#30FFFFFF"
@@ -272,12 +392,16 @@
                             <!-- ponytail 2026-08-27: 父项 CtxImport/CtxNew 不挂 Click — 只承担
                                  展开子菜单职责。挂 Click 会同时触发父项 + 子项两个 Click,
                                  导致"导入系统项目"关闭后父项 ImportFiles_Click 又弹一次。 -->
+                            <!-- 快捷栏专用：添加应用（分区形态下隐藏）。「添加文件」不再单列 ——
+                                 下面的「导入 ▶ 导入文件」就是同一个入口，避免两处重复。 -->
+                            <MenuItem x:Name="CtxDockAddApp" Header="{loc:Loc Key=DockMenu.AddApp}" Click="DockAddApp_Click" Visibility="Collapsed"/>
+                            <Separator x:Name="CtxDockSep" Visibility="Collapsed"/>
                             <MenuItem x:Name="CtxImport" Header="{loc:Loc Key=ZoneMenu.Import}">
                                 <MenuItem x:Name="CtxImportFiles" Header="{loc:Loc Key=ZoneMenu.ImportFiles}" Click="ImportFiles_Click"/>
                                 <MenuItem x:Name="CtxImportFolder" Header="{loc:Loc Key=ZoneMenu.ImportFolder}" Click="ImportFolder_Click"/>
                                 <MenuItem x:Name="CtxImportShell" Header="{loc:Loc Key=Zone.ImportShellItems}" Click="ImportShellItems_Click"/>
                             </MenuItem>
-                            <Separator/>
+                            <Separator x:Name="CtxImportSep"/>
                             <MenuItem x:Name="CtxNewSubZone" Header="{loc:Loc Key=SubZone.New}" Click="NewSubfolder_Click"/>
                             <MenuItem x:Name="CtxNew" Header="{loc:Loc Key=ZoneMenu.New}">
                                 <MenuItem x:Name="CtxNewFolder" Header="{loc:Loc Key=ZoneMenu.NewFolder}" Click="NewFolder_Click"/>
@@ -298,6 +422,8 @@
                                  切锁定态同步菜单 Header;合并组时随主分区状态同步(同一右键菜单)。 -->
                             <MenuItem x:Name="CtxLock" Header="{loc:Loc Key=Common.Lock}" Click="CtxLock_Click"/>
                             <MenuItem x:Name="CtxMinimize" Header="{loc:Loc Key=ZoneMenu.Minimize}" Click="HideZone_Click"/>
+                            <!-- 快捷栏专用：完全隐藏（= 关窗口，只能在管理界面的「快捷栏」列表里找回） -->
+                            <MenuItem x:Name="CtxFullHide" Header="{loc:Loc Key=DockMenu.Hide}" Click="DockFullHide_Click" Visibility="Collapsed"/>
                             <MenuItem x:Name="CtxDelete" Header="{loc:Loc Key=ZoneMenu.DeleteZone}" Foreground="#FF6666" Click="DeleteZone_Click"/>
                             <Separator x:Name="CtxPasteSep" Visibility="Collapsed"/>
                             <MenuItem x:Name="CtxPaste" Header="{loc:Loc Key=FolderMap.Paste}" Click="PasteClipboard_Click" Visibility="Collapsed"/>
@@ -472,6 +598,40 @@
                                 <TranslateTransform x:Name="ItemsViewportTranslate" X="0"/>
                             </ScrollViewer.RenderTransform>
                         <Grid>
+                        <!-- 快捷栏的「开始菜单按钮 + 分隔竖线」层：画在图标下面（同 Grid 里排在
+                             ItemsControl 之前），位置由 ZoneWindow.UpdateDockChrome 按几何算。
+                             没有背景的 Canvas 不参与命中测试，所以不会挡住条体拖动。 -->
+                        <Canvas x:Name="DockChromeLayer" Visibility="Collapsed"
+                                HorizontalAlignment="Left" VerticalAlignment="Top">
+                            <Border x:Name="DockStartBtn" Width="48" Height="48" CornerRadius="10"
+                                    Background="Transparent" Cursor="Hand"
+                                    MouseEnter="DockStart_Enter" MouseLeave="DockStart_Leave"
+                                    ToolTip="{loc:Loc Key=DockMenu.Start}">
+                                <!-- Windows 开始菜单标记（复刻，不是 icon 资源）：
+                                     shell 那个四格标是 StartMenu/explorer 里的私有 XAML 矢量，
+                                     imageres.dll / shell32.dll 里没有对应图标资源（208 是安全中心
+                                     盾牌），所以按原生比例 1:1 重画 —— 16 单位方格、四块 7.5、
+                                     缝隙 1、圆角 0.6。
+                                     颜色固定为 Windows 经典蓝 #0078D4（Win8/8.1/10 那颗开始按钮
+                                     的标就是这个色；之前跟「内容颜色」走，深色主题下是一排白灰小方块，
+                                     用户反馈"没上 Windows 的经典蓝色"）。开始按钮的倒影由代码拍快照
+                                     镜像，颜色自然跟着这里走。 -->
+                                <Viewbox x:Name="DockStartGlyph" Margin="0">
+                                    <Canvas Width="16" Height="16">
+                                        <Rectangle Canvas.Left="0" Canvas.Top="0" Width="7.5" Height="7.5"
+                                                   RadiusX="0.6" RadiusY="0.6" Fill="#FF0078D4"/>
+                                        <Rectangle Canvas.Left="8.5" Canvas.Top="0" Width="7.5" Height="7.5"
+                                                   RadiusX="0.6" RadiusY="0.6" Fill="#FF0078D4"/>
+                                        <Rectangle Canvas.Left="0" Canvas.Top="8.5" Width="7.5" Height="7.5"
+                                                   RadiusX="0.6" RadiusY="0.6" Fill="#FF0078D4"/>
+                                        <Rectangle Canvas.Left="8.5" Canvas.Top="8.5" Width="7.5" Height="7.5"
+                                                   RadiusX="0.6" RadiusY="0.6" Fill="#FF0078D4"/>
+                                    </Canvas>
+                                </Viewbox>
+                            </Border>
+                            <Rectangle x:Name="DockStartSep" Width="1" Height="30" Fill="#30FFFFFF"
+                                       IsHitTestVisible="False"/>
+                        </Canvas>
                         <ItemsControl x:Name="ItemsHost" ItemsSource="{Binding Items}">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
@@ -503,7 +663,6 @@
                         <Canvas x:Name="DropIndicatorLayer" IsHitTestVisible="False" Background="Transparent"/>
                         </Grid>
                         </ScrollViewer>
-
                         <!-- Folder mapping view (visible when folder mapping is enabled) -->
                         <Border x:Name="FolderMappingView" Grid.Row="2" Visibility="Collapsed"
                                 Background="#40000000" ClipToBounds="True">

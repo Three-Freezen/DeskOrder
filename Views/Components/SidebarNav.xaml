@@ -152,6 +152,15 @@
               <TextBlock Text="{loc:Loc Key=Sidebar.MergedZones}" VerticalAlignment="Center"/>
             </StackPanel>
           </Button>
+          <Button x:Name="NavDocks" Style="{StaticResource NavItem}" Tag="docks" Click="NavItem_Click">
+            <StackPanel Orientation="Horizontal">
+              <Path Width="16" Height="16" Margin="0,0,12,0" Stretch="Uniform"
+                    Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                    StrokeThickness="1.5" StrokeLineJoin="Round"
+                    Data="{StaticResource Icon.DockBar}"/>
+              <TextBlock Text="{loc:Loc Key=Manage.Docks}" VerticalAlignment="Center"/>
+            </StackPanel>
+          </Button>
           <Button x:Name="NavPanel" Style="{StaticResource NavItem}" Tag="panel" Click="NavItem_Click">
             <StackPanel Orientation="Horizontal">
               <Path Width="16" Height="16" Margin="0,0,12,0" Stretch="Uniform"

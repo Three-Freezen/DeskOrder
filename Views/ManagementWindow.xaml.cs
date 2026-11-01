@@ -188,6 +188,7 @@ public partial class ManagementWindow : Window
             if (MainContent != null && MainContent.Content is UserControl page)
             {
                 if (page is ZonesPage zp) zp.ApplyLoc();
+        else if (page is DocksPage dkp) dkp.ApplyLoc();
                 else if (page is MergedGroupsPage mgp) mgp.ApplyLoc();
                 else if (page is PanelPage pp) pp.ApplyLoc();
                 else if (page is CalendarPage cp) cp.ApplyLoc();
@@ -306,7 +307,7 @@ public partial class ManagementWindow : Window
         var loc = LocalizationService.Instance;
         return section switch
         {
-            "zones" or "merged" or "panel" => loc["Breadcrumb.GroupZones"],
+            "zones" or "merged" or "panel" or "docks" => loc["Breadcrumb.GroupZones"],
             "calendar" or "clock" or "sticky" => loc["Breadcrumb.GroupWidgets"],
             _ => "DeskOrder",
         };
@@ -319,6 +320,7 @@ public partial class ManagementWindow : Window
         {
             "zones"    => loc["Breadcrumb.Zones"],
             "merged"   => loc["Breadcrumb.Merged"],
+            "docks"    => loc["Manage.Docks"],
             "panel"    => loc["Breadcrumb.Panel"],
             "calendar" => loc["Breadcrumb.Calendar"],
             "clock"    => loc["Breadcrumb.Clock"],
@@ -857,6 +859,19 @@ public partial class ManagementWindow : Window
     }
 
     public void NewZone() => _viewModel.CreateZoneCommand.Execute(null);
+
+    /// <summary>
+    /// 新建一条快捷栏。形态创建时定死（不做形态选择框）：名字按「快捷栏 1 / 2…」自动编号，
+    /// 落地位置由 ZoneLayout 算（主屏工作区底部居中）。
+    /// </summary>
+    public Zone? NewDock()
+    {
+        if (_zoneManager == null) return null;
+        int n = 1;
+        while (_zoneManager.Zones.Any(z => z.DockMode && z.Name == $"{_loc["Manage.Docks"]} {n}")) n++;
+        var dock = _zoneManager.CreateDock($"{_loc["Manage.Docks"]} {n}");
+        return dock;
+    }
 
     public void ShowAll(bool staggered = true)
     {
@@ -2087,6 +2102,7 @@ public partial class ManagementWindow : Window
         System.Windows.Controls.UserControl? page = section switch
         {
             "zones"    => new ZonesPage(this, _viewModel, _zoneManager),
+            "docks"    => new DocksPage(this, _viewModel, _zoneManager),
             "merged"   => new MergedGroupsPage(this, _viewModel, _zoneManager),
             "panel"    => new PanelPage(this, _configService, _panelService),
             "calendar" => new CalendarPage(this, _viewModel, _widgetService),
@@ -2113,7 +2129,8 @@ public partial class ManagementWindow : Window
 
     private string GetSectionCountLabel(string section)
     {
-        int zones = _zoneManager?.Zones?.Count ?? 0;
+        int zones = _zoneManager?.Zones?.Count(z => !z.DockMode) ?? 0;
+        int docks = _zoneManager?.Zones?.Count(z => z.DockMode) ?? 0;
         int merged = _zoneManager?.Zones?.Count(z => z.MergedGroupMembership.SubZoneIds.Count > 0) ?? 0;
         int notes = _notesService?.Notes?.Count ?? 0;
         int clocks = _widgetService?.Clocks?.Count ?? 0;
@@ -2122,6 +2139,7 @@ public partial class ManagementWindow : Window
         return section switch
         {
             "zones"    => _loc.Get("Manage.Sidebar.Zones", zones),
+            "docks"    => _loc.Get("Manage.Sidebar.Docks", docks),
             "merged"   => _loc.Get("Manage.Sidebar.MergedGroups", merged),
             "panel"    => _loc["Manage.Sidebar.Panel"],
             "calendar" => _loc.Get("Manage.Sidebar.Calendars", calendars),

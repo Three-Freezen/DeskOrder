@@ -507,6 +507,8 @@ public class PropertyWindowManager
 
     public static string IconOf(object target) => target switch
     {
+        // 快捷栏与普通分区用不同图标（编辑器标签页/标题栏一眼区分形态）
+        Zone { DockMode: true } => "Icon.DockBar",
         Zone => "Icon.Zones",
         MergedGroupTarget => "Icon.Merged",
         DesktopClock => "Icon.Clock",

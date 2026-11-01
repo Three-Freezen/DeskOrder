@@ -57,7 +57,9 @@ public partial class ZonesPage : UserControl
     public void RefreshList()
     {
         var loc = LocalizationService.Instance;
-        var zones = _zoneManager.Zones;
+        // 快捷栏有自己的侧栏条目和列表页（DocksPage），这里只列普通分区，
+        // 否则同一个对象会在两个页面各出现一次。
+        var zones = _zoneManager.Zones.Where(z => !z.DockMode).ToList();
         CountLabel.Text = $"{zones.Count} {loc["Manage.Count.Unit"]}";
         // 拖动排序即列表顺序：不再按名称/数量重排，Rows 直接镜像 Zones 的持久化顺序。
         _rows.Clear();
@@ -141,7 +143,8 @@ public partial class ZonesPage : UserControl
     {
         _main.NewZone();
         RefreshList();
-        var last = _zoneManager.Zones.LastOrDefault();
+        // 只选普通分区（快捷栏有自己的页面，别在分区页里把新建的快捷栏选进来）
+        var last = _zoneManager.Zones.LastOrDefault(z => !z.DockMode);
         if (last != null) Select(last);
     }
 

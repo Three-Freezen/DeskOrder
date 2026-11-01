@@ -146,6 +146,11 @@ public static class NativeMethods
     public const int DWMWCP_ROUND = 2;
     public const int DWMWCP_DONOTROUND = 1;
 
+    /// <summary>窗口边框颜色（Win11 21H2+）。设成 <see cref="DWMWA_COLOR_NONE"/> 即不画那道 1px 边框。</summary>
+    public const int DWMWA_BORDER_COLOR = 34;
+    /// <summary>"不画边框"的哨兵值（DWM 文档里的 DWMWA_COLOR_NONE）。</summary>
+    public const int DWMWA_COLOR_NONE = unchecked((int)0xFFFFFFFE);
+
     [DllImport("dwmapi.dll")]
     public static extern int DwmSetWindowAttribute(IntPtr hwnd, int dwAttribute, ref int pvAttribute, int cbAttribute);
 
@@ -207,6 +212,26 @@ public static class NativeMethods
     }
 
     /// <summary>
+    /// Win11 会给每个顶层窗口描一圈 1px 边框（DWM 里叫 visible frame border，
+    /// <c>DwmGetWindowAttribute(DWMWA_VISIBLE_FRAME_BORDER_THICKNESS)</c> = 1）。
+    /// 对「窗口 = 可见内容」的普通窗口看不出来，但快捷栏的窗口比可见胶囊高
+    /// （上方放大余量 + 下方倒影带），那条边框就变成胶囊外面的一圈亮线。
+    /// DWMWA_BORDER_COLOR = DWMWA_COLOR_NONE 是官方关掉它的办法（21H2+）。
+    /// </summary>
+    public static void RemoveWindowBorder(Window window)
+    {
+        var hwnd = new WindowInteropHelper(window).Handle;
+        if (hwnd == IntPtr.Zero) return;
+
+        try
+        {
+            int none = DWMWA_COLOR_NONE;
+            DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, ref none, sizeof(int));
+        }
+        catch { /* 旧系统忽略即可 */ }
+    }
+
+    /// <summary>
     /// ponytail 2026-08-26 ghost-ring fix: DWM draws a drop shadow around borderless
     /// layered windows' opaque content — for a collapsed widget that's the RestoreButton,
     /// so the shadow hugs the button and shows as a dark ring on the wallpaper (the
@@ -225,6 +250,35 @@ public static class NativeMethods
         }
         catch { /* older Windows — no frame shadow to disable */ }
     }
+
+    // ── 低层鼠标钩子 + 命中测试（快捷栏开始按钮用，见 DockStartButtonHook） ──
+    public const int WH_MOUSE_LL = 14;
+    public const int WM_LBUTTONDOWN = 0x0201;
+    public const int WM_LBUTTONDBLCLK = 0x0203;
+
+    public delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct MSLLHOOKSTRUCT
+    {
+        public POINT pt;                 // 复用下面的 POINT（x/y 小写那个）
+        public uint mouseData;
+        public uint flags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern IntPtr SetWindowsHookEx(int idHook, LowLevelMouseProc lpfn, IntPtr hMod, uint dwThreadId);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool UnhookWindowsHookEx(IntPtr hhk);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    public static extern IntPtr GetModuleHandle(string? lpModuleName);
 
     // ── Global Hotkey ──
     public const uint MOD_ALT = 0x0001;
@@ -456,6 +510,64 @@ public static class NativeMethods
 
         return null;
     }
+
+    // ── 前台窗口 / 激活 / 开始菜单（快捷栏的「运行状态」与开始按钮用） ──
+
+    public const int SW_RESTORE = 9;
+
+    /// <summary>最小化（任务栏点击已在跑的应用那一下的行为）。</summary>
+    public const int SW_MINIMIZE = 6;
+
+    /// <summary>窗口被点击前那一下：**激活之前**由系统发给窗口，此时
+    /// <see cref="GetForegroundWindow"/> 还是"点击之前的那个前台窗口" —— 快捷栏靠它
+    /// 判断"我刚才是从哪个程序切过来的"，从而决定点图标是切前台还是最小化。</summary>
+    public const int WM_MOUSEACTIVATE = 0x0021;
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool BringWindowToTop(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsIconic(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
+    [DllImport("user32.dll")]
+    public static extern uint GetCurrentThreadId();
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern int GetWindowTextLength(IntPtr hWnd);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder lpString, int nMaxCount);
+
+    // 这三个在 DesktopHook 里也有一份；NativeMethods 自己再声明一次（不同类互不影响），
+    // 免得「运行状态」这段要跨类引用另一个 hook 类的成员。
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder lpClassName, int nMaxCount);
+
+    [DllImport("user32.dll")]
+    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+    /// <summary>点「开始」按钮 = 敲一下 Win 键（系统自己弹开始菜单，最省事也最稳）。</summary>
+    [DllImport("user32.dll")]
+    public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+
+    public const byte VK_LWIN = 0x5B;
+    public const uint KEYEVENTF_KEYUP = 0x0002;
+    public const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
 }
 
 // ponytail 2026-08-27: 桌面双击全局监听 — LowLevel 鼠标钩子。
@@ -541,6 +653,7 @@ public static class DesktopHook
 
     [DllImport("kernel32.dll")]
     public static extern bool CloseHandle(IntPtr hObject);
+
 
     [DllImport("kernel32.dll", SetLastError = true)]
     public static extern IntPtr VirtualAllocEx(IntPtr hProcess, IntPtr lpAddress, IntPtr dwSize, uint flAllocationType, uint flProtect);
