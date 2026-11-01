@@ -1111,9 +1111,16 @@ public partial class App : System.Windows.Application
             });
         // 液态玻璃（用户那条配置的配方）+ 倒影 + 次级分区 + 开始按钮倒影：
         // 验证玻璃只铺在胶囊里、开始按钮和 2×2 方框都出镜像。
-        await RenderOneAsync(MakeDock(animate: false, reflection: true, withSubfolder: true, glass: true),
-            "dock-n-glass.png", -1,
-            null, w => log.AppendLine("  " + w.DebugDockGlass()), onScreen: true);
+        // ponytail 2026-11-01: 玻璃预览必须走「壁纸采样」方案 —— 第 7 轮起「DWM 方案」
+        // 的胶囊玻璃是一个独立 HWND（DockGlassWindow），RenderTargetBitmap 只渲染 WPF
+        // 可视树，抓不到它，预览图会变成"没有玻璃"。这两张图要的是图层那条路的样子。
+        bool previewSchemeWasEnabled = DesktopZones.Helpers.WallpaperSource.Enabled;
+        DesktopZones.Helpers.WallpaperSource.Enabled = true;
+        try
+        {
+            await RenderOneAsync(MakeDock(animate: false, reflection: true, withSubfolder: true, glass: true),
+                "dock-n-glass.png", -1,
+                null, w => log.AppendLine("  " + w.DebugDockGlass()), onScreen: true);
         // 判定自测：点图标「切前台 / 最小化」、文件夹横条（资源管理器打开位置匹配）
         await RenderOneAsync(MakeDock(animate: false, reflection: false),
             "dock-p-diag.png", -1, null, w =>
@@ -1134,9 +1141,11 @@ public partial class App : System.Windows.Application
                 log.AppendLine("  " + w.PreviewDockToggle(1));
             });
         // 玻璃 + 悬停 1.8（玻璃不该跟着放大，胶囊宽度也不变）
-        await RenderOneAsync(MakeDock(animate: true, reflection: true, magnify: 1.8, glass: true),
-            "dock-o-glass-hover.png", 2,
-            null, w => log.AppendLine("  " + w.DebugDockGlass()), onScreen: true);
+            await RenderOneAsync(MakeDock(animate: true, reflection: true, magnify: 1.8, glass: true),
+                "dock-o-glass-hover.png", 2,
+                null, w => log.AppendLine("  " + w.DebugDockGlass()), onScreen: true);
+        }
+        finally { DesktopZones.Helpers.WallpaperSource.Enabled = previewSchemeWasEnabled; }
 
         // 悬停恢复按钮自动展开（item 7）：开关开 → 合成 MouseEnter 后应自动展开；关 → 不展开。
         try

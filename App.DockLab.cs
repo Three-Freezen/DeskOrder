@@ -70,6 +70,7 @@ public partial class App
             if (which is "glass") { await LabGlassAsync(dir, Say); return; }
             if (which is "dwmscope") { await LabDwmScopeAsync(dir, Say); return; }
             if (which is "layerglass") { await LabLayerGlassAsync(dir, Say); return; }
+            if (which is "glasswin") { await LabGlassWindowAsync(dir, Say); return; }
             if (which is "state" or "all") await LabStateAsync(dir, Say);
             if (which is "ring" or "all") await LabRingAsync(dir, Say);
             if (which is "ring2" or "all") await LabRingClickAsync(dir, Say);
@@ -452,6 +453,23 @@ public partial class App
             Math.Max(4, (int)Math.Round(h * dpi.DpiScaleY)));
     }
 
+    /// <summary>两张图在区域内的平均绝对差（判断"这块画面有没有在动"）。</summary>
+    static double MeanAbsDiff(DBitmap a, DBitmap b, DRect r)
+    {
+        int x0 = Math.Max(0, r.X), y0 = Math.Max(0, r.Y);
+        int x1 = Math.Min(Math.Min(a.Width, b.Width), r.Right);
+        int y1 = Math.Min(Math.Min(a.Height, b.Height), r.Bottom);
+        double sum = 0; int n = 0;
+        for (int y = y0; y < y1; y += 2)
+            for (int x = x0; x < x1; x += 2)
+            {
+                var p = a.GetPixel(x, y); var q = b.GetPixel(x, y);
+                sum += (Math.Abs(p.R - q.R) + Math.Abs(p.G - q.G) + Math.Abs(p.B - q.B)) / 3.0;
+                n++;
+            }
+        return n == 0 ? 0 : sum / n;
+    }
+
     /// <summary>区域「锐度」= 相邻像素的水平亮度差均值。模糊越重越小。</summary>
     static double Sharpness(DBitmap bmp, DRect r)
     {
@@ -481,6 +499,126 @@ public partial class App
                 sum += (p.R + p.G + p.B) / 3.0; n++;
             }
         return n == 0 ? 0 : sum / n;
+    }
+
+    // ── 场景 5：B —— 胶囊大小的独立「玻璃窗」吃真 DWM（实景模糊） ──────────
+    //
+    // 要验证四件事：
+    //   ① 玻璃窗存在、正好胶囊大小、在内容窗口正下方；
+    //   ② 胶囊里是玻璃（比周围壁纸模糊），而两条透明带**没有**被糊；
+    //   ③ 点击仍然落在内容窗口（玻璃窗 WS_EX_TRANSPARENT 不抢命中）；
+    //   ④ 切回「壁纸采样」方案时玻璃窗藏起来、图层接管。
+
+    async Task LabGlassWindowAsync(string dir, Action<string> Say)
+    {
+        Say("");
+        Say("== glasswin: 双窗（内容层 + 胶囊玻璃层） ==");
+        var dock = _zoneManager!.Zones.FirstOrDefault(z => z.DockMode);
+        if (dock == null) { Say("配置里没有快捷栏 → 跳过"); return; }
+
+        bool oldTile = dock.TileMode, oldGlass = dock.EnableLiquidGlass;
+        bool oldScheme = DesktopZones.Helpers.WallpaperSource.Enabled;
+        try
+        {
+            dock.TileMode = false;
+            dock.EnableLiquidGlass = true;
+            DesktopZones.Helpers.WallpaperSource.Enabled = false;   // 渲染方案 = DWM
+            _zoneManager.ShowZone(dock);
+            var win = _zoneManager.GetZoneWindow(dock.Id);
+            if (win == null) { Say("拿不到窗口 → 跳过"); return; }
+            win.RefreshZone(dock);
+            MoveToFreeSpot(win, Say);
+            await Task.Delay(1600);
+            win.UpdateLayout();
+
+            var region = CaptureRegion(win, 30);
+            var pill = PillRectInRegion(win, dock, region);
+            var contentHwnd = new System.Windows.Interop.WindowInteropHelper(win).Handle;
+            var glassHwnd = win.DebugDockGlassHwnd();
+            Say($"content=0x{contentHwnd.ToInt64():X} glass=0x{glassHwnd.ToInt64():X}");
+            Say("state: " + win.DebugDockGlass());
+            Say("layer: " + win.DebugDockGlassLayer());
+
+            // ①② 画面：胶囊锐度应明显低于周围壁纸；顶部带上沿不应有玻璃
+            using (var shot = Grab(region))
+            {
+                SavePng(shot, Path.Combine(dir, "gw-1-dwm.png"));
+                var bandTop = new DRect(pill.X, pill.Y - 22, pill.Width, 16);
+                var bandBottom = new DRect(pill.X, pill.Bottom + 6, pill.Width, 16);
+                var outside = new DRect(region.Width - 70, region.Height - 40, 40, 24);
+                Say($"  sharp pill={Sharpness(shot, pill):F1} bandTop={Sharpness(shot, bandTop):F1} " +
+                    $"bandBottom={Sharpness(shot, bandBottom):F1} outside={Sharpness(shot, outside):F1} " +
+                    $"pillLuma={MeanLuma(shot, pill):F1}");
+            }
+
+            // ③ 命中：胶囊中心应该还是内容窗口
+            var cx = region.X + pill.X + pill.Width / 2;
+            var cy = region.Y + pill.Y + pill.Height / 2;
+            var hit = WindowAt((cx, cy));
+            var hitRoot = GetAncestor(hit, 2 /*GA_ROOT*/);
+            Say($"  WindowFromPoint(pill 中心 {cx},{cy}) = 0x{hit.ToInt64():X} root=0x{hitRoot.ToInt64():X} " +
+                $"isContent={hitRoot == contentHwnd} isGlass={hitRoot == glassHwnd}");
+            var by = region.Y + pill.Y - 12;      // 顶部带里的一点
+            var hitBand = WindowAt((cx, by));
+            Say($"  WindowFromPoint(顶部带 {cx},{by}) = 0x{hitBand.ToInt64():X} " +
+                $"isContent={hitBand == contentHwnd} isGlass={hitBand == glassHwnd}");
+
+            // 参照帧：两个窗口都收走（glass 是独立窗口，Hide 内容窗口不会带走它）
+            win.DebugSetDockGlassVisible(false);
+            win.Hide();
+            await Task.Delay(800);
+            using (var reference = Grab(region))
+            {
+                SavePng(reference, Path.Combine(dir, "gw-ref-desktop.png"));
+                win.Show();
+                await Task.Delay(1400);
+                using var back = Grab(region);
+                SavePng(back, Path.Combine(dir, "gw-2-back.png"));
+                ReportDiff(back, reference, win, dock, region, "dwm-window", dir, Say);
+            }
+
+            // ④ 切回采样方案
+            DesktopZones.Helpers.WallpaperSource.Enabled = true;
+            win.RefreshZone(dock);
+            await Task.Delay(1200);
+            Say("采样方案下: " + win.DebugDockGlass());
+            Say("采样方案下 layer: " + win.DebugDockGlassLayer());
+            using (var shot2 = Grab(region)) SavePng(shot2, Path.Combine(dir, "gw-3-sample.png"));
+
+            // ⑤ 真玻璃 vs 采样：动态壁纸下胶囊里的像素会不会跟着变（采样 = 冻结的一帧）
+            using (var d1 = Grab(region))
+            {
+                await Task.Delay(1000);
+                using var d2 = Grab(region);
+                Say($"  采样方案 pill 逐帧变化={MeanAbsDiff(d1, d2, pill):F2} band={MeanAbsDiff(d1, d2, new DRect(pill.X, pill.Y - 22, pill.Width, 16)):F2}");
+            }
+            DesktopZones.Helpers.WallpaperSource.Enabled = false;
+            win.RefreshZone(dock);
+            await Task.Delay(1200);
+            using (var e1 = Grab(region))
+            {
+                await Task.Delay(1000);
+                using var e2 = Grab(region);
+                Say($"  DWM 方案 pill 逐帧变化={MeanAbsDiff(e1, e2, pill):F2} band={MeanAbsDiff(e1, e2, new DRect(pill.X, pill.Y - 22, pill.Width, 16)):F2}");
+            }
+
+            // ⑥ 最小化 → 展开：玻璃窗要跟着藏/显、并且回到胶囊原位
+            win.HideZone();
+            await Task.Delay(2200);
+            Say("  最小化后: " + win.DebugDockGlass());
+            win.ShowZone();
+            await Task.Delay(2200);
+            Say("  展开后  : " + win.DebugDockGlass());
+            using (var back2 = Grab(region)) SavePng(back2, Path.Combine(dir, "gw-4-expanded.png"));
+        }
+        finally
+        {
+            dock.TileMode = oldTile;
+            dock.EnableLiquidGlass = oldGlass;
+            DesktopZones.Helpers.WallpaperSource.Enabled = oldScheme;
+            var w2 = _zoneManager?.GetZoneWindow(dock.Id);
+            if (w2 != null) w2.RefreshZone(dock);
+        }
     }
 
     // ── 场景 1b：最小化 → 点 36×36 恢复按钮展开（用户的真实路径） ─────────

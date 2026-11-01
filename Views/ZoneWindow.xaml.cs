@@ -451,7 +451,7 @@ public partial class ZoneWindow : Window
 
     void OnLoad(object s, RoutedEventArgs e)
     {
-        DesktopLayer.BringToFront(this); NativeMethods.SetToolWindow(this);
+        DesktopLayer.BringToFront(this); if (IsDock) SyncDockGlassWindow(); NativeMethods.SetToolWindow(this);
         // ponytail 2026-08-26 ghost-ring fix: kill the DWM frame shadow that hugs the
         // collapsed RestoreButton (visible as a dark ring on the wallpaper).
         NativeMethods.DisableDwmFrameShadow(this);
@@ -1576,7 +1576,7 @@ public partial class ZoneWindow : Window
         Dispatcher.BeginInvoke(new Action(ApplyStyle),
             System.Windows.Threading.DispatcherPriority.Loaded);
         RefreshFolderMapping();
-        DesktopLayer.BringToFront(this);
+        DesktopLayer.BringToFront(this); if (IsDock) SyncDockGlassWindow();
         // 快捷栏不做整窗圆角/边框（见 ReapplyAcrylic 里「一圈鬼影」的说明）。
         if (IsDock) ApplyDockWindowFrame(_zone.TileMode);
         else NativeMethods.SetRoundedCorners(this, (int)_zone.CornerRadius);
@@ -1590,6 +1590,7 @@ public partial class ZoneWindow : Window
 #endif
         // Save dimensions only if not currently minimized (RestoreButton not visible)
         // If minimized, the original dimensions are already saved in _zone
+        HideDockGlassWindow();      // 快捷栏的玻璃层是独立窗口，隐藏分区时一起收走
         if (RestoreButton.Visibility != Visibility.Visible)
         {
             _zone.X = Left; _zone.Y = Top; _zone.Width = Width; _zone.Height = FullHeightFromWindowHeight();
@@ -1639,7 +1640,7 @@ public partial class ZoneWindow : Window
             // 都在窗口失去焦点的情况下触发,残影最明显。
             NativeMethods.DisableRoundedCorners(this);
             AcrylicHelper.DisableBlur(this);
-            DesktopLayer.BringToFront(this);
+            DesktopLayer.BringToFront(this); if (IsDock) SyncDockGlassWindow();
             if (waveDelayMs > 0)
                 _hover?.CollapseAfterDelay(waveDelayMs, null);
             else
@@ -1761,6 +1762,8 @@ public partial class ZoneWindow : Window
         // 在已关闭的窗口上跑)。顺序与 StickyNoteWindow.OnClosed 同策。
         _mgr.ZonesChanged -= OnZonesChanged;
         _mgr.LockChanged -= OnServiceLockChanged;
+        // 玻璃层是独立窗口，必须跟着关掉，否则会剩下一个胶囊形状的毛玻璃残影。
+        CloseDockGlassWindow();
         // 关窗前把标题栏里还没提交的改名落盘(用户敲完直接关/隐藏窗口).
         CommitTitleRename();
         _saveDebounce?.Stop();
@@ -1862,7 +1865,7 @@ public partial class ZoneWindow : Window
             return;
         }
 
-        DesktopLayer.BringToFront(this);
+        DesktopLayer.BringToFront(this); if (IsDock) SyncDockGlassWindow();
         _zone.X = Left; _zone.Y = Top;
         _mgr.SaveConfig();
     }
@@ -1975,7 +1978,7 @@ public partial class ZoneWindow : Window
         bool left = gr == GripTL || gr == GripBL;
         bool top = gr == GripTL || gr == GripTR;
         _snapResize?.Start(e, left, top, !left, !top, 120, 80, OnResizeCompleted);
-        DesktopLayer.BringToFront(this);
+        DesktopLayer.BringToFront(this); if (IsDock) SyncDockGlassWindow();
         e.Handled = true;
     }
 
@@ -3043,7 +3046,7 @@ public partial class ZoneWindow : Window
             RestoreButton.ReleaseMouseCapture();
             _snapDrag?.Start(e, () =>
             {
-                DesktopLayer.BringToFront(this);
+                DesktopLayer.BringToFront(this); if (IsDock) SyncDockGlassWindow();
                 _zone.X = Left; _zone.Y = Top; _mgr.SaveConfig();
             });
         }
@@ -5164,6 +5167,7 @@ public partial class ZoneWindow : Window
         AcrylicHelper.DisableBlur(this);
         NativeMethods.DisableRoundedCorners(this);
         NativeMethods.DisableDwmFrameShadow(this);
+        HideDockGlassWindow();      // 玻璃层是独立 HWND，跟不上收起动画 → 直接藏掉
     }
 
     // ── 自绘背板(方案①:壁纸采样 + 可变半径模糊) ──
@@ -6099,11 +6103,17 @@ public partial class ZoneWindow : Window
     void ApplyDockGlass(ResolvedZoneStyle s)
     {
         if (FillRect == null || DockGlassHost == null) return;
+#if DEBUG
+        DzTrace.Log($"[Dock glass] enter glass={s.EnableLiquidGlass} tile={s.TileMode} " +
+                    $"selfDrawn={AcrylicHelper.ResolveSelfDrawn()} enabled={WallpaperSource.Enabled} " +
+                    $"equalsPill={DockWindowEqualsPill()} mode={_dockGlassMode}");
+#endif
 
-        // 玻璃关掉：磁贴模式什么都不铺（全透明），否则铺纯填充色；采样层一并藏掉。
+        // 玻璃关掉：磁贴模式什么都不铺（全透明），否则铺纯填充色；采样层/玻璃窗一并藏掉。
         if (!s.EnableLiquidGlass)
         {
             HideDockGlassLayer();
+            HideDockGlassWindow();
             if (s.TileMode) FillRect.Fill = Brushes.Transparent;
             else
             {
@@ -6116,26 +6126,33 @@ public partial class ZoneWindow : Window
             return;
         }
 
-        // 玻璃开着 + 窗口 == 胶囊（无放大带/倒影带/左右余量）→ 和分区一样把 DWM 直接交给
-        // 窗口本身（此时"整窗"就是"胶囊"，不存在糊到透明带的问题）。
-        if (DockWindowEqualsPill() && !AcrylicHelper.ResolveSelfDrawn())
+        // 渲染方案 = DWM 时走**真**玻璃（实景模糊，动态壁纸也跟着动）：
+        //   · 窗口 == 胶囊（动效/倒影都关）→ 直接把 DWM 交给窗口本身，不必多一个窗口；
+        //   · 否则 → 第 7 轮 B：胶囊大小的独立玻璃窗口垫在下面（见 DockGlassWindow）。
+        if (!AcrylicHelper.ResolveSelfDrawn())
         {
-            var r = AcrylicHelper.EnableBlurComposite(this, _zone.GlassBlurAmount,
-                s.FillColor, 1.0, _zone.GlassColorMode, _zone.GlassTintOpacity, _zone.GlassTintLuminosity,
-                AcrylicHelper.ResolveAccentState(_zone.GlassMaterial),
-                AcrylicHelper.ResolveUseClassicBlur(_zone.GlassMaterial));
-            if (r.Success)
+            if (DockWindowEqualsPill())
             {
-                HideDockGlassLayer();
-                FillRect.Fill = AcrylicHelper.HitTestFill;
-                FillRect.Opacity = 1.0;
-                _dockGlassMode = "dwm(window==pill)";
-                _dockGlassRect = Rect.Empty;
-                DzTrace.Log("[Dock glass] scheme=dwm window==pill blur ok");
-                return;
+                var r = AcrylicHelper.EnableBlurComposite(this, _zone.GlassBlurAmount,
+                    s.FillColor, 1.0, _zone.GlassColorMode, _zone.GlassTintOpacity, _zone.GlassTintLuminosity,
+                    AcrylicHelper.ResolveAccentState(_zone.GlassMaterial),
+                    AcrylicHelper.ResolveUseClassicBlur(_zone.GlassMaterial));
+                if (r.Success)
+                {
+                    HideDockGlassWindow();
+                    HideDockGlassLayer();
+                    FillRect.Fill = AcrylicHelper.HitTestFill;
+                    FillRect.Opacity = 1.0;
+                    _dockGlassMode = "dwm(window==pill)";
+                    _dockGlassRect = Rect.Empty;
+                    DzTrace.Log("[Dock glass] scheme=dwm window==pill blur ok");
+                    return;
+                }
+                DzTrace.Log($"[Dock glass] scheme=dwm EnableBlurComposite failed: {r.Error} → 采样兜底");
             }
-            DzTrace.Log($"[Dock glass] scheme=dwm EnableBlurComposite failed: {r.Error} → 采样兜底");
+            else if (TryApplyDwmGlassWindow(s)) return;
         }
+        HideDockGlassWindow();
 
         // ── 采样通道（第 7 轮 A：与分区/时钟/日历/便签/面板**同一个** WallpaperBackdropLayer）
         //    以前这里是 CreateStaticBrush 的一次性静态画刷，而且"位置没变就 return"，
@@ -6185,6 +6202,104 @@ public partial class ZoneWindow : Window
 
     WallpaperBackdropLayer? _dockGlassLayer;
     string _dockGlassMode = "off";
+
+    // ── B：DWM 真玻璃用的独立「玻璃层」窗口（正好胶囊大小、非分层、可被区域裁圆角） ──
+
+    DockGlassWindow? _dockGlassWin;
+
+    /// <summary>DWM 方案下的胶囊玻璃：把玻璃单独做成一个窗口垫在内容窗口正下方。
+    /// 成功返回 true（此时内容层的 FillRect 只留一个 HitTestFill 抢命中）。</summary>
+    bool TryApplyDwmGlassWindow(ResolvedZoneStyle s)
+    {
+        try
+        {
+            return TryApplyDwmGlassWindowCore(s);
+        }
+        catch (Exception ex)
+        {
+            DzTrace.Log($"[Dock glass] glasswin EXC {ex.GetType().Name}: {ex.Message}");
+            return false;
+        }
+    }
+
+    bool TryApplyDwmGlassWindowCore(ResolvedZoneStyle s)
+    {
+        var pill = DockPillScreenPx();
+        if (pill.IsEmpty) { DzTrace.Log("[Dock glass] glasswin: pill empty → skip"); return false; }
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == IntPtr.Zero) { DzTrace.Log("[Dock glass] glasswin: no hwnd → skip"); return false; }
+        if (!DockGlassWindowShouldShow())
+        {
+            DzTrace.Log($"[Dock glass] glasswin: shouldShow=false (vis={IsVisible} content={MainContent.Visibility} " +
+                        $"btn={RestoreButton.Visibility} expanded={_hover?.IsExpanded}) → skip");
+            HideDockGlassWindow();
+            return false;
+        }
+
+        var win = _dockGlassWin ??= new DockGlassWindow();
+        win.ShowNoActivate();                       // 先确保句柄
+        if (win.Handle == IntPtr.Zero)
+        {
+            DzTrace.Log("[Dock glass] glasswin: CreateWindowEx 失败 → skip");
+            return false;
+        }
+
+        var r = win.ApplyGlass(_zone.GlassBlurAmount, s.FillColor, 1.0, _zone.GlassColorMode,
+            _zone.GlassTintOpacity, _zone.GlassTintLuminosity,
+            AcrylicHelper.ResolveAccentState(_zone.GlassMaterial),
+            AcrylicHelper.ResolveUseClassicBlur(_zone.GlassMaterial));
+        if (!r.Success)
+        {
+            DzTrace.Log($"[Dock glass] DWM 玻璃窗失败: {r.Error} → 采样兜底");
+            HideDockGlassWindow();
+            return false;
+        }
+
+        var dpi = VisualTreeHelper.GetDpi(this);
+        win.SyncTo(hwnd,
+            (int)Math.Round(pill.X), (int)Math.Round(pill.Y),
+            (int)Math.Round(pill.Width), (int)Math.Round(pill.Height),
+            (int)Math.Round(Math.Max(0, s.CornerRadius) * dpi.DpiScaleX));
+        win.ShowNoActivate();
+
+        AcrylicHelper.DisableBlur(this);            // 内容窗口自己不能再上 accent
+        HideDockGlassLayer();
+        FillRect.Fill = AcrylicHelper.HitTestFill;  // 命中仍归内容层（alpha=1，肉眼不可见）
+        FillRect.Opacity = 1.0;
+        _dockGlassMode = "dwm-window";
+        _dockGlassRect = pill;
+        DzTrace.Log($"[Dock glass] dwm-window pill={pill.X:F0},{pill.Y:F0} {pill.Width:F0}x{pill.Height:F0} " +
+                    $"r={_zone.GlassBlurAmount}");
+        return true;
+    }
+
+    /// <summary>玻璃层该不该露出来：内容层可见、没被最小化成 36×36、悬停展开着。
+    /// 收起/最小化时内容层在缩放动画里，玻璃层是独立 HWND 跟不上动画 —— 直接藏掉，
+    /// 展开完成（`_hover.Expanded → ReapplyAcrylic`）时会重新摆一遍。</summary>
+    bool DockGlassWindowShouldShow()
+        => IsVisible
+           && MainContent.Visibility == Visibility.Visible
+           && RestoreButton.Visibility != Visibility.Visible
+           && (_hover?.IsExpanded ?? true);
+
+    void HideDockGlassWindow()
+    {
+        _dockGlassWin?.HideGlass();
+        if (_dockGlassMode == "dwm-window") _dockGlassMode = "none";
+    }
+
+    /// <summary>只重排位置/层级（窗口移动、贴桌面层之后调用）。</summary>
+    void SyncDockGlassWindow()
+    {
+        if (_dockGlassWin == null || !_dockGlassWin.IsVisibleGlass) return;
+        try { ApplyDockGlass(ResolveStyle()); } catch { }
+    }
+
+    void CloseDockGlassWindow()
+    {
+        try { _dockGlassWin?.Dispose(); } catch { }
+        _dockGlassWin = null;
+    }
 
     /// <summary>懒创建胶囊玻璃图层。壁纸不可用 → null（调用方退成纯着色）。</summary>
     WallpaperBackdropLayer? EnsureDockGlassLayer()
@@ -7304,6 +7419,7 @@ public partial class ZoneWindow : Window
                 if (ch is FrameworkElement f && (f.Tag as string) == DockReflectTag) startRefl++;
         var inset = DockPillInsetPx();
         return $"glass={_dockGlassMode} fill={brush} " +
+               $"glaswin={(_dockGlassWin == null ? "none" : (_dockGlassWin.IsVisibleGlass ? $"visible#0x{_dockGlassWin.Handle.ToInt64():X}" : "hidden"))} " +
                $"host={(DockGlassHost == null ? "null" : $"{DockGlassHost.Visibility} {DockGlassHost.ActualWidth:F0}x{DockGlassHost.ActualHeight:F0}")} " +
                $"inset={inset.X:F0},{inset.Y:F0} {inset.Width:F0}x{inset.Height:F0} " +
                $"pill={(pill.IsEmpty ? "empty" : $"{pill.X:F0},{pill.Y:F0} {pill.Width:F0}x{pill.Height:F0}")} " +
@@ -7315,6 +7431,16 @@ public partial class ZoneWindow : Window
 
     /// <summary>自测用：胶囊玻璃图层的内部状态（半径/世代/位图/裁剪框）。</summary>
     public string DebugDockGlassLayer() => _dockGlassLayer?.DebugState() ?? "(no layer)";
+
+    /// <summary>自测用：强制显示/藏起玻璃层窗口（抓"纯桌面"参照帧时要两个窗口都收走）。</summary>
+    public void DebugSetDockGlassVisible(bool on)
+    {
+        if (_dockGlassWin == null) return;
+        if (on) _dockGlassWin.ShowNoActivate(); else _dockGlassWin.HideGlass();
+    }
+
+    /// <summary>自测用：玻璃层窗口句柄（0 = 还没创建）。</summary>
+    public IntPtr DebugDockGlassHwnd() => _dockGlassWin?.Handle ?? IntPtr.Zero;
 
     // ── 自测用：DWM 整窗模糊 vs 窗口裁成胶囊（第 7 轮回答「为什么做不了 DWM」） ──
 
