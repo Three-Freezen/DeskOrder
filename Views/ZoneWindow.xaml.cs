@@ -6244,6 +6244,11 @@ public partial class ZoneWindow : Window
             return false;
         }
 
+        // 配方必须和分区**逐项一致**（这是用户说的"调成和分区一样的"）：
+        //   accentState / 是否叠加经典模糊都走同一套材质解析器。
+        // 第 7 轮踩过的坑：这里一度写死 `useClassicBlur: false`，玻璃层就比分区少一遍模糊
+        // ——实测同一位置同一背景，分区 luma=66.7/sharp=1.3，快捷栏 luma=67.8/sharp=2.5
+        // （亮度对上了但明显更"清"），看起来就是"参数不对"。
         var r = win.ApplyGlass(_zone.GlassBlurAmount, s.FillColor, 1.0, _zone.GlassColorMode,
             _zone.GlassTintOpacity, _zone.GlassTintLuminosity,
             AcrylicHelper.ResolveAccentState(_zone.GlassMaterial),
@@ -6256,11 +6261,17 @@ public partial class ZoneWindow : Window
         }
 
         var dpi = VisualTreeHelper.GetDpi(this);
+        // 顺序要紧：ShowWindow 会把窗口提到最前 → 位置/层级必须放在**最后**一步，
+        // 否则玻璃层会盖在图标上面（用户反馈"有时候玻璃层还会盖住内容"）。
         win.SyncTo(hwnd,
             (int)Math.Round(pill.X), (int)Math.Round(pill.Y),
             (int)Math.Round(pill.Width), (int)Math.Round(pill.Height),
             (int)Math.Round(Math.Max(0, s.CornerRadius) * dpi.DpiScaleX));
         win.ShowNoActivate();
+        win.SyncTo(hwnd,
+            (int)Math.Round(pill.X), (int)Math.Round(pill.Y),
+            (int)Math.Round(pill.Width), (int)Math.Round(pill.Height),
+            (int)Math.Round(Math.Max(0, s.CornerRadius) * dpi.DpiScaleX));
 
         AcrylicHelper.DisableBlur(this);            // 内容窗口自己不能再上 accent
         HideDockGlassLayer();

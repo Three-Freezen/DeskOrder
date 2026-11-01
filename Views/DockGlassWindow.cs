@@ -170,13 +170,14 @@ sealed class DockGlassWindow : IDisposable
     }
 
     /// <summary>摆到胶囊的屏幕矩形（**物理像素**），并插到 <paramref name="below"/> 窗口正下方
-    /// （= 内容窗口下面）。regionRadiusPx 是胶囊圆角的像素半径。</summary>
+    /// （= 内容窗口下面）。regionRadiusPx 是胶囊圆角的像素半径。
+    /// 形状和模糊区域一起裁（<see cref="AcrylicHelper.ShapeToRoundRect"/>），圆角外面不会有一圈糊边；
+    /// 位置/层级放在最后一步，保证玻璃层永远紧贴内容层下方（ShowWindow 会把窗口提到最前）。</summary>
     public bool SyncTo(IntPtr below, int x, int y, int w, int h, int regionRadiusPx)
     {
         EnsureWindow();
         if (_hwnd == IntPtr.Zero || w < 1 || h < 1) return false;
-        int d = Math.Max(0, regionRadiusPx) * 2;   // CreateRoundRectRgn 收的是椭圆的宽高 = 直径
-        SetWindowRgn(_hwnd, CreateRoundRectRgn(0, 0, w, h, d, d), true);
+        AcrylicHelper.ShapeToRoundRect(_hwnd, w, h, regionRadiusPx);
         return SetWindowPos(_hwnd, below, x, y, w, h, SWP_NOACTIVATE | SWP_NOOWNERZORDER);
     }
 
@@ -196,6 +197,9 @@ sealed class DockGlassWindow : IDisposable
     {
         EnsureWindow();
         if (_hwnd == IntPtr.Zero) return;
+        // 已经可见就不要再 ShowWindow —— 对可见窗口再 SHOW 会把它提到 Z 序最前，
+        // 那一瞬间玻璃层就盖在图标上面了（"有时候玻璃层还会盖住内容"）。
+        if (IsWindowVisible(_hwnd)) return;
         ShowWindow(_hwnd, SW_SHOWNOACTIVATE);
     }
 

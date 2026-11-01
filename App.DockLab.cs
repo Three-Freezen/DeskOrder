@@ -71,6 +71,8 @@ public partial class App
             if (which is "dwmscope") { await LabDwmScopeAsync(dir, Say); return; }
             if (which is "layerglass") { await LabLayerGlassAsync(dir, Say); return; }
             if (which is "glasswin") { await LabGlassWindowAsync(dir, Say); return; }
+            if (which is "glasscmp") { await LabGlassCompareAsync(dir, Say); return; }
+            if (which is "glassab") { await LabGlassAbAsync(dir, Say); return; }
             if (which is "state" or "all") await LabStateAsync(dir, Say);
             if (which is "ring" or "all") await LabRingAsync(dir, Say);
             if (which is "ring2" or "all") await LabRingClickAsync(dir, Say);
@@ -619,6 +621,250 @@ public partial class App
             var w2 = _zoneManager?.GetZoneWindow(dock.Id);
             if (w2 != null) w2.RefreshZone(dock);
         }
+    }
+
+    // ── 场景 6：DWM 玻璃「快捷栏 vs 分区」到底一不一样（同级比较） ──────────
+    //
+    // 用户反馈「快捷栏 DWM 默认玻璃的参数不对，调成和分区一样的」。这里把**分区**和
+    // **快捷栏**都用 DWM 方案开玻璃摆到桌面上，各取一块"纯玻璃"的区域算平均色 ——
+    // 两个数接近才算真的同一套观感。
+
+    async Task LabGlassCompareAsync(string dir, Action<string> Say)
+    {
+        Say("");
+        Say("== glasscmp: 同一个位置、同一块背景 —— 分区 vs 快捷栏 的 DWM 玻璃 ==");
+        Say("（DWM 是实景模糊：不在同一位置的绝对不能用亮度对比，那样量的只是背景不同）");
+        bool oldScheme = DesktopZones.Helpers.WallpaperSource.Enabled;
+        ZoneWindow? zoneWin = null;
+        try
+        {
+            DesktopZones.Helpers.WallpaperSource.Enabled = false;   // DWM
+            var dock = _zoneManager!.Zones.FirstOrDefault(z => z.DockMode);
+            if (dock == null) { Say("配置里没有快捷栏 → 跳过"); return; }
+            bool oldTile = dock.TileMode, oldGlass = dock.EnableLiquidGlass;
+            string oldFill = dock.FillColor, oldMode = dock.GlassColorMode;
+            int oldBlur = dock.GlassBlurAmount, oldTint = dock.GlassTintOpacity;
+            try
+            {
+                dock.TileMode = false;
+                dock.EnableLiquidGlass = true;
+                dock.GlassColorMode = "Default";
+                dock.GlassTintOpacity = 50;
+                dock.GlassBlurAmount = 18;
+                dock.FillColor = "#08000000";
+                _zoneManager.ShowZone(dock);
+                var dwin = _zoneManager.GetZoneWindow(dock.Id);
+                if (dwin == null) { Say("拿不到快捷栏窗口"); return; }
+                dwin.RefreshZone(dock);
+                MoveToFreeSpot(dwin, Say);
+                await Task.Delay(1600);
+                dwin.PreviewResetHover();
+                await Task.Delay(250);
+
+                // 探针 = 胶囊内侧靠底边的一条（没有图标、没有描边、没有倒影）
+                var pill = DockPillScreenPx(dock, dwin);
+                var patch = new DRect(pill.X + 40, pill.Bottom - 8, 140, 5);
+                var region = new DRect(patch.X - 20, patch.Y - 20, patch.Width + 40, patch.Height + 40);
+                Say($"pill={pill} patch={patch}");
+                Say("dock: " + dwin.DebugDockGlass());
+
+                double dockLuma, dockSharp;
+                using (var shot = Grab(region))
+                {
+                    SavePng(shot, Path.Combine(dir, "cmp-dock.png"));
+                    var local = new DRect(20, 20, patch.Width, patch.Height);
+                    dockLuma = MeanLuma(shot, local);
+                    dockSharp = Sharpness(shot, local);
+                    Say($"  dock  patch luma={dockLuma:F1} sharp={dockSharp:F1} " +
+                        $"rgb={MeanRgb(shot, local)}");
+                }
+
+                // 同一个屏幕矩形上摆一个**分区**（尺寸 = 胶囊），玻璃参数完全相同
+                dwin.Hide();
+                await Task.Delay(500);
+                var dpi = System.Windows.Media.VisualTreeHelper.GetDpi(dwin);
+                var zone = new Zone
+                {
+                    Name = "lab glass zone",
+                    DockMode = false,
+                    GridSize = 48,
+                    CornerRadius = 12,
+                    BorderThickness = 1.0,
+                    IsVisible = true,
+                    EnableLiquidGlass = true,
+                    FillColor = "#08000000",
+                    BorderColor = "#66FFFFFF",
+                    GlassBlurAmount = 18,
+                    GlassTintOpacity = 50,
+                    GlassColorMode = "Default",
+                    Width = Math.Round(pill.Width / dpi.DpiScaleX),
+                    Height = Math.Round(pill.Height / dpi.DpiScaleY),
+                    X = Math.Round(pill.X / dpi.DpiScaleX),
+                    Y = Math.Round(pill.Y / dpi.DpiScaleY),
+                };
+                zoneWin = new ZoneWindow(zone, _zoneManager!, DesktopZones.Services.ShellIconService.Instance)
+                { ShowInTaskbar = false };
+                zoneWin.Show();
+                await Task.Delay(1600);
+                zoneWin.UpdateLayout();
+                using (var shot = Grab(region))
+                {
+                    SavePng(shot, Path.Combine(dir, "cmp-zone.png"));
+                    var local = new DRect(20, 20, patch.Width, patch.Height);
+                    double zl = MeanLuma(shot, local), zs = Sharpness(shot, local);
+                    Say($"  zone  patch luma={zl:F1} sharp={zs:F1} rgb={MeanRgb(shot, local)}");
+                    Say($"  Δluma={Math.Abs(zl - dockLuma):F1}（<=8 视为同一套观感）");
+                }
+                zoneWin.Close();
+                zoneWin = null;
+                dwin.Show();
+                await Task.Delay(1200);
+                using (var shot = Grab(region))
+                {
+                    SavePng(shot, Path.Combine(dir, "cmp-dock2.png"));
+                    var local = new DRect(20, 20, patch.Width, patch.Height);
+                    Say($"  dock2 patch luma={MeanLuma(shot, local):F1} rgb={MeanRgb(shot, local)}（回到原位复测）");
+                }
+            }
+            finally
+            {
+                dock.TileMode = oldTile;
+                dock.EnableLiquidGlass = oldGlass;
+                dock.FillColor = oldFill;
+                dock.GlassColorMode = oldMode;
+                dock.GlassBlurAmount = oldBlur;
+                dock.GlassTintOpacity = oldTint;
+                var w2 = _zoneManager?.GetZoneWindow(dock.Id);
+                if (w2 != null) w2.RefreshZone(dock);
+            }
+        }
+        finally
+        {
+            DesktopZones.Helpers.WallpaperSource.Enabled = oldScheme;
+            try { zoneWin?.Close(); } catch { }
+        }
+    }
+
+    // ── 场景 6b：同一个位置，两种 DWM 玻璃通道 A/B ──────────────────────
+    //
+    // A = 窗口 == 胶囊（内容窗口自己吃 accent —— 和分区/时钟/便签**同一条代码路径**）
+    // B = 双窗（胶囊大小的裸 HWND 吃 accent，第 7 轮 B）
+    // 两条通道在同一位置、同一块背景、同一套参数下取同一块像素，数字接近才算"和分区一样"。
+
+    async Task LabGlassAbAsync(string dir, Action<string> Say)
+    {
+        Say("");
+        Say("== glassab: A 窗口==胶囊（=分区那条路） vs B 双窗 ==");
+        bool oldScheme = DesktopZones.Helpers.WallpaperSource.Enabled;
+        try
+        {
+            DesktopZones.Helpers.WallpaperSource.Enabled = false;   // DWM
+            var dock = _zoneManager!.Zones.FirstOrDefault(z => z.DockMode);
+            if (dock == null) { Say("配置里没有快捷栏 → 跳过"); return; }
+            bool oldTile = dock.TileMode, oldGlass = dock.EnableLiquidGlass;
+            bool oldAnim = dock.DockAnimate, oldRefl = dock.DockReflection;
+            string oldFill = dock.FillColor, oldMode = dock.GlassColorMode;
+            int oldBlur = dock.GlassBlurAmount, oldTint = dock.GlassTintOpacity;
+            try
+            {
+                dock.TileMode = false;
+                dock.EnableLiquidGlass = true;
+                dock.GlassColorMode = "Default";
+                dock.GlassTintOpacity = 50;
+                dock.GlassBlurAmount = 18;
+                dock.FillColor = "#08000000";
+                _zoneManager.ShowZone(dock);
+                var dwin = _zoneManager.GetZoneWindow(dock.Id);
+                if (dwin == null) { Say("拿不到快捷栏窗口"); return; }
+
+                async Task Shot(ZoneWindow w, Zone d, string tag)
+                {
+                    w.PreviewResetHover();
+                    await Task.Delay(1200);
+                    var pill = DockPillScreenPx(d, w);
+                    var patch = new DRect(pill.X + 40, pill.Bottom - 8, 160, 5);
+                    var region = new DRect(patch.X - 16, patch.Y - 16, patch.Width + 32, patch.Height + 32);
+                    using var shot = Grab(region);
+                    SavePng(shot, Path.Combine(dir, $"ab-{tag}.png"));
+                    var local = new DRect(16, 16, patch.Width, patch.Height);
+                    Say($"  [{tag}] pill={pill.Width}x{pill.Height} luma={MeanLuma(shot, local):F1} " +
+                        $"sharp={Sharpness(shot, local):F1} rgb={MeanRgb(shot, local)} | " + w.DebugDockGlass());
+                }
+
+                // 两条通道都摆到**同一个胶囊屏幕矩形**上（DWM 是实景模糊，位置不同就没法比）
+                const double targetLeft = 820, targetTop = 620;
+                void PlaceDock(ZoneWindow w, Zone d)
+                {
+                    double side = DesktopZones.Helpers.ZoneLayout.DockSideOverflow(d);
+                    double top = DesktopZones.Helpers.ZoneLayout.DockBarTop(d);
+                    // 让**胶囊**左上角落在 (targetLeft, targetTop)：窗口原点要往左上让开侧向/上方余量
+                    w.Left = targetLeft - side;
+                    w.Top = targetTop - top;
+                }
+
+                // A：窗口 == 胶囊（动效/倒影都关）→ 走内容窗口自己的 accent
+                dock.DockAnimate = false;
+                dock.DockReflection = false;
+                dwin.RefreshZone(dock);
+                PlaceDock(dwin, dock);
+                await Task.Delay(700);
+                await Shot(dwin, dock, "A-inwindow");
+
+                // B：双窗（胶囊屏幕矩形不变，只是打开溢出带）
+                dock.DockAnimate = true;
+                dock.DockReflection = true;
+                dwin.RefreshZone(dock);
+                PlaceDock(dwin, dock);
+                await Task.Delay(700);
+                await Shot(dwin, dock, "B-twowindow");
+            }
+            finally
+            {
+                dock.TileMode = oldTile;
+                dock.EnableLiquidGlass = oldGlass;
+                dock.DockAnimate = oldAnim;
+                dock.DockReflection = oldRefl;
+                dock.FillColor = oldFill;
+                dock.GlassColorMode = oldMode;
+                dock.GlassBlurAmount = oldBlur;
+                dock.GlassTintOpacity = oldTint;
+                var w2 = _zoneManager?.GetZoneWindow(dock.Id);
+                if (w2 != null) w2.RefreshZone(dock);
+            }
+        }
+        finally { DesktopZones.Helpers.WallpaperSource.Enabled = oldScheme; }
+    }
+
+    /// <summary>胶囊的屏幕物理矩形（不加抓屏 pad）。</summary>
+    static DRect DockPillScreenPx(Zone dock, ZoneWindow win)
+    {
+        var dpi = System.Windows.Media.VisualTreeHelper.GetDpi(win);
+        var tl = win.PointToScreen(new System.Windows.Point(0, 0));
+        double side = DesktopZones.Helpers.ZoneLayout.DockSideOverflow(dock);
+        double top = DesktopZones.Helpers.ZoneLayout.DockBarTop(dock);
+        double w = DesktopZones.Helpers.ZoneLayout.DockPillWidth(dock, dock.Items.Count);
+        double h = DesktopZones.Helpers.ZoneLayout.DockBarHeight(dock);
+        return new DRect(
+            (int)Math.Round(tl.X + side * dpi.DpiScaleX),
+            (int)Math.Round(tl.Y + top * dpi.DpiScaleY),
+            Math.Max(4, (int)Math.Round(w * dpi.DpiScaleX)),
+            Math.Max(4, (int)Math.Round(h * dpi.DpiScaleY)));
+    }
+
+    /// <summary>区域平均 RGB（快速判断"颜色一不一样"）。</summary>
+    static string MeanRgb(DBitmap bmp, DRect r)
+    {
+        int x0 = Math.Max(0, r.X), y0 = Math.Max(0, r.Y);
+        int x1 = Math.Min(bmp.Width, r.Right), y1 = Math.Min(bmp.Height, r.Bottom);
+        double sr = 0, sg = 0, sb = 0; int n = 0;
+        for (int y = y0; y < y1; y += 2)
+            for (int x = x0; x < x1; x += 2)
+            {
+                var p = bmp.GetPixel(x, y);
+                sr += p.R; sg += p.G; sb += p.B; n++;
+            }
+        if (n == 0) return "-";
+        return $"({sr / n:F0},{sg / n:F0},{sb / n:F0})";
     }
 
     // ── 场景 1b：最小化 → 点 36×36 恢复按钮展开（用户的真实路径） ─────────

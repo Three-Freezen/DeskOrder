@@ -1795,6 +1795,39 @@ public static class AcrylicHelper
         }
     }
 
+    /// <summary>
+    /// 把一个**非分层**窗口裁成圆角矩形，并让 DWM 背板的模糊也止于同一块区域。
+    ///
+    /// 这就是菜单/弹窗那套「三层保险」的前两层（见 <see cref="ApplyMenuSurfaceEffects"/>）：
+    ///   ① `SetWindowRgn` 把窗口本身裁成圆角 —— 背板（模糊 + 着色）跟着被裁；
+    ///   ② `DWM_BB_BLURREGION` 让模糊只发生在同一个圆角区域里，圆角外面不会有一圈糊边。
+    /// 第三层（`DWMWA_WINDOW_CORNER_PREFERENCE`）由调用方按需要不要。
+    ///
+    /// `SetWindowRgn` 会接管 hRgn 的所有权（不能 DeleteObject）；模糊区域是 Dwm 拷贝的，
+    /// 调用返回后要自己删。
+    /// </summary>
+    public static void ShapeToRoundRect(IntPtr hwnd, int w, int h, int radiusPx)
+    {
+        if (hwnd == IntPtr.Zero || w <= 0 || h <= 0) return;
+        int d = Math.Max(0, radiusPx) * 2;   // CreateRoundRectRgn 收的是椭圆的宽高 = 直径
+        try
+        {
+            SetWindowRgn(hwnd, CreateRoundRectRgn(0, 0, w, h, d, d), true);
+            var bb = new DWM_BLURBEHIND
+            {
+                dwFlags = DWM_BB_ENABLE | DWM_BB_BLURREGION,
+                fEnable = true,
+                hRgnBlur = CreateRoundRectRgn(0, 0, w, h, d, d),
+            };
+            DwmEnableBlurBehindWindow(hwnd, ref bb);
+            if (bb.hRgnBlur != IntPtr.Zero) DeleteObject(bb.hRgnBlur);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[AcrylicHelper] ShapeToRoundRect: {ex}");
+        }
+    }
+
     /// <summary>圆角裁剪 + 模糊背板 + Win11 圆角偏好 + 磨砂 accent（主菜单 / 子菜单 / 系统弹窗共用）。</summary>
     static void ApplyMenuSurfaceEffects(IntPtr hwnd, int w, int h, int rad)
     {

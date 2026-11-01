@@ -1034,20 +1034,6 @@ public partial class PropertyPanel : UserControl
         DockPanel.SetDock(delete, Dock.Right);
         row2.Children.Add(delete);
         StatusHost.Children.Add(row2);
-
-        var chips = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Margin = new Thickness(0, 10, 0, 0),
-        };
-        chips.Children.Add(MakeStatusChip(_loc["Dock.ManageSubtitle"], true));
-        chips.Children.Add(MakeStatusChip($"{z.GridSize}px", true));
-        chips.Children.Add(MakeStatusChip($"{z.Items.Count} {_loc["Manage.Count.Unit"]}", z.Items.Count > 0));
-        // 锁定状态也给一个词条：快捷栏没有标题栏，那颗 🔒 按钮是不可见的，这里得能看出锁没锁。
-        var lockChip = MakeStatusChip(_loc["PropertyPanel.Status.Locked"], z.IsLocked);
-        _statusChips.Add((lockChip, () => z.IsLocked));
-        chips.Children.Add(lockChip);
-        StatusHost.Children.Add(chips);
     }
 
     FrameworkElement MakeZoneStatusChips(Zone z, double topMargin = 0)
