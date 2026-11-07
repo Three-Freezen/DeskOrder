@@ -96,6 +96,7 @@ public partial class App
             if (which is "glassdiff") { await LabGlassDiffAsync(dir, Say); return; }
             if (which is "glassshape") { await LabGlassShapeAsync(dir, Say); return; }
             if (which is "glassfit") { await LabGlassFitAsync(dir, Say); return; }
+            if (which is "widgetfit") { await LabWidgetFitAsync(dir, Say); return; }
             if (which is "zorder") { await LabZOrderAsync(dir, Say); return; }
             if (which is "state" or "all") await LabStateAsync(dir, Say);
             if (which is "ring" or "all") await LabRingAsync(dir, Say);
@@ -1227,6 +1228,103 @@ public partial class App
         catch (Exception ex) { System.Diagnostics.Debug.WriteLine("zoom " + ex.Message); }
     }
 
+    // ── 场景 10：四个小组件（时钟/日历/播放器/便签）的边框对齐（widgetfit）──────
+    //
+    // 用户报「四个小组件的边框也有类似的问题」。它们和快捷栏是同一套结构：
+    //   · 窗口 == 可见内容（不像快捷栏那样多出两条带），圆角靠 DWM 的
+    //     `DWMWA_WINDOW_CORNER_PREFERENCE = ROUND` 切 —— 半径是**固定 8 DIP**；
+    //   · 而 WPF 自己画的边框 / 填充用的是模型里的 CornerRadius（10 / 12）。
+    // 只要 10/12 > 8，四个角上「DWM 切出来的玻璃」就从「WPF 画的描边弧」**外面**
+    // 探出一小条 —— 与快捷栏第 10 轮同一个几何错误。
+    //
+    // 这里把每个小组件摆到空位、玻璃开的情况下拍「有/无」两张图求差，再存四角 14 倍特写。
+    async Task LabWidgetFitAsync(string dir, Action<string> Say)
+    {
+        Say("");
+        Say("== widgetfit: 小组件边框 vs DWM 圆角 ==");
+        bool oldScheme = DesktopZones.Helpers.WallpaperSource.Enabled;
+        DesktopZones.Helpers.WallpaperSource.Enabled = false;   // 渲染方案 = DWM
+        var hidden = new List<Window>();
+        try
+        {
+            // 自测台在 `App.OnStartup` 里提前 return 了，`RestoreVisibleWidgets()` 没跑过 ——
+            // 这里按配置自己建四个（每类一个），跑完就关掉。
+            var created = new List<Window>();
+            var cfg = _configService!.Load();
+            if (cfg.Clocks.Count > 0) created.Add(new DesktopZones.Views.ClockWidget(cfg.Clocks[0], _widgetService!));
+            if (cfg.Calendars.Count > 0) created.Add(new DesktopZones.Views.CalendarWidget(cfg.Calendars[0], _widgetService!));
+            if (cfg.MediaPlayers.Count > 0) created.Add(new DesktopZones.Views.MediaPlayerWidget(cfg.MediaPlayers[0], _widgetService!));
+            if (cfg.Notes.Count > 0) created.Add(new DesktopZones.Views.StickyNoteWindow(cfg.Notes[0], _notesService!));
+            foreach (var w in created) { try { w.Show(); } catch { } }
+            await Task.Delay(1800);
+            Say($"按配置建了 {created.Count} 个小组件窗口");
+
+            var widgets = created;
+            Say($"找到 {widgets.Count} 个小组件窗口（含隐藏的）");
+            if (widgets.Count == 0) { Say("没有小组件 → 跳过"); return; }
+
+            var spots = new (double X, double Y)[] { (240, 200), (1000, 200), (240, 760), (1000, 760), (1560, 200) };
+            int si = 0;
+            foreach (var w in widgets)
+            {
+                string cls = w.GetType().Name;
+                if (!w.IsVisible) { try { w.Show(); } catch { } await Task.Delay(500); }
+                var hwnd = new System.Windows.Interop.WindowInteropHelper(w).Handle;
+                // 挪到一个"没被别人盖住"的位置（桌面层的分区/快捷栏永远在应用窗口下面，
+                // 被盖住就拍不到自己）
+                bool visible = false;
+                for (int k = 0; k < spots.Length; k++)
+                {
+                    var (sx, sy) = spots[(si + k) % spots.Length];
+                    w.Left = sx; w.Top = sy;
+                    await Task.Delay(260);
+                    var c = w.PointToScreen(new Point(w.ActualWidth / 2, w.ActualHeight / 2));
+                    var at = WindowAt(((int)c.X, (int)c.Y));
+                    if (at == hwnd) { visible = true; si = (si + k + 1) % spots.Length; break; }
+                }
+                await Task.Delay(500);
+                w.UpdateLayout();
+
+                var tl = w.PointToScreen(new Point(0, 0));
+                int x0 = (int)Math.Round(tl.X), y0 = (int)Math.Round(tl.Y);
+                int cw = (int)Math.Round(w.ActualWidth * System.Windows.Media.VisualTreeHelper.GetDpi(w).DpiScaleX);
+                int ch = (int)Math.Round(w.ActualHeight * System.Windows.Media.VisualTreeHelper.GetDpi(w).DpiScaleY);
+                Say($"{cls}: visible={visible} win=({x0},{y0}) {cw}x{ch} dip={w.ActualWidth:F1}x{w.ActualHeight:F1} " +
+                    $"dpi={System.Windows.Media.VisualTreeHelper.GetDpi(w).DpiScaleX:F2} | {DwmState(w)}");
+                if (!visible) { hidden.Add(w); continue; }
+
+                var pad = new DRect(x0 - 10, y0 - 10, cw + 20, ch + 20);
+                using var shot = Grab(pad);
+                SavePng(shot, Path.Combine(dir, $"w-{cls}-shot.png"));
+                // 不藏窗口取参照帧：小组件的 Hide/Show 会触发它们自己的收起/展开状态机
+                // （留恢复按钮、关 DWM 圆角），拿来做参照会把状态搞乱。四角特写足够判断。
+                const int zs = 14, box = 30;
+                SaveZoom(shot, new DRect(10, 10, box, box), zs, Path.Combine(dir, $"w-{cls}-tl.png"));
+                SaveZoom(shot, new DRect(pad.Width - 10 - box, 10, box, box), zs, Path.Combine(dir, $"w-{cls}-tr.png"));
+                SaveZoom(shot, new DRect(10, pad.Height - 10 - box, box, box), zs,
+                    Path.Combine(dir, $"w-{cls}-bl.png"));
+                SaveZoom(shot, new DRect(pad.Width - 10 - box, pad.Height - 10 - box, box, box), zs,
+                    Path.Combine(dir, $"w-{cls}-br.png"));
+            }
+        }
+        catch (Exception ex) { Say("widgetfit EXC " + ex); }
+        finally
+        {
+            DesktopZones.Helpers.WallpaperSource.Enabled = oldScheme;
+            try
+            {
+                foreach (Window w in Application.Current.Windows)
+                    if (w is DesktopZones.Views.ClockWidget or DesktopZones.Views.CalendarWidget
+                        or DesktopZones.Views.MediaPlayerWidget or DesktopZones.Views.StickyNoteWindow)
+                    {
+                        try { w.Hide(); } catch { }
+                        try { w.Close(); } catch { }
+                    }
+            }
+            catch { }
+        }
+    }
+
     // ── 场景 7：快捷栏玻璃 vs 分区玻璃（同一位置、同一背景，参考帧做差） ──────
     //
     // 用户报「快捷栏的玻璃默认比分区深不少」。这里把两者摆到**同一个胶囊屏幕矩形**上，
@@ -1923,7 +2021,7 @@ public partial class App
 
     // ── 工具 ──────────────────────────────────────────────────────────────
 
-    static string DwmState(ZoneWindow win)
+    static string DwmState(Window win)
     {
         try
         {

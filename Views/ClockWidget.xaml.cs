@@ -150,6 +150,11 @@ public partial class ClockWidget : Window
         DesktopLayer.BringToFront(this);
         NativeMethods.SetToolWindow(this);
         NativeMethods.DisableDwmFrameShadow(this);
+        // Win11 会给每个顶层窗口描一圈 1px 边框（visible frame border = 1）。小组件的窗口
+        // 正好等于可见内容，这条线就压在自己画的那条边框**外面** —— 看起来是"双层边框"、
+        // 角上还从描边弧外面绕过去。快捷栏早就关掉了它（见 ZoneWindow.ApplyDockWindowFrame），
+        // 四个小组件是同一个问题。
+        NativeMethods.RemoveWindowBorder(this);
         if (_clock.Mode == ClockDisplayMode.Digital)
             NativeMethods.RemoveThickFrame(this);
         ApplyAcrylic();
@@ -502,7 +507,8 @@ public partial class ClockWidget : Window
             {
                 ClockGlassBorder.BorderBrush = AcrylicHelper.CreateChromaticBorder();
                 ClockGlassBorder.BorderThickness = new Thickness(Math.Max(1.0, borderThickness));
-                ClockGlassBorder.CornerRadius = new CornerRadius(_clock.CornerRadius);
+                ClockGlassBorder.CornerRadius = new CornerRadius(
+                    NativeMethods.VisibleCornerRadius(_clock.CornerRadius, !backdropActive));
             }
         }
         else
@@ -606,11 +612,14 @@ public partial class ClockWidget : Window
         // ponytail 2026-08-26: 圆角/尖角 switch — drive every corner-bearing
         // element + the OS DWM preference from the resolved radius (0 = sharp).
         int r = _clock.CornerRadius;
-        MainContent.CornerRadius = new CornerRadius(r);
-        ClockBorder.CornerRadius = new CornerRadius(r);
+        // 可见半径压到 Windows 给窗口切的那个值（8 DIP）：边框/填充画得比它更圆的话，
+        // 四个角上 DWM 切出来的玻璃就会从描边弧外面露出一小条（见 NativeMethods.VisibleCornerRadius）。
+        int rv = NativeMethods.VisibleCornerRadius(r, _clock.EnableLiquidGlass && !AcrylicHelper.ResolveSelfDrawn());
+        MainContent.CornerRadius = new CornerRadius(rv);
+        ClockBorder.CornerRadius = new CornerRadius(rv);
         if (ClockGlassBorder != null)
-            ClockGlassBorder.CornerRadius = new CornerRadius(r);
-        FillRect.RadiusX = FillRect.RadiusY = r;
+            ClockGlassBorder.CornerRadius = new CornerRadius(rv);
+        FillRect.RadiusX = FillRect.RadiusY = rv;
         // ponytail 2026-08-28: 收起状态下跳过 DWM 圆角 — 设置面板显示开关 →
         // HideClock → UpdateClock → ClocksChanged → OnClocksChanged → ApplyStyle
         // 这条链会在窗口收起后重新打开整窗大小的圆角描边(边框残影来源)。

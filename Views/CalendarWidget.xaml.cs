@@ -149,6 +149,9 @@ public partial class CalendarWidget : Window
         DesktopLayer.BringToFront(this);
         NativeMethods.SetToolWindow(this);
         NativeMethods.DisableDwmFrameShadow(this);
+        // 关掉 Win11 给窗口描的那圈 1px 边框（否则它压在自己画的边框外面 = 双层边框，
+        // 角上还从描边弧外面绕过去）。与快捷栏 ApplyDockWindowFrame 同一个理由。
+        NativeMethods.RemoveWindowBorder(this);
         ApplyAcrylic();
         ApplyBackgroundImage();
         // ponytail: subscribe to day-cell ItemsControl's StatusChanged so the fixed text
@@ -404,7 +407,8 @@ public partial class CalendarWidget : Window
         {
             // ponytail 2026-09-26 方案①: 选了材质 → 壁纸采样自绘背板(半径真正生效);
             // 壁纸不可用/自定义 → 落回 DWM。
-            if (!TryApplyWallpaperBackdrop(_calendar.FillColor))
+            bool backdropActive = TryApplyWallpaperBackdrop(_calendar.FillColor);
+            if (!backdropActive)
             {
                 // ponytail 2026-08-30: 一体化 — 填充并入玻璃 tint(算一层),FillRect 已由
                 // SyncFillRect 置透明;填充色与玻璃配色作为两个输入本质上仍是两层。
@@ -421,7 +425,10 @@ public partial class CalendarWidget : Window
             {
                 CalendarGlassBorder.BorderBrush = AcrylicHelper.CreateChromaticBorder();
                 CalendarGlassBorder.BorderThickness = new Thickness(Math.Max(1.0, borderThickness));
-                CalendarGlassBorder.CornerRadius = new CornerRadius(_calendar.CornerRadius);
+                // 只有「玻璃由 DWM accent 画」时圆角才被 Windows 切成 8 DIP；自绘背板时
+                // 形状完全由 WPF 决定，半径照用户设的画。
+                CalendarGlassBorder.CornerRadius =
+                    new CornerRadius(NativeMethods.VisibleCornerRadius(_calendar.CornerRadius, !backdropActive));
             }
         }
         else
@@ -531,11 +538,14 @@ public partial class CalendarWidget : Window
 
         // ponytail 2026-08-26: 圆角/尖角 switch — corner elements + DWM lockstep.
         int r = _calendar.CornerRadius;
-        MainContent.CornerRadius = new CornerRadius(r);
-        CalendarBorder.CornerRadius = new CornerRadius(r);
+        // 可见半径压到 Windows 给窗口切的那个值（8 DIP）：否则四个角上 DWM 切出来的玻璃
+        // 会从 WPF 画的描边弧外面露出一小条（见 NativeMethods.VisibleCornerRadius）。
+        int rv = NativeMethods.VisibleCornerRadius(r, _calendar.EnableLiquidGlass && !AcrylicHelper.ResolveSelfDrawn());
+        MainContent.CornerRadius = new CornerRadius(rv);
+        CalendarBorder.CornerRadius = new CornerRadius(rv);
         if (CalendarGlassBorder != null)
-            CalendarGlassBorder.CornerRadius = new CornerRadius(r);
-        FillRect.RadiusX = FillRect.RadiusY = r;
+            CalendarGlassBorder.CornerRadius = new CornerRadius(rv);
+        FillRect.RadiusX = FillRect.RadiusY = rv;
         // ponytail 2026-08-28: 收起状态下跳过 DWM 圆角 — 设置面板显示开关 →
         // HideCalendar → UpdateCalendar → CalendarsChanged → OnCalendarsChanged →
         // ApplyStyle 这条链会在窗口收起后重新打开整窗大小的圆角描边(边框残影来源)。

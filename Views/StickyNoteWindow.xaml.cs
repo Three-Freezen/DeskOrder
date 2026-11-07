@@ -586,6 +586,9 @@ public partial class StickyNoteWindow : Window
         if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
         NativeMethods.SetToolWindow(this);
         NativeMethods.DisableDwmFrameShadow(this);
+        // 关掉 Win11 给窗口描的那圈 1px 边框（否则它压在自己画的边框外面 = 双层边框，
+        // 角上还从描边弧外面绕过去）。与快捷栏 ApplyDockWindowFrame 同一个理由。
+        NativeMethods.RemoveWindowBorder(this);
         ApplyAcrylic();
         ApplyBackgroundImage();
         NativeMethods.SetRoundedCorners(this, _note.CornerRadius);
@@ -940,7 +943,9 @@ public partial class StickyNoteWindow : Window
                 {
                     NoteGlassBorder.BorderBrush = AcrylicHelper.CreateChromaticBorder();
                     NoteGlassBorder.BorderThickness = new Thickness(Math.Max(1.0, borderThickness));
-                    NoteGlassBorder.CornerRadius = new CornerRadius(_note.CornerRadius);
+                    // 自绘背板：形状完全由 WPF 决定，半径照用户设的画。
+                    NoteGlassBorder.CornerRadius =
+                        new CornerRadius(NativeMethods.VisibleCornerRadius(_note.CornerRadius, dwmGlassOnWindow: false));
                 }
                 if (BodyFillRect != null) BodyFillRect.Fill = AcrylicHelper.HitTestFill;
                 return;
@@ -960,7 +965,9 @@ public partial class StickyNoteWindow : Window
             {
                 NoteGlassBorder.BorderBrush = AcrylicHelper.CreateChromaticBorder();
                 NoteGlassBorder.BorderThickness = new Thickness(Math.Max(1.0, borderThickness));
-                NoteGlassBorder.CornerRadius = new CornerRadius(_note.CornerRadius);
+                // DWM accent：玻璃被 Windows 切成固定 8 DIP，描边得跟着走。
+                NoteGlassBorder.CornerRadius =
+                    new CornerRadius(NativeMethods.VisibleCornerRadius(_note.CornerRadius, dwmGlassOnWindow: true));
             }
             // ponytail 2026-09-26: 非亚克力材质(毛玻璃/清透/液态/深色玻璃)的 DWM 背板不认着色
             // (实测 state3 完全不着色),合成着色改由 BodyFillRect 承担;亚克力系返回 null →
@@ -1041,15 +1048,18 @@ public partial class StickyNoteWindow : Window
 
         // ponytail 2026-08-26: 圆角/尖角 switch — corner elements + DWM lockstep.
         int r = _note.CornerRadius;
-        MainContent.CornerRadius = new CornerRadius(r);
-        NoteBorder.CornerRadius = new CornerRadius(r);
+        // 可见半径压到 Windows 给窗口切的那个值（8 DIP）：否则四个角上 DWM 切出来的玻璃
+        // 会从 WPF 画的描边弧外面露出一小条（见 NativeMethods.VisibleCornerRadius）。
+        int rv = NativeMethods.VisibleCornerRadius(r, _note.EnableLiquidGlass && !AcrylicHelper.ResolveSelfDrawn());
+        MainContent.CornerRadius = new CornerRadius(rv);
+        NoteBorder.CornerRadius = new CornerRadius(rv);
         if (NoteGlassBorder != null)
-            NoteGlassBorder.CornerRadius = new CornerRadius(r);
-        TitleBarBorder.CornerRadius = new CornerRadius(r, r, 0, 0);
+            NoteGlassBorder.CornerRadius = new CornerRadius(rv);
+        TitleBarBorder.CornerRadius = new CornerRadius(rv, rv, 0, 0);
         // 磁贴模式:砍掉最上面一层标题栏(格式化工具栏保留)。
         TitleBarBorder.Visibility = _note.TileMode ? Visibility.Collapsed : Visibility.Visible;
         if (BodyFillRect != null)
-            BodyFillRect.RadiusX = BodyFillRect.RadiusY = _note.TitleBarFillIndependent ? 0 : r;
+            BodyFillRect.RadiusX = BodyFillRect.RadiusY = _note.TitleBarFillIndependent ? 0 : rv;
         // ponytail 2026-08-28: 收起状态下跳过 DWM 圆角 — 设置面板显示开关 →
         // HideNote → UpdateNote → NotesChanged → OnNotesChanged → ApplyStyle
         // 这条链会在窗口收起后重新打开整窗大小的圆角描边(边框残影来源)。

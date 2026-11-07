@@ -4706,17 +4706,23 @@ public partial class ZoneWindow : Window
         // Borders + corners
         try { ZoneBorder.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.BorderColor)!); } catch { }
         ZoneBorder.BorderThickness = new Thickness(s.BorderThickness);
-        MainContent.CornerRadius = new CornerRadius(s.CornerRadius);
-        ZoneBorder.CornerRadius = new CornerRadius(s.CornerRadius);
+        // 可见圆角：分区也是「窗口 == 可见内容、圆角靠 DWM 切」——Windows 只给固定 8 DIP
+        // （NativeMethods.VisibleCornerRadius），WPF 这边画得更圆的话，四个角上 DWM 切出来的
+        // 玻璃就会从描边弧外面露出一小条（快捷栏/四个小组件都是同一个几何错误）。
+        // 圆角 ≤ 8（默认值）时是空操作。
+        int rVisibleZone = NativeMethods.VisibleCornerRadius(s.CornerRadius,
+            s.EnableLiquidGlass && !AcrylicHelper.ResolveSelfDrawn());
+        MainContent.CornerRadius = new CornerRadius(rVisibleZone);
+        ZoneBorder.CornerRadius = new CornerRadius(rVisibleZone);
         // ponytail 2026-08-26: the title bar and bottom bar carry their own
         // hardcoded corner radii in XAML. They were never updated here, so
         // switching to 尖角 left rounded top/bottom edges behind ("不能完全
         // 转化尖角"). Drive them from the same resolved radius now.
-        TitleBarBg.CornerRadius = new CornerRadius(s.CornerRadius, s.CornerRadius, 0, 0);
+        TitleBarBg.CornerRadius = new CornerRadius(rVisibleZone, rVisibleZone, 0, 0);
         if (BottomBarBg != null)
-            BottomBarBg.CornerRadius = new CornerRadius(0, 0, s.CornerRadius, s.CornerRadius);
+            BottomBarBg.CornerRadius = new CornerRadius(0, 0, rVisibleZone, rVisibleZone);
         if (ClickPulseBg != null)
-            ClickPulseBg.CornerRadius = new CornerRadius(s.CornerRadius);
+            ClickPulseBg.CornerRadius = new CornerRadius(rVisibleZone);
 
         // ponytail 2026-08-26: keep the OS (DWM) corner preference in lockstep.
         // radius 0 → DONOTROUND so Win11 stops clipping the sharp WPF corners.
@@ -4746,7 +4752,7 @@ public partial class ZoneWindow : Window
                 _zone.GlassColorMode, _zone.GlassTintOpacity, _zone.GlassTintLuminosity)
             : null;
         try { FillRect.Fill = wpfGlassTint ?? (glassCarriesFill ? AcrylicHelper.HitTestFill : new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.FillColor)!)); } catch { }
-        FillRect.RadiusX = FillRect.RadiusY = fillIndependent ? 0 : s.CornerRadius;
+        FillRect.RadiusX = FillRect.RadiusY = fillIndependent ? 0 : rVisibleZone;
         // ponytail 2026-08-26: the merged master's title bar is TWO layers — the
         // 24px top bar + the 24px sub-zone tab row — so the body fill starts below
         // both (48px), not just below the top bar.

@@ -212,6 +212,23 @@ public static class NativeMethods
     }
 
     /// <summary>
+    /// 「窗口 == 可见内容」的桌面对象（分区 / 时钟 / 日历 / 播放器 / 便签）的**可见圆角**。
+    ///
+    /// Win11 给窗口切的圆角是**固定 8 DIP**（<see cref="AcrylicHelper.DwmWindowCornerRadiusDip"/>，
+    /// 实测见 `--dock-lab-case=glassfit`）。但只有「玻璃由 DWM accent 背板画」时，那圈玻璃才
+    /// 会被 DWM 切成 8 DIP —— 此时 WPF 的边框/填充如果画得更圆，四个角上玻璃就会从描边弧
+    /// **外面**露出一小条（快捷栏第 10 轮、四个小组件第 11 轮都是这个几何错误）。
+    ///
+    /// 反过来，玻璃关 / 自绘背板时，形状完全由 WPF 决定（DWM 切的 8 DIP 反而比 WPF 的形状大，
+    /// 什么都切不到），用户设多少就该画多少。
+    /// </summary>
+    /// <param name="dwmGlassOnWindow">玻璃是不是靠 DWM accent 画在窗口上。</param>
+    public static int VisibleCornerRadius(int radius, bool dwmGlassOnWindow)
+        => radius <= 0 || !dwmGlassOnWindow
+            ? radius
+            : Math.Min(radius, (int)AcrylicHelper.DwmWindowCornerRadiusDip);
+
+    /// <summary>
     /// Win11 会给每个顶层窗口描一圈 1px 边框（DWM 里叫 visible frame border，
     /// <c>DwmGetWindowAttribute(DWMWA_VISIBLE_FRAME_BORDER_THICKNESS)</c> = 1）。
     /// 对「窗口 = 可见内容」的普通窗口看不出来，但快捷栏的窗口比可见胶囊高

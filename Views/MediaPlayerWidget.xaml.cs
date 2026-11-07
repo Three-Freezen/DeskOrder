@@ -119,6 +119,9 @@ public partial class MediaPlayerWidget : Window
         NativeMethods.SetToolWindow(this);
         NativeMethods.DisableDwmFrameShadow(this);
         NativeMethods.RemoveThickFrame(this);
+        // 关掉 Win11 给窗口描的那圈 1px 边框（否则它压在自己画的边框外面 = 双层边框，
+        // 角上还从描边弧外面绕过去）。与快捷栏 ApplyDockWindowFrame 同一个理由。
+        NativeMethods.RemoveWindowBorder(this);
         ApplyAcrylic();
         ApplyBackgroundImage();
         NativeMethods.SetRoundedCorners(this, _player.CornerRadius);
@@ -224,10 +227,14 @@ public partial class MediaPlayerWidget : Window
         int r = _player.CornerRadius;
         bool barsTile = IsBarsTileMode();
 
-        MainContent.CornerRadius = new CornerRadius(r);
-        BorderRoot.CornerRadius = new CornerRadius(r);
-        GlassBorder.CornerRadius = new CornerRadius(r);
-        FillRect.RadiusX = FillRect.RadiusY = r;
+        // 可见半径压到 Windows 给窗口切的那个值（8 DIP）：否则四个角上 DWM 切出来的玻璃
+        // 会从 WPF 画的描边弧外面露出一小条（见 NativeMethods.VisibleCornerRadius）。
+        int rv = NativeMethods.VisibleCornerRadius(r,
+            _player.EnableLiquidGlass && !AcrylicHelper.ResolveSelfDrawn() && !barsTile);
+        MainContent.CornerRadius = new CornerRadius(rv);
+        BorderRoot.CornerRadius = new CornerRadius(rv);
+        GlassBorder.CornerRadius = new CornerRadius(rv);
+        FillRect.RadiusX = FillRect.RadiusY = rv;
 
         // 边框
         try
@@ -430,7 +437,8 @@ public partial class MediaPlayerWidget : Window
             {
                 GlassBorder.BorderBrush = AcrylicHelper.CreateChromaticBorder();
                 GlassBorder.BorderThickness = new Thickness(Math.Max(1.0, _player.BorderThickness));
-                GlassBorder.CornerRadius = new CornerRadius(_player.CornerRadius);
+                GlassBorder.CornerRadius = new CornerRadius(
+                    NativeMethods.VisibleCornerRadius(_player.CornerRadius, dwmGlassOnWindow: true));
             }
         }
         else
