@@ -6026,19 +6026,24 @@ public partial class ZoneWindow : Window
         double side = ZoneLayout.DockSideOverflow(_zone);
         var band = new Thickness(side, top, side, below);
         bool clear = _zone.TileMode;
+        // 可见圆角：走 DWM 玻璃窗时压到系统给窗口切的圆角（见 DockVisibleCornerRadius），
+        // 描边和玻璃层必须是同一个半径，否则四个角上两层对不齐。
+        double rVisible = DockVisibleCornerRadius(s);
 
         FillRect.Margin = band;
-        FillRect.RadiusX = FillRect.RadiusY = s.CornerRadius;
+        FillRect.RadiusX = FillRect.RadiusY = rVisible;
 
         // 胶囊玻璃图层也只用胶囊这一块：Margin 与 FillRect 完全一致，圆角用 Clip 切
         // （图层内部是三块无圆角的矩形）。尺寸直接按几何算，不依赖 ActualWidth ——
         // ApplyDockBarVisuals 可能发生在布局之前。
+        // 半径同样用 rVisible：万一 DWM 玻璃窗上不去、退到这条自绘通道，胶囊的圆角
+        // 也得跟描边一致（描边是 rVisible），否则角上又会露出一个壁纸楔子。
         if (DockGlassHost != null)
         {
             DockGlassHost.Margin = band;
             double pw = Math.Max(1, ZoneLayout.DockPillWidth(_zone, _zone.Items.Count));
             double ph = Math.Max(1, ZoneLayout.DockBarHeight(_zone));
-            double r = Math.Max(0, s.CornerRadius);
+            double r = Math.Max(0, rVisible);
             DockGlassHost.Clip = new RectangleGeometry(new Rect(0, 0, pw, ph), r, r);
         }
         BgImageBorder.Margin = band;
@@ -6049,7 +6054,7 @@ public partial class ZoneWindow : Window
         {
             double bt = clear ? 0 : Math.Max(0, s.BorderThickness);
             DockBarStroke.StrokeThickness = bt;
-            DockBarStroke.RadiusX = DockBarStroke.RadiusY = s.CornerRadius;
+            DockBarStroke.RadiusX = DockBarStroke.RadiusY = rVisible;
             try
             {
                 DockBarStroke.Stroke = new SolidColorBrush(
@@ -6215,12 +6220,29 @@ public partial class ZoneWindow : Window
     /// 层级被顶掉后重摆时要复用它，保证形状和内容层一模一样。</summary>
     int _dockGlassRadiusPx = 12;
 
-    /// <summary>玻璃层往里收的像素数。Win11 给窗口切的圆角是**固定半径**（约 8 DIP），
-    /// 比 CornerRadius 小，玻璃贴着胶囊放会在圆角外露出一圈；按差值收进去，描边盖住接缝。</summary>
-    int _dockGlassInsetPx;
-
     /// <summary>已经排了一次层级修正（防抖，避免一帧里排好几次）。</summary>
     bool _dockGlassZPending;
+
+    /// <summary>
+    /// 快捷栏胶囊的**可见圆角**（DIP）—— 描边、填充、玻璃层都用这一个值。
+    ///
+    /// 为什么不是直接用 `CornerRadius`：走 DWM 玻璃（独立 HWND 那一层）时，玻璃层的圆角
+    /// 由 Windows 定死（<see cref="AcrylicHelper.DwmWindowCornerRadiusDip"/> ≈ 8 DIP），
+    /// 而且 `SetWindowRgn` 对它完全无效（实测：把玻璃窗区域设成半窗矩形，画面一个像素都不变）。
+    /// 如果描边还按用户设的 12 画，四个角上玻璃就从描边的弧**外面**露出一小条 ——
+    /// 用户报的「玻璃层和内容层没有完美契合」里，圆角这一半就是这个。
+    ///
+    /// 剩下两个通道不受这个限制，用户设多少就是多少：
+    ///   · 自绘背板（渲染方案 = 壁纸采样）—— 玻璃是 WPF 图层，任意半径；
+    ///   · 玻璃关闭 / 整窗就是胶囊 —— 可见形状由 WPF 自己画。
+    /// </summary>
+    double DockVisibleCornerRadius(ResolvedZoneStyle s)
+    {
+        if (!IsDock || !_zone.EnableLiquidGlass) return s.CornerRadius;
+        if (AcrylicHelper.ResolveSelfDrawn()) return s.CornerRadius;
+        if (DockWindowEqualsPill()) return s.CornerRadius;
+        return Math.Min(s.CornerRadius, AcrylicHelper.DwmWindowCornerRadiusDip);
+    }
 
     /// <summary>DWM 方案下的胶囊玻璃：把玻璃单独做成一个窗口垫在内容窗口正下方。
     /// 成功返回 true（此时内容层的 FillRect 只留一个 HitTestFill 抢命中）。</summary>
@@ -6283,25 +6305,23 @@ public partial class ZoneWindow : Window
         // 否则玻璃层会盖在图标上面（用户反馈"有时候玻璃层还会盖住内容"）。
         // 圆角半径存一份：之后层级被别人顶掉时（见 OnDockWindowPosChanged）还要按
         // 同一个半径重新摆一次，不能跟 WPF 胶囊那边算出两个半径来。
-        _dockGlassRadiusPx = (int)Math.Round(Math.Max(0, s.CornerRadius) * dpi.DpiScaleX);
-        // Win11 的窗口圆角 ≈ 8 DIP（固定，不跟用户设的 CornerRadius 走）。差值越大，
-        // 圆角处玻璃露出描边的量越大；乘 (1−1/√2)≈0.293 就是对角线上的那一段。
-        // 只在"有描边"时收：没描边时可见胶囊边缘就是玻璃自己，收进去等于把胶囊缩小。
-        double scale = dpi.DpiScaleX;
-        bool rounded = s.CornerRadius > 0;
-        _dockGlassInsetPx = rounded && s.BorderThickness > 0
-            ? (int)Math.Ceiling(Math.Max(0, (s.CornerRadius - 8) * scale * 0.30))
-            : 0;
+        //
+        // **玻璃窗矩形 = 胶囊矩形，一个像素都不收**（第九轮曾经按 (CornerRadius−8)×0.3
+        // 往里收过 2px，结果两侧多出一条壁纸缝，用户看到的就是"WPF 层比玻璃大一圈"）。
+        // 圆角不需要收：可见圆角已经在 DockVisibleCornerRadius 里压到玻璃层同一个半径，
+        // 描边的弧和玻璃的弧重合，贴着放反而严丝合缝。
+        _dockGlassRadiusPx = (int)Math.Round(Math.Max(0, DockVisibleCornerRadius(s)) * dpi.DpiScaleX);
+        bool rounded = _dockGlassRadiusPx > 0;
         win.SetCornerRounding(rounded);
         win.SyncTo(hwnd,
             (int)Math.Round(pill.X), (int)Math.Round(pill.Y),
             (int)Math.Round(pill.Width), (int)Math.Round(pill.Height),
-            _dockGlassRadiusPx, _dockGlassInsetPx);
+            _dockGlassRadiusPx);
         win.ShowNoActivate();
         win.SyncTo(hwnd,
             (int)Math.Round(pill.X), (int)Math.Round(pill.Y),
             (int)Math.Round(pill.Width), (int)Math.Round(pill.Height),
-            _dockGlassRadiusPx, _dockGlassInsetPx);
+            _dockGlassRadiusPx);
 
         AcrylicHelper.DisableBlur(this);            // 内容窗口自己不能再上 accent
         HideDockGlassLayer();
@@ -6378,7 +6398,7 @@ public partial class ZoneWindow : Window
         bool ok = gw.SyncTo(content,
             (int)Math.Round(pill.X), (int)Math.Round(pill.Y),
             (int)Math.Round(pill.Width), (int)Math.Round(pill.Height),
-            _dockGlassRadiusPx, _dockGlassInsetPx);
+            _dockGlassRadiusPx);
         DzTrace.Log($"[Dock glass] zorder 修正: ok={ok} pill={pill.X:F0},{pill.Y:F0} " +
                     $"{pill.Width:F0}x{pill.Height:F0} | {DockGlassWindow.LastError}");
         if (!ok) _dockGlassMode = "none";   // 兜底：这一帧先别露玻璃，下一次 ApplyDockGlass 再来
@@ -7511,6 +7531,8 @@ public partial class ZoneWindow : Window
                $"glaswin={(_dockGlassWin == null ? "none" : (_dockGlassWin.IsVisibleGlass ? $"visible#0x{_dockGlassWin.Handle.ToInt64():X}" : "hidden"))} " +
                $"host={(DockGlassHost == null ? "null" : $"{DockGlassHost.Visibility} {DockGlassHost.ActualWidth:F0}x{DockGlassHost.ActualHeight:F0}")} " +
                $"inset={inset.X:F0},{inset.Y:F0} {inset.Width:F0}x{inset.Height:F0} " +
+               $"rVis={(IsDock ? DockVisibleCornerRadius(ResolveStyle()) : _zone.CornerRadius):F1} " +
+               $"rGlassPx={_dockGlassRadiusPx} " +
                $"pill={(pill.IsEmpty ? "empty" : $"{pill.X:F0},{pill.Y:F0} {pill.Width:F0}x{pill.Height:F0}")} " +
                $"gen={WallpaperBackdrop.Generation} " +
                $"startGlyph={DockStartGlyph?.ActualWidth:F0} startRefl={startRefl} " +

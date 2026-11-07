@@ -11,6 +11,7 @@ using DesktopZones.Views;
 using DBitmap = System.Drawing.Bitmap;
 using DColor = System.Drawing.Color;
 using DGraphics = System.Drawing.Graphics;
+using DGraphicsUnit = System.Drawing.GraphicsUnit;
 using DCopyOp = System.Drawing.CopyPixelOperation;
 using DImageFormat = System.Drawing.Imaging.ImageFormat;
 using DPixelFormat = System.Drawing.Imaging.PixelFormat;
@@ -34,6 +35,9 @@ namespace DesktopZones;
 ///   · zorder —— 玻璃层（独立 HWND）会不会被内容层的 PinBelowProgman / BringToFront
 ///               顶到上面去（用户报的「两层玻璃、点一下边缘下面那层就盖上来」）。
 ///               含一段「故意翻过来」的强制复现 + 守卫自愈验证。
+///   · glassfit —— 玻璃层和内容层到底差几个像素（用户报的「WPF 层明显大一圈」）：
+///               A 段在**纯色背景**上逐个试 `SetWindowRgn` / 圆角偏好，量出「accent 背板
+///               不认窗口区域、只认系统圆角」；B 段量真实胶囊的每侧内缩与四角半径。
 /// </summary>
 public partial class App
 {
@@ -91,6 +95,7 @@ public partial class App
             if (which is "glassab") { await LabGlassAbAsync(dir, Say); return; }
             if (which is "glassdiff") { await LabGlassDiffAsync(dir, Say); return; }
             if (which is "glassshape") { await LabGlassShapeAsync(dir, Say); return; }
+            if (which is "glassfit") { await LabGlassFitAsync(dir, Say); return; }
             if (which is "zorder") { await LabZOrderAsync(dir, Say); return; }
             if (which is "state" or "all") await LabStateAsync(dir, Say);
             if (which is "ring" or "all") await LabRingAsync(dir, Say);
@@ -935,6 +940,273 @@ public partial class App
             try { w?.Close(); } catch { }
             DesktopZones.Helpers.WallpaperSource.Enabled = oldScheme;
         }
+    }
+
+    // ── 场景 9：玻璃层和内容层「契合」到什么程度（glassfit）──────────────────
+    //
+    // 用户报「玻璃层和内容层没有完美契合，WPF 层明显要大一圈」。这句话里其实有
+    // **两个**可以分开量的量：
+    //   A. 玻璃窗的形状由谁决定 —— 把一只裸玻璃窗放到**纯色**背景上，逐个试
+    //      SetWindowRgn（圆角区域 / 半窗区域）与 DWMWA_WINDOW_CORNER_PREFERENCE，
+    //      看玻璃边界到底听谁的。纯色背景 = 差分干净，不受动态壁纸干扰。
+    //   B. 真实快捷栏的玻璃边界 vs 胶囊矩形差几像素、四角半径是多少 —— 这就是
+    //      「大一圈」的量化定义：每一侧的内缩（应为 0）+ 四角半径（应与描边一致）。
+    //
+    // 边界一律用「玻璃开 / 玻璃关」两张图求差得到，而不是看绝对颜色。
+
+    [DllImport("gdi32.dll")] static extern IntPtr CreateRoundRectRgn(int l, int t, int r, int b, int w, int h);
+
+    async Task LabGlassFitAsync(string dir, Action<string> Say)
+    {
+        Say("");
+        Say("== glassfit: 玻璃层和内容层差几像素 ==");
+        bool oldScheme = DesktopZones.Helpers.WallpaperSource.Enabled;
+        Window? bgw = null;
+        ZoneWindow? dwin = null;
+        DockGlassWindow? glass = null;
+        try
+        {
+            DesktopZones.Helpers.WallpaperSource.Enabled = false;
+
+            // ── A. 纯色背景上的裸玻璃窗：形状听谁的 ──
+            var bgRect = new DRect(1180, 200, 460, 300);
+            bgw = new Window
+            {
+                WindowStyle = WindowStyle.None,
+                ResizeMode = ResizeMode.NoResize,
+                ShowInTaskbar = false,
+                AllowsTransparency = false,
+                Background = new System.Windows.Media.SolidColorBrush(
+                    System.Windows.Media.Color.FromRgb(0x3A, 0x3A, 0x3A)),
+                Left = bgRect.X, Top = bgRect.Y, Width = bgRect.Width, Height = bgRect.Height,
+            };
+            // WPF 的 Left/Top/Width/Height 是 **DIP**：在 125% 缩放下直接写物理像素会让窗口
+            // 整体偏到别处（第一版就是这么错的：玻璃一大半落在壁纸上，右边缘的"没变"其实是
+            // 灰色背景窗的边）。先 Show 拿到窗口，再按 DIP 摆。
+            bgw.Show();
+            var bgDpi = System.Windows.Media.VisualTreeHelper.GetDpi(bgw);
+            bgw.Left = bgRect.X / bgDpi.DpiScaleX;
+            bgw.Top = bgRect.Y / bgDpi.DpiScaleY;
+            bgw.Width = bgRect.Width / bgDpi.DpiScaleX;
+            bgw.Height = bgRect.Height / bgDpi.DpiScaleY;
+            await Task.Delay(600);
+
+            var gr = new DRect(bgRect.X + 60, bgRect.Y + 80, 260, 72);   // 玻璃窗矩形（物理像素）
+            glass = new DockGlassWindow();
+            glass.ShowNoActivate();
+            if (glass.Handle == IntPtr.Zero)
+            {
+                Say("A: 玻璃窗创建失败 → 跳过 A");
+            }
+            else
+            {
+                IntPtr topmost = new IntPtr(-1);
+                void Place() => SetWindowPosEx(glass!.Handle, topmost,
+                    gr.X, gr.Y, gr.Width, gr.Height, SWP_NOACTIVATE_ | SWP_SHOWWINDOW_);
+                Place();
+                var ar = glass.ApplyGlass(18, "#CC101418", 1.0, "Default", 100, 0,
+                    DesktopZones.Helpers.AcrylicHelper.ResolveAccentState(""), useClassicBlur: false);
+                Say($"A: ApplyGlass {(ar.Success ? "ok" : ar.Error)} rect={gr} " +
+                    $"dpi={System.Windows.Media.VisualTreeHelper.GetDpi(bgw).DpiScaleX:F2}");
+                await Task.Delay(500);
+
+                var cap = new DRect(gr.X - 10, gr.Y - 10, gr.Width + 20, gr.Height + 20);
+                glass.HideGlass();
+                await Task.Delay(350);
+                using var bgShot = Grab(cap);
+                SavePng(bgShot, Path.Combine(dir, "gf-a-ref.png"));
+                glass.ShowNoActivate();
+                Place();
+                await Task.Delay(500);
+
+                async Task Variant(string tag, bool round, IntPtr region, string note)
+                {
+                    glass!.SetCornerRounding(round);
+                    int hr = SetWindowRgn(glass.Handle, region, true);
+                    Place();                       // 改区域后重摆一次，保证 z 序仍在最上
+                    await Task.Delay(600);
+                    using var shot = Grab(cap);
+                    SavePng(shot, Path.Combine(dir, $"gf-a-{tag}.png"));
+                    Say($"  [{tag}] {note} round={round} regionSet={hr}");
+                    ReportGlassMask(shot, bgShot, cap, gr, Say, tag, dir);
+                    SaveZoom(shot, new DRect(10, 10, 26, 26), 8, Path.Combine(dir, $"gf-a-{tag}-tl8x.png"));
+                }
+
+                await Variant("rect-noround", false, IntPtr.Zero, "无区域 + DONOTROUND");
+                await Variant("round", true, IntPtr.Zero, "无区域 + ROUND");
+                await Variant("rect+rgn16", false, CreateRoundRectRgn(0, 0, gr.Width + 1, gr.Height + 1, 32, 32),
+                    "圆角区域 r=16 + DONOTROUND");
+                await Variant("rect+rgn-half", false, CreateRoundRectRgn(0, 0, gr.Width / 2, gr.Height, 0, 0),
+                    "半窗矩形区域 + DONOTROUND（accent 认区域就该只剩半边）");
+                await Variant("round+rgn16", true, CreateRoundRectRgn(0, 0, gr.Width + 1, gr.Height + 1, 32, 32),
+                    "圆角区域 r=16 + ROUND");
+            }
+
+            try { glass.Dispose(); } catch { }
+            glass = null;
+            bgw.Close();
+            bgw = null;
+            await Task.Delay(400);
+
+            // ── B. 真实快捷栏：玻璃边界 vs 胶囊矩形 ──
+            var dock = MakeLabDock(false, "lab fit");
+            dock.EnableLiquidGlass = true;
+            dock.TileMode = false;
+            dock.FillColor = "#CC101418";
+            dock.GlassColorMode = "Default";
+            dock.GlassMaterial = "";
+            dock.GlassBlurAmount = 18;
+            dock.GlassTintOpacity = 100;      // 只为把玻璃和背景拉开：形状跟不透明度无关
+            dock.GlassTintLuminosity = 100;
+            dock.CornerRadius = 12;
+            dock.BorderThickness = 1.5;
+            dock.BorderColor = "#66FFFFFF";
+            dock.DockAnimate = true;
+            dock.DockMagnify = 1.8;
+            dock.DockReflection = true;
+            DesktopZones.Helpers.ZoneLayout.ApplyDockSize(dock);
+
+            dwin = new ZoneWindow(dock, _zoneManager!, DesktopZones.Services.ShellIconService.Instance)
+            { ShowInTaskbar = false };
+            foreach (Window ow in Application.Current.Windows)
+                if (ow is ZoneWindow oz && !ReferenceEquals(oz, dwin) && oz.IsVisible)
+                { oz.DebugSetDockGlassVisible(false); oz.Hide(); }
+            dwin.Show();
+            await Task.Delay(900);
+            double side = DesktopZones.Helpers.ZoneLayout.DockSideOverflow(dock);
+            double top = DesktopZones.Helpers.ZoneLayout.DockBarTop(dock);
+            var contentHwnd = new System.Windows.Interop.WindowInteropHelper(dwin).Handle;
+            foreach (var (cx, cy) in new (double, double)[] { (1500, 980), (700, 1050), (300, 980), (1500, 260) })
+            {
+                dwin.Left = cx - side;
+                dwin.Top = cy - top;
+                await Task.Delay(320);
+                var probe = DockPillScreenPx(dock, dwin);
+                if (WindowAt((probe.X + probe.Width / 2, probe.Y + probe.Height / 2)) == contentHwnd) break;
+            }
+            await Task.Delay(1300);
+            dwin.UpdateLayout();
+
+            var pill = DockPillScreenPx(dock, dwin);
+            var pad = new DRect(pill.X - 10, pill.Y - 10, pill.Width + 20, pill.Height + 20);
+            Say($"B: dock='{dock.Name}' pill={pill} corner={dock.CornerRadius} border={dock.BorderThickness} " +
+                $"mode={dwin.DebugDockGlass()}");
+
+            dwin.DebugSetDockGlassVisible(false);
+            await Task.Delay(700);
+            using var refShot = Grab(pad);
+            SavePng(refShot, Path.Combine(dir, "gf-b-ref.png"));
+            dwin.DebugSetDockGlassVisible(true);
+            await Task.Delay(900);
+            using (var shot = Grab(pad))
+            {
+                SavePng(shot, Path.Combine(dir, "gf-b-shot.png"));
+                ReportGlassMask(shot, refShot, pad, pill, Say, "dock", dir);
+                SaveZoom(shot, new DRect(10, 10, 26, 26), 8, Path.Combine(dir, "gf-b-tl8x.png"));
+                SaveZoom(shot, new DRect(pad.Width - 36, 10, 26, 26), 8, Path.Combine(dir, "gf-b-tr8x.png"));
+            }
+            // 再拍一张"玻璃关"：动态壁纸两张参照帧求交集，把"壁纸自己动了"的像素剔掉
+            dwin.DebugSetDockGlassVisible(false);
+            await Task.Delay(700);
+            using (var ref2 = Grab(pad)) SavePng(ref2, Path.Combine(dir, "gf-b-ref2.png"));
+            Say("B: " + dwin.DebugDockGlass());
+        }
+        catch (Exception ex) { Say("glassfit EXC " + ex); }
+        finally
+        {
+            try { glass?.Dispose(); } catch { }
+            try { bgw?.Close(); } catch { }
+            try { dwin?.Close(); } catch { }
+            DesktopZones.Helpers.WallpaperSource.Enabled = oldScheme;
+        }
+    }
+
+    /// <summary>
+    /// 玻璃相对同一块背景的**可见范围**：每一侧相对 <paramref name="target"/> 的内缩
+    /// （0 = 齐边）与四角沿对角线的圆角半径（r = t / 0.2929）。边界一律取"变了"的像素，
+    /// 不依赖颜色绝对值。参数都是屏幕坐标，<paramref name="area"/> 是抓屏区域。
+    /// </summary>
+    static void ReportGlassMask(DBitmap shot, DBitmap bg, DRect area, DRect target,
+                                Action<string> Say, string tag, string dir)
+    {
+        int W = Math.Min(shot.Width, bg.Width), H = Math.Min(shot.Height, bg.Height);
+        bool In(int x, int y) => x >= 0 && y >= 0 && x < W && y < H;
+        bool Changed(int x, int y)
+        {
+            if (!In(x, y)) return false;
+            var a = shot.GetPixel(x, y); var b = bg.GetPixel(x, y);
+            return Math.Abs(a.R - b.R) + Math.Abs(a.G - b.G) + Math.Abs(a.B - b.B) > 12;
+        }
+
+        int tx = target.X - area.X, ty = target.Y - area.Y, tw = target.Width, th = target.Height;
+
+        static int Med(List<int> list)
+        {
+            var c = list.Where(v => v != int.MinValue).ToList();
+            if (c.Count == 0) return int.MinValue;
+            c.Sort();
+            return c[c.Count / 2];
+        }
+
+        var leftVals = new List<int>(); var rightVals = new List<int>();
+        var topVals = new List<int>(); var botVals = new List<int>();
+        for (int i = th / 3; i < th * 2 / 3; i += 2)
+        {
+            int rowY = ty + i;
+            for (int x = tx - 6; x < tx + tw; x++) if (Changed(x, rowY)) { leftVals.Add(x - tx); break; }
+            for (int x = tx + tw + 5; x > tx; x--) if (Changed(x, rowY)) { rightVals.Add(x - (tx + tw - 1)); break; }
+        }
+        for (int i = tw / 3; i < tw * 2 / 3; i += 2)
+        {
+            int colX = tx + i;
+            for (int y = ty - 6; y < ty + th; y++) if (Changed(colX, y)) { topVals.Add(y - ty); break; }
+            for (int y = ty + th + 5; y > ty; y--) if (Changed(colX, y)) { botVals.Add(y - (ty + th - 1)); break; }
+        }
+
+        double Corner(int sx, int sy, int dx, int dy, int limit)
+        {
+            for (int t = 0; t <= limit; t++)
+                if (Changed(sx + dx * t, sy + dy * t)) return t / 0.2929;
+            return -1;
+        }
+        int lim = Math.Min(tw, th) / 2;
+        double rTL = Corner(tx, ty, 1, 1, lim);
+        double rTR = Corner(tx + tw - 1, ty, -1, 1, lim);
+        double rBL = Corner(tx, ty + th - 1, 1, -1, lim);
+        double rBR = Corner(tx + tw - 1, ty + th - 1, -1, -1, lim);
+
+        Say($"  [{tag}] edgeInset L={Med(leftVals)} T={Med(topVals)} R={Med(rightVals)} B={Med(botVals)} " +
+            $"(0 = 与目标矩形齐边) | cornerR TL={rTL:F1} TR={rTR:F1} BL={rBL:F1} BR={rBR:F1}");
+
+        using (var mask = new DBitmap(W, H, DPixelFormat.Format32bppArgb))
+        {
+            for (int y = 0; y < H; y++)
+                for (int x = 0; x < W; x++)
+                    mask.SetPixel(x, y, Changed(x, y)
+                        ? DColor.FromArgb(255, 255, 255, 255) : DColor.FromArgb(255, 0, 0, 0));
+            foreach (var yy in new[] { ty, ty + th - 1 })            // 目标矩形画成红框，方便对着看
+                for (int x = tx; x < tx + tw; x++) if (In(x, yy)) mask.SetPixel(x, yy, DColor.FromArgb(255, 255, 0, 0));
+            foreach (var xx in new[] { tx, tx + tw - 1 })
+                for (int y = ty; y < ty + th; y++) if (In(xx, y)) mask.SetPixel(xx, y, DColor.FromArgb(255, 255, 0, 0));
+            SavePng(mask, Path.Combine(dir, $"gf-mask-{tag}.png"));
+        }
+    }
+
+    /// <summary>把一小块放大存成 PNG（看圆角/接缝用，最近邻放大，不模糊）。</summary>
+    static void SaveZoom(DBitmap src, DRect r, int scale, string path)
+    {
+        try
+        {
+            int w = Math.Max(1, Math.Min(r.Width, src.Width - r.X)) * scale;
+            int h = Math.Max(1, Math.Min(r.Height, src.Height - r.Y)) * scale;
+            using var dst = new DBitmap(w, h, DPixelFormat.Format32bppArgb);
+            using var g = DGraphics.FromImage(dst);
+            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
+            g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half;
+            g.DrawImage(src, new DRect(0, 0, w, h), r, DGraphicsUnit.Pixel);
+            SavePng(dst, path);
+        }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine("zoom " + ex.Message); }
     }
 
     // ── 场景 7：快捷栏玻璃 vs 分区玻璃（同一位置、同一背景，参考帧做差） ──────

@@ -243,6 +243,14 @@ public static class AcrylicHelper
     /// 默认 true —— 让「还没试过」不阻塞渲染;真正不可用时第一次取图就会把它压下去。</summary>
     public static bool SelfDrawnAvailable { get; set; } = true;
 
+    /// <summary>DWM 给**窗口**切的圆角半径(DIP)。Windows 固定值:`DWMWA_WINDOW_CORNER_PREFERENCE`
+    /// 只有 DONOTROUND / ROUND(≈8) / ROUNDSMALL(≈4) 三档,给不了任意像素数。
+    ///
+    /// 实测(`--dock-lab-case=glassfit`,125% 缩放,纯色背景上逐像素量):ROUND 窗口的玻璃边界
+    /// 四角拟合半径 **10px = 8 DIP**;同一只窗口无论 `SetWindowRgn` 设成圆角还是**半窗**矩形,
+    /// 画面逐像素不变 —— accent 背板完全不认窗口区域。所以「玻璃层是独立 HWND」时,
+    /// 那层的圆角只能等于这个值,内容层的描边必须跟着它画,两层才严丝合缝。</summary>
+    public const double DwmWindowCornerRadiusDip = 8;
     /// <summary>模型里的模糊半径(0-60,原本是 DWM accent flags 的档位)→ 自绘背板的
     /// **屏幕物理像素**半径。1:1 映射:滑块的数字从此就是"多少像素"。</summary>
     public static int ResolveSelfDrawnRadiusPx(int blurAmount)
@@ -1804,9 +1812,15 @@ public static class AcrylicHelper
     /// 把一个**非分层**窗口裁成圆角矩形，并让 DWM 背板的模糊也止于同一块区域。
     ///
     /// 这就是菜单/弹窗那套「三层保险」的前两层（见 <see cref="ApplyMenuSurfaceEffects"/>）：
-    ///   ① `SetWindowRgn` 把窗口本身裁成圆角 —— 背板（模糊 + 着色）跟着被裁；
+    ///   ① `SetWindowRgn` 把窗口本身裁成圆角；
     ///   ② `DWM_BB_BLURREGION` 让模糊只发生在同一个圆角区域里，圆角外面不会有一圈糊边。
     /// 第三层（`DWMWA_WINDOW_CORNER_PREFERENCE`）由调用方按需要不要。
+    ///
+    /// **但 `SetWindowRgn` 对「accent 背板」是无效的**（第 10 轮实测，`--dock-lab-case=glassfit`）：
+    /// 一只只有 accent 的裸窗口，把区域设成半窗矩形之后画面**逐像素不变**；能改形状的只有
+    /// `DWMWA_WINDOW_CORNER_PREFERENCE`（固定 8 DIP）。所以「窗口区域 = 玻璃形状」这个前提
+    /// 只在有 DWM 帧/菜单那种场合成立，不能拿它给快捷栏的玻璃层切任意圆角
+    /// （快捷栏因此改成：内容层的描边跟着系统圆角画，见 ZoneWindow.DockVisibleCornerRadius）。
     ///
     /// `classicBlur = false`：**只裁形状，不开经典 blurbehind**（快捷栏的玻璃层用）。
     /// 非分层窗口上的 `DwmEnableBlurBehindWindow` 在 Win10/11 上不是"模糊"，而是给整窗

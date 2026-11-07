@@ -189,25 +189,27 @@ sealed class DockGlassWindow : IDisposable
 
     /// <summary>摆到胶囊的屏幕矩形（**物理像素**），并插到 <paramref name="below"/> 窗口正下方
     /// （= 内容窗口下面）。regionRadiusPx 是胶囊圆角的像素半径。
-    /// 形状和模糊区域一起裁（<see cref="AcrylicHelper.ShapeToRoundRect"/>），圆角外面不会有一圈糊边；
-    /// 位置/层级放在最后一步，保证玻璃层永远紧贴内容层下方（ShowWindow 会把窗口提到最前）。</summary>
-    public bool SyncTo(IntPtr below, int x, int y, int w, int h, int regionRadiusPx, int insetPx = 0)
+    ///
+    /// **矩形就是胶囊矩形，一个像素都不收**：第九轮曾经按「DWM 圆角比 CornerRadius 小」
+    /// 往里收过 2px，结果玻璃四周比描边小一圈、中间那条缝露出壁纸 —— 用户看到的就是
+    /// 「玻璃层和内容层没有完美契合，WPF 层明显大一圈」。正确做法是让**内容层的圆角**
+    /// 跟着玻璃走（见 ZoneWindow.DockVisibleCornerRadius），而不是把玻璃缩小 ——
+    /// 因为 accent 背板**不认** `SetWindowRgn`（实测：区域设成半窗矩形，画面逐像素不变），
+    /// 玻璃这层的形状只有 DWM 的圆角偏好说了算，缩矩形只会缩出缝来。
+    ///
+    /// 形状和模糊区域一起裁（<see cref="AcrylicHelper.ShapeToRoundRect"/>），圆角外面不会
+    /// 有一圈糊边；位置/层级放在最后一步，保证玻璃层永远紧贴内容层下方（ShowWindow 会把
+    /// 窗口提到最前）。</summary>
+    public bool SyncTo(IntPtr below, int x, int y, int w, int h, int regionRadiusPx)
     {
         EnsureWindow();
         if (_hwnd == IntPtr.Zero || w < 1 || h < 1) return false;
-        // Win11 给窗口切的圆角是**固定半径**（约 8 DIP），比用户设的 CornerRadius 小。
-        // 玻璃窗贴着胶囊矩形放的话，圆角处玻璃会从内容层描边的圆弧外面露出一小圈
-        // （12 DIP 对 8 DIP 时对角线约 1.5px）。按差值把玻璃窗收进去，描边正好盖住接缝。
-        if (insetPx > 0)
-        {
-            x += insetPx; y += insetPx;
-            w = Math.Max(1, w - insetPx * 2);
-            h = Math.Max(1, h - insetPx * 2);
-        }
         bool ok = PlaceBelow(below, x, y, w, h);
-        // 圆角裁剪**放在最后**：上玻璃配方会重设 DWM 的模糊区域，先裁后上配方等于白裁。
-        // classicBlur:false —— 这个窗口是**非分层**的，`DwmEnableBlurBehindWindow` 在这里
-        // 不是模糊而是一层灰黑（实测 Δluma≈−24），分区那种分层窗口上才是空操作。
+        // 这一步**不是**为了裁圆角（实测：accent 背板不认窗口区域 —— 把区域设成半窗矩形，
+        // 画面逐像素不变，见 `--dock-lab-case=glassfit` 的 rect+rgn-half）。它真正的作用是把
+        // 可能残留的经典 blurbehind 关掉（`classicBlur:false`）：非分层窗口上的
+        // `DwmEnableBlurBehindWindow` 不是模糊，而是一层灰黑（实测 Δluma≈−24）。
+        // 圆角由 DWM 的圆角偏好决定，内容层的描边跟着它画（ZoneWindow.DockVisibleCornerRadius）。
         AcrylicHelper.ShapeToRoundRect(_hwnd, w, h, regionRadiusPx, classicBlur: false);
         return ok;
     }
