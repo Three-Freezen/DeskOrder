@@ -104,6 +104,16 @@ The "now playing" on your desktop: bars or vinyl, picked at creation and fixed a
 - **Two preset sets**: bars presets and vinyl presets are stored separately, never mixed, and apply with one click
 - **Recognised even without SMTC**: players that never register a system media session (e.g. NetEase Cloud Music) are recognised through audio-session level, window title and their own play-queue cache, with controls sent as system media keys. When nothing can be identified, the bars/record still react — just without track text
 
+### Dock
+
+A capsule that lives on the desktop layer and keeps your everyday apps in one row — the idea of a taskbar, but with the zone look system all the way through.
+
+- **Single row**: icon size, gap and padding come from one formula, so the bar grows and shrinks with its items; optional "minimize into a 36×36 restore button" and "expand on hover", with the usual show / minimize / fully hidden states
+- **Hover magnify**: 1.0–2.0×, scaled from the bottom centre of the cell, with neighbouring icons shifting aside; the window keeps room above for the magnified icon and a band below for the reflection, so nothing gets clipped
+- **Icon reflections**: an optional mirrored, squashed and faded copy under each icon, with adjustable opacity
+- **Start button**: optional, with a divider, opening the Start menu
+- **Look**: tile mode, liquid glass, background image, rounded / sharp corners, border and preset cards — the **same** system as zones; the context menu, drag-to-reorder and click-to-launch behave like zones too
+
 ### Quick panel
 
 Summoned with a global hotkey; keeps all zone cards in one place, with file search, new document/folder creation and system item import. Popup position and motion are configurable.

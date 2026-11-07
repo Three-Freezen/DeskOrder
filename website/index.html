@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DeskOrder 秩序桌面 — 桌面分区与磁贴美化</title>
-<meta name="description" content="DeskOrder 秩序桌面：Windows 桌面分区管理与磁贴美化工具。透明悬浮分区、液态玻璃、磁贴模式、时钟/日历/便签挂件、快捷面板。Apache-2.0 开源，Windows 10+，自带运行时。">
+<meta name="description" content="DeskOrder 秩序桌面：Windows 桌面分区管理与磁贴美化工具。透明悬浮分区、液态玻璃、磁贴模式、快捷栏（Dock）、时钟/日历/便签/播放器挂件、快捷面板。Apache-2.0 开源，Windows 10+，自带运行时。">
 <meta property="og:title" content="DeskOrder 秩序桌面">
 <meta property="og:description" content="桌面分类管理和磁贴美化，一个软件全实现。">
 <meta property="og:image" content="assets/hero.webp">
@@ -364,7 +364,7 @@ html.lang-fading main{animation:langIn .22s ease}
     <div class="container">
       <div class="section-head center reveal">
         <h2 data-i18n="sec_features_t">软件功能</h2>
-        <p class="section-sub" data-i18n="sec_features_s">从整理到美化，七大模块。</p>
+        <p class="section-sub" data-i18n="sec_features_s">从整理到美化，八大模块。</p>
       </div>
       <div class="card-grid" data-stagger>
         <article class="feature-card reveal" data-od-id="feature-zones">
@@ -386,6 +386,11 @@ html.lang-fading main{animation:langIn .22s ease}
           <div class="f-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 19V10M9 19V5M14 19v-6M19 19v-9"/></svg></div>
           <h3 data-i18n="f7t">播放器</h3>
           <p data-i18n="f7d">律动条与唱片机两种形态：真实频谱跳动、专辑封面与主色、可只跟某个应用；没接入系统媒体会话的播放器也能认出来。</p>
+        </article>
+        <article class="feature-card reveal" data-od-id="feature-dock">
+          <div class="f-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="2.5" y="8" width="19" height="8" rx="4"/><path d="M7 12h.01M11 12h.01M15 12h.01M19 12h.01" stroke-linecap="round"/></svg></div>
+          <h3 data-i18n="f8t">快捷栏</h3>
+          <p data-i18n="f8d">桌面层上的一条胶囊：常用应用排成一行，悬停放大、图标倒影、可选开始按钮；磁贴、液态玻璃、背景图与预设卡跟分区同一套。</p>
         </article>
         <article class="feature-card reveal" data-od-id="feature-panel">
           <div class="f-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="10.5" cy="11" r="3"/><path d="M13 13.5 15.5 16"/></svg></div>
@@ -526,7 +531,14 @@ html.lang-fading main{animation:langIn .22s ease}
         <h2 data-i18n="sec_cl_t">更新日志</h2>
       </div>
       <div class="cl-card reveal" data-od-id="changelog-card">
-        <div class="cl-head"><span class="rm-ver">v1.0.24</span></div>
+        <div class="cl-head"><span class="rm-ver">v1.0.25</span></div>
+        <ul class="cl-list">
+          <li><b data-i18n="cl25_i1t"></b><span data-i18n="cl25_i1d"></span></li>
+          <li><b data-i18n="cl25_i2t"></b><span data-i18n="cl25_i2d"></span></li>
+          <li><b data-i18n="cl25_i3t"></b><span data-i18n="cl25_i3d"></span></li>
+          <li><b data-i18n="cl25_i4t"></b><span data-i18n="cl25_i4d"></span></li>
+        </ul>
+        <div class="cl-head cl-prev"><span class="rm-ver">v1.0.24</span></div>
         <ul class="cl-list">
           <li><b data-i18n="cl24_i1t"></b><span data-i18n="cl24_i1d"></span></li>
           <li><b data-i18n="cl24_i2t"></b><span data-i18n="cl24_i2d"></span></li>
@@ -619,11 +631,12 @@ zh:{
   shot_widgets_c:"桌面挂件",shot_widgets_d:"时钟、日历、便签",
   shot_panel_c:"快捷面板",shot_panel_d:"分区卡片、系统项目和搜索收在一处",
   shot_manager_c:"管理窗口",shot_manager_d:"分区、组件和设置集中管理",
-  sec_features_t:"软件功能",sec_features_s:"从整理到美化，七大模块。",
+  sec_features_t:"软件功能",sec_features_s:"从整理到美化，八大模块。",
   f1t:"桌面分区",f1d:"任意数量的透明悬浮分区，文件拖入即归类；网格或自由排列、吸附与自动重排，支持多显示器。",
   f2t:"磁贴与美化",f2d:"分区一键变磁贴，八种液态玻璃材质与背景图随心调；整套样式存成预设卡，其他分区一键套用。",
   f3t:"桌面挂件",f3d:"时钟支持指针/数字与 12/24 小时制，日历待办到点托盘提醒，便签可绑定全局热键随时唤起。",
   f7t:"播放器",f7d:"律动条与唱片机两种形态：真实频谱跳动、专辑封面与主色、可只跟某个应用；没接入系统媒体会话的播放器也能认出来。",
+  f8t:"快捷栏",f8d:"桌面层上的一条胶囊：常用应用排成一行，悬停放大、图标倒影、可选开始按钮；磁贴、液态玻璃、背景图与预设卡跟分区同一套。",
   f4t:"快捷面板",f4d:"全局热键呼出，分区卡片、文件搜索、新建文档与文件夹收在一处，弹出位置和动效可调。",
   f5t:"合并组",f5d:"多个分区组成一组统一管理，样式一起换。",
   f6t:"系统集成",f6d:"分区驻留桌面层不挡应用；托盘、开机自启、中英双语、浅色/深色主题、应用内更新。",
@@ -653,6 +666,10 @@ zh:{
   sec_rm_t:"未来展望",rm_note:"计划中的功能，发布顺序可能调整。",
   rm_i1:"性能优化",
   sec_cl_t:"更新日志",
+  cl25_i1t:"快捷栏（新）：",cl25_i1d:"桌面层上的一条胶囊，把常用应用排成一行——单行排列、悬停放大、图标倒影、可选开始按钮；磁贴、液态玻璃、背景图、预设卡与分区是同一套外观系统。",
+  cl25_i2t:"玻璃和边框逐像素对齐：",cl25_i2d:"快捷栏胶囊和四个小组件（时钟/日历/便签/播放器）的可见轮廓不再由两套几何各画一半：胶囊先在设备像素里取整，可见圆角统一压到 Windows 给窗口切的固定值（8 DIP），四个角上不再露出一小条玻璃。",
+  cl25_i3t:"小组件边框回到你设的颜色：",cl25_i3d:"玻璃开着时不再叠一条彩色渐变边框（以前四个角各占一个颜色），改成和分区一致的「边框颜色 / 线宽」，默认半透明白。",
+  cl25_i4t:"三处玻璃问题修复：",cl25_i4d:"快捷栏玻璃不再比分区深一截（去掉了在裸窗口上只会压灰黑的经典模糊）、点边缘不再让玻璃翻到内容层上面、圆角不再是方的（accent 背板不认窗口区域，改用系统的圆角偏好）。",
   cl24_i1t:"播放器组件（新）：",cl24_i1d:"桌面上的「正在播放」，律动条和唱片机两种形态——创建时选定，之后不再改。律动条按系统真实频谱跳动（WASAPI 环回 + 手写 FFT，可切回模拟律动），唱片机是黑胶盘加旋转的专辑封面，两者都支持磁贴模式。",
   cl24_i2t:"曲目、封面与兜底识别：",cl24_i2d:"自动读取正在播放的曲名、歌手、专辑与封面，可直接上一曲 / 暂停 / 下一曲。没有接入系统媒体会话的播放器（如网易云音乐）靠音频会话电平 + 窗口标题 + 它自己的播放缓存兜底识别；实在认不出是谁在出声时，条子 / 唱盘照样动，只是不显示曲目内容。",
   cl24_i3t:"封面取色、跟随应用与两套预设：",cl24_i3d:"从封面提取主色，用在律动条颜色、分割线和唱片机中心标签；同时有多个播放器时可以让某个组件只跟某个应用；律动条和唱片机各有一套独立预设卡，分开存放、互不混用。",
@@ -686,11 +703,12 @@ en:{
   shot_widgets_c:"Widgets",shot_widgets_d:"Clock, calendar and sticky notes",
   shot_panel_c:"Quick panel",shot_panel_d:"Zone cards, system locations and search in one place",
   shot_manager_c:"Manager",shot_manager_d:"Zones, widgets and settings in one place",
-  sec_features_t:"Features",sec_features_s:"Seven modules, from organizing to beautifying.",
+  sec_features_t:"Features",sec_features_s:"Eight modules, from organizing to beautifying.",
   f1t:"Desktop zones",f1d:"Any number of transparent floating zones — drop files in to organize them; grid or free layout, snap and auto-arrange, multi-monitor.",
   f2t:"Tiles & styling",f2d:"Turn a zone into one big tile; tune eight liquid glass materials and background images, then save the whole look as a preset card for other zones.",
   f3t:"Widgets",f3d:"Analog or digital clock with 12/24-hour modes; calendar reminders via tray notifications; sticky notes with global hotkeys.",
   f7t:"Player",f7d:"Bars or vinyl: real spectrum motion, album artwork with accent colour, follow a single app — and players that never register a system media session are recognised too.",
+  f8t:"Dock",f8d:"A capsule on the desktop layer: your everyday apps in one row, with hover magnify, icon reflections and an optional Start button — tile mode, liquid glass, background image and preset cards, the same look system as zones.",
   f4t:"Quick panel",f4d:"Summon with a global hotkey: zone cards, file search and new document/folder in one place; popup position and motion configurable.",
   f5t:"Merged groups",f5d:"Combine zones into a group and restyle them together.",
   f6t:"System integration",f6d:"Zones live on the desktop layer; tray, start with Windows, bilingual UI, light/dark themes and in-app updates.",
@@ -720,6 +738,10 @@ en:{
   sec_rm_t:"What's next",rm_note:"Planned features; shipping order may change.",
   rm_i1:"Performance improvements",
   sec_cl_t:"Changelog",
+  cl25_i1t:"New: dock. ",cl25_i1d:"A capsule on the desktop layer that keeps your everyday apps in one row — single row, hover magnify, icon reflections, optional Start button. Tile mode, liquid glass, background image and preset cards are the same look system as zones.",
+  cl25_i2t:"Glass and borders line up pixel for pixel: ",cl25_i2d:"the dock capsule and the four widgets (clock / calendar / note / player) no longer draw their outline with two different geometries: the pill is rounded to whole device pixels first, and the visible corner radius is clamped to the fixed 8 DIP Windows gives a window, so no sliver of glass shows outside the border.",
+  cl25_i3t:"Widget borders use your colour again: ",cl25_i3d:"with glass on, the widgets no longer add a chromatic gradient border (previously one hue per corner); they use the configured border colour and width like zones — a translucent white by default.",
+  cl25_i4t:"Three glass fixes: ",cl25_i4d:"the dock glass is no longer darker than a zone (the classic blur that only greys out a bare window is gone), the glass no longer flips above the content when you click an edge, and the corners are actually round (the accent backdrop ignores window regions, so it uses the DWM corner preference instead).",
   cl24_i1t:"New: player component. ",cl24_i1d:"\"Now playing\" on your desktop in two shapes — bars or vinyl, picked at creation and fixed afterwards. Bars follow the real system spectrum (WASAPI loopback + hand-written FFT, switchable to simulated motion); vinyl is a black record with the album cover spinning on it. Both support tile mode.",
   cl24_i2t:"Track, artwork and fallback recognition: ",cl24_i2d:"reads the title, artist, album and cover of whatever is playing, with prev / play-pause / next. Players that never register a system media session (e.g. NetEase Cloud Music) are recognised through audio-session level, window title and their own play-queue cache; when nothing can be identified, the bars and the record still react — just without track text.",
   cl24_i3t:"Accent from cover, follow one app, two preset sets: ",cl24_i3d:"the dominant colour of the artwork drives the bar colour, the divider and the vinyl centre label; with several widgets each one can follow a single app; and bars presets and vinyl presets are stored separately, never mixed.",
