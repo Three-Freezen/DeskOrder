@@ -1040,6 +1040,13 @@ public partial class App
                     "半窗矩形区域 + DONOTROUND（accent 认区域就该只剩半边）");
                 await Variant("round+rgn16", true, CreateRoundRectRgn(0, 0, gr.Width + 1, gr.Height + 1, 32, 32),
                     "圆角区域 r=16 + ROUND");
+
+                // 7) ROUND + **饱和着色**：只为把「玻璃」和「投影」在像素上分开 —— 玻璃的差
+                //    会被拉到 150 以上，投影只有 30 上下，这样四个角（尤其下面两个）的圆角
+                //    半径才量得准：下边那一圈投影正是上一轮把 BL/BR 量成 0 的原因。
+                glass!.ApplyGlass(18, "#FFFF0000", 1.0, "#FFFF0000", 100, 100,
+                    DesktopZones.Helpers.AcrylicHelper.ResolveAccentState(""), useClassicBlur: false);
+                await Variant("round-red", true, IntPtr.Zero, "ROUND + 强红着色（分离投影）");
             }
 
             try { glass.Dispose(); } catch { }
@@ -1048,8 +1055,12 @@ public partial class App
             bgw = null;
             await Task.Delay(400);
 
-            // ── B. 真实快捷栏：玻璃边界 vs 胶囊矩形 ──
-            var dock = MakeLabDock(false, "lab fit");
+            // 参数按用户那条「快捷栏 1」逐项抄：0 个图标（空胶囊 181×60 DIP，只有一个开始按钮）、
+            // magnify 1.4、倒影关、corner=12、border=1、玻璃开。这样：
+            //   · 四个角上只有"描边 + 玻璃"两样东西，差半个像素都能看出来；
+            //   · 上边距 11 DIP × 1.25 = 13.75px、胶囊宽 181 × 1.25 = 226.25px —— 都是**带小数**
+            //     的，正是"玻璃层和描边差一个亚像素"的最坏情况。
+            var dock = MakeLabDock(false, "lab fit", Array.Empty<string>());
             dock.EnableLiquidGlass = true;
             dock.TileMode = false;
             dock.FillColor = "#CC101418";
@@ -1059,11 +1070,12 @@ public partial class App
             dock.GlassTintOpacity = 100;      // 只为把玻璃和背景拉开：形状跟不透明度无关
             dock.GlassTintLuminosity = 100;
             dock.CornerRadius = 12;
-            dock.BorderThickness = 1.5;
-            dock.BorderColor = "#66FFFFFF";
+            dock.BorderThickness = 1.0;
+            dock.BorderColor = "#40FFFFFF";
             dock.DockAnimate = true;
-            dock.DockMagnify = 1.8;
-            dock.DockReflection = true;
+            dock.DockMagnify = 1.4;
+            dock.DockReflection = false;
+            dock.DockStartButton = true;
             DesktopZones.Helpers.ZoneLayout.ApplyDockSize(dock);
 
             dwin = new ZoneWindow(dock, _zoneManager!, DesktopZones.Services.ShellIconService.Instance)
@@ -1091,6 +1103,7 @@ public partial class App
             var pad = new DRect(pill.X - 10, pill.Y - 10, pill.Width + 20, pill.Height + 20);
             Say($"B: dock='{dock.Name}' pill={pill} corner={dock.CornerRadius} border={dock.BorderThickness} " +
                 $"mode={dwin.DebugDockGlass()}");
+            Say("B geom: " + dwin.DebugDockPillGeom());
 
             dwin.DebugSetDockGlassVisible(false);
             await Task.Delay(700);
@@ -1102,8 +1115,13 @@ public partial class App
             {
                 SavePng(shot, Path.Combine(dir, "gf-b-shot.png"));
                 ReportGlassMask(shot, refShot, pad, pill, Say, "dock", dir);
-                SaveZoom(shot, new DRect(10, 10, 26, 26), 8, Path.Combine(dir, "gf-b-tl8x.png"));
-                SaveZoom(shot, new DRect(pad.Width - 36, 10, 26, 26), 8, Path.Combine(dir, "gf-b-tr8x.png"));
+                // 四角各拍一张 14 倍特写：**左下角**是用户报的那一处，四个角放一起才比得出来
+                const int zs = 14, box = 30;
+                SaveZoom(shot, new DRect(0, 0, box, box), zs, Path.Combine(dir, "corner-tl.png"));
+                SaveZoom(shot, new DRect(pad.Width - box, 0, box, box), zs, Path.Combine(dir, "corner-tr.png"));
+                SaveZoom(shot, new DRect(0, pad.Height - box, box, box), zs, Path.Combine(dir, "corner-bl.png"));
+                SaveZoom(shot, new DRect(pad.Width - box, pad.Height - box, box, box), zs,
+                    Path.Combine(dir, "corner-br.png"));
             }
             // 再拍一张"玻璃关"：动态壁纸两张参照帧求交集，把"壁纸自己动了"的像素剔掉
             dwin.DebugSetDockGlassVisible(false);

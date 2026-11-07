@@ -6019,34 +6019,51 @@ public partial class ZoneWindow : Window
     void ApplyDockBarVisuals(ResolvedZoneStyle s)
     {
         if (FillRect == null) return;
-        double top = ZoneLayout.DockBarTop(_zone);
-        double barH = ZoneLayout.DockBarHeight(_zone);
-        double below = Math.Max(0, ZoneLayout.DockHeight(_zone) - top - barH);
-        // 左右两侧的透明余量（放大溢出用）不属于胶囊，填充/背景图/描边都要让开。
-        double side = ZoneLayout.DockSideOverflow(_zone);
-        var band = new Thickness(side, top, side, below);
+        // 胶囊几何一律走 DockPill*Px：**先落到整像素，再按左/上 + 显式宽高摆放**。
+        //
+        // 两件事都不能用"四边 Margin"那条老写法：
+        //   ① 上边距 × DPI 常常带小数（用户的快捷栏 11 DIP × 1.25 = 13.75px），不取整的话
+        //      玻璃层（HWND，只能整数坐标）跟描边差 0.25px；
+        //   ② 窗口自己也会被取整 —— 131 DIP × 1.25 = 163.75px，HWND 是 164px，
+        //      内容层于是有 131.2 DIP，"右/下边距"按模型 131 算就短 0.25px。
+        // 所以：左/上边距按整像素换算，宽高**直接给死**（不依赖父容器实际尺寸），
+        // 四个边就都落在同一组整数设备像素上，跟玻璃窗逐个像素对齐。
+        var dpi = VisualTreeHelper.GetDpi(this);
+        double sx = dpi.DpiScaleX, sy = dpi.DpiScaleY;
+        int lPx = DockPillLeftPx(), tPx = DockPillTopPx();
+        int wPx = DockPillWidthPx(), hPx = DockPillHeightPx();
+        double leftDip = lPx / sx, topDip = tPx / sy;
+        double widthDip = wPx / sx, heightDip = hPx / sy;
         bool clear = _zone.TileMode;
         // 可见圆角：走 DWM 玻璃窗时压到系统给窗口切的圆角（见 DockVisibleCornerRadius），
         // 描边和玻璃层必须是同一个半径，否则四个角上两层对不齐。
         double rVisible = DockVisibleCornerRadius(s);
 
-        FillRect.Margin = band;
+        FillRect.Margin = new Thickness(leftDip, topDip, 0, 0);
+        FillRect.HorizontalAlignment = HorizontalAlignment.Left;
+        FillRect.VerticalAlignment = VerticalAlignment.Top;
+        FillRect.Width = widthDip;
+        FillRect.Height = heightDip;
         FillRect.RadiusX = FillRect.RadiusY = rVisible;
 
-        // 胶囊玻璃图层也只用胶囊这一块：Margin 与 FillRect 完全一致，圆角用 Clip 切
-        // （图层内部是三块无圆角的矩形）。尺寸直接按几何算，不依赖 ActualWidth ——
-        // ApplyDockBarVisuals 可能发生在布局之前。
-        // 半径同样用 rVisible：万一 DWM 玻璃窗上不去、退到这条自绘通道，胶囊的圆角
-        // 也得跟描边一致（描边是 rVisible），否则角上又会露出一个壁纸楔子。
+        // 胶囊玻璃图层也只用胶囊这一块：位置/尺寸与 FillRect 完全一致，圆角用 Clip 切
+        // （图层内部是三块无圆角的矩形）。半径同样用 rVisible：万一 DWM 玻璃窗上不去、
+        // 退到这条自绘通道，胶囊的圆角也得跟描边一致，否则角上又会露出一个壁纸楔子。
         if (DockGlassHost != null)
         {
-            DockGlassHost.Margin = band;
-            double pw = Math.Max(1, ZoneLayout.DockPillWidth(_zone, _zone.Items.Count));
-            double ph = Math.Max(1, ZoneLayout.DockBarHeight(_zone));
+            DockGlassHost.Margin = new Thickness(leftDip, topDip, 0, 0);
+            DockGlassHost.HorizontalAlignment = HorizontalAlignment.Left;
+            DockGlassHost.VerticalAlignment = VerticalAlignment.Top;
+            DockGlassHost.Width = widthDip;
+            DockGlassHost.Height = heightDip;
             double r = Math.Max(0, rVisible);
-            DockGlassHost.Clip = new RectangleGeometry(new Rect(0, 0, pw, ph), r, r);
+            DockGlassHost.Clip = new RectangleGeometry(new Rect(0, 0, widthDip, heightDip), r, r);
         }
-        BgImageBorder.Margin = band;
+        BgImageBorder.Margin = new Thickness(leftDip, topDip, 0, 0);
+        BgImageBorder.HorizontalAlignment = HorizontalAlignment.Left;
+        BgImageBorder.VerticalAlignment = VerticalAlignment.Top;
+        BgImageBorder.Width = widthDip;
+        BgImageBorder.Height = heightDip;
         BgImageBorder.Visibility = clear ? Visibility.Collapsed : Visibility.Visible;
 
         // 描边单独一条：往里收半个线宽，免得被窗口/胶囊边缘切掉一半。
@@ -6055,6 +6072,12 @@ public partial class ZoneWindow : Window
             double bt = clear ? 0 : Math.Max(0, s.BorderThickness);
             DockBarStroke.StrokeThickness = bt;
             DockBarStroke.RadiusX = DockBarStroke.RadiusY = rVisible;
+            // **这条必须关掉整像素布局对齐**（Window 上是 `UseLayoutRounding=True`）：
+            // 描边要往里收半个线宽，`left + 0.5` 在 125% 下是 15.625px，布局对齐会把它圆成
+            // 16px —— 外沿就变成"左边缩进 0.375px、右边探出 0.625px"（上下同理），四个角
+            // 左右/上下不对称。关掉之后 15.625 − 0.625 = 15px，正好压在玻璃的边上。
+            DockBarStroke.UseLayoutRounding = false;
+            DockBarStroke.SnapsToDevicePixels = false;
             try
             {
                 DockBarStroke.Stroke = new SolidColorBrush(
@@ -6062,7 +6085,11 @@ public partial class ZoneWindow : Window
             }
             catch { }
             double half = bt / 2;
-            DockBarStroke.Margin = new Thickness(side + half, top + half, side + half, below + half);
+            DockBarStroke.Margin = new Thickness(leftDip + half, topDip + half, 0, 0);
+            DockBarStroke.HorizontalAlignment = HorizontalAlignment.Left;
+            DockBarStroke.VerticalAlignment = VerticalAlignment.Top;
+            DockBarStroke.Width = Math.Max(0, widthDip - bt);
+            DockBarStroke.Height = Math.Max(0, heightDip - bt);
             DockBarStroke.Visibility = bt > 0 ? Visibility.Visible : Visibility.Collapsed;
         }
 
@@ -6432,18 +6459,39 @@ public partial class ZoneWindow : Window
         if (DockGlassHost != null) DockGlassHost.Visibility = Visibility.Collapsed;
     }
 
+    // ── 胶囊几何：**先在设备像素里取整，再换回 DIP** ────────────────────────
+    //
+    // 快捷栏的可见胶囊有两个"画家"：内容层（WPF，能把描边画在半像素上）和玻璃层
+    // （裸 HWND，坐标只能是整数）。只要有一边落在 .25/.5 上，两层就差一个亚像素：
+    // 描边那侧看不出来，玻璃那侧就变成"多吃 0.25px"或"少 0.25px"（一条发丝缝）。
+    //
+    // 实测（125% 缩放，用户那条「快捷栏 1」）：`DockBarTop = 11 DIP × 1.25 = 13.75px`、
+    // 胶囊宽 `181 × 1.25 = 226.25px`。玻璃窗按 round 摆到 14 / 226，描边还画在 13.75 / 226.25
+    // 上 → 玻璃"上边多出 0.25px、下边少 0.25px"；再叠上后面那条布局取整（见
+    // ApplyDockBarVisuals 里描边那段的注释），两个弧的圆心就斜了，两条弧在**左下**交叉 ——
+    // 用户报的"左下角还稍微有点没对齐"。
+    //
+    // 解决办法：四条边先用 round() 落到整数像素，再把整数换算成 DIP 交给 WPF
+    // （整数 ÷ 1.25 × 1.25 正好还是那个整数），玻璃层直接用同一组整数 —— 两层重合。
+
+    /// <summary>胶囊左边距（**整设备像素**，相对内容层左上角）。</summary>
+    int DockPillLeftPx() => (int)Math.Round(ZoneLayout.DockSideOverflow(_zone) * VisualTreeHelper.GetDpi(this).DpiScaleX);
+
+    /// <summary>胶囊上边距（**整设备像素**，相对内容层左上角）。</summary>
+    int DockPillTopPx() => (int)Math.Round(ZoneLayout.DockBarTop(_zone) * VisualTreeHelper.GetDpi(this).DpiScaleY);
+
+    /// <summary>胶囊宽度（**整设备像素**）。</summary>
+    int DockPillWidthPx() => Math.Max(1,
+        (int)Math.Round(ZoneLayout.DockPillWidth(_zone, _zone.Items.Count) * VisualTreeHelper.GetDpi(this).DpiScaleX));
+
+    /// <summary>胶囊高度（**整设备像素**）。</summary>
+    int DockPillHeightPx() => Math.Max(1,
+        (int)Math.Round(ZoneLayout.DockBarHeight(_zone) * VisualTreeHelper.GetDpi(this).DpiScaleY));
+
     /// <summary>胶囊在**窗口内**的物理像素矩形（= 壁纸裁剪源偏移）。
     /// 存窗口内偏移而不是屏幕矩形：窗口一移动，图层自己按新位置重裁。</summary>
     Rect DockPillInsetPx()
-    {
-        var dpi = VisualTreeHelper.GetDpi(this);
-        double side = ZoneLayout.DockSideOverflow(_zone);
-        double top = ZoneLayout.DockBarTop(_zone);
-        double w = ZoneLayout.DockPillWidth(_zone, _zone.Items.Count);
-        double h = ZoneLayout.DockBarHeight(_zone);
-        return new Rect(side * dpi.DpiScaleX, top * dpi.DpiScaleY,
-                        Math.Max(1, w * dpi.DpiScaleX), Math.Max(1, h * dpi.DpiScaleY));
-    }
+        => new(DockPillLeftPx(), DockPillTopPx(), DockPillWidthPx(), DockPillHeightPx());
 
 
     /// <summary>窗口矩形是否正好等于可见胶囊（此时 DWM 整窗模糊 == 胶囊模糊，可以用 DWM）。</summary>
@@ -6452,20 +6500,18 @@ public partial class ZoneWindow : Window
            && ZoneLayout.DockOverflowTop(_zone) <= 0
            && ZoneLayout.DockReflectBand(_zone) <= 0;
 
-    /// <summary>胶囊在屏幕上的**物理像素**矩形（壁纸裁剪用）。窗口没就位时返回 Empty。</summary>
+    /// <summary>胶囊在屏幕上的**物理像素**矩形（玻璃层窗口 / 壁纸裁剪用）。
+    /// 四条边都是整数（见上面那段注释），窗口没就位时返回 Empty。</summary>
     Rect DockPillScreenPx()
     {
         try
         {
             if (PresentationSource.FromVisual(this) == null) return Rect.Empty;
-            double side = ZoneLayout.DockSideOverflow(_zone);
-            double top = ZoneLayout.DockBarTop(_zone);
-            double w = ZoneLayout.DockPillWidth(_zone, _zone.Items.Count);
-            double h = ZoneLayout.DockBarHeight(_zone);
+            int w = DockPillWidthPx(), h = DockPillHeightPx();
             if (w < 2 || h < 2) return Rect.Empty;
-            var dpi = VisualTreeHelper.GetDpi(this);
-            var tl = PointToScreen(new Point(side, top));      // 设备像素
-            return new Rect(tl.X, tl.Y, w * dpi.DpiScaleX, h * dpi.DpiScaleY);
+            var origin = PointToScreen(new Point(0, 0));       // 内容层左上角（设备像素）
+            return new Rect(Math.Round(origin.X) + DockPillLeftPx(),
+                            Math.Round(origin.Y) + DockPillTopPx(), w, h);
         }
         catch { return Rect.Empty; }
     }
@@ -7538,6 +7584,42 @@ public partial class ZoneWindow : Window
                $"startGlyph={DockStartGlyph?.ActualWidth:F0} startRefl={startRefl} " +
                $"bands=top{ZoneLayout.DockOverflowTop(_zone):F0}/refl{ZoneLayout.DockReflectBand(_zone):F0} " +
                $"snap=[{string.Join(" | ", _snapLog)}] refl=[{string.Join(" ", _reflLog)}]";
+    }
+
+    /// <summary>自测用：胶囊的**三方几何**（全部换成设备像素）—— 胶囊矩形 / 描边外沿 /
+    /// 玻璃窗矩形。三个必须落在同一组整数边界上：差 0 才叫"严丝合缝"，只要有一个是 .25
+    /// 就是一条发丝缝（第 10 轮的左下角问题）。</summary>
+    public string DebugDockPillGeom()
+    {
+        try
+        {
+            var pill = DockPillScreenPx();
+            var origin = PointToScreen(new Point(0, 0));
+            var dpi = VisualTreeHelper.GetDpi(this);
+            string stroke = "n/a";
+            if (DockBarStroke != null && DockBarStroke.Visibility == Visibility.Visible
+                && DockBarStroke.ActualWidth > 0)
+            {
+                var tl = DockBarStroke.TransformToAncestor(this).Transform(new Point(0, 0));
+                var br = DockBarStroke.TransformToAncestor(this).Transform(
+                    new Point(DockBarStroke.ActualWidth, DockBarStroke.ActualHeight));
+                double half = DockBarStroke.StrokeThickness / 2;   // 描边居中：外沿再向外半个线宽
+                double x0 = origin.X + (tl.X - half) * dpi.DpiScaleX;
+                double y0 = origin.Y + (tl.Y - half) * dpi.DpiScaleY;
+                double x1 = origin.X + (br.X + half) * dpi.DpiScaleX;
+                double y1 = origin.Y + (br.Y + half) * dpi.DpiScaleY;
+                stroke = $"({x0:F2},{y0:F2}) {x1 - x0:F2}x{y1 - y0:F2}";
+            }
+            string glass = "none";
+            if (_dockGlassWin is { } gw && gw.Handle != IntPtr.Zero)
+            {
+                NativeMethods.GetWindowRect(gw.Handle, out var r);
+                glass = $"({r.Left},{r.Top}) {r.Right - r.Left}x{r.Bottom - r.Top}";
+            }
+            return $"pillPx=({pill.X},{pill.Y}) {pill.Width}x{pill.Height} | " +
+                   $"strokeOuter={stroke} | glassRect={glass}";
+        }
+        catch (Exception ex) { return "geom-exc " + ex.Message; }
     }
 
     /// <summary>自测用：胶囊玻璃图层的内部状态（半径/世代/位图/裁剪框）。</summary>
