@@ -6071,7 +6071,12 @@ public partial class ZoneWindow : Window
         {
             double bt = clear ? 0 : Math.Max(0, s.BorderThickness);
             DockBarStroke.StrokeThickness = bt;
-            DockBarStroke.RadiusX = DockBarStroke.RadiusY = rVisible;
+            // 半径要**减去半个线宽**：描边是沿着"往里收半线宽"的路径居中画的，它的**外沿**
+            // 半径 = 路径半径 + 半线宽。玻璃层那个圆角是 rVisible（DWM 给的），所以路径半径
+            // 取 rVisible − bt/2，外沿才正好是 rVisible —— 否则四个角上描边会挂在玻璃圆角
+            // **外面**约半个线宽（0.6px），在左下那种背景最暗的角上看着就像多了一条弧。
+            double rStroke = Math.Max(0, rVisible - bt / 2);
+            DockBarStroke.RadiusX = DockBarStroke.RadiusY = rStroke;
             // **这条必须关掉整像素布局对齐**（Window 上是 `UseLayoutRounding=True`）：
             // 描边要往里收半个线宽，`left + 0.5` 在 125% 下是 15.625px，布局对齐会把它圆成
             // 16px —— 外沿就变成"左边缩进 0.375px、右边探出 0.625px"（上下同理），四个角
@@ -7616,8 +7621,10 @@ public partial class ZoneWindow : Window
                 NativeMethods.GetWindowRect(gw.Handle, out var r);
                 glass = $"({r.Left},{r.Top}) {r.Right - r.Left}x{r.Bottom - r.Top}";
             }
+            double rPath = DockBarStroke?.RadiusX ?? 0, t = DockBarStroke?.StrokeThickness ?? 0;
             return $"pillPx=({pill.X},{pill.Y}) {pill.Width}x{pill.Height} | " +
-                   $"strokeOuter={stroke} | glassRect={glass}";
+                   $"strokeOuter={stroke} | glassRect={glass} | " +
+                   $"rOuter={rPath + t / 2:F2}DIP rGlass={(IsDock ? DockVisibleCornerRadius(ResolveStyle()) : _zone.CornerRadius):F2}DIP";
         }
         catch (Exception ex) { return "geom-exc " + ex.Message; }
     }
