@@ -6215,6 +6215,10 @@ public partial class ZoneWindow : Window
     /// 层级被顶掉后重摆时要复用它，保证形状和内容层一模一样。</summary>
     int _dockGlassRadiusPx = 12;
 
+    /// <summary>玻璃层往里收的像素数。Win11 给窗口切的圆角是**固定半径**（约 8 DIP），
+    /// 比 CornerRadius 小，玻璃贴着胶囊放会在圆角外露出一圈；按差值收进去，描边盖住接缝。</summary>
+    int _dockGlassInsetPx;
+
     /// <summary>已经排了一次层级修正（防抖，避免一帧里排好几次）。</summary>
     bool _dockGlassZPending;
 
@@ -6256,14 +6260,17 @@ public partial class ZoneWindow : Window
         }
 
         // 配方必须和分区**逐项一致**（这是用户说的"调成和分区一样的"）：
-        //   accentState / 是否叠加经典模糊都走同一套材质解析器。
-        // 第 7 轮踩过的坑：这里一度写死 `useClassicBlur: false`，玻璃层就比分区少一遍模糊
-        // ——实测同一位置同一背景，分区 luma=66.7/sharp=1.3，快捷栏 luma=67.8/sharp=2.5
-        // （亮度对上了但明显更"清"），看起来就是"参数不对"。
+        //   accentState 走同一套材质解析器。
+        //
+        // **经典 blurbehind 固定关掉**（`useClassicBlur: false`）：这个玻璃层是**非分层**
+        // 裸 HWND，`DwmEnableBlurBehindWindow` 在这里不是"模糊"，而是给整窗加一层灰黑
+        // （实测同一块壁纸：开着 Δluma≈−24、蓝通道 −43，看起来就是"比分区深一截"）；
+        // 分组那种**分层** WPF 窗口上它反而是空操作 —— 同一套配方两条通道观感不同，
+        // 根因就在这。分区那边保留材质解析器给的取值，不动。
         var r = win.ApplyGlass(_zone.GlassBlurAmount, s.FillColor, 1.0, _zone.GlassColorMode,
             _zone.GlassTintOpacity, _zone.GlassTintLuminosity,
             AcrylicHelper.ResolveAccentState(_zone.GlassMaterial),
-            AcrylicHelper.ResolveUseClassicBlur(_zone.GlassMaterial));
+            useClassicBlur: false);
         if (!r.Success)
         {
             DzTrace.Log($"[Dock glass] DWM 玻璃窗失败: {r.Error} → 采样兜底");
@@ -6277,15 +6284,24 @@ public partial class ZoneWindow : Window
         // 圆角半径存一份：之后层级被别人顶掉时（见 OnDockWindowPosChanged）还要按
         // 同一个半径重新摆一次，不能跟 WPF 胶囊那边算出两个半径来。
         _dockGlassRadiusPx = (int)Math.Round(Math.Max(0, s.CornerRadius) * dpi.DpiScaleX);
+        // Win11 的窗口圆角 ≈ 8 DIP（固定，不跟用户设的 CornerRadius 走）。差值越大，
+        // 圆角处玻璃露出描边的量越大；乘 (1−1/√2)≈0.293 就是对角线上的那一段。
+        // 只在"有描边"时收：没描边时可见胶囊边缘就是玻璃自己，收进去等于把胶囊缩小。
+        double scale = dpi.DpiScaleX;
+        bool rounded = s.CornerRadius > 0;
+        _dockGlassInsetPx = rounded && s.BorderThickness > 0
+            ? (int)Math.Ceiling(Math.Max(0, (s.CornerRadius - 8) * scale * 0.30))
+            : 0;
+        win.SetCornerRounding(rounded);
         win.SyncTo(hwnd,
             (int)Math.Round(pill.X), (int)Math.Round(pill.Y),
             (int)Math.Round(pill.Width), (int)Math.Round(pill.Height),
-            _dockGlassRadiusPx);
+            _dockGlassRadiusPx, _dockGlassInsetPx);
         win.ShowNoActivate();
         win.SyncTo(hwnd,
             (int)Math.Round(pill.X), (int)Math.Round(pill.Y),
             (int)Math.Round(pill.Width), (int)Math.Round(pill.Height),
-            _dockGlassRadiusPx);
+            _dockGlassRadiusPx, _dockGlassInsetPx);
 
         AcrylicHelper.DisableBlur(this);            // 内容窗口自己不能再上 accent
         HideDockGlassLayer();
@@ -6362,7 +6378,7 @@ public partial class ZoneWindow : Window
         bool ok = gw.SyncTo(content,
             (int)Math.Round(pill.X), (int)Math.Round(pill.Y),
             (int)Math.Round(pill.Width), (int)Math.Round(pill.Height),
-            _dockGlassRadiusPx);
+            _dockGlassRadiusPx, _dockGlassInsetPx);
         DzTrace.Log($"[Dock glass] zorder 修正: ok={ok} pill={pill.X:F0},{pill.Y:F0} " +
                     $"{pill.Width:F0}x{pill.Height:F0} | {DockGlassWindow.LastError}");
         if (!ok) _dockGlassMode = "none";   // 兜底：这一帧先别露玻璃，下一次 ApplyDockGlass 再来

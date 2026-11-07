@@ -841,9 +841,14 @@ public static class AcrylicHelper
         return BlurResult.Fail(primary.Error ?? secondary.Error ?? "unknown");
     }
 
+#if DEBUG
+    /// <summary>自测专用：单独开关某个窗口的经典 blurbehind（排查"快捷栏玻璃比分区深一截"）。
+    /// 只给 `--dock-lab-case=glassdiff` 用，Release 不编译。</summary>
+    public static void DebugSetClassicBlur(IntPtr hwnd, bool enable) => TryBlurBehind(hwnd, enable);
+#endif
+
     /// <summary>Disable blur on a window.</summary>
-    public static BlurResult DisableBlur(Window window)
-    {
+    public static BlurResult DisableBlur(Window window)    {
         // ponytail: drop the registry entry so OnSystemAccentChanged doesn't try to
         // re-apply to a torn-down window.
         _registered.Remove(window);
@@ -1803,16 +1808,33 @@ public static class AcrylicHelper
     ///   ② `DWM_BB_BLURREGION` 让模糊只发生在同一个圆角区域里，圆角外面不会有一圈糊边。
     /// 第三层（`DWMWA_WINDOW_CORNER_PREFERENCE`）由调用方按需要不要。
     ///
+    /// `classicBlur = false`：**只裁形状，不开经典 blurbehind**（快捷栏的玻璃层用）。
+    /// 非分层窗口上的 `DwmEnableBlurBehindWindow` 在 Win10/11 上不是"模糊"，而是给整窗
+    /// 加一层灰黑（实测同一块壁纸 Δluma≈−24、蓝通道 −43）；分层窗口（分区/挂件那种）
+    /// 上它是空操作。所以玻璃层一开经典模糊就比分区的玻璃"深一截"—— 见 22 节。
+    ///
     /// `SetWindowRgn` 会接管 hRgn 的所有权（不能 DeleteObject）；模糊区域是 Dwm 拷贝的，
     /// 调用返回后要自己删。
     /// </summary>
-    public static void ShapeToRoundRect(IntPtr hwnd, int w, int h, int radiusPx)
+    public static void ShapeToRoundRect(IntPtr hwnd, int w, int h, int radiusPx, bool classicBlur = true)
     {
         if (hwnd == IntPtr.Zero || w <= 0 || h <= 0) return;
         int d = Math.Max(0, radiusPx) * 2;   // CreateRoundRectRgn 收的是椭圆的宽高 = 直径
         try
         {
             SetWindowRgn(hwnd, CreateRoundRectRgn(0, 0, w, h, d, d), true);
+            if (!classicBlur)
+            {
+                // 把可能残留的经典 blurbehind 关掉（accent 的圆角裁剪靠上面的窗口区域就够 —— 实测圆角干净）。
+                var off = new DWM_BLURBEHIND
+                {
+                    dwFlags = DWM_BB_ENABLE,
+                    fEnable = false,
+                    hRgnBlur = IntPtr.Zero,
+                };
+                DwmEnableBlurBehindWindow(hwnd, ref off);
+                return;
+            }
             var bb = new DWM_BLURBEHIND
             {
                 dwFlags = DWM_BB_ENABLE | DWM_BB_BLURREGION,

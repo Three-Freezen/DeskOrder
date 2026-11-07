@@ -89,6 +89,8 @@ public partial class App
             if (which is "glasswin") { await LabGlassWindowAsync(dir, Say); return; }
             if (which is "glasscmp") { await LabGlassCompareAsync(dir, Say); return; }
             if (which is "glassab") { await LabGlassAbAsync(dir, Say); return; }
+            if (which is "glassdiff") { await LabGlassDiffAsync(dir, Say); return; }
+            if (which is "glassshape") { await LabGlassShapeAsync(dir, Say); return; }
             if (which is "zorder") { await LabZOrderAsync(dir, Say); return; }
             if (which is "state" or "all") await LabStateAsync(dir, Say);
             if (which is "ring" or "all") await LabRingAsync(dir, Say);
@@ -852,6 +854,242 @@ public partial class App
         finally { DesktopZones.Helpers.WallpaperSource.Enabled = oldScheme; }
     }
 
+    // ── 场景 8：玻璃窗的形状到底被什么裁（glassshape）──────────────────────
+    //
+    // 用户报「圆角的裁切还是有点问题」。玻璃层是**非分层裸 HWND**，DWM 的 accent
+    // （亚克力背板）到底认不认 `SetWindowRgn` / `DWMWA_WINDOW_CORNER_PREFERENCE`，
+    // 直接做实验：正常 → 椭圆区域 → 圆角偏好 → 关 accent，各拍一张。
+
+    [DllImport("user32.dll")] static extern int SetWindowRgn(IntPtr hwnd, IntPtr rgn, bool redraw);
+    [DllImport("gdi32.dll")] static extern IntPtr CreateEllipticRgn(int l, int t, int r, int b);
+    [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int val, int size);
+
+    async Task LabGlassShapeAsync(string dir, Action<string> Say)
+    {
+        Say("");
+        Say("== glassshape: 玻璃窗的形状被什么裁 ==");
+        bool oldScheme = DesktopZones.Helpers.WallpaperSource.Enabled;
+        ZoneWindow? w = null;
+        try
+        {
+            DesktopZones.Helpers.WallpaperSource.Enabled = false;
+            var z = MakeLabDock(false, "lab shape", Array.Empty<string>());
+            z.EnableLiquidGlass = true;
+            z.FillColor = "#08000000";
+            z.GlassColorMode = "Default";
+            z.GlassMaterial = "";
+            z.GlassBlurAmount = 18;
+            z.GlassTintOpacity = 50;
+            z.CornerRadius = 12;
+            z.BorderThickness = 0;          // 去掉 WPF 描边，免得它遮住玻璃自己的边
+            z.DockAnimate = true;           // 留溢出带，逼它走独立玻璃窗
+            z.DockMagnify = 1.8;
+            z.DockReflection = true;
+            DesktopZones.Helpers.ZoneLayout.ApplyDockSize(z);
+
+            w = new ZoneWindow(z, _zoneManager!, DesktopZones.Services.ShellIconService.Instance)
+            { ShowInTaskbar = false };
+            w.Show();
+            await Task.Delay(1400);
+            foreach (Window ow in Application.Current.Windows)
+                if (ow is ZoneWindow oz && !ReferenceEquals(oz, w) && oz.IsVisible)
+                { oz.DebugSetDockGlassVisible(false); oz.Hide(); }
+            w.Left = 1500;
+            w.Top = 980;
+            await Task.Delay(1300);
+            w.UpdateLayout();
+
+            var g = w.DebugDockGlassHwnd();
+            if (g == IntPtr.Zero) { Say("没有玻璃窗 → 跳过"); return; }
+            GetWindowRect(g, out var gr);
+            int gw = gr.Right - gr.Left, gh = gr.Bottom - gr.Top;
+            Say($"glass hwnd=0x{g.ToInt64():X} rect=({gr.Left},{gr.Top}) {gw}x{gh} state={w.DebugDockGlass()}");
+            var region = CaptureRegion(w, 26);
+            void Shot(string tag, string note)
+            {
+                using var bmp = Grab(region);
+                SavePng(bmp, Path.Combine(dir, $"gs-{tag}.png"));
+                Say($"  [{tag}] {note}");
+            }
+            Shot("a-normal", "现状（SetWindowRgn 圆角 + accent）");
+
+            // 1) 直接把玻璃窗裁成椭圆：accent 若认窗口区域，胶囊就该变椭圆
+            SetWindowRgn(g, CreateEllipticRgn(0, 0, gw, gh), true);
+            await Task.Delay(600);
+            Shot("b-ellipse", "SetWindowRgn(椭圆) —— accent 认区域的话这里会变椭圆");
+
+            // 2) Win11 圆角偏好（半径固定 ~8px）
+            int round = 2;   // DWMWCP_ROUND
+            int hr = DwmSetWindowAttribute(g, 33, ref round, sizeof(int));
+            await Task.Delay(600);
+            Shot("c-corner", $"DWMWA_WINDOW_CORNER_PREFERENCE=ROUND hr={hr}");
+
+            // 3) 关掉 accent：裸窗口还剩什么
+            DesktopZones.Helpers.AcrylicHelper.DisableBlur(g);
+            await Task.Delay(500);
+            Shot("d-accentoff", "DisableBlur(玻璃窗) —— 没有 accent 的裸窗口");
+        }
+        catch (Exception ex) { Say("glassshape EXC " + ex); }
+        finally
+        {
+            try { w?.Close(); } catch { }
+            DesktopZones.Helpers.WallpaperSource.Enabled = oldScheme;
+        }
+    }
+
+    // ── 场景 7：快捷栏玻璃 vs 分区玻璃（同一位置、同一背景，参考帧做差） ──────
+    //
+    // 用户报「快捷栏的玻璃默认比分区深不少」。这里把两者摆到**同一个胶囊屏幕矩形**上，
+    // 每次都先拍一张"没有玻璃的同一块背景"再拍玻璃，用差值（而不是绝对值）比较 ——
+    // 这台机的壁纸是动态的，绝对值没有可比性（见 20.2 的假阳性基线）。
+
+    async Task LabGlassDiffAsync(string dir, Action<string> Say)
+    {
+        Say("");
+        Say("== glassdiff: 快捷栏 DWM 玻璃 vs 分区 DWM 玻璃 ==");
+        bool oldScheme = DesktopZones.Helpers.WallpaperSource.Enabled;
+        ZoneWindow? dwin = null;
+        ZoneWindow? zw = null;
+        try
+        {
+            DesktopZones.Helpers.WallpaperSource.Enabled = false;   // 渲染方案 = DWM
+            // 用一条**空**快捷栏：胶囊里没有图标/倒影，整块都是纯玻璃，才好和空分区比。
+            var dock = MakeLabDock(false, "lab glassdiff", Array.Empty<string>());
+            dock.EnableLiquidGlass = true;
+            dock.TileMode = false;
+            dock.FillColor = "#08000000";
+            dock.GlassColorMode = "Default";
+            dock.GlassMaterial = "";
+            dock.GlassBlurAmount = 18;
+            dock.GlassTintOpacity = 50;
+            dock.GlassTintLuminosity = 100;
+            dock.CornerRadius = 12;
+            dock.BorderThickness = 1;
+            dock.BorderColor = "#66FFFFFF";
+            dock.DockAnimate = true;
+            dock.DockMagnify = 1.8;
+            dock.DockReflection = true;
+            DesktopZones.Helpers.ZoneLayout.ApplyDockSize(dock);
+
+            dwin = new ZoneWindow(dock, _zoneManager!, DesktopZones.Services.ShellIconService.Instance)
+            { ShowInTaskbar = false };
+
+            // 其它窗口全收（玻璃层是独立 HWND，也要一起收）
+            foreach (Window w in Application.Current.Windows)
+                if (w is ZoneWindow z2 && !ReferenceEquals(z2, dwin) && z2.IsVisible)
+                { z2.DebugSetDockGlassVisible(false); z2.Hide(); }
+
+            // 固定胶囊左上角（DIP）。窗口位置 = 胶囊 - 侧/上余量。
+            // 位置要挑一个"没有被别的窗口盖住"的：桌面层窗口永远在应用窗口下面，被盖住就拍不到。
+            dwin.Show();
+            await Task.Delay(900);
+            var candidates = new (double X, double Y)[] { (1500, 980), (700, 1050), (300, 980), (1500, 200) };
+            var contentHwnd = new System.Windows.Interop.WindowInteropHelper(dwin).Handle;
+            double side = DesktopZones.Helpers.ZoneLayout.DockSideOverflow(dock);
+            double top = DesktopZones.Helpers.ZoneLayout.DockBarTop(dock);
+            foreach (var (cx, cy) in candidates)
+            {
+                dwin.Left = cx - side;
+                dwin.Top = cy - top;
+                await Task.Delay(300);
+                var probe = DockPillScreenPx(dock, dwin);
+                var hit = WindowAt((probe.X + probe.Width / 2, probe.Y + probe.Height / 2));
+                Say($"  候选 pill@({cx},{cy}) hit=0x{hit.ToInt64():X} content=0x{contentHwnd.ToInt64():X} ok={hit == contentHwnd}");
+                if (hit == contentHwnd) break;
+            }
+            await Task.Delay(1200);
+            dwin.UpdateLayout();
+
+            var pill = DockPillScreenPx(dock, dwin);
+            // 空胶囊：取**底部中间**一条（快捷栏这里没有图标/倒影，分区这里在标题栏之下），
+            // 两边都不含标题栏/描边，才是"同一块纯玻璃"。
+            var patch = new DRect(pill.X + 15, pill.Bottom - 24,
+                Math.Max(20, pill.Width - 30), Math.Max(8, 14));
+            var region = new DRect(patch.X - 40, patch.Y - 40, patch.Width + 80, patch.Height + 80);
+            var local = new DRect(40, 40, patch.Width, patch.Height);
+            var corner = new DRect(pill.X - 24, pill.Y - 24, 80, 80);   // 左上角特写
+            Say($"pill={pill} patch={patch}");
+            Say($"appearance: mode={dock.GlassColorMode} fill={dock.FillColor} blur={dock.GlassBlurAmount} " +
+                $"tint={dock.GlassTintOpacity}/{dock.GlassTintLuminosity} mat='{dock.GlassMaterial}' " +
+                $"corner={dock.CornerRadius} border={dock.BorderThickness}");
+            Say("dock state: " + dwin.DebugDockGlass());
+
+            // A：快捷栏 —— 先拍"有玻璃"，再把**玻璃层**收掉拍同一块背景（内容层不参与取色）
+            using (var shotA = Grab(region))
+            {
+                SavePng(shotA, Path.Combine(dir, "gd-dock.png"));
+                using (var c = Grab(corner)) SavePng(c, Path.Combine(dir, "gd-corner-dock.png"));
+
+                // A2：只把经典 blurbehind 关掉（accent 不动），看"深一截"是不是它干的。
+                DesktopZones.Helpers.AcrylicHelper.DebugSetClassicBlur(dwin.DebugDockGlassHwnd(), false);
+                await Task.Delay(500);
+                using var shotA2 = Grab(region);
+                SavePng(shotA2, Path.Combine(dir, "gd-dock-noclassic.png"));
+                using (var c2 = Grab(corner)) SavePng(c2, Path.Combine(dir, "gd-corner-dock-noclassic.png"));
+
+                dwin.DebugSetDockGlassVisible(false);
+                await Task.Delay(600);
+                using var refA = Grab(region);
+                SavePng(refA, Path.Combine(dir, "gd-ref-dock.png"));
+                Say($"  [dock      ] luma={MeanLuma(shotA, local):F1} {DeltaRgb(shotA, refA, local)} " +
+                    $"shotRGB={MeanRgb(shotA, local)} bgRGB={MeanRgb(refA, local)}");
+                Say($"  [dock-nocl ] luma={MeanLuma(shotA2, local):F1} {DeltaRgb(shotA2, refA, local)} " +
+                    $"shotRGB={MeanRgb(shotA2, local)}");
+            }
+            dwin.Hide();
+            await Task.Delay(600);
+            var dpi = System.Windows.Media.VisualTreeHelper.GetDpi(dwin);
+            var zone = new Zone
+            {
+                Name = "lab glass zone",
+                DockMode = false,
+                GridSize = 48,
+                IsVisible = true,
+                EnableLiquidGlass = true,
+                TileMode = false,
+                CornerRadius = dock.CornerRadius,
+                BorderThickness = dock.BorderThickness,
+                BorderColor = dock.BorderColor,
+                FillColor = dock.FillColor,
+                GlassMaterial = dock.GlassMaterial,
+                GlassColorMode = dock.GlassColorMode,
+                GlassBlurAmount = dock.GlassBlurAmount,
+                GlassTintOpacity = dock.GlassTintOpacity,
+                GlassTintLuminosity = dock.GlassTintLuminosity,
+                Width = Math.Round(pill.Width / dpi.DpiScaleX),
+                Height = Math.Round(pill.Height / dpi.DpiScaleY),
+                X = Math.Round(pill.X / dpi.DpiScaleX),
+                Y = Math.Round(pill.Y / dpi.DpiScaleY),
+            };
+
+            // B：分区 —— 同一个屏幕矩形、同一套外观字段
+            zw = new ZoneWindow(zone, _zoneManager!, DesktopZones.Services.ShellIconService.Instance)
+            { ShowInTaskbar = false };
+            zw.Show();
+            await Task.Delay(1600);
+            zw.UpdateLayout();
+            using (var shotB = Grab(region))
+            {
+                SavePng(shotB, Path.Combine(dir, "gd-zone.png"));
+                using (var c = Grab(corner)) SavePng(c, Path.Combine(dir, "gd-corner-zone.png"));
+                zw.Hide();
+                await Task.Delay(600);
+                using var refB = Grab(region);
+                SavePng(refB, Path.Combine(dir, "gd-ref-zone.png"));
+                Say($"  [zone] luma={MeanLuma(shotB, local):F1} {DeltaRgb(shotB, refB, local)} " +
+                    $"shotRGB={MeanRgb(shotB, local)} bgRGB={MeanRgb(refB, local)}");
+                Say("  zone dwm: " + DwmState(zw));
+            }
+        }
+        catch (Exception ex) { Say("glassdiff EXC " + ex); }
+        finally
+        {
+            try { zw?.Close(); } catch { }
+            try { dwin?.Close(); } catch { }
+            DesktopZones.Helpers.WallpaperSource.Enabled = oldScheme;
+        }
+    }
+
     /// <summary>胶囊的屏幕物理矩形（不加抓屏 pad）。</summary>
     static DRect DockPillScreenPx(Zone dock, ZoneWindow win)
     {
@@ -882,6 +1120,26 @@ public partial class App
             }
         if (n == 0) return "-";
         return $"({sr / n:F0},{sg / n:F0},{sb / n:F0})";
+    }
+
+    /// <summary>玻璃相对同一块背景的 **差值**：Δrgb 每通道均值 + Δluma。
+    /// 这台机的壁纸是动态的，只有差值能横向比较"谁更深"。</summary>
+    static string DeltaRgb(DBitmap shot, DBitmap bg, DRect r)
+    {
+        int x0 = Math.Max(0, r.X), y0 = Math.Max(0, r.Y);
+        int x1 = Math.Min(Math.Min(shot.Width, bg.Width), r.Right);
+        int y1 = Math.Min(Math.Min(shot.Height, bg.Height), r.Bottom);
+        double dr = 0, dg = 0, db = 0, dl = 0; int n = 0;
+        for (int y = y0; y < y1; y++)
+            for (int x = x0; x < x1; x += 2)
+            {
+                var a = shot.GetPixel(x, y); var b = bg.GetPixel(x, y);
+                dr += a.R - b.R; dg += a.G - b.G; db += a.B - b.B;
+                dl += ((a.R + a.G + a.B) - (b.R + b.G + b.B)) / 3.0;
+                n++;
+            }
+        if (n == 0) return "Δ=-";
+        return $"Δrgb=({dr / n:+0.0;-0.0;0.0},{dg / n:+0.0;-0.0;0.0},{db / n:+0.0;-0.0;0.0}) Δluma={dl / n:+0.0;-0.0;0.0}";
     }
 
     // ── 场景 1b：最小化 → 点 36×36 恢复按钮展开（用户的真实路径） ─────────

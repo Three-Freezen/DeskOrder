@@ -105,7 +105,7 @@ sealed class DockGlassWindow : IDisposable
     const int SW_SHOWNOACTIVATE = 4, SW_HIDE = 0;
     const uint WM_PAINT = 0x000F, WM_ERASEBKGND = 0x0014, WM_NCHITTEST = 0x0084, WM_MOUSEACTIVATE = 0x0021;
     const int HTTRANSPARENT = -1, MA_NOACTIVATE = 3;
-    const int DWMWA_WINDOW_CORNER_PREFERENCE = 33, DWMWCP_DONOTROUND = 1;
+    const int DWMWA_WINDOW_CORNER_PREFERENCE = 33, DWMWCP_DONOTROUND = 1, DWMWCP_ROUND = 2;
 
     IntPtr _hwnd;
 
@@ -150,7 +150,16 @@ sealed class DockGlassWindow : IDisposable
         }
         try
         {
-            int pref = DWMWCP_DONOTROUND;        // 形状由区域决定，别再叠 Win11 整窗圆角
+            // 圆角偏好必须跟分区一致 = **ROUND**，不能 DONOTROUND。
+            //
+            // 实测（`--dock-lab-case=glassshape`）：这个裸窗口的 accent 背板**完全不认**
+            // `SetWindowRgn`（把窗口区域设成椭圆，画面一点没变），能被切圆的只有 Win11 的
+            // `DWMWA_WINDOW_CORNER_PREFERENCE`。写 DONOTROUND 时胶囊就是一块**直角**玻璃，
+            // 只有上面内容层画的那圈 1px 描边是圆的 —— 圆角外面那一小块方形玻璃就是
+            // 用户说的"圆角的裁切还是有问题"。分区一直是 ROUND（`SetRoundedCorners`），
+            // 所以它看起来才是圆的。Win11 的半径是固定的（约 8 DIP），比自己设的
+            // CornerRadius 略小 —— 这正是分区默认 8 和快捷栏默认 12 看起来不一样的原因。
+            int pref = DWMWCP_ROUND;
             DwmSetWindowAttribute(_hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref pref, sizeof(int));
         }
         catch { }
@@ -182,14 +191,24 @@ sealed class DockGlassWindow : IDisposable
     /// （= 内容窗口下面）。regionRadiusPx 是胶囊圆角的像素半径。
     /// 形状和模糊区域一起裁（<see cref="AcrylicHelper.ShapeToRoundRect"/>），圆角外面不会有一圈糊边；
     /// 位置/层级放在最后一步，保证玻璃层永远紧贴内容层下方（ShowWindow 会把窗口提到最前）。</summary>
-    public bool SyncTo(IntPtr below, int x, int y, int w, int h, int regionRadiusPx)
+    public bool SyncTo(IntPtr below, int x, int y, int w, int h, int regionRadiusPx, int insetPx = 0)
     {
         EnsureWindow();
         if (_hwnd == IntPtr.Zero || w < 1 || h < 1) return false;
+        // Win11 给窗口切的圆角是**固定半径**（约 8 DIP），比用户设的 CornerRadius 小。
+        // 玻璃窗贴着胶囊矩形放的话，圆角处玻璃会从内容层描边的圆弧外面露出一小圈
+        // （12 DIP 对 8 DIP 时对角线约 1.5px）。按差值把玻璃窗收进去，描边正好盖住接缝。
+        if (insetPx > 0)
+        {
+            x += insetPx; y += insetPx;
+            w = Math.Max(1, w - insetPx * 2);
+            h = Math.Max(1, h - insetPx * 2);
+        }
         bool ok = PlaceBelow(below, x, y, w, h);
-        // 圆角裁剪**放在最后**：上玻璃配方的 `DwmEnableBlurBehindWindow` 会把模糊区域重置成
-        // 整窗矩形，如果先裁后上配方，最后一帧的模糊就变成方的（圆角外面多一圈糊边）。
-        AcrylicHelper.ShapeToRoundRect(_hwnd, w, h, regionRadiusPx);
+        // 圆角裁剪**放在最后**：上玻璃配方会重设 DWM 的模糊区域，先裁后上配方等于白裁。
+        // classicBlur:false —— 这个窗口是**非分层**的，`DwmEnableBlurBehindWindow` 在这里
+        // 不是模糊而是一层灰黑（实测 Δluma≈−24），分区那种分层窗口上才是空操作。
+        AcrylicHelper.ShapeToRoundRect(_hwnd, w, h, regionRadiusPx, classicBlur: false);
         return ok;
     }
 
@@ -237,6 +256,20 @@ sealed class DockGlassWindow : IDisposable
             cur = GetWindow(cur, GW_HWNDPREV);
         }
         return false;
+    }
+
+    /// <summary>圆角偏好：快捷栏的 CornerRadius &gt; 0 → ROUND（和分区一样），尖角 → DONOTROUND。
+    /// **不能一直 DONOTROUND**：accent 背板不认 SetWindowRgn，只有这条属性能让它切圆角。</summary>
+    public void SetCornerRounding(bool round)
+    {
+        EnsureWindow();
+        if (_hwnd == IntPtr.Zero) return;
+        try
+        {
+            int pref = round ? DWMWCP_ROUND : DWMWCP_DONOTROUND;
+            DwmSetWindowAttribute(_hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref pref, sizeof(int));
+        }
+        catch { }
     }
 
     /// <summary>上玻璃配方 —— 与分区/律动条同一个 <see cref="AcrylicHelper.EnableBlurComposite"/>。</summary>
