@@ -926,8 +926,6 @@ public partial class StickyNoteWindow : Window
     public void ApplyAcrylic()
     {
         string fillColorStr = _note.FillColor;
-        string borderColorStr = _note.BorderColor;
-        double borderThickness = _note.BorderThickness;
 
         // ponytail: ghost-glass fix — see ZoneWindow. A collapsed note keeps its full-size
         // window, so enabling blur here would paint the tint across the whole window.
@@ -939,14 +937,9 @@ public partial class StickyNoteWindow : Window
             // 壁纸不可用/自定义 → 落回 DWM。
             if (TryApplyWallpaperBackdrop(fillColorStr))
             {
-                if (NoteGlassBorder != null)
-                {
-                    NoteGlassBorder.BorderBrush = AcrylicHelper.CreateChromaticBorder();
-                    NoteGlassBorder.BorderThickness = new Thickness(Math.Max(1.0, borderThickness));
-                    // 自绘背板：形状完全由 WPF 决定，半径照用户设的画。
-                    NoteGlassBorder.CornerRadius =
-                        new CornerRadius(NativeMethods.VisibleCornerRadius(_note.CornerRadius, dwmGlassOnWindow: false));
-                }
+                // 边框跟随分区：不再叠那条彩色渐变（CreateChromaticBorder 是液态玻璃的旧装饰），
+                // 可见边框就是 ApplyStyle 里设的「边框颜色 / 线宽」。
+                if (NoteGlassBorder != null) NoteGlassBorder.BorderThickness = new Thickness(0);
                 if (BodyFillRect != null) BodyFillRect.Fill = AcrylicHelper.HitTestFill;
                 return;
             }
@@ -959,16 +952,8 @@ public partial class StickyNoteWindow : Window
                 AcrylicHelper.ResolveUseClassicBlur(_note.GlassMaterial));
             if (!blurResult.Success)
                 System.Diagnostics.Debug.WriteLine($"[StickyNoteWindow] EnableBlur failed: {blurResult.Error}");
-            // ponytail: additive liquid-glass overlay — the chromatic border rides a
-            // separate overlay Border so it never replaces the user's base NoteBorder.
-            if (NoteGlassBorder != null)
-            {
-                NoteGlassBorder.BorderBrush = AcrylicHelper.CreateChromaticBorder();
-                NoteGlassBorder.BorderThickness = new Thickness(Math.Max(1.0, borderThickness));
-                // DWM accent：玻璃被 Windows 切成固定 8 DIP，描边得跟着走。
-                NoteGlassBorder.CornerRadius =
-                    new CornerRadius(NativeMethods.VisibleCornerRadius(_note.CornerRadius, dwmGlassOnWindow: true));
-            }
+            // 同上：边框跟随分区。
+            if (NoteGlassBorder != null) NoteGlassBorder.BorderThickness = new Thickness(0);
             // ponytail 2026-09-26: 非亚克力材质(毛玻璃/清透/液态/深色玻璃)的 DWM 背板不认着色
             // (实测 state3 完全不着色),合成着色改由 BodyFillRect 承担;亚克力系返回 null →
             // 保持透明,着色交给 DWM(历史行为)。

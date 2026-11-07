@@ -433,13 +433,10 @@ public partial class MediaPlayerWidget : Window
             if (!result.Success)
                 System.Diagnostics.Debug.WriteLine($"[MediaPlayer] EnableBlur failed: {result.Error}");
 
+            // 边框跟随分区：不再叠那条彩色渐变（CreateChromaticBorder 是液态玻璃的旧装饰）。
+            // 玻璃开着时可见边框就是 ApplyStyle 里设的「边框颜色 / 线宽」。
             if (GlassBorder != null)
-            {
-                GlassBorder.BorderBrush = AcrylicHelper.CreateChromaticBorder();
-                GlassBorder.BorderThickness = new Thickness(Math.Max(1.0, _player.BorderThickness));
-                GlassBorder.CornerRadius = new CornerRadius(
-                    NativeMethods.VisibleCornerRadius(_player.CornerRadius, dwmGlassOnWindow: true));
-            }
+                GlassBorder.BorderThickness = new Thickness(0);
         }
         else
         {

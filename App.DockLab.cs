@@ -1263,7 +1263,8 @@ public partial class App
             Say($"找到 {widgets.Count} 个小组件窗口（含隐藏的）");
             if (widgets.Count == 0) { Say("没有小组件 → 跳过"); return; }
 
-            var spots = new (double X, double Y)[] { (240, 200), (1000, 200), (240, 760), (1000, 760), (1560, 200) };
+            // 四个互不重叠的落点（DIP）：桌面层/别的小组件都不能盖住自己，否则拍到的是别人。
+            var spots = new (double X, double Y)[] { (40, 60), (350, 60), (680, 60), (1090, 60) };
             int si = 0;
             foreach (var w in widgets)
             {

@@ -396,9 +396,6 @@ public partial class CalendarWidget : Window
     {
         SyncFillRect();
 
-        string borderColorStr = _calendar.BorderColor;
-        double borderThickness = _calendar.BorderThickness;
-
         // ponytail: ghost-glass fix — see ZoneWindow/ClockWidget. A collapsed calendar keeps
         // its full-size window, so enabling blur here would paint the tint across the whole
         // window. Only enable while content is expanded.
@@ -419,17 +416,10 @@ public partial class CalendarWidget : Window
                 if (!blurResult.Success)
                     System.Diagnostics.Debug.WriteLine($"[CalendarWidget] EnableBlur failed: {blurResult.Error}");
             }
-            // ponytail: additive liquid-glass overlay — the chromatic border rides a
-            // separate overlay Border so it never replaces the user's base CalendarBorder.
+            // 边框跟随分区：不再叠那条彩色渐变（CreateChromaticBorder 是液态玻璃的旧装饰）。
+            // 玻璃开着时可见边框就是 ApplyStyle 里设的「边框颜色 / 线宽」。
             if (CalendarGlassBorder != null)
-            {
-                CalendarGlassBorder.BorderBrush = AcrylicHelper.CreateChromaticBorder();
-                CalendarGlassBorder.BorderThickness = new Thickness(Math.Max(1.0, borderThickness));
-                // 只有「玻璃由 DWM accent 画」时圆角才被 Windows 切成 8 DIP；自绘背板时
-                // 形状完全由 WPF 决定，半径照用户设的画。
-                CalendarGlassBorder.CornerRadius =
-                    new CornerRadius(NativeMethods.VisibleCornerRadius(_calendar.CornerRadius, !backdropActive));
-            }
+                CalendarGlassBorder.BorderThickness = new Thickness(0);
         }
         else
         {

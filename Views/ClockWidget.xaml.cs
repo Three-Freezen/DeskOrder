@@ -480,9 +480,6 @@ public partial class ClockWidget : Window
     {
         SyncFillRect();
 
-        string borderColorStr = _clock.BorderColor;
-        double borderThickness = _clock.BorderThickness;
-
         // ponytail: ghost-glass fix — acrylic follows the expand state: a collapsed clock
         // keeps its full-size window (only the RestoreButton shows), so enabling blur here
         // would paint the tint across the whole window. Only enable while expanded.
@@ -503,13 +500,10 @@ public partial class ClockWidget : Window
                 if (!blurResult.Success)
                     System.Diagnostics.Debug.WriteLine($"[ClockWidget] EnableBlur failed: {blurResult.Error}");
             }
+            // 边框跟随分区：不再叠那条彩色渐变（AcrylicHelper.CreateChromaticBorder 是液态
+            // 玻璃的旧装饰）。玻璃开着时可见边框就是 ApplyStyle 里设的「边框颜色 / 线宽」。
             if (ClockGlassBorder != null)
-            {
-                ClockGlassBorder.BorderBrush = AcrylicHelper.CreateChromaticBorder();
-                ClockGlassBorder.BorderThickness = new Thickness(Math.Max(1.0, borderThickness));
-                ClockGlassBorder.CornerRadius = new CornerRadius(
-                    NativeMethods.VisibleCornerRadius(_clock.CornerRadius, !backdropActive));
-            }
+                ClockGlassBorder.BorderThickness = new Thickness(0);
         }
         else
         {
