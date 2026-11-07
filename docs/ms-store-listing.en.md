@@ -36,6 +36,12 @@ Borders, fills, title bars, background images, materials, animations, layout —
 **Clock, calendar and sticky note widgets**
 An analog/digital clock, a calendar with to-do reminders, and a sticky note summoned by a global hotkey — your desktop becomes a workspace.
 
+**Dock — your everyday apps in one row**
+A capsule on the desktop layer: single row, hover magnify, icon reflections, optional Start button — tile mode, liquid glass, background image and preset cards share the zone look system.
+
+**Player — "now playing" on the desktop**
+Bars that follow the real system spectrum, or a vinyl record with the album cover spinning on it; track and artwork are read automatically, the accent colour comes from the cover, and players that never register a system media session are recognised too.
+
 **Quick panel**
 Summon it with a hotkey: all zone cards, file search, and quick new-document / new-folder actions in one panel.
 
