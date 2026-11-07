@@ -281,6 +281,9 @@ public partial class ZoneWindow : Window
         _langChanged = _ => ApplyLoc();
         _loc.LanguageChanged += _langChanged;
         _mgr.ZonesChanged += OnZonesChanged;
+        // 快捷栏的玻璃层是**独立窗口**：内容层一变成不可见（最小化 / Hide / 关窗前）
+        // 就必须跟着收，否则屏幕上会留下一块悬空的胶囊 —— 那也是一种「两层玻璃」。
+        IsVisibleChanged += (_, _) => { if (!IsVisible) HideDockGlassWindow(); };
         // ponytail: subscribe to LockChanged so management UI (or any other source) flipping
         // this zone's lock state immediately syncs the open window.
         _mgr.LockChanged += OnServiceLockChanged;
@@ -478,6 +481,7 @@ public partial class ZoneWindow : Window
     IntPtr WndProc(IntPtr h, int m, IntPtr w, IntPtr l, ref bool hd)
     {
         if (m == NativeMethods.WM_DROPFILES) { DoDrop(w); hd = true; }
+        else if (m == NativeMethods.WM_WINDOWPOSCHANGED) { OnDockWindowPosChanged(); }
         else if (m == NativeMethods.WM_MOUSEACTIVATE)
         {
             // 这一条**在窗口被激活之前**到达，所以 GetForegroundWindow() 还是"点之前那个
@@ -6207,6 +6211,13 @@ public partial class ZoneWindow : Window
 
     DockGlassWindow? _dockGlassWin;
 
+    /// <summary>玻璃层圆角的**物理像素**半径（与 WPF 胶囊那边的 `CornerRadius × DPI` 同一口径）。
+    /// 层级被顶掉后重摆时要复用它，保证形状和内容层一模一样。</summary>
+    int _dockGlassRadiusPx = 12;
+
+    /// <summary>已经排了一次层级修正（防抖，避免一帧里排好几次）。</summary>
+    bool _dockGlassZPending;
+
     /// <summary>DWM 方案下的胶囊玻璃：把玻璃单独做成一个窗口垫在内容窗口正下方。
     /// 成功返回 true（此时内容层的 FillRect 只留一个 HitTestFill 抢命中）。</summary>
     bool TryApplyDwmGlassWindow(ResolvedZoneStyle s)
@@ -6263,15 +6274,18 @@ public partial class ZoneWindow : Window
         var dpi = VisualTreeHelper.GetDpi(this);
         // 顺序要紧：ShowWindow 会把窗口提到最前 → 位置/层级必须放在**最后**一步，
         // 否则玻璃层会盖在图标上面（用户反馈"有时候玻璃层还会盖住内容"）。
+        // 圆角半径存一份：之后层级被别人顶掉时（见 OnDockWindowPosChanged）还要按
+        // 同一个半径重新摆一次，不能跟 WPF 胶囊那边算出两个半径来。
+        _dockGlassRadiusPx = (int)Math.Round(Math.Max(0, s.CornerRadius) * dpi.DpiScaleX);
         win.SyncTo(hwnd,
             (int)Math.Round(pill.X), (int)Math.Round(pill.Y),
             (int)Math.Round(pill.Width), (int)Math.Round(pill.Height),
-            (int)Math.Round(Math.Max(0, s.CornerRadius) * dpi.DpiScaleX));
+            _dockGlassRadiusPx);
         win.ShowNoActivate();
         win.SyncTo(hwnd,
             (int)Math.Round(pill.X), (int)Math.Round(pill.Y),
             (int)Math.Round(pill.Width), (int)Math.Round(pill.Height),
-            (int)Math.Round(Math.Max(0, s.CornerRadius) * dpi.DpiScaleX));
+            _dockGlassRadiusPx);
 
         AcrylicHelper.DisableBlur(this);            // 内容窗口自己不能再上 accent
         HideDockGlassLayer();
@@ -6304,6 +6318,54 @@ public partial class ZoneWindow : Window
     {
         if (_dockGlassWin == null || !_dockGlassWin.IsVisibleGlass) return;
         try { ApplyDockGlass(ResolveStyle()); } catch { }
+    }
+
+    // ── 玻璃层的层级守卫（第 7 轮补充 2）──────────────────────────────────
+
+    /// <summary>
+    /// 内容层的**位置/层级变了之后**，把玻璃层重新压回它正下方。
+    ///
+    /// 背景（用户报的「DWM 玻璃明显有两层，点一下边缘下面那层就盖到上面」）：
+    /// 玻璃层是独立 HWND，系统不会把它跟内容层当成一个整体。内容层被
+    /// `PinBelowProgman`（失焦 / 点桌面 / 启动程序抢前台）压到桌面层最底部、
+    /// 或被 `BringToFront` 提到别处时，玻璃层留在原地 —— 于是它从「内容层下面」
+    /// 翻到「上面」，糊住图标；再点一下又翻回来。所以每次 `WM_WINDOWPOSCHANGED`
+    /// 都检查一下，破了就在下一轮消息里修回去（不能在本条消息里直接 SetWindowPos，
+    /// 那会在系统处理 z 序的过程中重新排 z 序）。
+    /// </summary>
+    void OnDockWindowPosChanged()
+    {
+        if (!IsDock) return;
+        if (_dockGlassWin is not { } gw || !gw.IsVisibleGlass) return;
+        var content = new WindowInteropHelper(this).Handle;
+        if (content == IntPtr.Zero) return;
+        if (gw.IsBelow(content)) return;        // 还在下面 → 拖拽/移动时这条几乎零成本
+        if (_dockGlassZPending) return;
+        _dockGlassZPending = true;
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Render, new Action(() =>
+        {
+            _dockGlassZPending = false;
+            try { RestoreDockGlassZOrder(); } catch { }
+        }));
+    }
+
+    /// <summary>把玻璃层压回内容层下面（只动 z 序和胶囊矩形，不重上玻璃配方）。</summary>
+    void RestoreDockGlassZOrder()
+    {
+        if (_dockGlassMode != "dwm-window") return;
+        if (_dockGlassWin is not { } gw || !gw.IsVisibleGlass) return;
+        var content = new WindowInteropHelper(this).Handle;
+        if (content == IntPtr.Zero) return;
+        if (gw.IsBelow(content)) return;
+        var pill = DockPillScreenPx();
+        if (pill.IsEmpty) return;
+        bool ok = gw.SyncTo(content,
+            (int)Math.Round(pill.X), (int)Math.Round(pill.Y),
+            (int)Math.Round(pill.Width), (int)Math.Round(pill.Height),
+            _dockGlassRadiusPx);
+        DzTrace.Log($"[Dock glass] zorder 修正: ok={ok} pill={pill.X:F0},{pill.Y:F0} " +
+                    $"{pill.Width:F0}x{pill.Height:F0} | {DockGlassWindow.LastError}");
+        if (!ok) _dockGlassMode = "none";   // 兜底：这一帧先别露玻璃，下一次 ApplyDockGlass 再来
     }
 
     void CloseDockGlassWindow()

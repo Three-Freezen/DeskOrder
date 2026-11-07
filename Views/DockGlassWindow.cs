@@ -28,6 +28,11 @@ namespace DesktopZones.Views;
 /// 它点击穿透（`WS_EX_TRANSPARENT` + `WM_NCHITTEST → HTTRANSPARENT`）、永不激活
 /// （`WS_EX_NOACTIVATE` + `WM_MOUSEACTIVATE → MA_NOACTIVATE`）、不进任务栏/Alt-Tab
 /// （`WS_EX_TOOLWINDOW`），命中检测全部交给上面的内容窗口。
+///
+/// **层级是这套结构唯一的软肋**：系统不把两个 HWND 当成一个整体，内容窗口一失焦
+/// （`PinBelowProgman`）或换位置，玻璃就会从「下面」翻到「上面」，把图标糊成一块
+/// 空胶囊。由 `ZoneWindow` 的 `WM_WINDOWPOSCHANGED` 守卫 + 本类
+/// <see cref="SyncTo"/> 的「压不回下面就先藏」两道闸兜住。
 /// </summary>
 sealed class DockGlassWindow : IDisposable
 {
@@ -81,6 +86,10 @@ sealed class DockGlassWindow : IDisposable
     [DllImport("user32.dll")] static extern bool IsWindow(IntPtr hWnd);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern IntPtr GetModuleHandle(string? name);
     [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
+    [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr FindWindow(string? cls, string? name);
+
+    const uint GW_HWNDPREV = 3;   // z 序里"上面一个"
 
     static WndProcDelegate? _proc;          // 必须留引用：委托被 GC 后回调会崩
     static bool _classReady;
@@ -177,8 +186,57 @@ sealed class DockGlassWindow : IDisposable
     {
         EnsureWindow();
         if (_hwnd == IntPtr.Zero || w < 1 || h < 1) return false;
+        bool ok = PlaceBelow(below, x, y, w, h);
+        // 圆角裁剪**放在最后**：上玻璃配方的 `DwmEnableBlurBehindWindow` 会把模糊区域重置成
+        // 整窗矩形，如果先裁后上配方，最后一帧的模糊就变成方的（圆角外面多一圈糊边）。
         AcrylicHelper.ShapeToRoundRect(_hwnd, w, h, regionRadiusPx);
-        return SetWindowPos(_hwnd, below, x, y, w, h, SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+        return ok;
+    }
+
+    /// <summary>
+    /// 把玻璃窗摆到 <paramref name="above"/> 正下方。
+    ///
+    /// 正常情况一条 <c>SetWindowPos(玻璃, 内容)</c> 就够。但内容层被
+    /// `PinBelowProgman` 压到**桌面层最底部**之后，它下面已经没有位置可插 ——
+    /// 系统会把玻璃夹到别处（实测结果就是玻璃反而跑到内容上面，胶囊把图标糊住，
+    /// 用户看到"两层玻璃、点一下边缘下面那层就盖上来"）。这时退一步用「壁纸锚点」：
+    /// 玻璃插到桌面层最底部，而内容层本来就在最底部 → 玻璃落到它下面，顺序照样成立。
+    ///
+    /// 两条路都没把玻璃压到内容下面时**先藏起来**：宁可短暂没玻璃，也不能让一层
+    /// 带模糊的胶囊盖在图标上（那正是用户报的现象）。下一次 ApplyDockGlass 会再露出来。
+    /// </summary>
+    bool PlaceBelow(IntPtr above, int x, int y, int w, int h)
+    {
+        const uint flags = SWP_NOACTIVATE | SWP_NOOWNERZORDER;
+        SetWindowPos(_hwnd, above, x, y, w, h, flags);
+        if (IsBelow(above)) return true;
+
+        var progman = FindWindow("Progman", null);
+        if (progman != IntPtr.Zero)
+        {
+            SetWindowPos(_hwnd, progman, x, y, w, h, flags);
+            if (IsBelow(above)) return true;
+        }
+
+        LastError = $"glass not below content (above=0x{GetWindow(_hwnd, GW_HWNDPREV).ToInt64():X})";
+        DzTrace.Log($"[DockGlassWindow] 层级没压住 → 先把玻璃收起来: {LastError}");
+        HideGlass();
+        HasGlass = false;
+        return false;
+    }
+
+    /// <summary>本玻璃窗是不是在 <paramref name="other"/> **下面**（隔着别的窗口也算，
+    /// 只要它不在上面就行 —— 需要的是「不盖住内容层」）。</summary>
+    public bool IsBelow(IntPtr other)
+    {
+        if (_hwnd == IntPtr.Zero || other == IntPtr.Zero) return false;
+        var cur = GetWindow(_hwnd, GW_HWNDPREV);
+        for (int i = 0; i < 96 && cur != IntPtr.Zero; i++)
+        {
+            if (cur == other) return true;
+            cur = GetWindow(cur, GW_HWNDPREV);
+        }
+        return false;
     }
 
     /// <summary>上玻璃配方 —— 与分区/律动条同一个 <see cref="AcrylicHelper.EnableBlurComposite"/>。</summary>

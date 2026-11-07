@@ -26,11 +26,14 @@ namespace DesktopZones;
 /// 不靠推理，直接把窗口摆到真实桌面上、用真实鼠标输入（SetCursorPos/mouse_event）触发，
 /// 再把屏幕像素抓下来做差分、把内部状态打成文本。
 ///
-/// 场景（<c>--dock-lab-case=ring|ring2|hover|drag|all</c>）：
+/// 场景（<c>--dock-lab-case=ring|ring2|hover|drag|zorder|glass|glasswin|all</c>）：
 ///   · ring  —— 最小化→展开后「周围一圈鬼影/透明边框」：HideZone()/ShowZone() 路径。
 ///   · ring2 —— 同上，但展开走**真实的恢复按钮点击**（用户的日常路径）。
 ///   · hover —— 「显示名称」时悬停图标、缩放动画是否一直抽搐。
 ///   · drag  —— 「打开软件的同时拖动图标 → 图标卡在动画里」。
+///   · zorder —— 玻璃层（独立 HWND）会不会被内容层的 PinBelowProgman / BringToFront
+///               顶到上面去（用户报的「两层玻璃、点一下边缘下面那层就盖上来」）。
+///               含一段「故意翻过来」的强制复现 + 守卫自愈验证。
 /// </summary>
 public partial class App
 {
@@ -47,10 +50,23 @@ public partial class App
     [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr h, uint flags);
     [DllImport("user32.dll")] static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr w, IntPtr l);
     [DllImport("user32.dll")] static extern bool ScreenToClient(IntPtr hWnd, ref LabPoint p);
+    [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
+    delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+    [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lParam);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr hWnd, StringBuilder sb, int max);
+    [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hWnd, out LabRect r);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hWnd);
+    [DllImport("user32.dll", EntryPoint = "SetWindowPos", SetLastError = true)] static extern bool SetWindowPosEx(IntPtr hWnd, IntPtr after,
+        int x, int y, int cx, int cy, uint flags);
+    const uint SWP_NOSIZE_ = 0x0001, SWP_NOMOVE_ = 0x0002, SWP_NOACTIVATE_ = 0x0010, SWP_SHOWWINDOW_ = 0x0040;
     [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr hwnd, int attr, out int val, int size);
     [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr hwnd, int attr, ref LabRect val, int size);
 
     const uint WM_MOUSEMOVE = 0x0200, WM_LBUTTONDOWN = 0x0201, WM_LBUTTONUP = 0x0202;
+
+    /// <summary>GetWindow 的 z 序遍历命令：PREV = 上面一个，NEXT = 下面一个。</summary>
+    const uint GW_HWNDPREV = 3, GW_HWNDNEXT = 2;
 
     const uint LEFTDOWN = 0x0002, LEFTUP = 0x0004;
 
@@ -73,6 +89,7 @@ public partial class App
             if (which is "glasswin") { await LabGlassWindowAsync(dir, Say); return; }
             if (which is "glasscmp") { await LabGlassCompareAsync(dir, Say); return; }
             if (which is "glassab") { await LabGlassAbAsync(dir, Say); return; }
+            if (which is "zorder") { await LabZOrderAsync(dir, Say); return; }
             if (which is "state" or "all") await LabStateAsync(dir, Say);
             if (which is "ring" or "all") await LabRingAsync(dir, Say);
             if (which is "ring2" or "all") await LabRingClickAsync(dir, Say);
@@ -1070,6 +1087,227 @@ public partial class App
         }
         catch (Exception ex) { Say("drag case EXC " + ex); }
         finally { win.Close(); }
+    }
+
+    // ── 场景 7：玻璃层跟不跟得上内容层的层级变化（zorder）──────────────────
+    //
+    // 用户报「DWM 玻璃明显有两层，点一下边缘下面那层就盖到上面」。
+    // 怀疑点：快捷栏玻璃是**独立窗口**（第 7 轮 B），而内容窗口失焦时会
+    // `PinBelowProgman`（回落到桌面层最底部）—— 玻璃层不跟着动，就从「内容层下面」
+    // 翻到「上面」。沙箱里动不了光标，这里不模拟鼠标，直接调那两条层级路径，
+    // 用 `GetWindow(GW_HWNDPREV)` 看两者到底谁紧挨着谁，并抓图对照。
+
+    async Task LabZOrderAsync(string dir, Action<string> Say)
+    {
+        Say("");
+        Say("== zorder: 玻璃层 vs 内容层 的层级归属 ==");
+        bool oldScheme = DesktopZones.Helpers.WallpaperSource.Enabled;
+        ZoneWindow? win = null;
+        ZoneWindow? sibling = null;
+        try
+        {
+            DesktopZones.Helpers.WallpaperSource.Enabled = false;   // 渲染方案 = DWM
+            var z = MakeLabDock(true, "lab zorder");
+            z.EnableLiquidGlass = true;
+            z.TileMode = false;
+            z.DockAnimate = true;
+            z.DockMagnify = 1.8;
+            z.DockReflection = true;
+            DesktopZones.Helpers.ZoneLayout.ApplyDockSize(z);
+
+            win = new ZoneWindow(z, _zoneManager!, DesktopZones.Services.ShellIconService.Instance)
+            { ShowInTaskbar = false };
+            win.Show();
+            await Task.Delay(1200);
+            // 其它分区/快捷栏收起来：既免得盖住抓屏区域，也免得干扰层级比较。
+            // **收玻璃层也要收**（它们是独立 HWND：只 Hide 内容窗口会留下一个悬空的胶囊）。
+            foreach (Window w in Application.Current.Windows)
+                if (w is ZoneWindow zw && !ReferenceEquals(zw, win) && zw.IsVisible)
+                {
+                    zw.DebugSetDockGlassVisible(false);
+                    zw.Hide();
+                }
+            MoveToFreeSpot(win, Say);
+            await Task.Delay(1200);
+            win.UpdateLayout();
+
+            // 造一个「兄弟桌面层窗口」压在下面。没有兄弟时 PinBelowProgman 是空操作
+            // （内容窗口本来就在最底部），翻不过来；生产里快捷栏上面永远有别的分区/挂件。
+            var zsib = MakeLabDock(false, "lab sibling");
+            sibling = new ZoneWindow(zsib, _zoneManager!, DesktopZones.Services.ShellIconService.Instance)
+            { ShowInTaskbar = false };
+            sibling.Show();
+            sibling.Left = 40;
+            sibling.Top = 40;
+            await Task.Delay(700);
+            Say($"sibling=0x{new System.Windows.Interop.WindowInteropHelper(sibling).Handle.ToInt64():X}");
+
+            var content = new System.Windows.Interop.WindowInteropHelper(win).Handle;
+            var glass = win.DebugDockGlassHwnd();
+            Say($"content=0x{content.ToInt64():X} glass=0x{glass.ToInt64():X}");
+            Say("state: " + win.DebugDockGlass());
+            Say("own windows:\n" + DumpOwnWindows());
+            var region = CaptureRegion(win, 44);
+
+            void Shot(string tag)
+            {
+                using var bmp = Grab(region);
+                SavePng(bmp, Path.Combine(dir, $"z-{tag}.png"));
+            }
+            void Log(string tag)
+            {
+                var g = win.DebugDockGlassHwnd();
+                var s = sibling == null ? IntPtr.Zero : new System.Windows.Interop.WindowInteropHelper(sibling).Handle;
+                Say($"  [{tag}] {ZRelation(content, g)}");
+                Say("    z order (top→bottom):\n" + ZChainDump(content, g, s));
+                Say($"         state: " + win.DebugDockGlass());
+            }
+
+            // ① 点胶囊（内容层被提到桌面层最顶）——生产代码在这之后会 SyncDockGlassWindow()
+            DesktopZones.Helpers.DesktopLayer.BringToFront(win);
+            win.RefreshZone(z);
+            await Task.Delay(900);
+            Shot("1-raised"); Log("1-raised");
+
+            // ② 失焦路径 = 点胶囊外面的透明处 → 桌面拿到点击 → 内容窗口 Deactivated
+            //    → PinBelowProgman（这一条**不动玻璃层**，怀疑就是它把两层翻过来的）
+            DesktopZones.Helpers.NativeMethods.PinBelowProgman(win);
+            await Task.Delay(900);
+            Shot("2-pinned"); Log("2-pinned");
+
+            // ③ 再点回胶囊 → 又提到最顶（**故意不刷新**：层级守卫自己应该在下一轮修回来）
+            DesktopZones.Helpers.DesktopLayer.BringToFront(win);
+            await Task.Delay(600);
+            Shot("3-brought-front"); Log("3-brought-front");
+            win.RefreshZone(z);
+            await Task.Delay(700);
+            Shot("4-refreshed"); Log("4-refreshed");
+
+            // ⑤ 故意把层级翻成"玻璃在内容上面"（= 用户报的现象），看守卫能不能自己修回来。
+            {
+                var g = win.DebugDockGlassHwnd();
+                bool ok = SetWindowPosEx(content, g, 0, 0, 0, 0,
+                    SWP_NOMOVE_ | SWP_NOSIZE_ | SWP_NOACTIVATE_ | SWP_SHOWWINDOW_);
+                // 立刻量（不等消息泵）：这才是"破掉"的瞬间。
+                Say($"  forced-flip SetWindowPos(content→glass) ok={ok} → {ZRelation(content, g)}");
+                // 阻塞 UI 线程 120ms 抓一张"坏掉的画面"：守卫还排在队列里没跑，DWM 已经按
+                // 新层级合成完了 —— 这张就是用户看到的"玻璃盖在图标上"。
+                System.Threading.Thread.Sleep(120);
+                using (var broken = Grab(region))
+                {
+                    SavePng(broken, Path.Combine(dir, "z-5-flipped.png"));
+                    var pill = PillRectInRegion(win, z, region);
+                    Say($"  flipped 画面: pillLuma={MeanLuma(broken, pill):F1} sharp={Sharpness(broken, pill):F1}");
+                }
+                await Task.Delay(1000);
+                Shot("5-after-flip"); Log("5-after-flip（守卫应在这一帧之前修回）");
+            }
+
+            // ④ 环境探针（放在最后，别污染上面的层级测量）
+            //    先确认这台机（低完整性沙箱）到底能不能改 z 序：不能的话结论要打折看。
+            {
+                var prog = DesktopZones.Helpers.NativeMethods.GetProgmanHandle();
+                bool ok = SetWindowPosEx(content, prog, 0, 0, 0, 0,
+                    SWP_NOMOVE_ | SWP_NOSIZE_ | SWP_NOACTIVATE_ | SWP_SHOWWINDOW_);
+                Say($"  probe: direct SetWindowPos(content, progman=0x{prog.ToInt64():X}) " +
+                    $"ok={ok} err={Marshal.GetLastWin32Error()}（err=5 就是 UIPI 挡了，沙箱限制）");
+            }
+            // 同一进程里的 z 序方向探针：先 SetWindowPos(content, sibling)，再反过来，
+            // 用来看「insertAfter 到底是上面还是下面」。
+            if (sibling != null)
+            {
+                var sibHwnd = new System.Windows.Interop.WindowInteropHelper(sibling).Handle;
+                bool okA = SetWindowPosEx(content, sibHwnd, 0, 0, 0, 0,
+                    SWP_NOMOVE_ | SWP_NOSIZE_ | SWP_NOACTIVATE_ | SWP_SHOWWINDOW_);
+                await Task.Delay(250);
+                Say($"  probe A SetWindowPos(content→sibling) ok={okA} err={Marshal.GetLastWin32Error()}");
+                Say(ZChainDump(content, win.DebugDockGlassHwnd(), sibHwnd, 3));
+                bool okB = SetWindowPosEx(sibHwnd, content, 0, 0, 0, 0,
+                    SWP_NOMOVE_ | SWP_NOSIZE_ | SWP_NOACTIVATE_ | SWP_SHOWWINDOW_);
+                await Task.Delay(250);
+                Say($"  probe B SetWindowPos(sibling→content) ok={okB} err={Marshal.GetLastWin32Error()}");
+                Say(ZChainDump(content, win.DebugDockGlassHwnd(), sibHwnd, 3));
+            }
+        }
+        catch (Exception ex) { Say("zorder EXC " + ex); }
+        finally
+        {
+            try { sibling?.Close(); } catch { }
+            try { win?.Close(); } catch { }
+            DesktopZones.Helpers.WallpaperSource.Enabled = oldScheme;
+        }
+    }
+
+    /// <summary>从 content 往上/往下各走几个窗口，标出 content / glass / sibling。
+    /// 只靠 PREV/NEXT 判断关系容易把方向弄反，把两边的邻居都打出来最省事。</summary>
+    static string ZChainDump(IntPtr content, IntPtr glass, IntPtr sibling, int n = 5)
+    {
+        if (content == IntPtr.Zero) return "      (no content hwnd)";
+        string Name(IntPtr h)
+        {
+            var cls = new StringBuilder(256);
+            GetClassName(h, cls, 256);
+            GetWindowRect(h, out var r);
+            string tag = h == content ? " <=CONTENT" : h == glass ? " <=GLASS" : h == sibling ? " <=SIBLING" : "";
+            return $"0x{h.ToInt64():X} {cls} ({r.Left},{r.Top})-({r.Right},{r.Bottom}){tag}";
+        }
+        var sb = new StringBuilder();
+        var up = new List<string>();
+        var cur = GetWindow(content, GW_HWNDPREV);
+        for (int i = 0; i < n && cur != IntPtr.Zero; i++) { up.Add(Name(cur)); cur = GetWindow(cur, GW_HWNDPREV); }
+        for (int i = up.Count - 1; i >= 0; i--) sb.AppendLine("        ↑ " + up[i]);
+        sb.AppendLine("        = " + Name(content));
+        cur = GetWindow(content, GW_HWNDNEXT);
+        for (int i = 0; i < n && cur != IntPtr.Zero; i++) { sb.AppendLine("        ↓ " + Name(cur)); cur = GetWindow(cur, GW_HWNDNEXT); }
+        return sb.ToString().TrimEnd();
+    }
+
+    /// <summary>本进程所有**可见**顶层窗口（类名 + 屏幕矩形）。用来发现「多出来的胶囊」。</summary>
+    static string DumpOwnWindows()
+    {
+        var sb = new StringBuilder();
+        uint me = (uint)System.Diagnostics.Process.GetCurrentProcess().Id;
+        EnumWindows((h, _) =>
+        {
+            GetWindowThreadProcessId(h, out uint pid);
+            if (pid != me || !IsWindowVisible(h)) return true;
+            var cls = new StringBuilder(256);
+            GetClassName(h, cls, 256);
+            GetWindowRect(h, out var r);
+            sb.AppendLine($"    hwnd=0x{h.ToInt64():X} cls={cls} rect=({r.Left},{r.Top})-({r.Right},{r.Bottom}) {r.Right - r.Left}x{r.Bottom - r.Top}");
+            return true;
+        }, IntPtr.Zero);
+        return sb.ToString().TrimEnd();
+    }
+
+    /// <summary>两个窗口在 z 序里的相对位置。除了"紧挨着"还给一个明确结论：
+    /// **玻璃到底在内容上面还是下面**（上面=用户报的那种盖住图标的状态）。</summary>
+    static string ZRelation(IntPtr content, IntPtr glass)
+    {
+        if (content == IntPtr.Zero) return "content=0";
+        if (glass == IntPtr.Zero) return "glass=0（这一轮没有独立玻璃窗）";
+        var aboveGlass = GetWindow(glass, GW_HWNDPREV);
+        var aboveContent = GetWindow(content, GW_HWNDPREV);
+        bool glassAbove = IsAbove(glass, content);      // 玻璃在内容上面？
+        bool glassBelow = IsAbove(content, glass);      // 内容在玻璃上面（= 正解）
+        return $"above(glass)=0x{aboveGlass.ToInt64():X} above(content)=0x{aboveContent.ToInt64():X} | " +
+               $"contentDirectlyAboveGlass={aboveGlass == content} " +
+               $"glassDirectlyAboveContent={aboveContent == glass} | " +
+               $"VERDICT glassAboveContent={glassAbove} glassBelowContent={glassBelow}" +
+               (glassAbove ? "  ← 玻璃盖住内容（BUG）" : glassBelow ? "  ← 正确" : "  ← 不同 z 序带？");
+    }
+
+    /// <summary><paramref name="a"/> 是否在 <paramref name="b"/> 的**上面**（顺着往下走能找到 b）。</summary>
+    static bool IsAbove(IntPtr a, IntPtr b)
+    {
+        if (a == IntPtr.Zero || b == IntPtr.Zero) return false;
+        var cur = GetWindow(a, GW_HWNDNEXT);
+        for (int i = 0; i < 96 && cur != IntPtr.Zero; i++)
+        {
+            if (cur == b) return true;
+            cur = GetWindow(cur, GW_HWNDNEXT);
+        }
+        return false;
     }
 
     // ── 造/摆放测试用快捷栏 ──────────────────────────────────────────────

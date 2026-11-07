@@ -523,6 +523,11 @@ public static class NativeMethods
     /// 判断"我刚才是从哪个程序切过来的"，从而决定点图标是切前台还是最小化。</summary>
     public const int WM_MOUSEACTIVATE = 0x0021;
 
+    /// <summary>窗口的位置 / 尺寸 / **层级**已经变过之后（SetWindowPos、系统点击提层、
+    /// PinBelowProgman 都会发）。快捷栏的玻璃层是独立 HWND，靠这条把玻璃始终压回
+    /// 内容层下面 —— 否则内容层被压到桌面层底部时，玻璃会翻到它上面把图标糊住。</summary>
+    public const int WM_WINDOWPOSCHANGED = 0x0047;
+
     [DllImport("user32.dll")]
     public static extern IntPtr GetForegroundWindow();
 
