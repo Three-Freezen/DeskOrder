@@ -1,5 +1,9 @@
 <Project>
   <PropertyGroup>
+    <!-- 2026-11-14: 本机 NuGet 源配置(D:\BS\NuGet.Config)里的 nuget.azure.cn 不可达，
+         restore 的漏洞审计会报 NU1900。本仓库零 PackageReference，审计没有信息量，
+         故在仓库内关闭审计（不动机器级 NuGet 配置）。以后若加包依赖，删掉这一行即可恢复审计。 -->
+    <NuGetAudit>false</NuGetAudit>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <GenerateAssemblyTitleAttribute>false</GenerateAssemblyTitleAttribute>
     <GenerateAssemblyDescriptionAttribute>false</GenerateAssemblyDescriptionAttribute>
