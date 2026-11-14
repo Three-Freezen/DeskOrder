@@ -554,13 +554,6 @@ html.lang-fading main{animation:langIn .22s ease}
           <li><b data-i18n="cl25_i3t"></b><span data-i18n="cl25_i3d"></span></li>
           <li><b data-i18n="cl25_i4t"></b><span data-i18n="cl25_i4d"></span></li>
         </ul>
-        <div class="cl-head cl-prev"><span class="rm-ver">v1.0.24</span></div>
-        <ul class="cl-list">
-          <li><b data-i18n="cl24_i1t"></b><span data-i18n="cl24_i1d"></span></li>
-          <li><b data-i18n="cl24_i2t"></b><span data-i18n="cl24_i2d"></span></li>
-          <li><b data-i18n="cl24_i3t"></b><span data-i18n="cl24_i3d"></span></li>
-          <li><b data-i18n="cl24_i4t"></b><span data-i18n="cl24_i4d"></span></li>
-        </ul>
 
         <div class="cl-foot">
           <a href="https://github.com/Three-Freezen/DeskOrder/releases" target="_blank" rel="noopener" data-od-id="cl-link" data-i18n="cl_link">完整更新记录见 Releases →</a>
@@ -682,10 +675,6 @@ zh:{
   cl25_i2t:"玻璃和边框逐像素对齐：",cl25_i2d:"快捷栏胶囊和四个小组件（时钟/日历/便签/播放器）的可见轮廓不再由两套几何各画一半：胶囊先在设备像素里取整，可见圆角统一压到 Windows 给窗口切的固定值（8 DIP），四个角上不再露出一小条玻璃。",
   cl25_i3t:"小组件边框回到你设的颜色：",cl25_i3d:"玻璃开着时不再叠一条彩色渐变边框（以前四个角各占一个颜色），改成和分区一致的「边框颜色 / 线宽」，默认半透明白。",
   cl25_i4t:"三处玻璃问题修复：",cl25_i4d:"快捷栏玻璃不再比分区深一截（去掉了在裸窗口上只会压灰黑的经典模糊）、点边缘不再让玻璃翻到内容层上面、圆角不再是方的（accent 背板不认窗口区域，改用系统的圆角偏好）。",
-  cl24_i1t:"播放器组件（新）：",cl24_i1d:"桌面上的「正在播放」，律动条和唱片机两种形态——创建时选定，之后不再改。律动条按系统真实频谱跳动（WASAPI 环回 + 手写 FFT，可切回模拟律动），唱片机是黑胶盘加旋转的专辑封面，两者都支持磁贴模式。",
-  cl24_i2t:"曲目、封面与兜底识别：",cl24_i2d:"自动读取正在播放的曲名、歌手、专辑与封面，可直接上一曲 / 暂停 / 下一曲。没有接入系统媒体会话的播放器（如网易云音乐）靠音频会话电平 + 窗口标题 + 它自己的播放缓存兜底识别；实在认不出是谁在出声时，条子 / 唱盘照样动，只是不显示曲目内容。",
-  cl24_i3t:"封面取色、跟随应用与两套预设：",cl24_i3d:"从封面提取主色，用在律动条颜色、分割线和唱片机中心标签；同时有多个播放器时可以让某个组件只跟某个应用；律动条和唱片机各有一套独立预设卡，分开存放、互不混用。",
-  cl24_i4t:"识别与稳定性修复：",cl24_i4d:"修好三处底层问题——托盘图标在部分环境注册失败、CoreAudio 设备枚举器被重复创建导致兜底识别整条失效、换歌后唱片机封面要暂停再播一下才刷新。",
 
   cl_link:"完整更新记录见 Releases →",cl_req:"适用于 Windows 10 1809+ · 自包含运行时，无需安装 .NET",
   sec_au_t:"关于作者",au_d:"DeskOrder 的开发者，项目以 Apache-2.0 协议开源。",au_license:"Apache License 2.0",
@@ -756,10 +745,6 @@ en:{
   cl25_i2t:"Glass and borders line up pixel for pixel: ",cl25_i2d:"the dock capsule and the four widgets (clock / calendar / note / player) no longer draw their outline with two different geometries: the pill is rounded to whole device pixels first, and the visible corner radius is clamped to the fixed 8 DIP Windows gives a window, so no sliver of glass shows outside the border.",
   cl25_i3t:"Widget borders use your colour again: ",cl25_i3d:"with glass on, the widgets no longer add a chromatic gradient border (previously one hue per corner); they use the configured border colour and width like zones — a translucent white by default.",
   cl25_i4t:"Three glass fixes: ",cl25_i4d:"the dock glass is no longer darker than a zone (the classic blur that only greys out a bare window is gone), the glass no longer flips above the content when you click an edge, and the corners are actually round (the accent backdrop ignores window regions, so it uses the DWM corner preference instead).",
-  cl24_i1t:"New: player component. ",cl24_i1d:"\"Now playing\" on your desktop in two shapes — bars or vinyl, picked at creation and fixed afterwards. Bars follow the real system spectrum (WASAPI loopback + hand-written FFT, switchable to simulated motion); vinyl is a black record with the album cover spinning on it. Both support tile mode.",
-  cl24_i2t:"Track, artwork and fallback recognition: ",cl24_i2d:"reads the title, artist, album and cover of whatever is playing, with prev / play-pause / next. Players that never register a system media session (e.g. NetEase Cloud Music) are recognised through audio-session level, window title and their own play-queue cache; when nothing can be identified, the bars and the record still react — just without track text.",
-  cl24_i3t:"Accent from cover, follow one app, two preset sets: ",cl24_i3d:"the dominant colour of the artwork drives the bar colour, the divider and the vinyl centre label; with several widgets each one can follow a single app; and bars presets and vinyl presets are stored separately, never mixed.",
-  cl24_i4t:"Recognition and stability fixes: ",cl24_i4d:"three deeper fixes — tray icon registration failing in some environments, a duplicated CoreAudio device enumerator that silently broke the whole fallback detection, and the vinyl cover only refreshing after a pause/play when the track changed.",
 
   cl_link:"Full history in Releases →",cl_req:"For Windows 10 1809+ · self-contained runtime, no .NET needed",
   sec_au_t:"About",au_d:"Developer of DeskOrder. The project is open source under Apache-2.0.",au_license:"Apache License 2.0",
