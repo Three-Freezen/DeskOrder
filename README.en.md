@@ -129,7 +129,7 @@ The sidebar has its own **Plugins** group. Plugins are community-made; the offic
 - **Six kinds**: desktop widgets (`widget`), zone bays (`zonebar`), language packs and appearance packs, all available now; tools and integrations arrive in a later release
 - **Desktop widgets**: a plugin draws arbitrary WPF content; the host owns the window, dragging, snapping, locking, the three-state toggle and per-instance settings. Uninstalling a plugin leaves placeholder widgets; reinstalling restores them
 - **Zone bays**: collect minimized zone restore buttons into an edge dock and expand them on click/hover; the host owns the window, edge docking, auto-hide, expansion and zone safety, while the plugin only draws the chip strip
-- **Language packs**: add a new UI language (Japanese, Traditional Chinese…) or override Chinese/English. Partial translations are fine; missing entries fall back `base → en → zh`. Installed packs appear under `Settings → Language`, switching is instant, and removing the active pack falls back to Chinese with a notification
+- **Language packs**: add a new UI language (Japanese, Traditional Chinese…) or override Chinese/English. Partial translations are fine; missing entries fall back `base → en → zh`. Installed packs appear under `Settings → Language`, switching is instant, and removing the active pack falls back to Chinese with a notification. The **official full Japanese pack** is already listed (967 / 967 strings, 100% coverage, no English fallback)
 - **Appearance packs**: community materials (backdrop/blur/grain/tint) plus presets for zones, panels, notes, clocks and more. Installed materials appear under `Appearance → Material`, presets under `Load preset`; disabling/removing the pack reverts both, and existing objects are never changed automatically (materials need the wallpaper-sampling renderer, like the built-in ones)
 - **Code vs data**: widgets/tools/integrations run code and need a restart; appearance/language packs are pure data and don't execute code
 - **Official badge**: shown only when both the author's GitHub account and the repository owner are `Three-Freezen`; locally imported packages are never official
@@ -148,7 +148,7 @@ The sidebar has its own **Plugins** group. Plugins are community-made; the offic
 
 - Zones live on the desktop layer: above the wallpaper, below normal app windows
 - System tray, start with Windows
-- English / Chinese UI, applies instantly
+- English / Chinese UI plus community language packs (the official full Japanese pack is already in the marketplace), applies instantly
 - Light / dark theme
 - In-app updates
 
