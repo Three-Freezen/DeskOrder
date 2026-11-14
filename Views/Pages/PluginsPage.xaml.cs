@@ -69,16 +69,23 @@ public partial class PluginsPage : UserControl
         Render();
     }
 
-    void OnPluginsChanged()    {
-        if (!IsLoaded) return;
-        Dispatcher.BeginInvoke(new Action(() => { BuildTabs(); Render(); }), DispatcherPriority.Background);
+    void OnPluginsChanged()
+    {
+        // 判断必须放在 lambda 里：投递到 Background 队列的这段时间里页面可能已经卸载
+        // （ShowSection 每次 new PluginsPage，旧页面照样会收到事件），这时再画就是画给死页面。
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (!IsLoaded || AppLifetime.IsShuttingDown) return;
+            BuildTabs();
+            Render();
+        }), DispatcherPriority.Background);
     }
 
     void OnLanguageChanged(string _)
     {
-        if (!IsLoaded) return;
         Dispatcher.BeginInvoke(new Action(() =>
         {
+            if (!IsLoaded || AppLifetime.IsShuttingDown) return;
             BuildTabs();
             BuildFilters();
             Render();
@@ -209,7 +216,9 @@ public partial class PluginsPage : UserControl
         // 调用方（ShowDetail）随后继续往下执行。此时 new PluginCard() 里 InitializeComponent()
         // 会撞上 Application.LoadComponent 的「应用程序正在关闭」守卫并抛 InvalidOperationException
         // （2026-11-14 关托盘退出时弹「DeskOrder 错误」就是这条）。
-        if (Dispatcher.HasShutdownStarted) return;
+        // Dispatcher.HasShutdownStarted 是「dispatcher 已开始关」，AppLifetime 是「进程已经
+        // 决定退出」（更早、且覆盖不走 tray 的退出路径）；两者互补，关闭期一律不重建视觉树。
+        if (Dispatcher.HasShutdownStarted || AppLifetime.IsShuttingDown) return;
         if (Window.GetWindow(this) is { IsLoaded: false }) return;
 
         var installed = _service.Records.Count;
@@ -274,9 +283,15 @@ public partial class PluginsPage : UserControl
         if (string.IsNullOrWhiteSpace(url)) return;
         if (!_imageCache.TryGetValue(url, out var image))
         {
+            // 命中本地缓存时 GetImageAsync 同步返回、续体不真正切线程；只有真去下载才会让出。
+            var wasLoaded = card.IsLoaded;
             var path = await _service.Catalog.GetImageAsync(url);
             image = path == null ? null : LoadBitmap(path);
             _imageCache[url] = image;
+            // 下载期间卡片可能已被下一次 Render 从 CardsHost 摘下（Parent 变 null），或
+            // 页面已卸载（IsLoaded 由 true 变 false）。刚 Add 进来还没走布局时 IsLoaded 也是
+            // false，所以只把「true → false」当作卸载信号，避免误伤刚建好的卡片。
+            if (card.Parent == null || (wasLoaded && !card.IsLoaded)) return;
         }
         if (image != null && ReferenceEquals(card.Entry.Id, entry.Id)) card.SetPreview(image);
     }
@@ -793,13 +808,24 @@ public partial class PluginsPage : UserControl
         var dialog = new PluginDetailDialog(entry, record, delisted) { Owner = Window.GetWindow(this) };
         dialog.InstallRequested += async () =>
         {
-            dialog.SetBusy(true);
-            var ok = await InstallEntryAsync(entry);
-            dialog.SetBusy(false);
-            if (ok)
+            // 这是 async void 匿名处理器：异常一旦冒出去就直接进 DispatcherUnhandledException
+            // 弹「DeskOrder 错误」。安装失败要留在对话框里，不能让整页/整个进程背锅。
+            try
             {
-                _service.RefreshRecords();
-                dialog.SetRecord(_service.GetRecord(entry.Id));
+                dialog.SetBusy(true);
+                var ok = await InstallEntryAsync(entry);
+                dialog.SetBusy(false);
+                if (ok)
+                {
+                    _service.RefreshRecords();
+                    dialog.SetRecord(_service.GetRecord(entry.Id));
+                }
+            }
+            catch (Exception ex)
+            {
+                dialog.SetBusy(false);
+                ShowStatus(Loc.Get("Plugin.InstallFailed", ex.Message));
+                DzTrace.Always($"[Plugin] install from the detail dialog failed: {ex}");
             }
         };
         dialog.ToggleRequested += () =>

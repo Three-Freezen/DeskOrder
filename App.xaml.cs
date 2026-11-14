@@ -79,6 +79,18 @@ public partial class App : System.Windows.Application
         AppDomain.CurrentDomain.UnhandledException += (s, e) =>
             WriteCrashLog($"AppDomain.UnhandledException (IsTerminating={e.IsTerminating})",
                           e.ExceptionObject as Exception);
+
+        // 第三条未观察异常的出口：fire-and-forget 的 `_ = RefreshAsync(...)` /
+        // `_ = LoadCardPreviewAsync(...)` 若在 catch 之外抛出，只会成为 unobserved ——
+        // 进程不崩，日志里也什么都没有。这里记一笔并 SetObserved()，避免遗留的
+        // UnobservedTaskException 在 GC 终结器路径上再走一遍全局崩溃处理。
+        System.Threading.Tasks.TaskScheduler.UnobservedTaskException += (s, e) =>
+        {
+            WriteCrashLog("TaskScheduler.UnobservedTaskException", e.Exception);
+            Helpers.DzTrace.Always("[Crash] 未观察的任务异常: "
+                + e.Exception.GetType().Name + ": " + e.Exception.Message);
+            e.SetObserved();
+        };
     }
 
     internal static void WriteCrashLog(string source, Exception? ex)
@@ -216,6 +228,17 @@ public partial class App : System.Windows.Application
         {
             System.Diagnostics.Debug.WriteLine($"[DeskOrder] Unhandled: {args.Exception}");
             WriteCrashLog("DispatcherUnhandledException", args.Exception);
+            // 关闭期不弹兜底模态框：Application 已在 shutting-down，MessageBox 会把进程退出
+            // 拖住（用户看到的是「点了退出却关不掉」）。关窗口引发的异常（如模态对话框返回点
+            // 重建卡片撞上「应用程序正在关闭」）因此只剩一条 DzTrace，不再打扰用户。
+            if (Helpers.AppLifetime.IsShuttingDown)
+            {
+                Helpers.DzTrace.Always(
+                    "[Crash] 关闭期未处理异常（只记日志，不弹窗）: "
+                    + args.Exception.GetType().Name + ": " + args.Exception.Message);
+                args.Handled = true;
+                return;
+            }
             var ex = args.Exception;
             var sb = new System.Text.StringBuilder();
             sb.AppendLine($"Outer: {ex.GetType().FullName}");
@@ -2002,6 +2025,9 @@ public partial class App : System.Windows.Application
 
     private void ShutdownApplication()
     {
+        // 关闭闩锁必须抢在一切 teardown 之前：本方法随后会 ShutdownAll 插件、关托盘，
+        // 期间任何 PluginsChanged → PluginsPage.Render() 都该被直接跳过。
+        Helpers.AppLifetime.MarkShuttingDown();
         // Unregister all hotkeys
         if (_mainHwnd != IntPtr.Zero)
         {
@@ -2030,6 +2056,12 @@ public partial class App : System.Windows.Application
 
     private void Application_Exit(object sender, ExitEventArgs e)
     {
+        // 兜住不走 ShutdownApplication 的退出路径：UpdateService 的
+        // Application.Current.Shutdown()、PluginsPage.RestartApp()，以及 Windows 注销/关机
+        // 触发的默认 Shutdown。Application_Exit 在 DoShutdown() 里「关完所有窗口之后、
+        // Dispatcher.BeginInvokeShutdown 之前」触发，刚好赶在模态 ShowDialog() 的返回点
+        // 之前，所以那两条路径不需要各自再置一次闩锁。
+        Helpers.AppLifetime.MarkShuttingDown();
         if (_mainHwnd != IntPtr.Zero)
         {
             foreach (var id in _noteIdToHotkeyId.Values)

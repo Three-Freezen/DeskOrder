@@ -5,7 +5,8 @@
              Width="484" Height="214" Margin="0,0,12,16">
   <Border x:Name="CardRoot" CornerRadius="10" Background="{DynamicResource Brush.Bg.Surface}"
           BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1"
-          Cursor="Hand" MouseLeftButtonUp="CardRoot_MouseLeftButtonUp"
+          Cursor="Hand" MouseLeftButtonDown="CardRoot_MouseLeftButtonDown"
+          MouseLeftButtonUp="CardRoot_MouseLeftButtonUp"
           MouseEnter="CardRoot_MouseEnter" MouseLeave="CardRoot_MouseLeave">
     <Grid Margin="14">
       <Grid.ColumnDefinitions>

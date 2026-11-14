@@ -1,6 +1,7 @@
 using System;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using DesktopZones.Models;
@@ -17,6 +18,11 @@ public partial class PluginCard : UserControl
 
     public event Action<PluginCard>? ActionRequested;
     public event Action<PluginCard>? OpenRequested;
+
+    // 点开详情：按下点 + 拖动阈值 + 重入闩（见 CardRoot_MouseLeftButtonUp 的注释）。
+    const double DragThreshold = 4.0;
+    Point? _pressPoint;
+    bool _opening;
 
     public PluginCard()
     {
@@ -103,16 +109,43 @@ public partial class PluginCard : UserControl
         ActionRequested?.Invoke(this);
     }
 
-    void CardRoot_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    void CardRoot_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (e.OriginalSource is DependencyObject source && IsInsideButton(source)) return;
-        OpenRequested?.Invoke(this);
+        _pressPoint = null;
+        if (e.OriginalSource is DependencyObject source && IsInteractive(source)) return;
+        _pressPoint = e.GetPosition(this);
     }
 
-    static bool IsInsideButton(DependencyObject source)
+    void CardRoot_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        var press = _pressPoint;
+        _pressPoint = null;
+        // 没有在卡片上按下过（在按钮上按下、或从卡片外拖进来松手）不算点击。
+        if (press == null) return;
+        if (e.OriginalSource is DependencyObject source && IsInteractive(source)) return;
+        // 只判 Up 会把「按住卡片拖动、仍在本卡片上松手」当成点开；用按下点算位移。
+        if ((e.GetPosition(this) - press.Value).Length > DragThreshold) return;
+        // 详情是模态的，ShowDialog() 里跑嵌套消息泵；这个闩锁防重入（也给将来改非模态兜底）。
+        if (_opening) return;
+        _opening = true;
+        try
+        {
+            e.Handled = true;
+            OpenRequested?.Invoke(this);
+        }
+        finally
+        {
+            _opening = false;
+        }
+    }
+
+    /// <summary>按钮 / 下拉框 / 滚动条 / 滑块等自带交互的控件：交给它们自己处理，不要打开详情。</summary>
+    static bool IsInteractive(DependencyObject source)
     {
         for (var d = source; d != null; d = VisualTreeHelper.GetParent(d))
-            if (d is System.Windows.Controls.Button) return true;
+        {
+            if (d is ButtonBase or ComboBox or ScrollBar or Thumb) return true;
+        }
         return false;
     }
 
@@ -120,5 +153,10 @@ public partial class PluginCard : UserControl
         => CardRoot.BorderBrush = (Brush)FindResource("Brush.Border.Default");
 
     void CardRoot_MouseLeave(object sender, MouseEventArgs e)
-        => CardRoot.BorderBrush = (Brush)FindResource("Brush.Border.Subtle");
+    {
+        // 按下后移出卡片（拖出去再松手）不该留下一个过期的按下点，否则之后从卡片外
+        // 拖回来松手会被误判成点击。
+        _pressPoint = null;
+        CardRoot.BorderBrush = (Brush)FindResource("Brush.Border.Subtle");
+    }
 }
