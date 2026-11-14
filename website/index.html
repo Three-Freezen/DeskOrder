@@ -553,12 +553,6 @@ html.lang-fading main{animation:langIn .22s ease}
           <li><b data-i18n="cl24_i3t"></b><span data-i18n="cl24_i3d"></span></li>
           <li><b data-i18n="cl24_i4t"></b><span data-i18n="cl24_i4d"></span></li>
         </ul>
-        <div class="cl-head cl-prev"><span class="rm-ver">v1.0.19</span></div>
-        <ul class="cl-list">
-          <li><b data-i18n="cl19_i1t"></b><span data-i18n="cl19_i1d"></span></li>
-          <li><b data-i18n="cl19_i2t"></b><span data-i18n="cl19_i2d"></span></li>
-          <li><b data-i18n="cl19_i3t"></b><span data-i18n="cl19_i3d"></span></li>
-        </ul>
 
         <div class="cl-foot">
           <a href="https://github.com/Three-Freezen/DeskOrder/releases" target="_blank" rel="noopener" data-od-id="cl-link" data-i18n="cl_link">完整更新记录见 Releases →</a>
@@ -679,9 +673,6 @@ zh:{
   cl24_i2t:"曲目、封面与兜底识别：",cl24_i2d:"自动读取正在播放的曲名、歌手、专辑与封面，可直接上一曲 / 暂停 / 下一曲。没有接入系统媒体会话的播放器（如网易云音乐）靠音频会话电平 + 窗口标题 + 它自己的播放缓存兜底识别；实在认不出是谁在出声时，条子 / 唱盘照样动，只是不显示曲目内容。",
   cl24_i3t:"封面取色、跟随应用与两套预设：",cl24_i3d:"从封面提取主色，用在律动条颜色、分割线和唱片机中心标签；同时有多个播放器时可以让某个组件只跟某个应用；律动条和唱片机各有一套独立预设卡，分开存放、互不混用。",
   cl24_i4t:"识别与稳定性修复：",cl24_i4d:"修好三处底层问题——托盘图标在部分环境注册失败、CoreAudio 设备枚举器被重复创建导致兜底识别整条失效、换歌后唱片机封面要暂停再播一下才刷新。",
-  cl19_i1t:"次级分区浮层位置修复：",cl19_i1d:"根因是浮层窗口按打开动画的缩放锚点定位——从第二次打开起整体偏移，离图标越来越远（列表模式下尤其明显）。现在每次开层前重置锚点，浮层稳定贴着图标展开。",
-  cl19_i2t:"展开方位可选：",cl19_i2d:"设置 → 次级分区新增「默认展开位置」：左上 / 左下 / 右上 / 右下（默认左下）。该方位放不下时先左右翻、再上下翻、最后斜对角，不会甩到很远的地方。",
-  cl19_i3t:"正方形次级分区：",cl19_i3d:"同一设置栏新增开关：开启后展开的次级分区不显示名称与设置按钮，只保留正方形的图标网格。",
 
   cl_link:"完整更新记录见 Releases →",cl_req:"适用于 Windows 10 1809+ · 自包含运行时，无需安装 .NET",
   sec_au_t:"关于作者",au_d:"DeskOrder 的开发者，项目以 Apache-2.0 协议开源。",au_license:"Apache License 2.0",
@@ -751,9 +742,6 @@ en:{
   cl24_i2t:"Track, artwork and fallback recognition: ",cl24_i2d:"reads the title, artist, album and cover of whatever is playing, with prev / play-pause / next. Players that never register a system media session (e.g. NetEase Cloud Music) are recognised through audio-session level, window title and their own play-queue cache; when nothing can be identified, the bars and the record still react — just without track text.",
   cl24_i3t:"Accent from cover, follow one app, two preset sets: ",cl24_i3d:"the dominant colour of the artwork drives the bar colour, the divider and the vinyl centre label; with several widgets each one can follow a single app; and bars presets and vinyl presets are stored separately, never mixed.",
   cl24_i4t:"Recognition and stability fixes: ",cl24_i4d:"three deeper fixes — tray icon registration failing in some environments, a duplicated CoreAudio device enumerator that silently broke the whole fallback detection, and the vinyl cover only refreshing after a pause/play when the track changed.",
-  cl19_i1t:"Sub-zone flyout position fixed: ",cl19_i1d:"the flyout window was positioned using the open animation's scale anchor, so from the second open onward it drifted farther and farther from the icon (most visible in list mode). The anchor is now reset before every open, so the flyout always opens attached to the icon.",
-  cl19_i2t:"Expand position is now yours to pick: ",cl19_i2d:"Settings → Sub-Zones adds Default expand position: top left / bottom left / top right / bottom right (default bottom left). If that corner is out of room it flips horizontally first, then vertically, then diagonally — it never jumps far away.",
-  cl19_i3t:"Square sub-zone: ",cl19_i3d:"a switch in the same section hides the name and settings button of an expanded sub-zone, leaving only the square icon grid.",
 
   cl_link:"Full history in Releases →",cl_req:"For Windows 10 1809+ · self-contained runtime, no .NET needed",
   sec_au_t:"About",au_d:"Developer of DeskOrder. The project is open source under Apache-2.0.",au_license:"Apache License 2.0",
