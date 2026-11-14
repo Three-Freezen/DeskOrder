@@ -158,9 +158,16 @@ public sealed class PluginService
         RefreshBlocklistInBackground();
     }
 
+    /// <summary>
+    /// 自测台专用：禁用「启动后台拉取 registry」。用例会自己构造缓存/禁用名单，
+    /// 真实后台拉取会在用例跑到一半时把缓存覆盖成线上数据（2026-11-14 的 cache 用例偶发就是这样）。
+    /// </summary>
+    internal static bool SuppressBackgroundRefreshForLab { get; set; }
+
     /// <summary>后台刷新一次 registry，把新的 blocked[] 落到本地并立即执行。</summary>
     void RefreshBlocklistInBackground()
     {
+        if (SuppressBackgroundRefreshForLab) return;
         if (Records.Count == 0) return;
         _ = Task.Run(async () =>
         {

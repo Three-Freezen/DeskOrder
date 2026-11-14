@@ -59,6 +59,8 @@ public partial class App
     async Task RunPluginLabAsync(string dir, string caseName)
     {
         Directory.CreateDirectory(dir);
+        // 用例自己构造缓存与禁用名单；禁掉启动后台拉取，避免线上 registry 在用例跑到一半时覆盖它们。
+        PluginService.SuppressBackgroundRefreshForLab = true;
         var cases = caseName == "all"
             ? new[] { "install", "load", "restart", "disable", "enable", "hide", "uninstall", "offline", "bad", "crash", "cache", "signature", "signature-policy", "lang-install", "lang-switch", "lang-bad", "lang-override", "lang-uninstall", "appearance-install", "appearance-toggle", "appearance-render", "appearance-bad", "appearance-uninstall", "update", "blocked", "dialog", "ui", "dev", "widget-panel" }
             : new[] { caseName };
