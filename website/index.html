@@ -298,7 +298,7 @@ html.lang-fading main{animation:langIn .22s ease}
   <section class="hero" id="top" data-od-id="hero">
     <div class="container">
       <div class="badges" data-anim="1">
-        <span class="badge badge-accent">v1.0.27</span>
+        <span class="badge badge-accent">v1.0.28</span>
         <span class="badge" data-i18n="badge_win">Windows 10+ x64</span>
         <span class="badge" data-i18n="badge_net">.NET 10 自包含</span>
         <span class="badge" data-i18n="badge_mit">Apache-2.0 开源</span>
@@ -531,7 +531,15 @@ html.lang-fading main{animation:langIn .22s ease}
         <h2 data-i18n="sec_cl_t">更新日志</h2>
       </div>
       <div class="cl-card reveal" data-od-id="changelog-card">
-        <div class="cl-head"><span class="rm-ver">v1.0.27</span></div>
+        <div class="cl-head"><span class="rm-ver">v1.0.28</span></div>
+        <ul class="cl-list">
+          <li><b data-i18n="cl28_i1t"></b><span data-i18n="cl28_i1d"></span></li>
+          <li><b data-i18n="cl28_i2t"></b><span data-i18n="cl28_i2d"></span></li>
+          <li><b data-i18n="cl28_i3t"></b><span data-i18n="cl28_i3d"></span></li>
+          <li><b data-i18n="cl28_i4t"></b><span data-i18n="cl28_i4d"></span></li>
+          <li><b data-i18n="cl28_i5t"></b><span data-i18n="cl28_i5d"></span></li>
+        </ul>
+        <div class="cl-head cl-prev"><span class="rm-ver">v1.0.27</span></div>
         <ul class="cl-list">
           <li><b data-i18n="cl27_i1t"></b><span data-i18n="cl27_i1d"></span></li>
           <li><b data-i18n="cl27_i2t"></b><span data-i18n="cl27_i2d"></span></li>
@@ -660,6 +668,11 @@ zh:{
   sec_rm_t:"未来展望",rm_note:"计划中的功能，发布顺序可能调整。",
   rm_i1:"性能优化",
   sec_cl_t:"更新日志",
+  cl28_i1t:"空闲时更省资源：",cl28_i1d:"主题切换不再每 2 秒读注册表（改成系统事件 + 30 秒兜底）；媒体与音频的轮询/采集线程在组件关掉后自动停，空闲时轮询退到 3 秒。长时间挂着 DeskOrder 的 CPU 占用明显下降。",
+  cl28_i2t:"壁纸采样不卡 UI：",cl28_i2d:"液态玻璃的模糊档位改成后台线程计算，采样检测与抓屏不再持同一把锁；封面解码、文件哈希、图标扫描挪到线程池，管理页列表刷新改成一次性通知。",
+  cl28_i3t:"句柄与内存修复：",cl28_i3d:"图标解析（ExtractIconEx / IShellItem / 系统图像列表）与音频会话的 COM 引用现在显式释放，热键钩子退出时移除，子分区浮层关闭后不再泄漏；配置写盘改成异步并在退出前统一落盘。",
+  cl28_i4t:"打磨与修复：",cl28_i4d:"未处理异常弹窗限流（同类 30 秒一次、每 30 秒最多 3 次）；「全部隐藏」复用窗口前先确认窗口还活着；托盘图标在固定 GUID 身份下不再被反复重建；属性面板的订阅改成随加载/卸载成对管理。",
+  cl28_i5t:"系统要求：",cl28_i5d:"最低系统明确为 Windows 10 1809（build 17763），与安装器、MSIX 包一致；运行时自带，不需要另装 .NET。",
   cl27_i1t:"插件市场（新）：",cl27_i1d:"侧栏多了独立的「插件」一栏，分市场 / 已安装 / 更新三个页签，支持搜索、类型筛选和本地 .dopkg 导入。安装前先摊开作者、版本、包大小、SHA-256 和权限清单，装好之后可以单独启用 / 停用 / 卸载。",
   cl27_i2t:"四类插件：",cl27_i2d:"桌面组件、分区插件、语言包、外观包（工具与数据源后续开放）。组件和分区插件只由插件画内容，窗口、拖动、吸附、锁定、三态开关和每实例设置都由宿主负责；组件外观也接进了属性面板，和内置便签、时钟同一套。",
   cl27_i3t:"官方日语语言包（新）：",cl27_i3d:"宿主 967 条词条全部译出（覆盖率 100%，不依赖英文回退），术语统一、按钮用体言止め。在插件市场装好后到「设置 → 语言」切到「日本語」，立即生效、不用重启；社区也可以做自己的语言包，允许只翻一部分、缺词条自动回退。",
@@ -729,6 +742,11 @@ en:{
   sec_rm_t:"What's next",rm_note:"Planned features; shipping order may change.",
   rm_i1:"Performance improvements",
   sec_cl_t:"Changelog",
+  cl28_i1t:"Cheaper while idle: ",cl28_i1d:"theme changes no longer poll the registry every 2 seconds (system events plus a 30-second fallback); media and audio polling/capture threads stop once their components are closed, and idle polling backs off to 3 seconds. CPU usage during long idle stretches drops noticeably.",
+  cl28_i2t:"Wallpaper sampling no longer stutters: ",cl28_i2d:"liquid-glass blur tiers are computed on a background thread and detection/capture no longer share one lock; cover decoding, file hashing and icon scanning moved to the thread pool, and management lists refresh with a single notification.",
+  cl28_i3t:"Handle and memory fixes: ",cl28_i3d:"COM references from icon resolution (ExtractIconEx / IShellItem / the system image list) and audio sessions are now released explicitly, the hotkey hook is removed on exit, closing a sub-zone flyout no longer leaks its view model, and config writes are asynchronous with a flush on exit.",
+  cl28_i4t:"Polish and fixes: ",cl28_i4d:"the unhandled-exception dialog is throttled (same exception once per 30 seconds, at most three per 30 seconds); \"hide all\" re-uses a window only after checking it is still alive; the tray icon is no longer recreated under a fixed GUID identity; property-panel subscriptions are paired with Loaded/Unloaded.",
+  cl28_i5t:"Requirements: ",cl28_i5d:"minimum OS is now Windows 10 1809 (build 17763), matching the installer and the MSIX package; the runtime is self-contained, no .NET needed.",
   cl27_i1t:"New: plugin marketplace. ",cl27_i1d:"a dedicated \"Plugins\" section with Marketplace / Installed / Updates tabs, search, kind filters and local .dopkg import. The install dialog lays out author, version, package size, SHA-256 and permissions before anything is installed; afterwards each plugin can be enabled, disabled or uninstalled on its own.",
   cl27_i2t:"Four plugin kinds: ",cl27_i2d:"desktop widgets, zone plugins, language packs and appearance packs (tools and data sources come later). Widgets and zone plugins only draw their content — window, dragging, snapping, locking, the three-state toggle and per-instance settings stay with the host; a widget's look is edited in the host property panel, the same one used by the built-in note and clock.",
   cl27_i3t:"New: official Japanese language pack. ",cl27_i3d:"all 967 host strings translated (100% coverage, no English fallback) with consistent terminology and noun-phrase labels. Install it from the marketplace, then pick 日本語 under Settings → Language — it applies instantly, no restart. Community packs work too, and partial translations fall back automatically.",
