@@ -178,11 +178,21 @@ public partial class App
             }
             case "offline":
             {
+                // 隔离外部状态：本用例断言的是「没有缓存时」的降级行为，但社区 registry
+                // 已经发布，应用启动后的后台拉取（PluginService.RefreshBlocklistInBackground）
+                // 以及前面的 cache/ui 类用例都会往这个缓存里写真实数据。缓存只要在，
+                // LoadAsync 失败就会回落到它，条目数不再为 0。先清掉缓存与时间戳。
+                // 注意：File.Delete 与 LoadAsync 里同步执行的 File.Exists 之间没有 await，
+                // 后台拉取不存在插进这段窗口的机会。
+                File.Delete(PluginPaths.RegistryCachePath);
+                File.Delete(PluginPaths.RegistryMetaPath);
                 var catalog = new PluginCatalogService
                 {
                     RegistryUrl = "http://127.0.0.1:9/registry.json"
                 };
                 var result = await catalog.LoadAsync(force: true);
+                item.Details.Add($"entries={result.Entries.Count} fromCache={result.FromCache} " +
+                                 $"offline={result.Offline} fetched={result.FetchedAtUtc:O} error={result.Error}");
                 item.Check(result.Offline, "offline is reported");
                 item.Check(result.Entries.Count == 0, "no entries without cache");
                 item.Check(!string.IsNullOrEmpty(result.Error), "error message is kept");
@@ -651,7 +661,11 @@ public partial class App
                     },
                     Since = DateTime.UtcNow
                 };
-                PluginBlocklist.SaveFromRegistry(new List<BlockedPlugin> { blockedEntry });
+                // 单调合并保护：应用启动后的后台拉取成功后，会把真实 registry 的
+                // updatedAt（2026-11-14T09:48:02Z）写进本地名单的「来源时间」。之后再
+                // 不带时间戳地写空名单，会被判成「比本地旧」而只取并集 —— 封禁就清不掉。
+                // 这里模拟的是「来自 registry 的一次更新」，显式给一个严格递增的 updatedAt。
+                PluginBlocklist.SaveFromRegistry(new List<BlockedPlugin> { blockedEntry }, NextLabRegistryStamp());
                 PluginBlocklist.Reload();
                 service2.ApplyBlocklist();
 
@@ -679,8 +693,8 @@ public partial class App
                 if (window != null) SaveScreenshot(window, Path.Combine(dir, "shot-blocked.png"));
                 item.Check(File.Exists(Path.Combine(dir, "shot-blocked.png")), "blocked screenshot written");
 
-                // 还原
-                PluginBlocklist.SaveFromRegistry(new List<BlockedPlugin>());
+                // 还原：用更晚的 updatedAt 表示「registry 撤掉了这条封禁」。
+                PluginBlocklist.SaveFromRegistry(new List<BlockedPlugin>(), NextLabRegistryStamp());
                 PluginBlocklist.Reload();
                 service2.SetEnabled(SamplePluginId, true);
                 service2.ReloadForLab();
@@ -899,6 +913,14 @@ public partial class App
             {
                 // 开发者模式：直接把源码输出目录当已启用插件加载，不落配置。
                 var service3 = PluginService.Instance;
+                // 开发者模式不该受禁用名单影响：blocked 用例模拟过封禁，若它没清理干净
+                // （或本地名单里本来就封了这个版本），ApplyBlocklist 会把刚扫到的 dev
+                // 记录强制停用 —— 表现就是「发现了却没加载」。这里按「registry 撤回封禁」
+                // 显式解禁，让本用例不依赖前一个用例的清理结果。
+                var keepBlocked = PluginBlocklist.Entries
+                    .Where(e => !string.Equals(e.Id, SamplePluginId, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                PluginBlocklist.SaveFromRegistry(keepBlocked, NextLabRegistryStamp());
                 var package = FindSamplePackage(dir);
                 if (package == null) { item.Check(false, "sample package exists"); break; }
                 if (service3.GetRecord(SamplePluginId) != null) service3.Uninstall(SamplePluginId, deleteData: false, out _);
@@ -994,6 +1016,15 @@ public partial class App
                 break;
         }
     }
+
+    int _labRegistryStamp;
+
+    /// <summary>
+    /// 自测台专用的「registry updatedAt」，严格递增。
+    /// <see cref="PluginBlocklist.SaveFromRegistry"/> 只允许「来源确实比本地新」的名单整体替换，
+    /// 否则按单调保护取并集；自测台每次写入都必须比上一次新，否则清空/解禁会静默失效。
+    /// </summary>
+    DateTime NextLabRegistryStamp() => DateTime.UtcNow.AddSeconds(++_labRegistryStamp);
 
     async Task<PluginInstallResult?> InstallSampleAsync(string dir)
     {
