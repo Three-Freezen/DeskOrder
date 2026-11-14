@@ -45,7 +45,7 @@ A messy desktop needs organizing; a plain desktop could look better. That used t
 
 ## Download & Install
 
-Requirements: Windows 10 or later, 64-bit. The app ships with its own runtime — no .NET installation needed.
+Requirements: Windows 10 1809 (build 17763) or later, 64-bit. The app ships with its own runtime — no .NET installation needed.
 
 Two packages are available:
 
@@ -126,8 +126,9 @@ Combine zones into a group and restyle them together.
 
 The sidebar has its own **Plugins** group. Plugins are community-made; the official project only maintains the index and does **not** review code.
 
-- **Five kinds**: desktop widgets (`widget`), language packs and appearance packs, all available now; tools and integrations arrive in a later release
+- **Six kinds**: desktop widgets (`widget`), zone plugins (`zonebar`), language packs and appearance packs, all available now; tools and integrations arrive in a later release
 - **Desktop widgets**: a plugin draws arbitrary WPF content; the host owns the window, dragging, snapping, locking, the three-state toggle and per-instance settings. Uninstalling a plugin leaves placeholder widgets; reinstalling restores them
+- **Zone plugins**: extend what zones can do — the host owns the dock window, edge snapping, auto-hide, expand/collapse, drag-in absorption and zone safety, while the plugin only draws content. The current form is an edge-docked zone bay that collects minimized zone restore buttons and expands them on click/hover
 - **Language packs**: add a new UI language (Japanese, Traditional Chinese…) or override Chinese/English. Partial translations are fine; missing entries fall back `base → en → zh`. Installed packs appear under `Settings → Language`, switching is instant, and removing the active pack falls back to Chinese with a notification. The **official full Japanese pack** is already listed (967 / 967 strings, 100% coverage, no English fallback)
 - **Appearance packs**: community materials (backdrop/blur/grain/tint) plus presets for zones, panels, notes, clocks and more. Installed materials appear under `Appearance → Material`, presets under `Load preset`; disabling/removing the pack reverts both, and existing objects are never changed automatically (materials need the wallpaper-sampling renderer, like the built-in ones)
 - **Code vs data**: widgets/tools/integrations run code and need a restart; appearance/language packs are pure data and don't execute code

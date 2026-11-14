@@ -5,7 +5,7 @@
 DeskOrder reorganizes your desktop with "zones": drag files, folders and shortcuts into translucent floating zones to sort them, then turn zones into tiles with liquid glass and widgets — a desktop that is both tidy and beautiful.
 
 - Category: Personalization / Utilities
-- Requirements: Windows 10 or later (x64), self-contained runtime, no .NET installation needed
+- Requirements: Windows 10 1809 (build 17763) or later (x64), self-contained runtime, no .NET installation needed
 - Price: Free; open source under Apache-2.0
 
 ## Screenshots
