@@ -204,6 +204,14 @@ public partial class PluginsPage : UserControl
 
     void Render()
     {
+        // 关闭期不要再重建视觉树：Application.DoShutdown() 是「先关所有窗口、最后才
+        // BeginInvokeShutdown」，所以 modal 的 ShowDialog() 会在关闭已经开始之后才返回，
+        // 调用方（ShowDetail）随后继续往下执行。此时 new PluginCard() 里 InitializeComponent()
+        // 会撞上 Application.LoadComponent 的「应用程序正在关闭」守卫并抛 InvalidOperationException
+        // （2026-11-14 关托盘退出时弹「DeskOrder 错误」就是这条）。
+        if (Dispatcher.HasShutdownStarted) return;
+        if (Window.GetWindow(this) is { IsLoaded: false }) return;
+
         var installed = _service.Records.Count;
         CountLabel.Text = Loc.Get("Plugin.Count", _catalog?.Entries.Count ?? 0, installed);
 
@@ -810,7 +818,9 @@ public partial class PluginsPage : UserControl
             UninstallRecord(current);
         };
         dialog.ShowDialog();
-        Render();
+        // 应用退出时 WPF 会强制关掉这个模态窗口，ShowDialog() 立刻返回；页面已经 Unloaded，
+        // 这时再 Render() 只会白跑一遍（而且在关闭期会抛「应用程序正在关闭」）。
+        if (IsLoaded) Render();
     }
 
     // ── 本地导入 ──
