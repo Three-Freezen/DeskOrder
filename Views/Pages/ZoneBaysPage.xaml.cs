@@ -1,5 +1,6 @@
 using System;
 using System.Collections.ObjectModel;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -22,7 +23,8 @@ public partial class ZoneBaysPage : UserControl
     readonly ManagementWindow _main;
     readonly ZoneBayService _service = ZoneBayService.Instance;
     readonly LocalizationService _loc = LocalizationService.Instance;
-    readonly ObservableCollection<EditableListRow> _rows = new();
+    // ponytail 2026-11-14(性能审计): 批量替换行集合,只发一次 Reset。
+    readonly BulkObservableCollection<EditableListRow> _rows = new();
     PluginZoneBar? _selected;
 
     public ZoneBaysPage(ManagementWindow main)
@@ -47,8 +49,7 @@ public partial class ZoneBaysPage : UserControl
         NewBtn.Visibility = _service.HasAnyZoneBayPlugin ? Visibility.Visible : Visibility.Collapsed;
         NewBtn.IsEnabled = _service.HasAnyZoneBayPlugin;
 
-        _rows.Clear();
-        foreach (var bar in _service.Bars) _rows.Add(BuildRow(bar));
+        _rows.ReplaceAll(_service.Bars.Select(BuildRow));
         EmptyHint.Visibility = _rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         SetSelection(ListHost, _selected);
     }

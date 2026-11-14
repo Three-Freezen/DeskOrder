@@ -41,8 +41,9 @@ namespace DesktopZones.Helpers
 
         public const double DefaultChromeOpacity = 0.4;
 
-        /// <summary>设定统一不透明度，并给已挂接的元素套上（幂等，可在 ApplyStyle 里反复调用）。</summary>
-        public static void SetChromeOpacity(double opacity, IEnumerable<UIElement>? targets = null)
+        /// <summary>设定统一不透明度，并给已挂接的元素套上（幂等，可在 ApplyStyle 里反复调用）。
+        /// targets 允许含 null（XAML 生成字段在 NRT 下可能被判为可空，null 直接跳过）。</summary>
+        public static void SetChromeOpacity(double opacity, IEnumerable<UIElement?>? targets = null)
         {
             ChromeOpacity = Math.Max(0.05, Math.Min(1.0, opacity));
             if (targets == null) return;
@@ -57,7 +58,7 @@ namespace DesktopZones.Helpers
         /// 分区/时钟/日历/便签/面板都有这个设置项，各窗口 ApplyStyle 时往这里喂一次，
         /// 于是所有小按钮的明暗只跟一个数走（默认 40% 与分区历史观感一致）。
         /// </summary>
-        public static void ApplyControlOpacity(double percent, IEnumerable<UIElement>? targets = null)
+        public static void ApplyControlOpacity(double percent, IEnumerable<UIElement?>? targets = null)
             => SetChromeOpacity(percent / 100.0, targets);
 
         static SolidColorBrush Freeze(Color c)

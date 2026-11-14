@@ -464,15 +464,28 @@ public class ZoneManager
         // Set IsVisible BEFORE creating the window to prevent constructor from calling ApplyHidden()
         zone.IsVisible = true;
 
-        if (_zoneWindows.ContainsKey(zone.Id))
+        // ponytail 2026-11-14(审计修订 P1-8): 复用窗口前先确认它还活着。批量「全部隐藏」
+        // 的分波动画路径里窗口是自己 Close() 的（见 ZoneWindow.HideZone），字典条目现在由
+        // TrackWindow 的 Closed 回调清掉；这里再兜一层：万一字典里仍是已关闭的窗口，
+        // Show()/ShowZone() 会抛 InvalidOperationException("... after window has closed")。
+        bool reused = false;
+        if (_zoneWindows.TryGetValue(zone.Id, out var existingWindow))
         {
-            _zoneWindows[zone.Id].ShowZone(waveDelayMs);
+            try
+            {
+                existingWindow.ShowZone(waveDelayMs);
+                reused = true;
+            }
+            catch (InvalidOperationException)
+            {
+                _zoneWindows.Remove(zone.Id);
+            }
         }
-        else
+        if (!reused)
         {
             var window = new ZoneWindow(zone, this, ShellIconService.Instance);
+            TrackWindow(zone.Id, window);
             window.Show();
-            _zoneWindows[zone.Id] = window;
             // ponytail: batch "Show All" wave — a freshly created window starts expanded
             // from the ctor; re-collapse it and play its own entrance animation at the
             // stagger slot so new windows join the cascade.
@@ -634,12 +647,27 @@ public class ZoneManager
     public bool IsZoneShown(Guid zoneId) => _zoneWindows.ContainsKey(zoneId);
     public ZoneWindow? GetZoneWindow(Guid zoneId) => _zoneWindows.TryGetValue(zoneId, out var w) ? w : null;
 
+    /// <summary>登记「zoneId → 窗口」并订阅它的 Closed，保证窗口自己 Close（不经过本类）
+    /// 时字典条目一定被摘掉。
+    /// ponytail 2026-11-14(审计修订 P1-8): 见 <see cref="ShowZone"/> 里的说明。</summary>
+    void TrackWindow(Guid zoneId, ZoneWindow window)
+    {
+        _zoneWindows[zoneId] = window;
+        window.Closed += (_, _) =>
+        {
+            // 只删"还是同一个窗口"的条目 —— AdoptWindow 会把窗口换绑到 host.Id，
+            // 若按 id 盲删可能把新窗口误删。
+            if (_zoneWindows.TryGetValue(zoneId, out var current) && ReferenceEquals(current, window))
+                _zoneWindows.Remove(zoneId);
+        };
+    }
+
     /// <summary>坞展开时取一个窗口：已有就复用，没有就新建（不 Show）。</summary>
     public ZoneWindow GetOrCreateWindow(Zone zone)
     {
         if (_zoneWindows.TryGetValue(zone.Id, out var existing)) return existing;
         var window = new ZoneWindow(zone, this, ShellIconService.Instance);
-        _zoneWindows[zone.Id] = window;
+        TrackWindow(zone.Id, window);
         return window;
     }
 
@@ -649,7 +677,7 @@ public class ZoneManager
         if (_zoneWindows.ContainsKey(zone.Id)) return;
         zone.IsVisible = false;
         var window = new ZoneWindow(zone, this, ShellIconService.Instance);
-        _zoneWindows[zone.Id] = window;
+        TrackWindow(zone.Id, window);
         window.Show();
         window.SnapToCollapsedForBay();
     }
@@ -1213,6 +1241,12 @@ public class ZoneManager
             return;
         }
         _zoneWindows[host.Id] = window;
+        // ponytail 2026-11-14: 换绑后同样要保证窗口自己 Close 时字典被清（见 TrackWindow）
+        window.Closed += (_, _) =>
+        {
+            if (_zoneWindows.TryGetValue(host.Id, out var current) && ReferenceEquals(current, window))
+                _zoneWindows.Remove(host.Id);
+        };
         if (window.DataContext is ViewModels.ZoneViewModel vm)
         {
             if (merged) vm.SelectedSubZoneId = host.Id; // refreshes merged items

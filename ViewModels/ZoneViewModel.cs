@@ -117,40 +117,89 @@ public class ZoneViewModel : INotifyPropertyChanged
             RefreshMergedItems();
             return;
         }
-        Items.Clear();
-        double isize = CurrentIconSize();
-        foreach (var item in _zone.Items)
-        {
-            var vm = new ZoneItemViewModel(item, _iconService) { IconSize = isize, ItemSize = _zone.GridSize, ItemHeight = _zone.GridSize, SourceZoneId = _zone.Id };
-            Items.Add(vm);
-        }
+        SyncItems(_zone.Items, _zone.Id);
     }
 
     /// <summary>Load items from all merged sub-zones (filtered by selected tab).</summary>
     public void RefreshMergedItems()
     {
-        Items.Clear();
-        double isize = CurrentIconSize();
-
-        // Determine which zone's items to show
         Guid targetId = _selectedSubZoneId ?? _zone.Id;
 
         if (targetId == _zone.Id)
         {
-            foreach (var item in _zone.Items)
-                Items.Add(new ZoneItemViewModel(item, _iconService) { IconSize = isize, ItemSize = _zone.GridSize, ItemHeight = _zone.GridSize, SourceZoneId = _zone.Id });
+            SyncItems(_zone.Items, _zone.Id);
         }
         else
         {
             var subZone = _zoneManager.Zones.FirstOrDefault(z => z.Id == targetId);
-            if (subZone != null)
-            {
-                foreach (var item in subZone.Items)
-                    Items.Add(new ZoneItemViewModel(item, _iconService) { IconSize = isize, ItemSize = _zone.GridSize, ItemHeight = _zone.GridSize, SourceZoneId = targetId });
-            }
+            SyncItems(subZone != null ? subZone.Items : (IReadOnlyList<ZoneItem>)Array.Empty<ZoneItem>(), targetId);
         }
 
         OnPropertyChanged(nameof(IsMergedMaster));
+    }
+
+    /// <summary>
+    /// 增量同步 <see cref="Items"/>：按 <see cref="ZoneItem.Id"/> 复用已有 VM，只对真正
+    /// 变化的条目做 Remove/Insert/Move。
+    ///
+    /// ponytail 2026-11-14(审计修订 P0-3): 原实现是 `Items.Clear()` + 逐条 new ——
+    /// 每次 ZonesChanged（任意图标增删/改名/样式应用/自动整理导入都会触发）都让分区窗口的
+    /// 非虚拟化 ItemsControl 把所有容器销毁重建，代价 O(图标数)（见 OnZonesChanged 调用链）。
+    /// 现在只有新增/删除/顺序变化才动集合，未变化的条目连 PropertyChanged 都不发。
+    /// 语义保持：复用 VM 也重新解析一次图标（等价于旧实现"重建 VM → 图标重新走 GetIcon"），
+    /// 选中态按旧行为清空（旧实现重建 VM 相当于清空）。
+    /// </summary>
+    void SyncItems(IReadOnlyList<ZoneItem> source, Guid sourceZoneId)
+    {
+        double isize = CurrentIconSize();
+        var byId = new Dictionary<Guid, ZoneItemViewModel>(Items.Count);
+        foreach (var vm in Items) byId[vm.Id] = vm;
+
+        var desired = new List<ZoneItemViewModel>(source.Count);
+        foreach (var item in source)
+        {
+            ZoneItemViewModel? vm = null;
+            if (byId.TryGetValue(item.Id, out var existing))
+            {
+                byId.Remove(item.Id);
+                if (ReferenceEquals(existing.Source, item)) vm = existing;
+            }
+            if (vm == null)
+            {
+                vm = new ZoneItemViewModel(item, _iconService);
+                Items.Add(vm);   // 先占位，下面统一按顺序 Move
+            }
+            if (vm.IconSize != isize) vm.IconSize = isize;
+            if (vm.ItemSize != _zone.GridSize) vm.ItemSize = _zone.GridSize;
+            if (vm.ItemHeight != _zone.GridSize) vm.ItemHeight = _zone.GridSize;
+            if (vm.SourceZoneId != sourceZoneId) vm.SourceZoneId = sourceZoneId;
+
+            // 旧实现重建 VM = 选中态清零 + 图标缓存失效；复用路径显式补上这两点。
+            if (vm.IsSelected) vm.IsSelected = false;
+            vm.RefreshIcon();
+
+            desired.Add(vm);
+        }
+
+        // 删除已不存在的条目（倒序，索引稳定）
+        for (int i = Items.Count - 1; i >= 0; i--)
+        {
+            if (!desired.Contains(Items[i]))
+            {
+                Items[i].CancelIconRetryForRemoval();   // ponytail 2026-11-14: 别让被丢弃的 VM 继续挂着图标重试计时器
+                Items.RemoveAt(i);
+            }
+        }
+
+        // 校正顺序（只有顺序真变了才 Move；bubble 式比较下界）
+        for (int i = 0; i < desired.Count; i++)
+        {
+            if (!ReferenceEquals(Items[i], desired[i]))
+            {
+                int cur = Items.IndexOf(desired[i]);
+                if (cur > i) Items.Move(cur, i);
+            }
+        }
     }
 
     public void AddItem(ZoneItem item)
@@ -442,6 +491,11 @@ public class ZoneItemViewModel : INotifyPropertyChanged
         _iconRetryTimer?.Stop();
         _iconRetryTimer = null;
     }
+
+    /// <summary>VM 被 <see cref="ZoneViewModel"/> 丢弃前调用：停掉图标重试计时器。
+    /// ponytail 2026-11-14(审计修订 P2): 原来 RefreshItems 直接 Clear，旧 VM 的
+    /// 600ms×10 重试计时器会继续跑（每个都是一次 shell 图标解析）。</summary>
+    internal void CancelIconRetryForRemoval() => CancelIconRetry();
 
     /// <summary>Which zone this item belongs to (for merged views).</summary>
     public Guid SourceZoneId { get; set; }

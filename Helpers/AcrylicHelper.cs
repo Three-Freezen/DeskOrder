@@ -561,7 +561,14 @@ public static class AcrylicHelper
     static void RegisterWindow(Window window,
         (int blur, int opacity, int lum, string mode, string? fillHex, double fillOpacity, int accentState, bool useClassicBlur) settings)
     {
-        if (!_registered.ContainsKey(window)) window.Closed += OnRegisteredWindowClosed;
+        // ponytail 2026-11-14(审查 P2): DisableBlur(Window) 只 Remove 字典项、不摘 Closed；
+        // 窗口「隐藏→显示」反复触发 EnableBlur/DisableBlur 时，直接 `+=` 会重复挂接同一个处理器。
+        // 先 `-=` 再 `+=` 保证任何窗口只挂一份（重复挂接也幂等）。
+        if (!_registered.ContainsKey(window))
+        {
+            window.Closed -= OnRegisteredWindowClosed;
+            window.Closed += OnRegisteredWindowClosed;
+        }
         _registered[window] = settings;
     }
 
@@ -1867,7 +1874,11 @@ public static class AcrylicHelper
         int d = Math.Max(0, radiusPx) * 2;   // CreateRoundRectRgn 收的是椭圆的宽高 = 直径
         try
         {
-            SetWindowRgn(hwnd, CreateRoundRectRgn(0, 0, w, h, d, d), true);
+            // ponytail 2026-11-14(审查低优先级): SetWindowRgn 成功时接管 region，失败时调用方仍拥有它
+            // —— 失败路径要 DeleteObject，否则每次失败漏一个 GDI 区域。
+            var windowRgn = CreateRoundRectRgn(0, 0, w, h, d, d);
+            if (SetWindowRgn(hwnd, windowRgn, true) == 0 && windowRgn != IntPtr.Zero)
+                DeleteObject(windowRgn);
             if (!classicBlur)
             {
                 // 把可能残留的经典 blurbehind 关掉（accent 的圆角裁剪靠上面的窗口区域就够 —— 实测圆角干净）。
@@ -1901,8 +1912,11 @@ public static class AcrylicHelper
         if (hwnd == IntPtr.Zero || w <= 0 || h <= 0) return;
         try
         {
-            // 1) 窗口级圆角裁剪。SetWindowRgn 会接管 hRgn 的所有权,不能 DeleteObject。
-            SetWindowRgn(hwnd, CreateRoundRectRgn(0, 0, w, h, rad, rad), true);
+            // 1) 窗口级圆角裁剪。SetWindowRgn 成功时会接管 hRgn 的所有权（不能 DeleteObject），
+            //    失败时所有权仍在调用方 → 失败路径必须删，否则每次失败漏一个 GDI 区域。
+            var windowRgn = CreateRoundRectRgn(0, 0, w, h, rad, rad);
+            if (SetWindowRgn(hwnd, windowRgn, true) == 0 && windowRgn != IntPtr.Zero)
+                DeleteObject(windowRgn);
 
             // 2) 模糊背板用同样的圆角区域(调用返回后要自己 DeleteObject)。
             var bb = new DWM_BLURBEHIND

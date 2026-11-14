@@ -492,8 +492,12 @@ public static class NativeMethods
             SetWindowLong(helper.Handle, GWL_EXSTYLE, exStyle & ~WS_EX_TRANSPARENT);
     }
 
-    // Get icon from file path as a BitmapSource-friendly Bitmap
-    public static System.Drawing.Icon? ExtractIcon(string path, bool large = true)
+    // Get icon from file path as a raw HICON (caller owns it and must DestroyIcon).
+    //
+    // ponytail 2026-11-14: 旧实现返回 System.Drawing.Icon.FromHandle(...) —— 它**不拥有**句柄，
+    // using/Dispose 不会销毁 HICON，于是每次 fallback 图标提取都漏一个 GDI/USER 句柄。
+    // 现在直接交还 HICON，由 ShellIconService 在转成 BitmapSource 后 DestroyIcon。
+    public static IntPtr ExtractIconHandle(string path, bool large = true)
     {
         try
         {
@@ -502,9 +506,7 @@ public static class NativeMethods
 
             IntPtr result = SHGetFileInfo(path, 0, ref shinfo, (uint)Marshal.SizeOf(shinfo), flags);
             if (result != IntPtr.Zero && shinfo.hIcon != IntPtr.Zero)
-            {
-                return System.Drawing.Icon.FromHandle(shinfo.hIcon);
-            }
+                return shinfo.hIcon;
         }
         catch
         {
@@ -515,17 +517,20 @@ public static class NativeMethods
         {
             ExtractIconEx(path, 0, out var largeIcon, out var smallIcon, 1);
             var iconHandle = large ? largeIcon : smallIcon;
-            if (iconHandle != IntPtr.Zero)
+            // 只返回请求的那一只；另一只（ExtractIconEx 同时给出两个）当场销毁，避免同一处漏两个。
+            var unused = large ? smallIcon : largeIcon;
+            if (unused != IntPtr.Zero)
             {
-                return System.Drawing.Icon.FromHandle(iconHandle);
+                try { DestroyIcon(unused); } catch { }
             }
+            return iconHandle;
         }
         catch
         {
             // ignore
         }
 
-        return null;
+        return IntPtr.Zero;
     }
 
     // ── 前台窗口 / 激活 / 开始菜单（快捷栏的「运行状态」与开始按钮用） ──

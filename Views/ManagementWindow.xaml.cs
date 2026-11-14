@@ -97,7 +97,10 @@ public partial class ManagementWindow : Window
         // Re-translate dynamic UI text on language switch. ThemeLabel, breadcrumb,
         // and tray events (in App.xaml.cs) are the few things that aren't XAML
         // loc:Loc bindings.
-        _loc.LanguageChanged += _ => RefreshDynamicText();
+        // ponytail 2026-11-14(审计修复 P2-8): 用命名方法订阅(可在关闭时退订),
+        // 并把原来两处(_ => RefreshDynamicText / _ => ApplyLoc)合并成一次,避免
+        // 每次切语言把同一棵 UI 刷两遍。
+        _loc.LanguageChanged += OnLanguageChanged;
         RefreshDynamicText();
 
         _zoneManager.ZoneVisibilityChanged += OnZoneVisibilityChanged;
@@ -107,13 +110,7 @@ public partial class ManagementWindow : Window
         MediaSessionService.Instance.Changed += OnMediaSessionChanged;
 
         if (_panelService != null)
-            _panelService.WindowClosed += () =>
-            {
-                Dispatcher.BeginInvoke(new Action(() =>
-                {
-                    if (MainContent.Content is PanelPage pp) pp.RefreshList();
-                }));
-            };
+            _panelService.WindowClosed += OnPanelServiceWindowClosed;
 
         // Wire SideNav events (after InitializeComponent so x:Name'd control exists)
         SideNav.SectionChanged += SideNav_SectionChanged;
@@ -180,8 +177,36 @@ public partial class ManagementWindow : Window
             }
             catch { }
         };
+    }
 
-        _loc.LanguageChanged += _ => { try { ApplyLoc(); } catch { } };
+    // ponytail 2026-11-14(审计修复 P2-8): 命名事件处理器 + 关闭退订。本窗口平时只
+    // Hide() 不 Close(),但一旦真的关闭/重建,这些单例事件必须断开,否则窗口被永久持有。
+    void OnLanguageChanged(string _)
+    {
+        try { RefreshDynamicText(); } catch { }
+        try { ApplyLoc(); } catch { }
+    }
+
+    void OnPanelServiceWindowClosed()
+    {
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (MainContent.Content is PanelPage pp) pp.RefreshList();
+        }));
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        try { _loc.LanguageChanged -= OnLanguageChanged; } catch { }
+        try { _zoneManager.ZoneVisibilityChanged -= OnZoneVisibilityChanged; } catch { }
+        try { MediaSessionService.Instance.Changed -= OnMediaSessionChanged; } catch { }
+        if (_panelService != null)
+        {
+            try { _panelService.WindowClosed -= OnPanelServiceWindowClosed; } catch { }
+        }
+        try { Services.PluginService.Instance.PluginsChanged -= RefreshZoneBayEntry; } catch { }
+        try { Services.ZoneBayService.Instance.BarsChanged -= RefreshZoneBayEntry; } catch { }
+        base.OnClosed(e);
     }
 
     void ApplyLoc()

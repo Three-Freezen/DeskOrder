@@ -33,7 +33,6 @@ public partial class StickyNoteWindow : Window
     private bool _initializing = true;
     private bool _deleted;
     private Point _restoreDown;
-    public Action? OnStateChanged { get; set; }
     // ponytail: cached button-color brush for title bar buttons. Set by ApplyTitleBar from
     // _note.ButtonColor; hover/click handlers read it so the hover→leave cycle doesn't clobber it.
     private SolidColorBrush? _buttonBrush;
@@ -656,7 +655,6 @@ public partial class StickyNoteWindow : Window
         // defeat PinBelowProgman. PinnedTop notes still get Topmost via the constructor branch.
         if (_vm?.IsLocked != true) Topmost = true;
         Activate();
-        OnStateChanged?.Invoke();
     }
 
     // ── 快捷键唤出(参考面板 hotkey:聚焦显示器居中 + 展开动画) ──
@@ -801,7 +799,6 @@ public partial class StickyNoteWindow : Window
         }
         _note.IsVisible = false;
         _notesService.UpdateNote(_note);
-        OnStateChanged?.Invoke();
 #if DEBUG
         DzTrace.Log($"[StickyNoteWindow] HideNote DONE winVisible={IsVisible} content={MainContent.Visibility} btn={RestoreButton.Visibility} hoverExpanded={_hover?.IsExpanded} size={Width}x{Height}");
 #endif
@@ -1101,7 +1098,7 @@ public partial class StickyNoteWindow : Window
 
             // 按钮透明度 — 所有小按钮统一走 HoverHighlight 的那一个值（分区/组件/面板一致）。
             HoverHighlight.ApplyControlOpacity(_note.ControlOpacity,
-                new UIElement[] { SaveBtn, PinBtn, HideBtn, LockBtn, BoldBtn, ItalicBtn, UnderlineBtn, FontColorBtn });
+                new UIElement?[] { SaveBtn, PinBtn, HideBtn, LockBtn, BoldBtn, ItalicBtn, UnderlineBtn, FontColorBtn });
             if (RestoreIconChar != null) RestoreIconChar.Opacity = HoverHighlight.ChromeOpacity;
             if (RestoreIconPath != null) RestoreIconPath.Opacity = HoverHighlight.ChromeOpacity;
         }
@@ -1591,6 +1588,11 @@ public partial class StickyNoteWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        // ponytail 2026-11-14(审计修复 P2-9): 刚被热键 BringToFront 过的 500ms 兜底
+        // timer 若没停,会在窗口关闭后继续跑并对已关闭窗口 PinToDesktop(同文件注释里
+        // 记录过的 "关闭窗口后无法设置可见性" 一类崩溃)。
+        _bringToFrontTimer?.Stop();
+        _bringToFrontTimer = null;
         _autoSaveTimer?.Stop();
         _autoSaveTimer = null;
         // ponytail: unsubscribe BEFORE 任何会触发 NotesChanged 的写盘 —— 关窗收尾期间重入
@@ -1640,6 +1642,13 @@ public partial class StickyNoteWindow : Window
         _bringToFrontTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
         _bringToFrontTimer.Tick += (s, _) =>
         {
+            // ponytail 2026-11-14(审计修复 P2-9): 关窗后不再操作窗口句柄。
+            if (!IsVisible)
+            {
+                _bringToFrontTimer?.Stop();
+                _bringToFrontTimer = null;
+                return;
+            }
             Topmost = false;
             if (_vm?.IsLocked != true) NativeMethods.PinToDesktop(this);
             _bringToFrontTimer?.Stop();

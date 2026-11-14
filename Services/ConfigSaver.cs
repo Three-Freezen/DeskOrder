@@ -27,6 +27,10 @@ public static class ConfigSaver
         ConfigService configService,
         Action<AppConfig> mutate)
     {
+        // ponytail 2026-11-14(审计修订 P1-6): 本方法不再自己写盘 —— Load() 是进程内缓存
+        // 命中（无 IO），mutate 是内存操作，Save() 现在只做序列化，文件 I/O 由
+        // ConfigService 的后台单写者完成。所以这里保持同步语义（"改完即内存生效"），
+        // 但调用线程不再被磁盘阻塞；退出时由 App.Application_Exit → FlushPendingWrites 收口。
         var cfg = configService.Load();
 
         // Snapshot the Panel-owned POCOs + orphan hotkey list BEFORE mutation

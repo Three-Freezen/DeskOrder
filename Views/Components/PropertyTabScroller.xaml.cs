@@ -2,7 +2,6 @@ using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Input;
 
 namespace DesktopZones.Views.Components;
 
@@ -42,17 +41,6 @@ public partial class PropertyTabScroller : UserControl
     {
         get => (double)GetValue(MinTabWidthProperty);
         set => SetValue(MinTabWidthProperty, value);
-    }
-
-    /// <summary>Bubble the strip-level MouseLeftButtonUp from the inner ItemsControl
-    /// so the existing reorder logic in PropertyTabStrip still fires.</summary>
-    public static readonly RoutedEvent MouseLeftButtonUpEvent = EventManager.RegisterRoutedEvent(
-        nameof(MouseLeftButtonUp), RoutingStrategy.Bubble, typeof(MouseButtonEventHandler), typeof(PropertyTabScroller));
-
-    public event MouseButtonEventHandler MouseLeftButtonUp
-    {
-        add => AddHandler(MouseLeftButtonUpEvent, value);
-        remove => RemoveHandler(MouseLeftButtonUpEvent, value);
     }
 
     public PropertyTabScroller()
@@ -104,17 +92,5 @@ public partial class PropertyTabScroller : UserControl
         if (tab == null) return;
         var container = (FrameworkElement)TabsHostInner.ItemContainerGenerator.ContainerFromItem(tab);
         container?.BringIntoView();
-    }
-
-    void TabsHost_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
-    {
-        // Bubble up as our own routed event so the parent PropertyTabStrip
-        // can listen via its existing strip-level handler slot. Source stays
-        // the original ItemsControl so handlers can resolve coords against it.
-        RaiseEvent(new MouseButtonEventArgs(e.MouseDevice, e.Timestamp, e.ChangedButton, e.StylusDevice)
-        {
-            RoutedEvent = MouseLeftButtonUpEvent,
-            Source = sender,
-        });
     }
 }

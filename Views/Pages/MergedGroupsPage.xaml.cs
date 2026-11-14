@@ -31,7 +31,8 @@ public partial class MergedGroupsPage : UserControl
     // ponytail: live row collection bound to ListHost — drag reorder moves rows
     // through this OC (mirroring PropertyTabStrip's Tabs OC) so the ItemsControl
     // shifts live while ZoneManager.MoveMergedGroupMaster persists the model order.
-    readonly ObservableCollection<EditableListRow> _rows = new();
+    // ponytail 2026-11-14(性能审计): 批量替换行集合,只发一次 Reset。
+    readonly BulkObservableCollection<EditableListRow> _rows = new();
 
     public MergedGroupsPage(ManagementWindow main, ManagementViewModel vm, ZoneManager zoneManager)
     {
@@ -57,8 +58,7 @@ public partial class MergedGroupsPage : UserControl
         var masters = _zoneManager.Zones.Where(z => z.MergedGroupMembership.SubZoneIds.Count > 0).ToList();
         CountLabel.Text = _loc.Get("MergedGroupsPage.Subtitle", masters.Count, _zoneManager.Zones.Count);
         // 拖动排序即列表顺序：主分区按 Zones 集合中的持久化相对顺序展示。
-        _rows.Clear();
-        foreach (var m in masters) _rows.Add(BuildRow(m));
+        _rows.ReplaceAll(masters.Select(BuildRow));
         EmptyHint.Visibility = masters.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         SetSelection(ListHost, _selected);
     }

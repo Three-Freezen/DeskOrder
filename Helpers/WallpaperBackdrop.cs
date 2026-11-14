@@ -116,6 +116,16 @@ public static class WallpaperBackdrop
     static long _useTick;
     static int _generation;
 
+    // ponytail 2026-11-14(审计修订 P0-2): 后台档位计算。
+    // 原来 GetBlurredDesktop 在 UI 线程同步 RenderTargetBitmap(作者实测 1:1 档 363~1193ms、
+    // 1/2 档 80~172ms),拖模糊滑块每跨一档 UI 就冻一次。现在:冷启动第一张仍同步(保持首帧
+    // 行为不变),之后缺档全部丢后台算;算完抛 TierReady,已挂载的背板图层自己回填。
+    static readonly HashSet<int> _pendingTiers = new();
+
+    /// <summary>某个模糊档位在后台算好了。**可能在后台线程触发**,订阅方自行切 Dispatcher。
+    /// 已挂载的 <see cref="WallpaperBackdropLayer"/> 收到后按上次的半径/着色重取一次。</summary>
+    public static event Action? TierReady;
+
     /// <summary>壁纸图/模糊图的「世代号」,每次 <see cref="Invalidate"/> 自增。
     ///
     /// ponytail 2026-09-26(二期修订): **必须有这个号**。已经挂好的
@@ -188,6 +198,22 @@ public static class WallpaperBackdrop
             }
         }
 
+        // ponytail 2026-11-14(审计修订 P0-2): 缓存里**没有这一档**时不再在 UI 线程上渲。
+        // 冷启动(缓存完全空,含换壁纸后 Invalidate 的第一张)仍同步算一次 —— 保持"第一帧就有
+        // 玻璃"的历史行为;之后拖滑块跨档、切材质预设都走后台,先返回 null 让调用方保留旧档位图,
+        // 算完由 TierReady 回填。作者实测同步渲染的代价:1:1 档 363~1193ms / 1:2 档 80~172ms。
+        bool coldStart;
+        lock (_lock) coldStart = _blurCache.Count == 0;
+        if (coldStart) return ComputeBlurred(key, vw, vh, img);
+
+        ScheduleTierCompute(key, vw, vh, img, _generation);
+        return null;
+    }
+
+    /// <summary>真正的渲染+模糊。调用线程 = 执行线程（同步路径是 UI 线程，后台路径是线程池）。
+    /// `img` 必须是已 Freeze 的位图（WallpaperSource/CaptureDesktop 都 Freeze 过）。</summary>
+    static BitmapSource ComputeBlurred(int key, int vw, int vh, BitmapSource img)
+    {
         int scale = BlurScale(key);
         int dw = Math.Max(8, vw / scale);
         int dh = Math.Max(8, vh / scale);
@@ -219,6 +245,38 @@ public static class WallpaperBackdrop
         return rtb;
     }
 
+    /// <summary>把「缺这一档模糊图」丢到后台算；算完抛 <see cref="TierReady"/>。
+    /// 幂等：同一档位只会有一个计算在跑（_pendingTiers）。</summary>
+    static void ScheduleTierCompute(int key, int vw, int vh, BitmapSource img, int generationAtRequest)
+    {
+        lock (_lock)
+        {
+            if (_blurCache.ContainsKey(key) || !_pendingTiers.Add(key)) return;
+        }
+        _ = System.Threading.Tasks.Task.Run(() =>
+        {
+            bool ok = false;
+            try
+            {
+                // 期间换了壁纸 / 显示器拓扑变化 → 结果作废（世代号变了）
+                if (generationAtRequest != _generation) return;
+                if (vw <= 0 || vh <= 0) return;
+                ComputeBlurred(key, vw, vh, img);
+                ok = true;
+            }
+            catch (Exception ex)
+            {
+                DzTrace.Log($"[WallpaperBackdrop] 后台档位计算失败: {ex.GetType().Name} {ex.Message}");
+            }
+            finally
+            {
+                lock (_lock) _pendingTiers.Remove(key);
+            }
+            // 只有成功才通知回填 —— 失败也通知会形成「回填 → 缺档 → 再调度 → 再失败」的忙循环。
+            if (ok) { try { TierReady?.Invoke(); } catch { } }
+        });
+    }
+
     /// <summary>淘汰最久未使用的一档(调用方必须持有 <see cref="_lock"/>)。
     /// 档位最多 6 个,线性找最小即可,不值得上 OrderedDictionary。</summary>
     static void EvictLeastRecentlyUsed()
@@ -240,6 +298,7 @@ public static class WallpaperBackdrop
         lock (_lock)
         {
             _blurCache.Clear();
+            _pendingTiers.Clear();   // ponytail 2026-11-14: 旧世代的在算任务作废（结果按世代号丢弃）
             _generation++;
         }
         WallpaperSource.Invalidate();
@@ -382,6 +441,10 @@ public sealed class WallpaperBackdropLayer
     double _attachedNoise = -1;
     Rect _attachedWindow = Rect.Empty;
 
+    /// <summary>最近一次**请求**的半径（物理像素）。某档模糊图还在后台算时
+    /// <see cref="_attachedRadius"/> 不会前进，回填时要用这个值重试（见 OnTierReady）。</summary>
+    int _wantedRadius = -1;
+
     WallpaperBackdropLayer()
     {
         _root.Children.Add(_wallpaper);
@@ -391,6 +454,8 @@ public sealed class WallpaperBackdropLayer
         // 壁纸换了就自己重取（换壁纸/重新采样/显示器拓扑变化都走 WallpaperBackdrop.Invalidate）。
         // 生命周期：窗口关掉时可视树 Unloaded → 退订，避免静态事件把整棵树钉住。
         WallpaperBackdrop.Changed += OnWallpaperChanged;
+        // ponytail 2026-11-14(审计修订 P0-2): 后台算好某个模糊档位 → 回来重挂一次。
+        WallpaperBackdrop.TierReady += OnTierReady;
         _root.Unloaded += OnRootUnloaded;
     }
 
@@ -398,6 +463,7 @@ public sealed class WallpaperBackdropLayer
     {
         _root.Unloaded -= OnRootUnloaded;
         WallpaperBackdrop.Changed -= OnWallpaperChanged;
+        WallpaperBackdrop.TierReady -= OnTierReady;
     }
 
     /// <summary>壁纸换了：按上次的半径/着色/噪点重取（世代号一变 SetAppearance 就会重裁）。
@@ -412,6 +478,23 @@ public sealed class WallpaperBackdropLayer
             {
                 if (_host == null || _bound == null || _attachedRadius < 0) return;
                 SetAppearance(_bound, _attachedRadius, _attachedTint, Math.Max(0, _attachedNoise));
+            }));
+        }
+        catch { }
+    }
+
+    /// <summary>后台模糊档位算好了：用「期望半径」重试一次（命中的话走 SetAppearance 的缓存分支）。
+    /// ponytail 2026-11-14(P0-2): 可能在后台线程触发 → 切回宿主 Dispatcher。</summary>
+    void OnTierReady()
+    {
+        var dispatcher = _root.Dispatcher;
+        if (dispatcher == null || dispatcher.HasShutdownStarted) return;
+        try
+        {
+            dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (_host == null || _bound == null || _wantedRadius < 0) return;
+                SetAppearance(_bound, _wantedRadius, _attachedTint, Math.Max(0, _attachedNoise));
             }));
         }
         catch { }
@@ -580,6 +663,7 @@ public sealed class WallpaperBackdropLayer
             return;
         }
         int radius = WallpaperBackdrop.QuantizeRadius(blurRadiusPx);
+        _wantedRadius = blurRadiusPx;   // ponytail 2026-11-14: 供后台档位算好后回填
         var rect = SourcePx(window);
         if (rect.IsEmpty)
         {
@@ -597,7 +681,13 @@ public sealed class WallpaperBackdropLayer
         {
             var desk = WallpaperBackdrop.GetBlurredDesktop(radius);
             DzTrace.Log($"[WallpaperBackdrop] SetAppearance r={blurRadiusPx}→{radius} gen={gen} desk={(desk == null ? "NULL" : $"{desk.PixelWidth}x{desk.PixelHeight}")} rect={rect.X:F0},{rect.Y:F0} {rect.Width:F0}x{rect.Height:F0} tint=#{tint.A:X2}{tint.R:X2}{tint.G:X2}{tint.B:X2} noise={noiseOpacity:F3}");
-            if (desk == null) return;
+            if (desk == null)
+            {
+                // ponytail 2026-11-14(P0-2): 这一档还在后台算（GetBlurredDesktop 已负责调度）。
+                // 保持当前已挂的旧档位图不动（不闪、不塌成透明），算完由 OnTierReady 用
+                // _wantedRadius 重试；_attachedRadius 不前移，所以重试一定会重新进这个分支。
+                return;
+            }
             var brush = new ImageBrush(desk)
             {
                 Stretch = Stretch.Fill,

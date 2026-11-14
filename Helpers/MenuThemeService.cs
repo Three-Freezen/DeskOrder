@@ -32,35 +32,69 @@ public static class MenuThemeService
     static MenuPalette _current = MenuPalette.Light;
     static Color _lastAccent;
     static System.Windows.Threading.DispatcherTimer? _pollTimer;
+    static bool _listening;
 
     /// <summary>启动时调用一次;之后监听系统主题变化自动刷新。</summary>
     public static void Start()
     {
         Apply();
 
-        SystemEvents.UserPreferenceChanged += (_, e) =>
+        if (!_listening)
         {
-            if (e.Category is UserPreferenceCategory.General
-                or UserPreferenceCategory.Accessibility
-                or UserPreferenceCategory.VisualStyle
-                or UserPreferenceCategory.Color)
-                MarshalAndApply();
-        };
+            _listening = true;
+            SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
+            SystemParameters.StaticPropertyChanged += OnStaticPropertyChanged;
+        }
 
-        SystemParameters.StaticPropertyChanged += (_, e) =>
+        // 兜底轮询:事件链路在个别 Windows 版本/情况下可能不触发。
+        // ponytail 2026-11-14(审计修订 P2): 原来每 2 秒读一次注册表(常驻 UI 线程唤醒 + 2 次
+        // HKCU 打开/读取)。SystemEvents.UserPreferenceChanged / SystemParameters.StaticPropertyChanged
+        // 两条事件链已经覆盖正常路径,兜底只是「万一被吞」;把周期拉到 30 秒,行为退化最多是
+        // 极端情况下换主题后菜单晚 30 秒跟上,不再有 0.5Hz 的常驻唤醒。
+        if (_pollTimer == null)
         {
-            if (e.PropertyName == nameof(SystemParameters.HighContrast))
-                MarshalAndApply();
-        };
+            _pollTimer = new System.Windows.Threading.DispatcherTimer
+            {
+                Interval = TimeSpan.FromSeconds(30)
+            };
+            _pollTimer.Tick += OnPollTick;
+        }
+        if (!_pollTimer.IsEnabled) _pollTimer.Start();
+    }
 
-        // 兜底轮询:事件链路在个别 Windows 版本/情况下可能不触发,
-        // 每 2 秒读一次注册表,主题一变立刻跟上。
-        _pollTimer = new System.Windows.Threading.DispatcherTimer
+    static void OnUserPreferenceChanged(object? sender, UserPreferenceChangedEventArgs e)
+    {
+        if (e.Category is UserPreferenceCategory.General
+            or UserPreferenceCategory.Accessibility
+            or UserPreferenceCategory.VisualStyle
+            or UserPreferenceCategory.Color)
+            MarshalAndApply();
+    }
+
+    static void OnStaticPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(SystemParameters.HighContrast))
+            MarshalAndApply();
+    }
+
+    static void OnPollTick(object? sender, EventArgs e)
+    {
+        try { Apply(); } catch { }
+    }
+
+    /// <summary>进程退出前收口：停兜底轮询 + 退订 SystemEvents/SystemParameters。
+    /// ponytail 2026-11-14(审计修订 P2 静态事件): 由 App.Application_Exit 调用。</summary>
+    public static void Shutdown()
+    {
+        _listening = false;
+        try { SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged; } catch { }
+        try { SystemParameters.StaticPropertyChanged -= OnStaticPropertyChanged; } catch { }
+        if (_pollTimer != null)
         {
-            Interval = TimeSpan.FromSeconds(2)
-        };
-        _pollTimer.Tick += (_, _) => { try { Apply(); } catch { } };
-        _pollTimer.Start();
+            try { _pollTimer.Stop(); } catch { }
+            try { _pollTimer.Tick -= OnPollTick; } catch { }
+            _pollTimer = null;
+        }
     }
 
     static void MarshalAndApply()

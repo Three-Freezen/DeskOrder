@@ -39,6 +39,17 @@ public class ConfigService
     private static readonly object _lock = new();
     private static AppConfig? _cached;
 
+    // ── ponytail 2026-11-14(审计修订 P1-6): 异步写盘 ──
+    // 原来 Save() 在调用线程（几乎总是 UI 线程）上做「整份 JSON 序列化 + WriteAllText +
+    // Move」，配置含全部 zones/items 时单次 2~20ms，而 70+ 个调用点里有很多是拖拽/批量导入
+    // 的连续路径。现在：UI 线程只推进内存真相 + 序列化（无法避免，配置对象可能马上被改），
+    // 文件 I/O 交给单写者后台循环；突发多次 Save 只写最新的一份；内容没变直接跳过。
+    // 退出路径由 App.Application_Exit 调 FlushPendingWrites() 保证落盘。
+    private static readonly object _writeGate = new();
+    private static string? _pendingJson;
+    private static string? _lastWrittenJson;
+    private static bool _writerRunning;
+
     /// <summary>Raised when Save() fails. Subscribers can surface the error in the UI.</summary>
     public event Action<Exception>? SaveFailed;
 
@@ -280,42 +291,130 @@ public class ConfigService
 
     public void Save(AppConfig config)
     {
+        string json;
         lock (_lock)
         {
             // 先推进内存真相再落盘：写盘失败时内存态仍一致，错误经 SaveFailed 通知 UI。
             _cached = config;
-            string? json = null;
+            try
+            {
+                // 序列化留在调用线程：Save 之后调用方可能立刻继续改 config，
+                // 丢到后台会有「序列化时对象正被改」的撕裂风险。
+                json = JsonSerializer.Serialize(config, JsonOptions);
+            }
+            catch (Exception ex)
+            {
+                ReportSaveFailure(ex);
+                return;
+            }
+        }
+        EnqueueWrite(json);
+    }
+
+    // ── 后台单写者 ──
+
+    void EnqueueWrite(string json)
+    {
+        bool start = false;
+        lock (_writeGate)
+        {
+            // 内容与「已写 / 正待写」完全一致 → 没必要再碰磁盘（大量 Save 只是重复落盘）
+            if (string.Equals(json, _lastWrittenJson, StringComparison.Ordinal)
+                || string.Equals(json, _pendingJson, StringComparison.Ordinal))
+                return;
+            _pendingJson = json;
+            if (!_writerRunning)
+            {
+                _writerRunning = true;
+                start = true;
+            }
+        }
+        if (start) _ = System.Threading.Tasks.Task.Run(WriteLoop);
+    }
+
+    void WriteLoop()
+    {
+        while (true)
+        {
+            string? json;
+            lock (_writeGate)
+            {
+                json = _pendingJson;
+                _pendingJson = null;
+                if (json == null)
+                {
+                    _writerRunning = false;
+                    return;
+                }
+            }
+
             try
             {
                 Directory.CreateDirectory(ConfigDir);
-                json = JsonSerializer.Serialize(config, JsonOptions);
                 // temp + Move(overwrite) 原子替换：崩溃/断电不会留下半截 JSON
                 // (旧实现直接 WriteAllText，只能靠 Load 侧 quarantine 兜底)。
                 var tmpPath = ConfigPath + ".tmp";
                 File.WriteAllText(tmpPath, json);
                 File.Move(tmpPath, ConfigPath, overwrite: true);
+                lock (_writeGate) _lastWrittenJson = json;
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"[ConfigService] Save failed: {ex}");
                 Helpers.DzTrace.Always($"[Config] 保存失败: {ex.GetType().Name} {ex.Message}");
                 // 原子写失败常见于：临时文件被同步盘 / 杀软抢先占用、目标目录权限异常。
-                // 这时再试一次直接覆盖 —— 宁可少一层原子性，也别让整次保存被静默吞掉
-                // （历史症状：改了设置、重启全丢，日志里只有一行 Debug.WriteLine）。
-                if (json != null)
+                // 这时再试一次直接覆盖 —— 宁可少一层原子性，也别让整次保存被静默吞掉。
+                bool recovered = false;
+                try
                 {
-                    try
-                    {
-                        File.WriteAllText(ConfigPath, json);
-                        Helpers.DzTrace.Always("[Config] 原子写失败，改用直接覆盖成功");
-                    }
-                    catch (Exception ex2)
-                    {
-                        Helpers.DzTrace.Always($"[Config] 直接覆盖也失败: {ex2.GetType().Name} {ex2.Message}");
-                    }
+                    File.WriteAllText(ConfigPath, json);
+                    Helpers.DzTrace.Always("[Config] 原子写失败，改用直接覆盖成功");
+                    recovered = true;
                 }
-                SaveFailed?.Invoke(ex);
+                catch (Exception ex2)
+                {
+                    Helpers.DzTrace.Always($"[Config] 直接覆盖也失败: {ex2.GetType().Name} {ex2.Message}");
+                }
+                lock (_writeGate)
+                {
+                    // 失败（或直写成功）都允许下一次相同内容再写一次，避免"永久判为已写"
+                    _lastWrittenJson = recovered ? json : null;
+                }
+                ReportSaveFailure(ex);
             }
+        }
+    }
+
+    /// <summary>把写盘失败通知出去。可能在后台线程触发 → 有 Dispatcher 就切回 UI 线程，
+    /// 且**不在任何锁内**回调订阅方（旧实现是在 <see cref="_lock"/> 里 Invoke 的）。</summary>
+    void ReportSaveFailure(Exception ex)
+    {
+        void Fire()
+        {
+            try { SaveFailed?.Invoke(ex); } catch { /* 订阅方异常不能反噬保存链路 */ }
+        }
+        var app = System.Windows.Application.Current;
+        if (app?.Dispatcher is { } d && !d.CheckAccess())
+        {
+            try { d.BeginInvoke(new Action(Fire)); return; } catch { }
+        }
+        Fire();
+    }
+
+    /// <summary>等待后台写盘队列清空（退出 / 测试用）。超时返回 false。
+    /// ponytail 2026-11-14: 异步化后必须给退出路径一个"确保落盘"的收口，否则最后一次修改
+    /// 可能还在队列里就被进程结束。</summary>
+    public static bool FlushPendingWrites(int timeoutMs = 3000)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (true)
+        {
+            lock (_writeGate)
+            {
+                if (!_writerRunning && _pendingJson == null) return true;
+            }
+            if (sw.ElapsedMilliseconds > timeoutMs) return false;
+            System.Threading.Thread.Sleep(10);
         }
     }
 }

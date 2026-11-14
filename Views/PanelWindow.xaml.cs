@@ -58,6 +58,8 @@ public partial class PanelWindow : Window
     private Point _marqueeStart;
     private HashSet<Guid>? _marqueeStartSel;
     private System.Windows.Shapes.Rectangle? _marqueeRect;
+    // ponytail 2026-11-14(审计修复 P2-11): 框选开始时缓存的卡片矩形(见 ContentArea_PreviewMouseLeftButtonDown)。
+    private List<(Guid Id, Rect Bounds, Border Highlight)>? _marqueeCards;
     private Popup? _subfolderPopup;
     private SubfolderFlyout? _subfolderFlyout;
     // ponytail 2026-08-26: 与分区 OpenSubfolderFlyout 一致 — 关闭动画进行中点开新
@@ -69,6 +71,12 @@ public partial class PanelWindow : Window
     // ponytail 2026-09-26(审计修订): 位置/尺寸落盘的防抖(见 SavePosition)。
     private System.Windows.Threading.DispatcherTimer? _positionSaveDebounce;
     private bool _positionSavePending;
+
+    // ponytail 2026-11-14(审计修复 P1-5): 搜索框防抖 + 重建合帧。之前每敲一个键就
+    // RebuildDisplay() 一次,而 RebuildDisplay 内部还 BeginInvoke 排队 → 连打几个字
+    // 会排队多次"清空+重建全部卡片";ZonesChanged 连续触发同理。
+    private System.Windows.Threading.DispatcherTimer? _searchDebounce;
+    private bool _rebuildQueued;
 
     // ── 面板弹出动画(从桌面角落滑到屏幕中央 + 展开/收起,与其他窗口共用 HoverExpandAnimationKind) ──
     private HoverExpandAnimationKind _popupAnimation = HoverExpandAnimationKind.ScaleExpand;
@@ -126,6 +134,9 @@ public partial class PanelWindow : Window
         // ponytail 2026-09-26(审计修订): 位置/尺寸的落盘改成 500ms 防抖(见 SavePosition)。
         _positionSaveDebounce = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
         _positionSaveDebounce.Tick += (s, _) => { if (s is System.Windows.Threading.DispatcherTimer t) t.Stop(); FlushPositionSave(); };
+        // ponytail 2026-11-14(审计修复 P1-5): 搜索输入 150ms 防抖 —— 只重建最后一次。
+        _searchDebounce = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(150) };
+        _searchDebounce.Tick += (_, _) => { _searchDebounce!.Stop(); RebuildDisplay(); };
         _langChanged = _ => ApplyLoc();
         _loc.LanguageChanged += _langChanged;
 
@@ -185,7 +196,9 @@ public partial class PanelWindow : Window
     {
         SearchPlaceholder.Visibility = string.IsNullOrEmpty(SearchBox.Text)
             ? Visibility.Visible : Visibility.Collapsed;
-        RebuildDisplay();
+        // ponytail 2026-11-14(审计修复 P1-5): 150ms 防抖，避免每个按键全量重建卡片。
+        _searchDebounce?.Stop();
+        _searchDebounce?.Start();
     }
 
     void GridToggle_Click(object s, MouseButtonEventArgs e)
@@ -526,8 +539,13 @@ public partial class PanelWindow : Window
 
     public void RebuildDisplay()
     {
+        // ponytail 2026-11-14(审计修复 P1-5): 合帧 —— 同一轮 Dispatcher 内多次请求
+        // 只保留一次排队,避免 ZonesChanged 连发/搜索连打时排队 N 次 `Clear + 全量重建`。
+        if (_rebuildQueued) return;
+        _rebuildQueued = true;
         Dispatcher.BeginInvoke(new Action(() =>
         {
+            _rebuildQueued = false;
             try
             {
                 if (ContentStack == null) return;
@@ -1110,6 +1128,21 @@ public partial class PanelWindow : Window
         _marqueeMoved = false;
         _marqueeStart = e.GetPosition(MarqueeLayer);
         _marqueeStartSel = new HashSet<Guid>(_selectedItemIds);
+        // ponytail 2026-11-14(审计修复 P2-11): 框选开始时缓存每张卡片在 MarqueeLayer
+        // 里的矩形 —— 之后每个 MouseMove 只做纯矩形运算,不再逐卡 TranslatePoint(视觉树
+        // 变换) + 全量改 Visibility。
+        _marqueeCards = new List<(Guid Id, Rect Bounds, Border Highlight)>(_panelCards.Count);
+        foreach (var (id, entry) in _panelCards)
+        {
+            try
+            {
+                var p0 = entry.Card.TranslatePoint(new Point(0, 0), MarqueeLayer);
+                _marqueeCards.Add((id,
+                    new Rect(p0.X, p0.Y, Math.Max(1, entry.Card.ActualWidth), Math.Max(1, entry.Card.ActualHeight)),
+                    entry.Highlight));
+            }
+            catch { }
+        }
         try { Mouse.Capture(this); } catch { }
         e.Handled = true;
     }
@@ -1134,6 +1167,7 @@ public partial class PanelWindow : Window
         _marqueeActive = false;
         _marqueeMoved = false;
         _marqueeStartSel = null;
+        _marqueeCards = null;
         HidePanelMarquee();
         if (moved)
         {
@@ -1157,13 +1191,16 @@ public partial class PanelWindow : Window
         rect.Width = w;
         rect.Height = h;
         var r = new Rect(x1, y1, w, h);
-        foreach (var (id, entry) in _panelCards)
+        // ponytail 2026-11-14(审计修复 P2-11): 用按下时缓存的矩形做命中测试,
+        // 只在"选中态真的翻转"时改 Highlight.Visibility,避免每个 MouseMove 全量刷 UI。
+        if (_marqueeCards == null) return;
+        foreach (var (id, bounds, highlight) in _marqueeCards)
         {
-            var p0 = entry.Card.TranslatePoint(new Point(0, 0), MarqueeLayer);
-            bool inRect = r.IntersectsWith(new Rect(p0.X, p0.Y, Math.Max(1, entry.Card.ActualWidth), Math.Max(1, entry.Card.ActualHeight)));
-            bool sel = inRect || (_marqueeStartSel?.Contains(id) ?? false);
+            bool sel = r.IntersectsWith(bounds) || (_marqueeStartSel?.Contains(id) ?? false);
+            bool was = _selectedItemIds.Contains(id);
             if (sel) _selectedItemIds.Add(id); else _selectedItemIds.Remove(id);
-            entry.Highlight.Visibility = sel ? Visibility.Visible : Visibility.Collapsed;
+            if (sel != was)
+                highlight.Visibility = sel ? Visibility.Visible : Visibility.Collapsed;
         }
     }
 
@@ -1287,7 +1324,11 @@ public partial class PanelWindow : Window
         popup.Closed += (_, _) =>
         {
             flyout.DisableGlass();
-            flyout.UnhookClickOutside();
+            // ponytail 2026-11-14(审计修复 P0-1): 浮层是一次性创建的,关闭时必须和宿主
+            // 模型/事件完全断开 —— 否则 HostSubItem(长生命周期)会通过 PropertyChanged
+            // 永久持有 flyout,flyout 的事件委托又持有本 PanelWindow,每次开关面板泄漏
+            // 一个窗口。Detach 内部会退订阅 + Dispose VM。
+            flyout.Detach();
             if (_flyoutOpenToken == token)
             {
                 _subfolderPopup = null;
@@ -2408,6 +2449,8 @@ public partial class PanelWindow : Window
         _clockTimer?.Stop();
         _recycleTimer.Stop();
         _positionSaveDebounce?.Stop();
+        _searchDebounce?.Stop();
+        _rebuildQueued = false;
         FlushPositionSave();          // 挂起的位置先落盘(否则最后一次拖动白拖)
         CloseSubfolderFlyout();
         if (_langChanged != null) { _loc.LanguageChanged -= _langChanged; _langChanged = null; }

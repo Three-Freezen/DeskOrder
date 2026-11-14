@@ -17,7 +17,7 @@ namespace DesktopZones.ViewModels;
 /// written back to <see cref="HostSubItem"/>.SubItems via whole-list replacement so
 /// ZoneItem's INPC fires exactly once for the change.
 /// </summary>
-public class SubfolderFlyoutViewModel : INotifyPropertyChanged
+public class SubfolderFlyoutViewModel : INotifyPropertyChanged, IDisposable
 {
     private readonly ZoneItem _hostSubItem;
     private readonly ShellIconService _iconService;
@@ -32,6 +32,11 @@ public class SubfolderFlyoutViewModel : INotifyPropertyChanged
     /// SubItems INPC — skips the writeback handler so we don't echo the change
     /// back as another INPC and loop forever.</summary>
     private bool _suppressWriteback;
+
+    // ponytail 2026-11-14(审计修复 P0-1): 浮层关闭后 VM 必须从宿主 ZoneItem 的
+    // PropertyChanged 上退订。之前没有任何退订路径 → 模型对象长期持有 VM/浮层，
+    // 浮层事件再反向持有 PanelWindow，每开一次浮层泄漏一个面板窗口。
+    private bool _disposed;
 
     // ponytail 2026-08-26: flyout 内部拖拽换位的暂存区。拖拽过程中 ItemVms.Move
     // 只改集合顺序、不写回 HostSubItem.SubItems — 否则每次 Move 都触发 SubItems
@@ -150,6 +155,7 @@ public class SubfolderFlyoutViewModel : INotifyPropertyChanged
 
     private void OnHostPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (_disposed) return;
         DzTrace.Log($"[SubEdit] FlyoutVM.HostChanged: prop={e.PropertyName} FillFollows={_hostSubItem.FillFollowsZone} Corner={_hostSubItem.CornerRounded} Hover={_hostSubItem.HoverAutoExpand}");
         if (e.PropertyName == nameof(ZoneItem.SubItems))
             RebuildItemVms();
@@ -230,6 +236,16 @@ public class SubfolderFlyoutViewModel : INotifyPropertyChanged
         var vm = new ZoneItemViewModel(source, _iconService);
         _vmToSource[vm] = source;
         ItemVms.Add(vm);
+    }
+
+    /// <summary>ponytail 2026-11-14(审计修复 P0-1): 断开与宿主模型的全部强订阅。
+    /// 浮层关闭/替换 VM 时必须调用 —— 否则 ZoneItem(长生命周期)会一直持有本 VM。</summary>
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        _hostSubItem.PropertyChanged -= OnHostPropertyChanged;
+        ItemVms.CollectionChanged -= OnItemVmsCollectionChanged;
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;

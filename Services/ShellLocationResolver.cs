@@ -53,6 +53,7 @@ public static class ShellLocationResolver
         else candidate = s;
 
         IntPtr pidl = IntPtr.Zero;
+        IShellItem? item = null;
         try
         {
             if (ShellOle.SHParseDisplayName(candidate, IntPtr.Zero, out pidl, 0, out _) != 0 || pidl == IntPtr.Zero)
@@ -62,14 +63,22 @@ public static class ShellLocationResolver
                 return ResolveKnownFolderPath(candidate) != null ? candidate : null;
             }
             var iidItem = ShellOle.IID_IShellItem;
-            if (ShellOle.SHCreateItemFromIDList(pidl, ref iidItem, out var item) != 0 || item == null) return null;
+            if (ShellOle.SHCreateItemFromIDList(pidl, ref iidItem, out item) != 0 || item == null) return null;
             if (item.GetDisplayName(ShellOle.SIGDN_DESKTOPABSOLUTEPARSING, out var p) != 0 || p == IntPtr.Zero) return null;
             string parsed;
             try { parsed = Marshal.PtrToStringUni(p) ?? string.Empty; }
             finally { Marshal.FreeCoTaskMem(p); }
             return ShellOle.IsShellSpec(parsed) ? parsed : null;
         }
-        finally { if (pidl != IntPtr.Zero) NativeMethods.CoTaskMemFree(pidl); }
+        finally
+        {
+            // ponytail 2026-11-14: IShellItem RCW 显式释放（此前每次导入/校验都漏一个）。
+            if (item != null && Marshal.IsComObject(item))
+            {
+                try { Marshal.ReleaseComObject(item); } catch { }
+            }
+            if (pidl != IntPtr.Zero) NativeMethods.CoTaskMemFree(pidl);
+        }
     }
 
     /// <summary>OS-localized display name ("回收站" etc.) for a "::{GUID}" spec, or null.</summary>

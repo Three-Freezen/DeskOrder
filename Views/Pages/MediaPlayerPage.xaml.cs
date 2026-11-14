@@ -23,7 +23,8 @@ public partial class MediaPlayerPage : UserControl
     readonly MediaSessionService _media = MediaSessionService.Instance;
     readonly LocalizationService _loc = LocalizationService.Instance;
     DesktopMediaPlayer? _selected;
-    readonly ObservableCollection<EditableListRow> _rows = new();
+    // ponytail 2026-11-14(性能审计): 批量替换行集合,只发一次 Reset。
+    readonly BulkObservableCollection<EditableListRow> _rows = new();
 
     public MediaPlayerPage(ManagementWindow main, ManagementViewModel vm, WidgetService? widgetService)
     {
@@ -49,8 +50,7 @@ public partial class MediaPlayerPage : UserControl
         if (_widgetService == null) return;
         var players = _widgetService.MediaPlayers;
         CountLabel.Text = _loc.Get("MediaPage.ItemCount", players.Count);
-        _rows.Clear();
-        foreach (var p in players) _rows.Add(BuildRow(p));
+        _rows.ReplaceAll(players.Select(BuildRow));
         EmptyHint.Visibility = players.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         SetSelection(ListHost, _selected);
     }

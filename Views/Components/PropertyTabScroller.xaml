@@ -21,8 +21,7 @@
     <ScrollViewer x:Name="Scroller" Grid.Column="1"
                   HorizontalScrollBarVisibility="Hidden"
                   VerticalScrollBarVisibility="Disabled">
-      <ItemsControl x:Name="TabsHostInner"
-                    MouseLeftButtonUp="TabsHost_MouseLeftButtonUp">
+      <ItemsControl x:Name="TabsHostInner">
         <ItemsControl.ItemsPanel>
           <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
         </ItemsControl.ItemsPanel>

@@ -30,7 +30,8 @@ public partial class StickyNotePage : UserControl
     // ponytail: live row collection bound to ListHost — drag reorder moves rows
     // through this OC (mirroring PropertyTabStrip's Tabs OC) so the ItemsControl
     // shifts live while the model collection moves in parallel for persistence.
-    readonly ObservableCollection<EditableListRow> _rows = new();
+    // ponytail 2026-11-14(性能审计): 批量替换行集合,只发一次 Reset。
+    readonly BulkObservableCollection<EditableListRow> _rows = new();
 
     public StickyNotePage(ManagementWindow main, ManagementViewModel vm, NotesService? notesService)
     {
@@ -62,8 +63,7 @@ public partial class StickyNotePage : UserControl
         var notes = _notesService.Notes;
         CountLabel.Text = _loc.Get("StickyNotePage.ItemCount", notes.Count);
         // 拖动排序即列表顺序：不再重排，Rows 直接镜像 Notes 的持久化顺序。
-        _rows.Clear();
-        foreach (var n in notes) _rows.Add(BuildRow(n));
+        _rows.ReplaceAll(notes.Select(BuildRow));
         EmptyHint.Visibility = notes.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         SetSelection(ListHost, _selected);
     }

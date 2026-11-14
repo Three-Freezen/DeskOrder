@@ -33,7 +33,9 @@ public partial class ZonesPage : UserControl
     // ponytail: live row collection bound to ListHost — drag reorder moves rows
     // through this OC (mirroring PropertyTabStrip's Tabs OC) so the ItemsControl
     // shifts live while the model collection moves in parallel for persistence.
-    readonly ObservableCollection<EditableListRow> _rows = new();
+    // ponytail 2026-11-14(性能审计): 批量替换行集合,只发一次 Reset,避免 Clear + N 次 Add
+    // 触发 N 轮容器/布局(见 BulkObservableCollection)。
+    readonly BulkObservableCollection<EditableListRow> _rows = new();
 
     public ZonesPage(ManagementWindow main, ManagementViewModel vm, ZoneManager zoneManager)
     {
@@ -62,8 +64,7 @@ public partial class ZonesPage : UserControl
         var zones = _zoneManager.Zones.Where(z => !z.DockMode).ToList();
         CountLabel.Text = $"{zones.Count} {loc["Manage.Count.Unit"]}";
         // 拖动排序即列表顺序：不再按名称/数量重排，Rows 直接镜像 Zones 的持久化顺序。
-        _rows.Clear();
-        foreach (var z in zones) _rows.Add(BuildRow(z));
+        _rows.ReplaceAll(zones.Select(BuildRow));
         EmptyHint.Visibility = zones.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         SetSelection(ListHost, _selected); // re-apply after rebuild (rename / lock toggle).
     }

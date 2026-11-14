@@ -116,13 +116,9 @@ public static class MediaArtworkFallback
     // 这条路在窗口最小化到托盘、标题里没有歌名时仍然有效。
 
     /// <summary>网易云自己的数据根目录（<c>%LOCALAPPDATA%\Netease\CloudMusic</c>）。</summary>
-    private static string NetEaseRoot => NetEaseRootOverride ?? Path.Combine(
+    private static string NetEaseRoot => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "Netease", "CloudMusic");
-
-    /// <summary>测试钩子：把这套解析指到一份临时目录（同程序集内的自测harness用）。
-    /// 产品代码永远不写它，保持 null。</summary>
-    internal static string? NetEaseRootOverride;
 
     /// <summary>最近还在被写入的缓存文件里的歌曲 id（150 秒内改过才算数）。</summary>
     public static string? RecentSongIdFromCache()

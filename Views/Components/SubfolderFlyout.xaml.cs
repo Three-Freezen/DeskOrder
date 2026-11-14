@@ -22,8 +22,14 @@ public partial class SubfolderFlyout : UserControl
         set
         {
             if (ReferenceEquals(DataContext, value)) return;
-            if (DataContext is SubfolderFlyoutViewModel oldVm && oldVm.HostSubItem != null)
-                oldVm.HostSubItem.PropertyChanged -= OnHostItemChanged;
+            if (DataContext is SubfolderFlyoutViewModel oldVm)
+            {
+                if (oldVm.HostSubItem != null)
+                    oldVm.HostSubItem.PropertyChanged -= OnHostItemChanged;
+                // ponytail 2026-11-14(审计修复 P0-1): 换 VM/关闭浮层时把旧 VM 从宿主模型
+                // 上彻底摘掉,否则 ZoneItem 会永久持有每个打开过的 VM(及其 ItemVms)。
+                oldVm.Dispose();
+            }
             DataContext = value;
             if (value != null)
             {
@@ -36,6 +42,26 @@ public partial class SubfolderFlyout : UserControl
             // 的同一个控件,不重断言就会继承上一次打开的形态)。
             ApplySquareMode();
         }
+    }
+
+    /// <summary>ponytail 2026-11-14(审计修复 P0-1): Popup 关闭时把浮层与宿主完全断开。
+    /// 退掉 HostSubItem.PropertyChanged 并清空宿主挂上来的事件委托 —— 浮层实例可能
+    /// 仍被其它地方短暂引用,不应再反向持有宿主窗口。
+    /// 注意: ZoneWindow 的 SubfolderFlyoutView 是 XAML 子控件、跨多次打开复用,不能
+    /// 在 Unloaded 里做同样的事(否则重开时事件全丢),只能由"一次性浮层"的宿主调用。</summary>
+    public void Detach()
+    {
+        UnhookClickOutside();
+        ViewModel = null;                 // 退宿主 PropertyChanged + Dispose 旧 VM
+        EditStyleRequested = null;
+        ItemDragOutRequested = null;
+        ItemOpenRequested = null;
+        ItemOpenLocationRequested = null;
+        ItemRenameRequested = null;
+        ItemDeleteRequested = null;
+        ItemEmptyRecycleBinRequested = null;
+        ItemsChanged = null;
+        ClickOutsideRequested = null;
     }
 
     // ── 设置 → 次级分区 的两项全局设置 ──

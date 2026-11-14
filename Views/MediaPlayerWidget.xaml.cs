@@ -38,6 +38,11 @@ public partial class MediaPlayerWidget : Window
     private readonly DispatcherTimer _saveDebounce = new() { Interval = TimeSpan.FromMilliseconds(500) };
     private bool _savePending;
 
+    // ponytail 2026-11-14(审查 P0-1): 媒体/音频服务的持有标记 —— 组件关闭时释放，
+    // 让最后关闭的播放器把采样线程、WASAPI 环回、1s 轮询全部停掉。
+    private bool _audioServiceAcquired;
+    private bool _mediaConsumerAcquired;
+
     private bool _restoreDragging;
     private Point _restoreDown;
     private Point _pressPoint;
@@ -106,7 +111,8 @@ public partial class MediaPlayerWidget : Window
 
         // 媒体会话：懒启动（没有播放器组件时不碰 WinRT）
         _media.Changed += OnMediaChanged;
-        _media.EnsureStarted();
+        _media.AcquireConsumer();
+        _mediaConsumerAcquired = true;
         RefreshMediaState();
         ApplyFollow();
     }
@@ -155,6 +161,20 @@ public partial class MediaPlayerWidget : Window
         _snapDrag?.Detach();
         _snapResize?.Detach();
         _hover?.Dispose();
+        // ponytail 2026-11-14(审查 P0-1): 释放媒体/音频服务持有计数 —— 最后一个播放器关闭时，
+        // AudioLevelMeter 16ms 线程、AudioSpectrumCapture WASAPI 环回线程、MediaSessionService
+        // 1s 轮询都会停下（此前只有 App.OnExit 才停）。
+        if (_mediaConsumerAcquired)
+        {
+            _mediaConsumerAcquired = false;
+            _media.ReleaseConsumer();
+        }
+        if (_audioServiceAcquired)
+        {
+            _audioServiceAcquired = false;
+            AudioLevelMeter.Release();
+            AudioSpectrumCapture.Release();
+        }
         base.OnClosed(e);
     }
 
@@ -347,7 +367,18 @@ public partial class MediaPlayerWidget : Window
         Bars.Amplitude = DesktopMediaPlayer.AmplitudeFromLevel(_player.BarsAmplitude);
         Bars.Sensitivity = DesktopMediaPlayer.SensitivityFromLevel(_player.BarsSensitivity);
         // 真实响度：让条子跟着音乐本身的强弱走（不再只是合成正弦）
-        AudioLevelMeter.EnsureStarted();
+        // ponytail 2026-11-14(审查 P0-1): 音频采样线程改为「组件持有」——首次 Apply 时 Acquire，
+        // OnClosed 时 Release；旧实现只有 App 退出才停，组件关掉后线程/WASAPI 环回还永久跑。
+        if (!_audioServiceAcquired)
+        {
+            _audioServiceAcquired = true;
+            AudioLevelMeter.Acquire();
+            AudioSpectrumCapture.Acquire();
+        }
+        else
+        {
+            AudioLevelMeter.EnsureStarted();   // 幂等：线程被外部停过时拉起来
+        }
         Bars.EnergyProvider = static () => AudioLevelMeter.Level;
 
         // 律动数据源：真频谱（默认）/ 模拟。真频谱走 WASAPI 环回 + FFT，采不到会自动退回模拟。
@@ -686,19 +717,24 @@ public partial class MediaPlayerWidget : Window
     /// <summary>跟随指定应用时，控制指令只发给那个会话；自动模式下传 null（服务自己挑）。</summary>
     string? FollowAumidOrNull() => _follow.Length > 0 ? _follow : null;
 
+    // ponytail 2026-11-14(审计修订 perf P1-7): async void 事件处理器必须自带 try/catch ——
+    // 异常若逃到 Dispatcher，会走全局未处理异常；连续任务键连点时容易变成弹框/中断。
     async void PlayPause_Click(object s, RoutedEventArgs e)
     {
-        await _media.TogglePlayPauseAsync(FollowAumidOrNull());
+        try { await _media.TogglePlayPauseAsync(FollowAumidOrNull()); }
+        catch (Exception ex) { DzTrace.Log($"[MediaPlayer] 播放/暂停失败: {ex.GetType().Name} {ex.Message}"); }
     }
 
     async void Prev_Click(object s, RoutedEventArgs e)
     {
-        await _media.PreviousAsync(FollowAumidOrNull());
+        try { await _media.PreviousAsync(FollowAumidOrNull()); }
+        catch (Exception ex) { DzTrace.Log($"[MediaPlayer] 上一曲失败: {ex.GetType().Name} {ex.Message}"); }
     }
 
     async void Next_Click(object s, RoutedEventArgs e)
     {
-        await _media.NextAsync(FollowAumidOrNull());
+        try { await _media.NextAsync(FollowAumidOrNull()); }
+        catch (Exception ex) { DzTrace.Log($"[MediaPlayer] 下一曲失败: {ex.GetType().Name} {ex.Message}"); }
     }
 
     // ── 点击切换播放 / 拖动 ──

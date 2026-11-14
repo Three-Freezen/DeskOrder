@@ -111,7 +111,7 @@ public static class AudioNowPlayingProbe
     {
         var result = new ScanResult();
 
-        try { sessions = EnumerateSessions(trace, out result.SystemPeak); }
+        try { sessions = EnumerateSessions(trace, out result.SystemPeak, allowCache: preferredPid > 0); }
         catch (Exception ex)
         {
             // 这里每轮（1s）都会进来一次：日志做节流，避免刷屏。
@@ -221,9 +221,31 @@ public static class AudioNowPlayingProbe
     ///
     /// 顺带读每个设备自己的主音量表峰值（<paramref name="systemPeak"/>）：这是"整机确实有声音"
     /// 的唯一可靠读数 —— 会话枚举失败 / 声音归因不到进程时，上层还能靠它让动画跑起来。</summary>
+    /// <summary>最近一轮会话枚举的缓存（性能 P1-2 修法 4）。
+    /// RefreshAsync 在同一个 tick 里先 Scan() 再（兜底保持/暂停分支）FindByPid()，后者原本会
+    /// 把整轮 CoreAudio 枚举 + 设备/会话 QI 再跑一遍。现在 1s 内的 FindByPid 复用这份结果，
+    /// 只按 pid 重新取窗口标题；过期/正在扫则回退到全新枚举。</summary>
+    private static readonly object _sessionsCacheLock = new();
+    private static List<SessionInfo>? _cachedSessions;
+    private static float _cachedSystemPeak;
+    private static long _cachedSessionsAt;
+    private const int SessionsCacheMs = 900;
+
     private static List<SessionInfo> EnumerateSessions(
-        ICollection<string>? trace, out float systemPeak)
+        ICollection<string>? trace, out float systemPeak, bool allowCache = false)
     {
+        if (allowCache)
+        {
+            lock (_sessionsCacheLock)
+            {
+                if (_cachedSessions != null && Environment.TickCount64 - _cachedSessionsAt < SessionsCacheMs)
+                {
+                    systemPeak = _cachedSystemPeak;
+                    return _cachedSessions;
+                }
+            }
+        }
+
         systemPeak = 0;
         var merged = new Dictionary<int, SessionInfo>();
         IMMDeviceEnumerator? enumerator = null;
@@ -268,11 +290,19 @@ public static class AudioNowPlayingProbe
         }
         finally
         {
-            if (devices != null) Marshal.ReleaseComObject(devices);
+            // ponytail 2026-11-14: 释放失败（RCW 被别处提前分离）不能把异常抛给 1s 轮询。
+            if (devices != null) { try { Marshal.ReleaseComObject(devices); } catch { } }
             // 枚举器是进程内共享的那一份（CoreAudioInterop），**不能**释放：
             // ReleaseComObject 会把别的模块手里的接口一起打断。
         }
-        return new List<SessionInfo>(merged.Values);
+        var result = new List<SessionInfo>(merged.Values);
+        lock (_sessionsCacheLock)
+        {
+            _cachedSessions = result;
+            _cachedSystemPeak = systemPeak;
+            _cachedSessionsAt = Environment.TickCount64;
+        }
+        return result;
     }
 
     /// <summary>设备主音量表峰值（0..1）。失败静默 —— 这项只是"有声音"的旁证，不能因为它中断扫描。</summary>
@@ -286,12 +316,8 @@ public static class AudioNowPlayingProbe
                 || meterObj is not IAudioMeterInformation meter)
                 return;
             if (meter.GetPeakValue(out float peak) != 0) return;
-            if (peak < AudibleThreshold)
-            {
-                // 峰值是瞬时值，可能正好落在过零点上
-                System.Threading.Thread.Sleep(8);
-                if (meter.GetPeakValue(out float again) == 0) peak = again;
-            }
+            // ponytail 2026-11-14(性能 P1-2): 去掉了「峰值低于阈值就 Sleep(8) 再读一次」——
+            // 1s 轮询里每设备多睡 8ms 只会拉长整轮扫描，过零点漏读下一轮就会补上。
             if (peak > best) best = peak;
         }
         catch
@@ -333,13 +359,8 @@ public static class AudioNowPlayingProbe
                     float peak = 0;
                     if (state == 1 && control is IAudioMeterInformation meter)
                     {
+                        // ponytail 2026-11-14(性能 P1-2): 去掉 Sleep(10) 后的二次读数（原因同 ReadDevicePeak）。
                         meter.GetPeakValue(out peak);
-                        if (peak < AudibleThreshold)
-                        {
-                            // 峰值是瞬时的，可能正好落在过零点上；隔一帧再确认一次
-                            System.Threading.Thread.Sleep(10);
-                            meter.GetPeakValue(out peak);
-                        }
                     }
 
                     if (merged.TryGetValue(pid, out var existing))
@@ -376,7 +397,9 @@ public static class AudioNowPlayingProbe
 
     private static List<WindowInfo>? DescribeProcess(int pid)
     {
-        try { _ = Process.GetProcessById(pid); }
+        // ponytail 2026-11-14(审查 P0-3): 旧写法 `_ = Process.GetProcessById(pid);` 丢弃对象且不 Dispose，
+        // 1s 一轮的扫描每次漏一个原生进程句柄。using 后由 SafeHandle 立即归还。
+        try { using var _alive = Process.GetProcessById(pid); }
         catch { return null; }
 
         var list = new List<WindowInfo>();
@@ -461,9 +484,25 @@ public static class AudioNowPlayingProbe
         return name.Length > 0 ? name : "";
     }
 
+    /// <summary>pid → 小写 exe 名（缓存 5s，避免 1s 轮询里每窗口/每会话反复开进程句柄）。
+    /// ponytail 2026-11-14(审查 P0-3/性能 P1-2): Process 对象必须 Dispose；同 pid 的重复查询走缓存。</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, (string Name, long At)> _pidNameCache = new();
+    private const int PidNameCacheMs = 5000;
+
     private static string SafeProcessName(int pid)
     {
-        try { return Process.GetProcessById(pid).ProcessName; }
+        if (pid <= 0) return "";
+        try
+        {
+            long now = Environment.TickCount64;
+            if (_pidNameCache.TryGetValue(pid, out var hit) && now - hit.At < PidNameCacheMs)
+                return hit.Name;
+            string name;
+            using (var p = Process.GetProcessById(pid)) name = p.ProcessName;
+            if (_pidNameCache.Count > 512) _pidNameCache.Clear();  // 防御：pid 空间被高频复用时不无限涨
+            _pidNameCache[pid] = (name, now);
+            return name;
+        }
         catch { return ""; }
     }
 

@@ -24,7 +24,8 @@ public partial class DocksPage : UserControl
     readonly ManagementWindow _main;
     readonly ZoneManager _zoneManager;
     Zone? _selected;
-    readonly ObservableCollection<EditableListRow> _rows = new();
+    // ponytail 2026-11-14(性能审计): 批量替换行集合,只发一次 Reset。
+    readonly BulkObservableCollection<EditableListRow> _rows = new();
 
     public DocksPage(ManagementWindow main, ManagementViewModel vm, ZoneManager zoneManager)
     {
@@ -49,8 +50,7 @@ public partial class DocksPage : UserControl
         var loc = LocalizationService.Instance;
         var docks = _zoneManager.Zones.Where(IsDock).ToList();
         CountLabel.Text = $"{docks.Count} {loc["Manage.Count.Unit"]}";
-        _rows.Clear();
-        foreach (var z in docks) _rows.Add(BuildRow(z));
+        _rows.ReplaceAll(docks.Select(BuildRow));
         EmptyHint.Visibility = docks.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         SetSelection(ListHost, _selected);
     }

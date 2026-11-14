@@ -76,6 +76,17 @@ public sealed class MediaSessionService
     private bool _refreshing;
     private string _artKey = "";
 
+    // ponytail 2026-11-14(审查 P0-1/性能 P1-2): 轮询生命周期收口。
+    //  • _consumers = 正在使用媒体服务的播放器组件数；归零即停 1s 轮询（组件全关后不再扫系统媒体栈）。
+    //  • 空闲降频：连续 IdleTicksBeforeSlowPoll 轮没有媒体时把轮询从 1s 退到 5s，有变化立刻回 1s。
+    private int _consumers;
+    private int _idleTicks;
+    private const int IdleTicksBeforeSlowPoll = 15;
+    private static readonly TimeSpan FastPollInterval = TimeSpan.FromSeconds(1);
+    // 空闲降频上限 3s（不再更低）：无 SMTC 的播放器（网易云等）只能靠轮询发现"开始播放"，
+    // 5s 会让识别延迟明显；3s 在功耗与响应之间折中。
+    private static readonly TimeSpan SlowPollInterval = TimeSpan.FromSeconds(3);
+
     /// <summary>当前画面是否来自「音频会话 + 窗口标题」兜底（而不是 SMTC）。
     /// 这种状态下没有封面、也没有 SMTC 控制通道，控制按钮改走系统媒体键。</summary>
     private bool _usingFallback;
@@ -167,9 +178,31 @@ public sealed class MediaSessionService
     /// <summary>懒启动：第一个播放器组件出现时才开始接 SMTC，不用播放器就不碰 WinRT。</summary>
     public void EnsureStarted()
     {
-        if (_initStarted) return;
+        if (_initStarted)
+        {
+            // 消费者归零时轮询被 ReleaseConsumer 停过；再次有组件时恢复。
+            if (_poll is { IsEnabled: false }) _poll.Start();
+            return;
+        }
         _initStarted = true;
         _ = InitAsync();
+    }
+
+    /// <summary>播放器组件持有（与 <see cref="ReleaseConsumer"/> 成对）。</summary>
+    public void AcquireConsumer()
+    {
+        Interlocked.Increment(ref _consumers);
+        EnsureStarted();
+    }
+
+    /// <summary>播放器组件释放；最后一个消费者离开时停掉 1s 轮询（SMTC 管理器/事件保留，
+    /// 下次有组件时 EnsureStarted 会恢复轮询）。</summary>
+    public void ReleaseConsumer()
+    {
+        if (Interlocked.Decrement(ref _consumers) > 0) return;
+        Interlocked.Exchange(ref _consumers, 0);
+        _poll?.Stop();
+        DzTrace.Log("[MediaSession] 无消费者，暂停 1s 轮询");
     }
 
     private async Task InitAsync()
@@ -197,16 +230,42 @@ public sealed class MediaSessionService
         if (Application.Current?.Dispatcher is not Dispatcher d) return;
         _poll = new DispatcherTimer(DispatcherPriority.Background, d)
         {
-            Interval = TimeSpan.FromSeconds(1),
+            Interval = FastPollInterval,
         };
-        _poll.Tick += (_, _) => _ = RefreshAsync(force: false);
+        _poll.Tick += (_, _) =>
+        {
+            _ = RefreshAsync(force: false);
+            MaybeDowngradePoll();
+        };
         _poll.Start();
+    }
+
+    /// <summary>ponytail 2026-11-14(性能 P1-2 修法 3): 连续无媒体时把轮询退到 3s，减少常驻轮询开销；
+    /// 一旦有会话/SMTC 事件就回到 1s。</summary>
+    private void MaybeDowngradePoll()
+    {
+        if (_poll == null) return;
+        bool idle = Now.State == MediaPlaybackState.None;
+        _idleTicks = idle ? _idleTicks + 1 : 0;
+        var target = _idleTicks >= IdleTicksBeforeSlowPoll ? SlowPollInterval : FastPollInterval;
+        if (_poll.Interval != target) _poll.Interval = target;
+    }
+
+    /// <summary>有 SMTC 事件时把轮询拉回 1s（并清空闲计数）。</summary>
+    private void BumpPollToFast()
+    {
+        _idleTicks = 0;
+        if (_poll != null && _poll.Interval != FastPollInterval) _poll.Interval = FastPollInterval;
     }
 
     private void OnManagerSessionChanged(
         GlobalSystemMediaTransportControlsSessionManager sender,
         object args)
-        => Post(() => _ = RefreshAsync(force: false));
+        => Post(() =>
+        {
+            BumpPollToFast();
+            _ = RefreshAsync(force: false);
+        });
 
     // ── 控制 ──
 
@@ -609,7 +668,9 @@ public sealed class MediaSessionService
                     }
                     else
                     {
-                        var art = DecodeArt(bytes);
+                        // ponytail 2026-11-14(性能 P1-3): 512px 同步解码从 UI 线程挪到线程池；
+                        // DecodeArt 内部已 Freeze()，可以跨线程交回 UI。
+                        var art = await Task.Run(() => DecodeArt(bytes));
                         if (art != null)
                         {
                             Artwork = art;
@@ -954,11 +1015,19 @@ public sealed class MediaSessionService
 
     private void OnSessionMediaPropertiesChanged(
         GlobalSystemMediaTransportControlsSession sender, object args)
-        => Post(() => _ = RefreshAsync(force: false));
+        => Post(() =>
+        {
+            BumpPollToFast();
+            _ = RefreshAsync(force: false);
+        });
 
     private void OnSessionPlaybackInfoChanged(
         GlobalSystemMediaTransportControlsSession sender, object args)
-        => Post(() => _ = RefreshAsync(force: false));
+        => Post(() =>
+        {
+            BumpPollToFast();
+            _ = RefreshAsync(force: false);
+        });
 
     private void Apply(MediaNowPlaying next, bool force)
     {
@@ -990,24 +1059,31 @@ public sealed class MediaSessionService
     {
         try
         {
-            using var stream = await reference.OpenReadAsync();
-            using var reader = new DataReader(stream) { InputStreamOptions = InputStreamOptions.Partial };
-            using var ms = new MemoryStream();
-            ulong hash = 14695981039346656037UL;      // FNV-1a offset basis
-            uint loaded;
-            while ((loaded = await reader.LoadAsync(8192)) > 0)
+            // ponytail 2026-11-14(性能 P1-3): 整段流式读取 + 逐字节哈希挪到线程池 —— 旧实现每个
+            // await 续体都回到 UI 线程，一张 2MB 封面 = 250 次 UI 线程续体 + 2MB 逐字节循环。
+            // Task.Run 内的 async lambda 没有 UI SynchronizationContext，续体全在后台线程。
+            return await Task.Run<(byte[]? Bytes, ulong Hash)>(async () =>
             {
-                var buffer = new byte[loaded];
-                reader.ReadBytes(buffer);
-                ms.Write(buffer, 0, buffer.Length);
-                foreach (var b in buffer)
+                using var stream = await reference.OpenReadAsync();
+                using var reader = new DataReader(stream) { InputStreamOptions = InputStreamOptions.Partial };
+                using var ms = new MemoryStream();
+                ulong hash = 14695981039346656037UL;      // FNV-1a offset basis
+                uint loaded;
+                while ((loaded = await reader.LoadAsync(8192)) > 0)
                 {
-                    hash ^= b;
-                    hash *= 1099511628211UL;
+                    var buffer = new byte[loaded];
+                    reader.ReadBytes(buffer);
+                    ms.Write(buffer, 0, buffer.Length);
+                    foreach (var b in buffer)
+                    {
+                        hash ^= b;
+                        hash *= 1099511628211UL;
+                    }
+                    if (ms.Length > 16 * 1024 * 1024) break; // 防御：异常大的流直接放弃
                 }
-                if (ms.Length > 16 * 1024 * 1024) break; // 防御：异常大的流直接放弃
-            }
-            return ms.Length == 0 ? (null, 0) : (ms.ToArray(), hash);
+                if (ms.Length == 0) return ((byte[]?)null, 0UL);
+                return (ms.ToArray(), hash);
+            });
         }
         catch (Exception ex)
         {
@@ -1069,6 +1145,10 @@ public sealed class MediaSessionService
     /// <summary>进程退出前断开事件（App.OnExit 调用即可，不调也不会泄漏）。</summary>
     public void Shutdown()
     {
+        // ponytail 2026-11-14: 允许之后再次 EnsureStarted（保证 idle 收口/重启语义对称）。
+        Interlocked.Exchange(ref _consumers, 0);
+        _idleTicks = 0;
+        _initStarted = false;
         _poll?.Stop();
         _poll = null;
         if (_manager != null)

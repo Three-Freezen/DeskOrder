@@ -49,11 +49,12 @@ internal static class ShellOle
     public static IntPtr? GetItemIconBitmap(string spec, int sizePx)
     {
         IntPtr pidl = IntPtr.Zero;
+        IShellItem? item = null;
         try
         {
             if (SHParseDisplayName(spec, IntPtr.Zero, out pidl, 0, out _) != 0 || pidl == IntPtr.Zero) return null;
             var iidItem = IID_IShellItem;
-            if (SHCreateItemFromIDList(pidl, ref iidItem, out var item) != 0 || item == null) return null;
+            if (SHCreateItemFromIDList(pidl, ref iidItem, out item) != 0 || item == null) return null;
             if (item is not IShellItemImageFactory factory) return null;
             // BIGGERSIZEOK: when the shell lacks an exact 256px icon it may return a
             // larger one instead of a blurry 32px upscale.
@@ -65,7 +66,15 @@ internal static class ShellOle
             return hbm;
         }
         catch { return null; }
-        finally { if (pidl != IntPtr.Zero) NativeMethods.CoTaskMemFree(pidl); }
+        finally
+        {
+            // ponytail 2026-11-14: RCW 必须显式释放；此前每次图标解析都漏一个 IShellItem COM 引用。
+            if (item != null && Marshal.IsComObject(item))
+            {
+                try { Marshal.ReleaseComObject(item); } catch { }
+            }
+            if (pidl != IntPtr.Zero) NativeMethods.CoTaskMemFree(pidl);
+        }
     }
 
     /// <summary>
@@ -78,6 +87,7 @@ internal static class ShellOle
     /// </summary>
     public static IntPtr? GetJumboIcon(string path)
     {
+        IImageList? list = null;
         try
         {
             var info = new NativeMethods.SHFILEINFO();
@@ -86,13 +96,21 @@ internal static class ShellOle
                     NativeMethods.SHGFI_SYSICONINDEX) == IntPtr.Zero)
                 return null;
             var iid = IID_IImageList;
-            if (SHGetImageList(SHIL_JUMBO, ref iid, out var list) != 0 || list == null)
+            if (SHGetImageList(SHIL_JUMBO, ref iid, out list) != 0 || list == null)
                 return null;
             if (list.GetIcon(info.iIcon, ILD_TRANSPARENT, out var hIcon) != 0 || hIcon == IntPtr.Zero)
                 return null;
             return hIcon;
         }
         catch { return null; }
+        finally
+        {
+            // ponytail 2026-11-14: 系统图像列表的 RCW 也要释放（此前每次 jumbo 图标解析漏一个）。
+            if (list != null && Marshal.IsComObject(list))
+            {
+                try { Marshal.ReleaseComObject(list); } catch { }
+            }
+        }
     }
 }
 

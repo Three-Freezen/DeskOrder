@@ -62,6 +62,7 @@ public partial class ZoneBayWindow : Window
     DispatcherTimer? _hoverTimer;
     DispatcherTimer? _hoverLeaveTimer;
     string? _hoverZoneId;
+    string? _hoverLeaveZoneId;   // ponytail 2026-11-14(审计修复 P2-10): 复用 leave timer 用
     FrameworkElement? _hoverAnchor;
 
     ContextMenu? _menu;
@@ -193,7 +194,9 @@ public partial class ZoneBayWindow : Window
 
         _pollTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
         _pollTimer.Tick += (_, _) => PollAutoHide();
-        _pollTimer.Start();
+        // ponytail 2026-11-14(审计修复 P2-10): 只有 AutoHide 开启时才需要这个 5Hz 轮询;
+        // 否则 PollAutoHide 每次只是早退。AutoHide 变化时由 ApplyEverything 重新同步。
+        if (_bar.AutoHide) _pollTimer.Start();
     }
 
     void OnClosed(object? sender, EventArgs e)
@@ -202,6 +205,11 @@ public partial class ZoneBayWindow : Window
         _outsideTimer?.Stop();
         _hoverTimer?.Stop();
         _hoverLeaveTimer?.Stop();
+        // ponytail 2026-11-14(审计修复 P2-10): 芯片拖动是 16ms timer,关窗时必须停,
+        // 否则(拖拽中被插件禁用/删坞)会永久 tick 并持有窗口。
+        _chipDragTimer?.Stop();
+        _chipDragTimer = null;
+        _hoverLeaveZoneId = null;
         if (_langChanged != null) _loc.LanguageChanged -= _langChanged;
         try { AcrylicHelper.DisableBlur(this); } catch { }
         try { _glassLayer?.Detach(); } catch { }
@@ -463,6 +471,18 @@ public partial class ZoneBayWindow : Window
         ApplyCollapsed();
         RefreshChips();
         SettingsChanged();
+        SyncAutoHidePoll();
+    }
+
+    /// <summary>ponytail 2026-11-14(审计修复 P2-10): AutoHide 开关变化后按需启停轮询
+    /// (非 AutoHide 时不需要 200ms 轮询;若当前正处于 auto-hidden 态则先留着交给
+    /// PollAutoHide 复位)。</summary>
+    void SyncAutoHidePoll()
+    {
+        if (!_loaded || _pollTimer == null) return;
+        bool needed = _bar.AutoHide || _autoHidden;
+        if (needed && !_pollTimer.IsEnabled) _pollTimer.Start();
+        else if (!needed && _pollTimer.IsEnabled) _pollTimer.Stop();
     }
 
     public void ApplyCollapsed()
@@ -577,6 +597,8 @@ public partial class ZoneBayWindow : Window
         if (!_bar.AutoHide)
         {
             if (_autoHidden) SetAutoHidden(false);
+            // ponytail 2026-11-14(审计修复 P2-10): 关掉 AutoHide 后不再需要轮询。
+            _pollTimer?.Stop();
             return;
         }
         if (NativeMethods.GetCursorPos(out var pt))
@@ -1018,14 +1040,19 @@ public partial class ZoneBayWindow : Window
         _hoverZoneId = zoneId;
         _hoverAnchor = anchor;
         _hoverLeaveTimer?.Stop();
-        _hoverTimer?.Stop();
-        _hoverTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
-        _hoverTimer.Tick += (_, _) =>
-        {
-            _hoverTimer?.Stop();
-            if (_hoverZoneId == zoneId) Expand(zoneId, _hoverAnchor, permanent: false);
-        };
+        // ponytail 2026-11-14(审计修复 P2-10): 复用同一个 timer,不再每次悬停 new 一个
+        // (高频悬停时的无谓分配/GC)。
+        _hoverTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        _hoverTimer.Stop();
+        _hoverTimer.Tick -= OnHoverTimerTick;
+        _hoverTimer.Tick += OnHoverTimerTick;
         _hoverTimer.Start();
+    }
+
+    void OnHoverTimerTick(object? sender, EventArgs e)
+    {
+        _hoverTimer?.Stop();
+        if (_hoverZoneId is { } zoneId) Expand(zoneId, _hoverAnchor, permanent: false);
     }
 
     public void HoverLeave(string zoneId)
@@ -1037,18 +1064,25 @@ public partial class ZoneBayWindow : Window
         }
         if (_expandedZoneId == zoneId && !_expandedPermanent)
         {
-            _hoverLeaveTimer?.Stop();
-            _hoverLeaveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(2000) };
-            _hoverLeaveTimer.Tick += (_, _) =>
-            {
-                _hoverLeaveTimer?.Stop();
-                if (_expandedZoneId != zoneId || _expandedPermanent) return;
-                // 光标已经移进展开窗口：不要收，继续等它离开。
-                if (CursorInExpandedWindow()) { _hoverLeaveTimer?.Start(); return; }
-                Collapse(zoneId);
-            };
+            _hoverLeaveZoneId = zoneId;
+            _hoverLeaveTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(2000) };
+            _hoverLeaveTimer.Stop();
+            _hoverLeaveTimer.Tick -= OnHoverLeaveTimerTick;
+            _hoverLeaveTimer.Tick += OnHoverLeaveTimerTick;
             _hoverLeaveTimer.Start();
         }
+    }
+
+    void OnHoverLeaveTimerTick(object? sender, EventArgs e)
+    {
+        _hoverLeaveTimer?.Stop();
+        var zoneId = _hoverLeaveZoneId;
+        if (zoneId == null) return;
+        if (_expandedZoneId != zoneId || _expandedPermanent) { _hoverLeaveZoneId = null; return; }
+        // 光标已经移进展开窗口：不要收，继续等它离开。
+        if (CursorInExpandedWindow()) { _hoverLeaveTimer?.Start(); return; }
+        _hoverLeaveZoneId = null;
+        Collapse(zoneId);
     }
 
     bool CursorInExpandedWindow()

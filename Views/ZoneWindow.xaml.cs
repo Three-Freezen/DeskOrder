@@ -160,6 +160,32 @@ public partial class ZoneWindow : Window
     private SnapDrag? _snapDrag;
     private SnapResize? _snapResize;
 
+    // ── ponytail 2026-11-14: 性能审查(P0-1/P0-3/P1-1/P1-8/P2)引入的调度与缓存状态 ──
+    /// <summary>OnClosed 已经跑过 —— 之后不要再让排队到 Dispatcher 的收尾逻辑碰可视化树。</summary>
+    private bool _closed;
+    /// <summary>快捷栏尺寸变化后的"整批重建倒影/玻璃"合并标记（一帧一次）。见 OnSize。</summary>
+    private bool _dockSizeEffectsPending;
+    /// <summary>分区样式刷新合并标记：同一帧内多次 RefreshZone/OnZonesChanged 只跑一次。</summary>
+    private bool _zoneRefreshPending;
+    /// <summary>ZonesChanged 待处理（与 RefreshZone 合并到同一帧，见 RunScheduledRefresh）。</summary>
+    private bool _zonesChangedPending;
+    private Zone? _scheduledRefreshZone;
+    /// <summary>ApplyAcrylic 上次生效的"输入签名" —— 玻璃相关字段没变就跳过整套 Win32/DWM 重设。</summary>
+    private string _acrylicSignature = "";
+    /// <summary>RebuildSubZoneTabs 上次生效的签名（成员/顺序/选中项/标题色）。</summary>
+    private string _subTabsSignature = "";
+    /// <summary>快捷栏「能不能浏览」缓存（路径 → 是否文件夹/压缩包）。走 OnZonesChanged 失效，
+    /// 避免每 700ms tick 对每个条目做 Directory.Exists/File.Exists。</summary>
+    private readonly Dictionary<string, bool> _browsableCache = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>快捷栏运行指示条上次应用的状态 —— 状态没变就不重启动画（见 RefreshDockRunBars）。</summary>
+    private readonly Dictionary<Guid, DockRunState> _dockRunAppliedState = new();
+    private bool _dockRunBarsDirty = true;
+    /// <summary>跨分区拖动目标检测节流（见 FindZoneWindowAt）：每 30ms 最多一次 WindowFromPoint。</summary>
+    private long _extTargetCheckMs;
+    private ZoneWindow? _extTargetCached;
+    /// <summary>「隐藏应用名」上次应用的取值（null = 容器刚重建，需要重走一遍）。</summary>
+    private bool? _hideAppNameApplied;
+
     // ── Title-bar drag-to-merge ──
     private ZoneWindow? _mergeTarget;
     private bool _titleDragMoved;
@@ -241,10 +267,9 @@ public partial class ZoneWindow : Window
         SubfolderFlyoutView.ItemDragOutRequested += SubfolderFlyout_ItemDragOutRequested;
         // ponytail 2026-08-26: 键盘焦点可能落在 Popup 内(主窗口收不到 Ctrl+A/Delete),
         // flyout 侧再挂一份同样的快捷键处理。
-        SubfolderFlyoutView.PreviewKeyDown += (_, e) =>
-        {
-            if (TryHandleFlyoutKeys(e)) e.Handled = true;
-        };
+        // ponytail 2026-11-14(审计修订 P1-4): 原来用 lambda 订阅，OnClosed 无法 -=（事件泄漏
+        // 宿主窗口）→ 改成命名方法，关闭时退订。
+        SubfolderFlyoutView.PreviewKeyDown += SubfolderFlyoutView_PreviewKeyDown;
         _vm = new ZoneViewModel(zone, mgr, icons);
         // 视图模式跟随分区模型（标题栏 ▦/≡ 会写回 Zone.IsGridView 并落盘）。
         _isGridView = zone.IsGridView;
@@ -294,13 +319,26 @@ public partial class ZoneWindow : Window
             if (_dv != null) CancelItemDrag("window deactivated");
         };
         _recycleTimer.Tick += RecycleTimer_Tick;
-        _recycleTimer.Start();
+        // ponytail 2026-11-14(审计修订 P2): 不再无条件 Start —— 没有回收站条目的分区白跑
+        // 每 2.5s 一次（有回收站时还要真查 shell）。改由 EnsureRecycleTimer() 按需启停：
+        // 条目刷新 / 窗口重新显示时调用，tick 里发现没有回收站就自己停。
+        EnsureRecycleTimer();
         _langChanged = _ => ApplyLoc();
         _loc.LanguageChanged += _langChanged;
         _mgr.ZonesChanged += OnZonesChanged;
         // 快捷栏的玻璃层是**独立窗口**：内容层一变成不可见（最小化 / Hide / 关窗前）
         // 就必须跟着收，否则屏幕上会留下一块悬空的胶囊 —— 那也是一种「两层玻璃」。
-        IsVisibleChanged += (_, _) => { if (!IsVisible) HideDockGlassWindow(); };
+        IsVisibleChanged += (_, _) =>
+        {
+            if (!IsVisible) HideDockGlassWindow();
+            else
+            {
+                // ponytail 2026-11-14(P2/P0-1): 重新显示 → 按需把回收站轮询和快捷栏运行
+                // 状态轮询起回来（隐藏期间它们都停了）。
+                EnsureRecycleTimer();
+                if (IsDock) EnsureDockRunPolling();
+            }
+        };
         // ponytail: subscribe to LockChanged so management UI (or any other source) flipping
         // this zone's lock state immediately syncs the open window.
         _mgr.LockChanged += OnServiceLockChanged;
@@ -316,10 +354,11 @@ public partial class ZoneWindow : Window
             if (ItemsHost.ItemContainerGenerator.Status
                 == System.Windows.Controls.Primitives.GeneratorStatus.ContainersGenerated)
             {
+                _hideAppNameApplied = null;   // ponytail 2026-11-14: 容器重建 → 名称可见性要重走一遍
                 ApplyItemTextColor();
                 ReapplyTileItemVisuals();
                 // 容器重建后短线是新实例（宽度 0、画刷透明）→ 按当前状态补一次
-                if (IsDock) RefreshDockRunBars(animate: false);
+                if (IsDock) { _dockRunBarsDirty = true; RefreshDockRunBars(animate: false); }
                 // 倒影要读图标的**实际渲染矩形**（TransformToAncestor），容器/布局没好时
                 // 量不到 → 容器生成后再补一次（ApplyDockGeometry 那次多半还没排好版）。
                 if (IsDock) RefreshDockReflection();
@@ -1494,10 +1533,28 @@ public partial class ZoneWindow : Window
 
     // ── Recycle Bin icon state (empty ⇄ full) ──
 
+    /// <summary>按需启停回收站图标轮询：分区里有回收站条目、且窗口可见时才需要跑。
+    /// ponytail 2026-11-14(审计修订 P2): 原来每个 ZoneWindow 无条件常驻 2.5s 计时器。</summary>
+    void EnsureRecycleTimer()
+    {
+        if (_closed) return;
+        bool needed = IsVisible && ZoneContainsRecycleBin(_zone.Items);
+        if (needed)
+        {
+            if (!_recycleTimer.IsEnabled) _recycleTimer.Start();
+        }
+        else
+        {
+            _recycleTimer.Stop();
+            _recycleStateInit = false;
+        }
+    }
+
     void RecycleTimer_Tick(object? s, EventArgs e)
     {
         try
         {
+            if (_closed || !IsVisible) { _recycleTimer.Stop(); return; }
             bool hasRecycle = false;
             foreach (var item in _vm.Items)
             {
@@ -1508,7 +1565,13 @@ public partial class ZoneWindow : Window
             // 上面的平铺扫描看不见它 → 轮询直接短路(hasRecycle=false)，浮层里的
             // 空桶/满桶图标永不刷新。这里递归进 SubItems 再判一次。
             if (!hasRecycle) hasRecycle = ZoneContainsRecycleBin(_zone.Items);
-            if (!hasRecycle) { _recycleStateInit = false; return; }
+            if (!hasRecycle)
+            {
+                // 已经没有回收站条目 → 停表（下次条目刷新/重新显示时再由 EnsureRecycleTimer 起）
+                _recycleTimer.Stop();
+                _recycleStateInit = false;
+                return;
+            }
 
             bool full = ShellIconService.RecycleBinHasItems();
             if (_recycleStateInit && full == _recycleFullLast) return;
@@ -1592,6 +1655,9 @@ public partial class ZoneWindow : Window
             else _hover?.SnapToExpanded();
         }
         _zone.IsVisible = true;
+        // ponytail 2026-11-14(P2/P0-1): 窗口重新显示 → 把隐藏期间停掉的按需轮询起回来。
+        EnsureRecycleTimer();
+        if (IsDock) EnsureDockRunPolling();
         // ponytail: BP-A — Visibility=Visible is processed in the next layout pass, so a
         // synchronous ApplyStyle would walk the visual tree before WPF has re-attached
         // item containers. Defer to Loaded priority so the brush walk runs after layout,
@@ -2106,14 +2172,48 @@ public partial class ZoneWindow : Window
         ZoneBayService.Instance.Release(_zone.Id);
     }
 
+    /// <summary>flyout 内键盘快捷键（Ctrl+A 全选 / Delete 删除）。命名方法以便 OnClosed 退订。</summary>
+    void SubfolderFlyoutView_PreviewKeyDown(object? sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (TryHandleFlyoutKeys(e)) e.Handled = true;
+    }
+
     protected override void OnClosed(EventArgs e)
     {
+        // ponytail 2026-11-14(审计修订 P1-4 / P0-1 跨文件): 先置 _closed，之后所有排队到
+        // Dispatcher 的合并刷新（ScheduleZoneRefresh / ScheduleDockSizeEffects）都直接早退。
+        _closed = true;
+        _zoneRefreshPending = false;
+        _zonesChangedPending = false;
+        _scheduledRefreshZone = null;
+        _dockSizeEffectsPending = false;
+
         // ponytail 2026-09-26: 先摘订阅再做任何会抛 ZonesChanged 的事 —— 下面的标题提交会
         // 走 ZoneManager.RenameZone → NotifyChanged,若此时自己还订阅着,OnZonesChanged 会
         // 排一个 BeginInvoke 到关窗之后再跑(RefreshItems/ApplyStyle/RefreshFolderMapping
         // 在已关闭的窗口上跑)。顺序与 StickyNoteWindow.OnClosed 同策。
         _mgr.ZonesChanged -= OnZonesChanged;
         _mgr.LockChanged -= OnServiceLockChanged;
+
+        // ponytail 2026-11-14(审计修订 P1-4 / 跨文件 P0-1): 关窗前把 SubFolder 浮层彻底断开 ——
+        // 关掉 StaysOpen 的 Popup（否则它的 PopupRoot 会留住整棵浮层可视树）、置空 ViewModel
+        // （新 API：setter 会 Dispose 旧 VM，不再让 ZoneItem 反向持有窗口），再 Detach 掉浮层上
+        // 由本窗口挂的 9 个事件委托（它们捕获 ZoneWindow）。
+        try { if (SubfolderFlyoutPopup.IsOpen) SubfolderFlyoutPopup.IsOpen = false; } catch { }
+        try { SubfolderFlyoutView.Detach(); } catch { }   // 内部会 ViewModel = null + UnhookClickOutside
+        SubfolderFlyoutView.ItemOpenRequested -= OnFlyoutItemOpen;
+        SubfolderFlyoutView.ItemOpenLocationRequested -= OnFlyoutItemOpenLocation;
+        SubfolderFlyoutView.ItemRenameRequested -= OnFlyoutItemRename;
+        SubfolderFlyoutView.ItemDeleteRequested -= OnFlyoutItemDelete;
+        SubfolderFlyoutView.ItemEmptyRecycleBinRequested -= OnFlyoutItemEmptyRecycleBin;
+        SubfolderFlyoutView.ItemsChanged -= OnFlyoutItemsChanged;
+        SubfolderFlyoutView.ClickOutsideRequested -= OnFlyoutClickOutside;
+        SubfolderFlyoutView.MouseEnter -= SubfolderFlyoutView_MouseEnter;
+        SubfolderFlyoutView.MouseLeave -= SubfolderFlyoutView_MouseLeave;
+        SubfolderFlyoutView.EditStyleRequested -= SubfolderFlyout_EditStyleRequested;
+        SubfolderFlyoutView.ItemDragOutRequested -= SubfolderFlyout_ItemDragOutRequested;
+        SubfolderFlyoutView.PreviewKeyDown -= SubfolderFlyoutView_PreviewKeyDown;
+
         // 玻璃层是独立窗口，必须跟着关掉，否则会剩下一个胶囊形状的毛玻璃残影。
         CloseDockGlassWindow();
         // 关窗前把标题栏里还没提交的改名落盘(用户敲完直接关/隐藏窗口).
@@ -2124,6 +2224,12 @@ public partial class ZoneWindow : Window
         _dockRunTimer?.Stop();
         _dockHoverWatch?.Stop();
         _dockHoverEndTimer?.Stop();
+        // ponytail 2026-11-14(审计修订 P1-4): 其余常驻 timer 也停掉并置空（原来漏了这 5 个）。
+        StopAndNull(ref _flyoutCloseTimer);
+        StopAndNull(ref _flyoutAutoClosePoll);
+        StopAndNull(ref _flyoutHoverTimer);
+        StopAndNull(ref _mapStatusTimer);
+        StopAndNull(ref _selectHoldTimer);
         _folderLoadCts?.Cancel();
         _folderLoadCts = null;
         _vm.Items.CollectionChanged -= _vmItemsChangedHandler;
@@ -2146,27 +2252,61 @@ public partial class ZoneWindow : Window
         base.OnClosed(e);
     }
 
+    /// <summary>停掉并置空一个可空 DispatcherTimer（OnClosed 收口用）。</summary>
+    static void StopAndNull(ref System.Windows.Threading.DispatcherTimer? timer)
+    {
+        if (timer == null) return;
+        try { timer.Stop(); } catch { }
+        timer = null;
+    }
+
     void OnZonesChanged()
     {
-        Dispatcher.BeginInvoke(new Action(() =>
-        {
-            _vm.RefreshItems();
-            UpdateCanvasSize();
-            // 快捷栏：图标被别处增删（跨分区拖入、管理器加图标）也要重排 + 重算宽高。
-            if (IsDock) ApplyDockGeometry();
-            // ponytail: keep the title NAME in sync on every ZonesChanged, not just on the
-            // style-panel's direct RefreshZone preview. Rename/merge paths that only fire
-            // ZonesChanged used to leave the title bar showing the old name (ApplyStyle
-            // below refreshes the icon/colors but never the title text).
-            ZoneTitleText.Text = _zone.Name;
-            // ponytail: Fix C — re-apply body content color after RefreshItems wipes the
-            // brush via the XAML default `#E0FFFFFF` foreground on freshly-generated item
-            // containers. Without this, any OnZonesChanged trigger (rename, delete, etc.)
-            // would silently revert the previously-applied brush on all items.
-            ApplyStyle();
-            UpdateMergedTitle();
-            RefreshFolderMapping();
-        }), System.Windows.Threading.DispatcherPriority.Normal);
+        // ponytail 2026-11-14(审计修订 P0-3 / P1-1): 旧实现每次事件都排一个 BeginInvoke，
+        // 连续增删图标 / 批量导入 / 面板「应用」会排出一串全量刷新（每个都含 RefreshItems +
+        // ApplyStyle + RefreshFolderMapping）。现在只置标记，统一由 RunScheduledRefresh 合并执行。
+        if (_closed) return;
+        _zonesChangedPending = true;
+        ScheduleZoneRefresh();
+    }
+
+    /// <summary>合并执行「ZonesChanged 全量刷新」与「RefreshZone 样式刷新」—— 一帧一次。
+    /// 见 <see cref="ScheduleZoneRefresh"/>。</summary>
+    void RunScheduledRefresh()
+    {
+        _zoneRefreshPending = false;
+        if (_closed) return;
+        bool zonesChanged = _zonesChangedPending;
+        _zonesChangedPending = false;
+        var zone = _scheduledRefreshZone;
+        _scheduledRefreshZone = null;
+        if (zonesChanged) OnZonesChangedCore();
+        if (zone != null) RefreshZoneCore(zone);
+    }
+
+    void OnZonesChangedCore()
+    {
+        _vm.RefreshItems();
+        UpdateCanvasSize();
+        // 快捷栏：图标被别处增删（跨分区拖入、管理器加图标）也要重排 + 重算宽高。
+        if (IsDock) ApplyDockGeometry();
+        // 条目集合变了 → 浏览判定缓存 / 运行指示条缓存全部失效
+        _browsableCache.Clear();
+        _dockRunBarsDirty = true;
+        // 回收站条目可能刚被加入/移除 → 按需启停 2.5s 轮询
+        EnsureRecycleTimer();
+        // ponytail: keep the title NAME in sync on every ZonesChanged, not just on the
+        // style-panel's direct RefreshZone preview. Rename/merge paths that only fire
+        // ZonesChanged used to leave the title bar showing the old name (ApplyStyle
+        // below refreshes the icon/colors but never the title text).
+        ZoneTitleText.Text = _zone.Name;
+        // ponytail: Fix C — re-apply body content color after RefreshItems wipes the
+        // brush via the XAML default `#E0FFFFFF` foreground on freshly-generated item
+        // containers. Without this, any OnZonesChanged trigger (rename, delete, etc.)
+        // would silently revert the previously-applied brush on all items.
+        ApplyStyle();
+        UpdateMergedTitle();
+        RefreshFolderMapping();
     }
 
     // ── Drag: DIRECT handler on title bar ──
@@ -3270,7 +3410,7 @@ public partial class ZoneWindow : Window
         }
     }
 
-    static bool IsOnFolderEntry(object s)
+    static bool IsOnFolderEntry(object? s)
     {
         var c = s as DependencyObject;
         while (c != null)
@@ -3786,6 +3926,9 @@ public partial class ZoneWindow : Window
 
     void Item_MouseDown(object s, MouseButtonEventArgs e)
     {
+        // ponytail 2026-11-14: 新一次拖拽 → 清掉跨分区目标检测的节流缓存（见 FindZoneWindowAt）
+        _extTargetCheckMs = 0;
+        _extTargetCached = null;
         // 快捷栏：单击打开（默认）时，双击不再额外触发一次打开 —— 交给 MouseUp 判定。
         bool dockSingleClick = IsDock && _zone.DockClickOnce;
         if (e.ClickCount == 2 && !dockSingleClick)
@@ -4045,23 +4188,36 @@ public partial class ZoneWindow : Window
 
     /// <summary>屏幕点下的可接收分区窗口(排除自身;最小化成恢复按钮的分区不可接收)。
     /// WindowFromPoint 尊重真实 z 序与分层窗口透明像素——覆盖在目标分区上的应用
-    /// 窗口会自然挡住投放。</summary>
+    /// 窗口会自然挡住投放。
+    ///
+    /// ponytail 2026-11-14(审计修订): 拖动时每来一个 MouseMove 都要调一次 Win32
+    /// `WindowFromPoint` 再遍历全部分区+取 HWND（高刷新率鼠标 500~1000Hz 时是纯浪费）。
+    /// 这里 30ms 节流：30ms 内复用上次结果（投放目标判定延迟 ≤30ms，人眼无感）。</summary>
     ZoneWindow? FindZoneWindowAt(Point screenPt)
     {
+        const long throttleMs = 30;
+        long now = Environment.TickCount64;
+        if (now - _extTargetCheckMs < throttleMs) return _extTargetCached;
+        _extTargetCheckMs = now;
+
+        ZoneWindow? result = null;
         var hwnd = NativeMethods.WindowFromPoint(new NativeMethods.POINT
         {
             x = (int)Math.Round(screenPt.X),
             y = (int)Math.Round(screenPt.Y)
         });
         if (hwnd != IntPtr.Zero) hwnd = NativeMethods.GetAncestor(hwnd, NativeMethods.GA_ROOT);
-        if (hwnd == IntPtr.Zero) return null;
-        foreach (var z in _mgr.Zones)
+        if (hwnd != IntPtr.Zero)
         {
-            if (z.Id == _zone.Id) continue;
-            if (_mgr.GetZoneWindow(z.Id) is not ZoneWindow zw || !zw.AcceptsExternalDrop) continue;
-            if (new WindowInteropHelper(zw).Handle == hwnd) return zw;
+            foreach (var z in _mgr.Zones)
+            {
+                if (z.Id == _zone.Id) continue;
+                if (_mgr.GetZoneWindow(z.Id) is not ZoneWindow zw || !zw.AcceptsExternalDrop) continue;
+                if (new WindowInteropHelper(zw).Handle == hwnd) { result = zw; break; }
+            }
         }
-        return null;
+        _extTargetCached = result;
+        return result;
     }
 
     /// <summary>跨分区移动提交:把拖拽图标从其所属分区(合并时可能是子分区)移除,
@@ -4387,7 +4543,7 @@ public partial class ZoneWindow : Window
         }
     }
 
-    static bool IsWithinZoneChrome(object s)
+    static bool IsWithinZoneChrome(object? s)
     {
         var c = s as DependencyObject;
         while (c != null)
@@ -5116,8 +5272,8 @@ public partial class ZoneWindow : Window
     public void ApplyStyle()
     {
         var s = ResolveStyle();
-        // Acrylic
-        ApplyAcrylic(s);
+        // Acrylic（ponytail 2026-11-14: 玻璃输入没变就跳过整套 Win32/DWM 重设，见 ApplyAcrylicIfNeeded）
+        ApplyAcrylicIfNeeded(s);
 
         // Borders + corners
         try { ZoneBorder.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(s.BorderColor)!); } catch { }
@@ -5252,7 +5408,7 @@ public partial class ZoneWindow : Window
 
         // Sub-zone tabs reuse the resolved title text color (merged groups share one
         // title-bar band); items use the resolved body content color.
-        RebuildSubZoneTabs(s.TitleTextColor);
+        RebuildSubZoneTabsIfChanged(s.TitleTextColor);
         ApplyItemTextColor(s.TextColor);
 
         // 坞内长条：无论 ApplyStyle 在 Show()/刷新时跑几次，都保持“一格高的胶囊”外观。
@@ -5271,13 +5427,105 @@ public partial class ZoneWindow : Window
             MainContent.CornerRadius = new CornerRadius(stripRadius);
             ZoneBorder.CornerRadius = new CornerRadius(stripRadius);
             TitleBarBg.Visibility = Visibility.Collapsed;
-            BottomBarBg.Visibility = Visibility.Collapsed;
+            BottomBarBg!.Visibility = Visibility.Collapsed;
             ControlPoint.Visibility = Visibility.Collapsed;
             ItemsListHost.Visibility = Visibility.Collapsed;
             ItemsHost.Visibility = Visibility.Visible;
-            SubZoneTabsRow.Visibility = _zone.MergedGroupMembership.SubZoneIds.Count > 0
+            SubZoneTabsRow!.Visibility = _zone.MergedGroupMembership.SubZoneIds.Count > 0
                 ? Visibility.Visible : Visibility.Collapsed;
         }
+    }
+
+    /// <summary>
+    /// 玻璃/背板相关输入没变就跳过 <see cref="ApplyAcrylic"/>。
+    ///
+    /// ponytail 2026-11-14(审计修订 P1-1): ApplyAcrylic 每次可能是
+    /// `SetWindowCompositionAttribute` / DWM 圆角 / 壁纸背板重挂 —— 而拖「填充/边框/文字颜色」
+    /// 这类无关滑块时这些输入一个都没变，却每帧重设一遍。签名里包含窗口句柄是否就绪
+    /// （构造期 ApplyStyle 早于 HWND，那时设置会失败/无效，必须允许 show 后重来一次）。
+    /// </summary>
+    void ApplyAcrylicIfNeeded(ResolvedZoneStyle s)
+    {
+        string sig = AcrylicSignatureOf(s);
+        if (sig == _acrylicSignature) return;
+        _acrylicSignature = sig;
+        ApplyAcrylic(s);
+    }
+
+    string AcrylicSignatureOf(ResolvedZoneStyle s)
+    {
+        // 注意：只放"会改变 ApplyAcrylic 行为"的输入；任何新增外观字段都要同步加进来，
+        // 否则改它时玻璃不会重绘（宁可在签名里多放，也不要漏）。
+        var sb = new System.Text.StringBuilder(96);
+        sb.Append(IsDock).Append('|')
+          .Append(_zone.TileMode).Append('|')
+          .Append(_zone.EnableLiquidGlass).Append('|')
+          .Append(_zone.GlassMaterial ?? "").Append('|')
+          .Append(_zone.GlassBlurAmount).Append('|')
+          .Append(_zone.GlassTintOpacity).Append('|')
+          .Append(_zone.GlassTintLuminosity).Append('|')
+          .Append(_zone.GlassColorMode ?? "").Append('|')
+          .Append(s.FillColor ?? "").Append('|')
+          .Append(s.TitleBarFillColor ?? "").Append('|')
+          .Append(s.TitleBarFillIndependent).Append('|')
+          .Append(_hover?.IsExpanded ?? false).Append('|')
+          .Append(_bayActive).Append('|')
+          .Append(_bayStrip).Append('|')
+          .Append(AcrylicHelper.ResolveSelfDrawn()).Append('|')
+          .Append(PresentationSource.FromVisual(this) != null);
+        return sb.ToString();
+    }
+
+    /// <summary>子分区页签（Border/StackPanel/TextBlock + 事件）只在成员/顺序/选中项/标题色
+    /// 变化时重建。ponytail 2026-11-14(审计修订 P1-1): 原来每次 ApplyStyle 无条件重建，
+    /// 拖一次滑块会 new 出上百个控件。</summary>
+    void RebuildSubZoneTabsIfChanged(string? titleTextColor)
+    {
+        string sig = SubTabsSignatureOf(titleTextColor);
+        if (sig == _subTabsSignature) return;
+        RebuildSubZoneTabs(titleTextColor);
+        _subTabsSignature = SubTabsSignatureOf(titleTextColor);
+    }
+
+    string SubTabsSignatureOf(string? titleTextColor)
+    {
+        var sb = new System.Text.StringBuilder(96);
+        sb.Append(titleTextColor ?? "").Append('|')
+          .Append(_vm.SelectedSubZoneId?.ToString("N") ?? "").Append('|');
+        // 与 RebuildSubZoneTabs 内部的规范化保持一致：TabOrder 不完整时按 master-first 重建。
+        var order = _zone.MergedGroupMembership.TabOrder;
+        var subIds = _zone.MergedGroupMembership.SubZoneIds;
+        bool needNormalize = order.Count != subIds.Count + 1
+                             || !order.Contains(_zone.Id)
+                             || subIds.Any(id => !order.Contains(id));
+        if (needNormalize)
+        {
+            sb.Append("N:").Append(_zone.Id.ToString("N"));
+            foreach (var id in subIds) sb.Append(',').Append(id.ToString("N"));
+        }
+        else
+        {
+            foreach (var id in order) sb.Append(id.ToString("N")).Append(',');
+        }
+        sb.Append('|');
+        // 名字 / 图标字符也可能变（改名、换图标），一并纳入签名
+        if (needNormalize)
+        {
+            AppendTabLabel(sb, _zone);
+            foreach (var id in subIds) AppendTabLabel(sb, _mgr.Zones.FirstOrDefault(x => x.Id == id));
+        }
+        else
+        {
+            foreach (var id in order)
+                AppendTabLabel(sb, id == _zone.Id ? _zone : _mgr.Zones.FirstOrDefault(x => x.Id == id));
+        }
+        return sb.ToString();
+    }
+
+    static void AppendTabLabel(System.Text.StringBuilder sb, Zone? z)
+    {
+        if (z == null) { sb.Append("<null>,"); return; }
+        sb.Append(z.Name).Append('/').Append(z.IconChar ?? "").Append(',');
     }
 
     /// <summary>遍历 ItemsHost / ItemsListHost 内的容器，根据 hide 切换名称 TextBlock
@@ -5287,6 +5535,11 @@ public partial class ZoneWindow : Window
     /// StatusChanged / SetGridView 会在容器就绪后补一次。</summary>
     void ApplyHideAppName(bool hide)
     {
+        // ponytail 2026-11-14(审计修订 P1-1): 每次 ApplyStyle 都全量走一遍容器 + 可视化树
+        // 搜索（拖滑块时每帧几十遍）。参数没变且容器没重建过（重建时 StatusChanged 会把
+        // 标记置空）就直接跳过；语义完全等价。
+        if (_hideAppNameApplied == hide) return;
+        _hideAppNameApplied = hide;
         var target = hide ? Visibility.Collapsed : Visibility.Visible;
         ApplyHideAppNameTo(ItemsHost, target);
         ApplyHideAppNameTo(ItemsListHost, target);
@@ -5494,6 +5747,27 @@ public partial class ZoneWindow : Window
         Helpers.IconGlyph.Apply(TitleIconChar, TitleIconPath, icon, titleBrush, 12);
         Helpers.IconGlyph.Apply(RestoreIconChar, RestoreIconPath, icon, titleBrush, 18);
     }
+    /// <summary>快捷栏尺寸变化后的「整批重建倒影/玻璃」合并到本帧一次。
+    /// ponytail 2026-11-14(审计修订 views 报告): 原来每次 SizeChanged 都同步跑
+    /// RefreshDockReflection（逐条目找容器 + 摘/挂镜像子元素，次级分区还要
+    /// RenderTargetBitmap 快照）、RefreshDockStartReflection、RefreshDockGlass、
+    /// UpdateRoundedCorners —— 快捷栏做尺寸动画/布局抖动时一帧能来好几次。
+    /// 现在合并成一次（DispatcherPriority.Render，布局之前），行为与"最后一次尺寸生效后重算"一致。</summary>
+    void ScheduleDockSizeEffects()
+    {
+        if (_dockSizeEffectsPending || _closed) return;
+        _dockSizeEffectsPending = true;
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            _dockSizeEffectsPending = false;
+            if (_closed || !IsLoaded) return;
+            RefreshDockReflection();
+            RefreshDockStartReflection();
+            RefreshDockGlass();          // 胶囊高度/位置变了 → 壁纸裁剪要重铺
+            NativeMethods.UpdateRoundedCorners(this, (int)_zone.CornerRadius);
+        }), System.Windows.Threading.DispatcherPriority.Render);
+    }
+
     void OnSize(object s, SizeChangedEventArgs e)
     {
         if (_bayActive) return;
@@ -5509,10 +5783,7 @@ public partial class ZoneWindow : Window
             }
             ScheduleSave();
             UpdateCanvasSize();
-            RefreshDockReflection();
-            RefreshDockStartReflection();
-            RefreshDockGlass();          // 胶囊高度/位置变了 → 壁纸裁剪要重铺
-            NativeMethods.UpdateRoundedCorners(this, (int)_zone.CornerRadius);
+            ScheduleDockSizeEffects();
             return;
         }
         _zone.Width = Width;
@@ -5605,6 +5876,9 @@ public partial class ZoneWindow : Window
             NativeMethods.SetRoundedCorners(this, (int)_zone.CornerRadius);
         }
         ApplyAcrylic(s);
+        // ponytail 2026-11-14: 这里是绕过 ApplyAcrylicIfNeeded 的直接应用 —— 同步签名，
+        // 避免紧接着的 ApplyStyle 因为"签名没更新"白跑一遍整套 Win32/DWM 设置。
+        _acrylicSignature = AcrylicSignatureOf(s);
     }
 
     /// <summary>
@@ -5772,9 +6046,31 @@ public partial class ZoneWindow : Window
         }
         return null;
     }
-    static bool IsOnItem(object s) { var c = s as DependencyObject; while (c != null) { if (c is Grid g && g.DataContext is ZoneItemViewModel) return true; c = VisualTreeHelper.GetParent(c); } return false; }
+    static bool IsOnItem(object? s) { var c = s as DependencyObject; while (c != null) { if (c is Grid g && g.DataContext is ZoneItemViewModel) return true; c = VisualTreeHelper.GetParent(c); } return false; }
 
     public void RefreshZone(Zone zone)
+    {
+        // ponytail 2026-11-14(审计修订 P1-1): 属性面板每个滑块 ValueChanged 都会走到这里
+        // （ManagementWindow 的 Preview 回调），而旧实现是**同步**跑完整套 RefreshZone：
+        // ApplyStyle（Acrylic Win32 + 子分区页签重建 + 容器遍历）、RefreshFolderMapping
+        // （Directory.Exists）、ShowZone/ApplyHidden。拖一次滑块 = 几十遍。
+        // 现在只记录"要刷新哪个 zone"，同一帧内的多次请求合并成一次（DispatcherPriority.Render
+        // 在布局之前跑，视觉上仍然是逐帧跟手的），行为与「每次同步刷新」一致，只是同一帧只做一次。
+        if (_closed) return;
+        _scheduledRefreshZone = zone;
+        ScheduleZoneRefresh();
+    }
+
+    /// <summary>把「刷新请求」合并到本帧一次。见 <see cref="RefreshZone"/>。</summary>
+    void ScheduleZoneRefresh()
+    {
+        if (_zoneRefreshPending || _closed) return;
+        _zoneRefreshPending = true;
+        Dispatcher.BeginInvoke(new Action(RunScheduledRefresh),
+            System.Windows.Threading.DispatcherPriority.Render);
+    }
+
+    void RefreshZoneCore(Zone zone)
     {
         _zone = zone; // ← KEY FIX: update the reference
         // ponytail: skip _vm.RefreshZone (Items.Clear/Add). Items don't actually change
@@ -7388,10 +7684,7 @@ public partial class ZoneWindow : Window
 
     // ── 开始按钮的倒影 ────────────────────────────────────────────────────
 
-    /// <summary>开始按钮倒影的重试计数（布局/快照没好时会延后重来）。</summary>
-    int _dockStartReflRetry;
-
-    void RefreshDockStartReflection() { _dockStartReflRetry = 0; RefreshDockStartReflection(0); }
+    void RefreshDockStartReflection() => RefreshDockStartReflection(0);
 
     /// <param name="retry">内部用：字形还没排好版（拍出来是空图）时延后重试，最多 5 次。</param>
     void RefreshDockStartReflection(int retry)
@@ -7507,6 +7800,7 @@ public partial class ZoneWindow : Window
         {
             _dockRunTimer?.Stop();
             foreach (var vm in _vm.Items) vm.RunState = DockRunState.None;
+            _dockRunBarsDirty = true;   // ponytail 2026-11-14: 强制把短线一次性归零
             RefreshDockRunBars(animate: false);
             return;
         }
@@ -7514,6 +7808,13 @@ public partial class ZoneWindow : Window
         {
             _dockRunTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(700) };
             _dockRunTimer.Tick += (_, _) => RefreshDockRunStates();
+        }
+        if (!IsVisible)
+        {
+            // ponytail 2026-11-14(P0-1): 隐藏/最小化的快捷栏不轮询（省 EnumWindows + COM）；
+            // 重新显示时 IsVisibleChanged 会再调到这里把表起回来。
+            _dockRunTimer.Stop();
+            return;
         }
         if (!_dockRunTimer.IsEnabled) _dockRunTimer.Start();
         // 属性面板拖滑块时 ApplyDockGeometry 会连发；枚举窗口别每帧都跑一遍，
@@ -7527,6 +7828,9 @@ public partial class ZoneWindow : Window
     void RefreshDockRunStates()
     {
         if (!IsDock || !_zone.DockRunIndicator) return;
+        // ponytail 2026-11-14(P0-1): 窗口不可见时不枚举窗口、不碰 COM。重新显示时
+        // IsVisibleChanged / ShowZone 会经 EnsureDockRunPolling 立刻补一次状态。
+        if (!IsVisible) return;
         _dockRunLastPoll = DateTime.UtcNow;
         System.Collections.Generic.Dictionary<string, AppActivityService.RunningApp> snap;
         try { snap = AppActivityService.Snapshot(); }
@@ -7568,7 +7872,7 @@ public partial class ZoneWindow : Window
         }
 
         // ② 文件夹 / 压缩包：资源管理器在浏览它（含子目录）
-        if (AppActivityService.IsBrowsableFolder(vm.TargetPath))
+        if (IsBrowsableCached(vm.TargetPath))
         {
             var hwnd = AppActivityService.FolderOpenWindow(vm.TargetPath);
             if (hwnd == IntPtr.Zero) return DockRunState.None;
@@ -7583,6 +7887,18 @@ public partial class ZoneWindow : Window
         return DockRunState.None;
     }
 
+    /// <summary>「这个条目能不能当文件夹浏览」按路径缓存（条目集合变化时整体失效）。
+    /// ponytail 2026-11-14(审计修订 P0-1): 原来每 700ms 对每个条目做一次
+    /// Directory.Exists / File.Exists（UI 线程同步 IO）。</summary>
+    bool IsBrowsableCached(string? path)
+    {
+        string key = path ?? "";
+        if (_browsableCache.TryGetValue(key, out bool cached)) return cached;
+        bool value = AppActivityService.IsBrowsableFolder(path);
+        _browsableCache[key] = value;
+        return value;
+    }
+
     /// <summary>把每条短线的宽度/颜色推到当前状态（动画开则过渡，关则瞬切）。</summary>
     void RefreshDockRunBars(bool animate)
     {
@@ -7591,16 +7907,25 @@ public partial class ZoneWindow : Window
         double idleW = Math.Max(6, Math.Round(cell * 0.18));
         double activeW = Math.Max(idleW + 4, Math.Round(cell * 0.34));
         double durMs = Math.Clamp(_zone.DockAnimMs, 80, 300) + 40;
-        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+        CubicEase? ease = null;
         var accent = DockRunActiveColor();
+        bool dirty = _dockRunBarsDirty;
+        if (dirty) _dockRunAppliedState.Clear();
 
         for (int i = 0; i < ItemsHost.Items.Count; i++)
         {
+            var vm = ItemsHost.Items[i] as ZoneItemViewModel;
+            var state = vm?.RunState ?? DockRunState.None;
+            // ponytail 2026-11-14(审计修订 P0-1/P1-8): 状态没变就跳过 —— 既不做
+            // FindVisualChild 全子树搜索，也不重新 BeginAnimation。旧实现每 700ms
+            // 对每个条目新建 2 个动画 + 缓动对象并重启 260ms 动画，动画永不进入稳态、持续重绘。
+            if (!dirty && vm != null
+                && _dockRunAppliedState.TryGetValue(vm.Id, out var prev) && prev == state)
+                continue;
+
             if (ItemsHost.ItemContainerGenerator.ContainerFromIndex(i) is not DependencyObject container) continue;
             var bar = FindVisualChild<Border>(container, b => b.Name == "RunBar");
             if (bar == null) continue;
-            var vm = ItemsHost.Items[i] as ZoneItemViewModel;
-            var state = vm?.RunState ?? DockRunState.None;
             double targetW = state switch
             {
                 DockRunState.Foreground => activeW,
@@ -7612,6 +7937,7 @@ public partial class ZoneWindow : Window
 
             if (animate)
             {
+                ease ??= new CubicEase { EasingMode = EasingMode.EaseOut };
                 bar.BeginAnimation(FrameworkElement.WidthProperty,
                     new DoubleAnimation(targetW, TimeSpan.FromMilliseconds(durMs)) { EasingFunction = ease });
                 brush.BeginAnimation(SolidColorBrush.ColorProperty,
@@ -7624,7 +7950,9 @@ public partial class ZoneWindow : Window
                 bar.Width = targetW;
                 brush.Color = targetColor;
             }
+            if (vm != null) _dockRunAppliedState[vm.Id] = state;
         }
+        _dockRunBarsDirty = false;
     }
 
     /// <summary>每条短线用自己的可写画刷（模板里的画刷会被冻住，动画写不进去）。</summary>

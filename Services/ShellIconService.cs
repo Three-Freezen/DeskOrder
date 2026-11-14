@@ -248,29 +248,48 @@ public class ShellIconService
             if (w < 16 || h < 16) return src;
 
             int stride = w * 4;
-            var px = new byte[stride * h];
-            bmp.CopyPixels(px, stride, 0);
-
-            int minX = w, minY = h, maxX = -1, maxY = -1;
-            for (int y = 0; y < h; y++)
+            // ponytail 2026-11-14(性能 P1-4): 256×256 图标每张都 new 256KB 再逐像素全扫，
+            // 300 个图标 = 77MB 分配 + 2000 万次循环，全堵在 UI 线程的绑定求值里。
+            // 现在: ① 扫描缓冲用 ArrayPool 复用（逐像素读取不可避免，但不再进 GC）；
+            //       ② 大图标按 step 抽样找 art 边界，循环量最多降 4 倍；边界按步长向外扩，
+            //          保证 crop 只会比真实 art 略大、不会裁掉边缘（与旧行为视觉等价）。
+            int step = w >= 128 && h >= 128 ? 2 : 1;
+            var px = System.Buffers.ArrayPool<byte>.Shared.Rent(stride * h);
+            try
             {
-                int row = y * stride;
-                for (int x = 0; x < w; x++)
+                bmp.CopyPixels(px, stride, 0);
+
+                int minX = w, minY = h, maxX = -1, maxY = -1;
+                for (int y = 0; y < h; y += step)
                 {
-                    if (px[row + x * 4 + 3] >= CropAlphaThreshold)
+                    int row = y * stride;
+                    for (int x = 0; x < w; x += step)
                     {
+                        if (px[row + x * 4 + 3] < CropAlphaThreshold) continue;
                         if (x < minX) minX = x;
                         if (x > maxX) maxX = x;
                         if (y < minY) minY = y;
                         if (y > maxY) maxY = y;
                     }
                 }
-            }
-            if (maxX < minX || maxY < minY) return src; // no solid art — return as-is
+                if (maxX < minX || maxY < minY) return src; // no solid art — return as-is
+                if (step > 1)
+                {
+                    // 抽样点代表 [x, x+step-1] 区间：向外扩一格，绝不把 art 边缘切掉。
+                    minX = Math.Max(0, minX - (step - 1));
+                    minY = Math.Max(0, minY - (step - 1));
+                    maxX = Math.Min(w - 1, maxX + (step - 1));
+                    maxY = Math.Min(h - 1, maxY + (step - 1));
+                }
 
-            int cw = maxX - minX + 1, ch = maxY - minY + 1;
-            if (cw >= w * 0.85 && ch >= h * 0.85) return src; // art fills at least 85% of the canvas
-            return new CroppedBitmap(bmp, new System.Windows.Int32Rect(minX, minY, cw, ch));
+                int cw = maxX - minX + 1, ch = maxY - minY + 1;
+                if (cw >= w * 0.85 && ch >= h * 0.85) return src; // art fills at least 85% of the canvas
+                return new CroppedBitmap(bmp, new System.Windows.Int32Rect(minX, minY, cw, ch));
+            }
+            finally
+            {
+                System.Buffers.ArrayPool<byte>.Shared.Return(px);
+            }
         }
         catch { return src; }
     }
@@ -440,11 +459,16 @@ public class ShellIconService
 
         try
         {
-            using var icon = NativeMethods.ExtractIcon(path, large);
-            if (icon == null) return null;
-
-            return System.Windows.Interop.Imaging.CreateBitmapSourceFromHIcon(
-                icon.Handle, System.Windows.Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+            // ponytail 2026-11-14: ExtractIconHandle 返回裸 HICON，转成 BitmapSource 后必须 DestroyIcon。
+            // 变量名不能叫 hIcon —— 外层 jumbo 分支已在该方法作用域声明了同名局部（CS0136）。
+            var legacyIcon = NativeMethods.ExtractIconHandle(path, large);
+            if (legacyIcon == IntPtr.Zero) return null;
+            try
+            {
+                return System.Windows.Interop.Imaging.CreateBitmapSourceFromHIcon(
+                    legacyIcon, System.Windows.Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+            }
+            finally { NativeMethods.DestroyIcon(legacyIcon); }
         }
         catch
         {

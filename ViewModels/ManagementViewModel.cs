@@ -36,13 +36,6 @@ public class ManagementViewModel : INotifyPropertyChanged
         set { _startMinimized = value; OnPropertyChanged(); SaveSettings(); }
     }
 
-    private string _theme = "dark";
-    public string Theme
-    {
-        get => _theme;
-        set { _theme = value; OnPropertyChanged(); }
-    }
-
     private string _language = "zh-CN";
     public string Language
     {
@@ -99,7 +92,6 @@ public class ManagementViewModel : INotifyPropertyChanged
         _startWithWindows = config.StartWithWindows;
         _startMinimized = config.StartMinimized;
         _language = config.Language ?? "zh-CN";
-        _theme = config.Theme ?? "dark";
 
         // Zone
         CreateZoneCommand = new RelayCommand(_ => _zoneManager.CreateZone());

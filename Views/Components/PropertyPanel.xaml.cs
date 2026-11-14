@@ -143,29 +143,50 @@ public partial class PropertyPanel : UserControl
     public PropertyPanel()
     {
         InitializeComponent();
-        Loaded += (_, _) => CachedOwner = Window.GetWindow(this);
+        // ponytail 2026-11-14(审计修复 P2-14): 订阅从「构造函数一次」改成 Loaded/Unloaded
+        // 成对管理 —— 控件被卸载后重新挂载时能自动恢复;未加载就被丢弃的实例也不会留下
+        // 单例事件强引用。退订改用 Subscribe 时缓存的服务引用,不再依赖 Application.Current
+        // (应用退出阶段 Application.Current 可能已为 null,旧写法会漏退)。
+        Loaded += (_, _) =>
+        {
+            CachedOwner = Window.GetWindow(this);
+            SubscribeModelEvents();
+            // ponytail 2026-11-14(媒体消费者计数): 重挂载时目标可能还是播放器,
+            // 补一次 Acquire(幂等;正常首次加载时字段树构建已 Acquire 过)。
+            if (Target is DesktopMediaPlayer) AcquireMediaConsumer();
+            FlushPendingRebuild();
+        };
         Unloaded += (_, _) =>
         {
-            _loc.LanguageChanged -= OnLanguageChanged;
-            ThemeService.Changed -= OnThemeChanged;
-            if (_zoneChangedHandler != null && Application.Current is App app2 && app2.ZoneManager is ZoneManager zm2)
-            {
-                zm2.ZonesChanged -= _zoneChangedHandler;
-                zm2.ZoneVisibilityChanged -= _zoneVisibilityChangedHandler;
-                zm2.LockChanged -= _zoneLockChangedHandler;
-            }
-            if (_notesChangedHandler != null && Application.Current is App app3 && app3.NotesService is NotesService ns)
-                ns.NotesChanged -= _notesChangedHandler;
-            if (_clocksChangedHandler != null && Application.Current is App app4 && app4.WidgetService is WidgetService ws)
-            {
-                ws.ClocksChanged -= _clocksChangedHandler;
-                ws.CalendarsChanged -= _clocksChangedHandler;
-            }
-            if (_panelChangedHandler != null && Application.Current is App appP2 && appP2.PanelService is PanelService ps2)
-                ps2.PanelEnabledChanged -= _panelChangedHandler;
+            // ponytail 2026-11-14(媒体消费者计数): 面板卸载/关闭时释放媒体消费者,
+            // 与 AcquireMediaConsumer 成对(否则 1s 轮询会在面板关掉后继续跑)。
+            ReleaseMediaConsumer();
+            UnsubscribeModelEvents();
         };
-        _loc.LanguageChanged += OnLanguageChanged;
-        ThemeService.Changed += OnThemeChanged;
+        // 面板在管理窗口里可能被收起(Visibility.Collapsed),主题/语言切换时先把重建
+        // 挂起,等它再次可见时补一次(审计修复 P2-13)。
+        IsVisibleChanged += (_, e) =>
+        {
+            if (e.NewValue is true) FlushPendingRebuild();
+        };
+    }
+
+    bool _modelEventsSubscribed;
+    bool _rebuildPending;
+    // ponytail 2026-11-14: 订阅时缓存的服务引用 —— 退订不再依赖 Application.Current。
+    ZoneManager? _zmRef;
+    NotesService? _notesRef;
+    WidgetService? _widgetsRef;
+    PanelService? _panelServiceRef;
+
+    void SubscribeModelEvents()
+    {
+        if (!_modelEventsSubscribed)
+        {
+            _modelEventsSubscribed = true;
+            _loc.LanguageChanged += OnLanguageChanged;
+            ThemeService.Changed += OnThemeChanged;
+        }
         // ponytail: folder-mapping sync — the zone window can toggle the mapping
         // (✕ button / + menu / navigation), and the panel's checkbox + path row
         // rebuild when the manager reports a change to the current target's state.
@@ -173,9 +194,10 @@ public partial class PropertyPanel : UserControl
         // 上做轻量实时刷新（只重建状态区控件，不碰字段树）。
         // 分区窗口自身的隐藏/锁定按钮只触发 ZoneVisibilityChanged / LockChanged
         // （不走 ZonesChanged），必须额外订阅才能让状态区开关实时跟随。
-        if (Application.Current is App app && app.ZoneManager is ZoneManager zm)
+        if (_zmRef == null && Application.Current is App app && app.ZoneManager is ZoneManager zm)
         {
-            _zoneChangedHandler = () =>
+            _zmRef = zm;
+            _zoneChangedHandler ??= () =>
             {
                 SyncFolderMappingStateFromManager();
                 RefreshStatusArea();
@@ -183,41 +205,104 @@ public partial class PropertyPanel : UserControl
                 // (改完立即落盘 + 抛 ZonesChanged),面板这边必须跟上。
                 SyncNameFromModel();
             };
-            _zoneVisibilityChangedHandler = (_, _) => RefreshStatusArea();
-            _zoneLockChangedHandler = (_, _) => RefreshStatusArea();
+            _zoneVisibilityChangedHandler ??= (_, _) => RefreshStatusArea();
+            _zoneLockChangedHandler ??= (_, _) => RefreshStatusArea();
             zm.ZonesChanged += _zoneChangedHandler;
             zm.ZoneVisibilityChanged += _zoneVisibilityChangedHandler;
             zm.LockChanged += _zoneLockChangedHandler;
         }
-        if (Application.Current is App appN && appN.NotesService is NotesService notesService)
+        if (_notesRef == null && Application.Current is App appN && appN.NotesService is NotesService notesService)
         {
-            _notesChangedHandler = () =>
+            _notesRef = notesService;
+            _notesChangedHandler ??= () =>
             {
                 RefreshStatusArea();
                 SyncNameFromModel();
             };
             notesService.NotesChanged += _notesChangedHandler;
         }
-        if (Application.Current is App appW && appW.WidgetService is WidgetService widgetService)
+        if (_widgetsRef == null && Application.Current is App appW && appW.WidgetService is WidgetService widgetService)
         {
-            _clocksChangedHandler = RefreshStatusArea;
+            _widgetsRef = widgetService;
+            _clocksChangedHandler ??= RefreshStatusArea;
             widgetService.ClocksChanged += _clocksChangedHandler;
             widgetService.CalendarsChanged += _clocksChangedHandler;
         }
         // 面板启用开关实时同步 — 面板经热键/托盘/自身"─"按钮开关时,PanelService
         // 发 PanelEnabledChanged,状态区的启用开关立即跟随(参考分区/便签等组件的
         // Changed 事件订阅模式)。
-        if (Application.Current is App appP && appP.PanelService is PanelService panelService)
+        if (_panelServiceRef == null && Application.Current is App appP && appP.PanelService is PanelService panelService)
         {
-            _panelChangedHandler = RefreshStatusArea;
+            _panelServiceRef = panelService;
+            _panelChangedHandler ??= RefreshStatusArea;
             panelService.PanelEnabledChanged += _panelChangedHandler;
         }
     }
 
-    void OnLanguageChanged(string _) => OnTargetChanged();
+    void UnsubscribeModelEvents()
+    {
+        if (_modelEventsSubscribed)
+        {
+            _modelEventsSubscribed = false;
+            _loc.LanguageChanged -= OnLanguageChanged;
+            ThemeService.Changed -= OnThemeChanged;
+        }
+        if (_zmRef != null)
+        {
+            if (_zoneChangedHandler != null) _zmRef.ZonesChanged -= _zoneChangedHandler;
+            if (_zoneVisibilityChangedHandler != null) _zmRef.ZoneVisibilityChanged -= _zoneVisibilityChangedHandler;
+            if (_zoneLockChangedHandler != null) _zmRef.LockChanged -= _zoneLockChangedHandler;
+            _zmRef = null;
+        }
+        if (_notesRef != null)
+        {
+            if (_notesChangedHandler != null) _notesRef.NotesChanged -= _notesChangedHandler;
+            _notesRef = null;
+        }
+        if (_widgetsRef != null)
+        {
+            if (_clocksChangedHandler != null)
+            {
+                _widgetsRef.ClocksChanged -= _clocksChangedHandler;
+                _widgetsRef.CalendarsChanged -= _clocksChangedHandler;
+            }
+            _widgetsRef = null;
+        }
+        if (_panelServiceRef != null)
+        {
+            if (_panelChangedHandler != null) _panelServiceRef.PanelEnabledChanged -= _panelChangedHandler;
+            _panelServiceRef = null;
+        }
+    }
+
+    /// <summary>主题/语言切换触发的重建 —— 面板不可见/未加载时挂起,避免对隐藏控件做
+    /// 整棵字段树重建;可见时由 Loaded/IsVisibleChanged 补一次。</summary>
+    void OnLanguageChanged(string _)
+    {
+        if (DeferRebuildIfHidden()) return;
+        OnTargetChanged();
+    }
 
     /// <summary>主题切换时重建字段树，重新解析自适应文字（chip 前景色）与主题 brush。</summary>
-    void OnThemeChanged(AppThemeMode _) => OnTargetChanged();
+    void OnThemeChanged(AppThemeMode _)
+    {
+        if (DeferRebuildIfHidden()) return;
+        OnTargetChanged();
+    }
+
+    bool DeferRebuildIfHidden()
+    {
+        if (IsLoaded && IsVisible) return false;
+        _rebuildPending = true;
+        return true;
+    }
+
+    void FlushPendingRebuild()
+    {
+        if (!_rebuildPending) return;
+        _rebuildPending = false;
+        OnTargetChanged();
+    }
 
     // ── Folder-mapping state sync (zone window ↔ style panel) ──
 
@@ -691,6 +776,13 @@ public partial class PropertyPanel : UserControl
     void OnTargetChanged()
     {
         if (FieldScroller == null) return; // pre-InitializeComponent guard
+        // ponytail 2026-11-14(审计修复 P2-13): 已经全量重建,之前挂起的重建请求作废。
+        _rebuildPending = false;
+
+        // ponytail 2026-11-14(媒体消费者计数): 目标不再是播放器 → 面板不再需要实时媒体
+        // 信息,立刻释放消费者(1s 轮询只在确实需要时保留)。切到播放器时由
+        // MakeFollowSessionRow.Rebuild() 里的 AcquireMediaConsumer() 重新获取。
+        if (Target is not DesktopMediaPlayer) ReleaseMediaConsumer();
 
         // ponytail 2026-10 (修老 BUG): 退掉「上一棵字段树」的 DP 订阅必须在这里做,
         // 不能放在 SetFieldRoot 里 —— 所有 Build*Fields 都是「先把行建好(行里注册订阅)、
@@ -984,6 +1076,26 @@ public partial class PropertyPanel : UserControl
     readonly List<(Border Chip, Func<bool> IsActive)> _statusChips = new();
     TextBlock? _statusHotkeyText;
     Func<string>? _statusHotkeyGetter;
+
+    // ponytail 2026-11-14(媒体消费者计数): 面板第一次需要媒体信息(构建播放器属性里的
+    // "跟随的应用"下拉)时 AcquireConsumer,面板 Unloaded/换离播放器目标时 Release ——
+    // 与 MediaPlayerWidget 的 Acquire/Release 配对,避免属性面板打开过一次后
+    // MediaSessionService 的 1s 轮询永远残留。_mediaConsumerAcquired 保证幂等,不重复计数。
+    bool _mediaConsumerAcquired;
+
+    void AcquireMediaConsumer()
+    {
+        if (_mediaConsumerAcquired) return;
+        _mediaConsumerAcquired = true;
+        try { MediaSessionService.Instance.AcquireConsumer(); } catch { }
+    }
+
+    void ReleaseMediaConsumer()
+    {
+        if (!_mediaConsumerAcquired) return;
+        _mediaConsumerAcquired = false;
+        try { MediaSessionService.Instance.ReleaseConsumer(); } catch { }
+    }
 
     void ApplyChipState(Border chip, bool active)
     {
@@ -3155,6 +3267,8 @@ public partial class PropertyPanel : UserControl
 
         // 面板可能是第一个碰到播放器的地方（没开过组件窗时服务还没接到 SMTC）——
         // 这里叫一下懒启动，列表里至少能尽快看到会话。
+        // ponytail 2026-11-14(媒体消费者计数): 用 AcquireConsumer 替代裸 EnsureStarted,
+        // 与 Unloaded / 换离播放器目标时的 ReleaseMediaConsumer 配对。
         IReadOnlyList<MediaSessionChoice> choices = Array.Empty<MediaSessionChoice>();
         bool suppress = false;   // 程序改 SelectedIndex 时不写模型
 
@@ -3162,7 +3276,7 @@ public partial class PropertyPanel : UserControl
         // 只在打开面板时读一次的话，用户必须"关掉设置界面再打开"才看得到新会话。
         void Rebuild()
         {
-            MediaSessionService.Instance.EnsureStarted();
+            AcquireMediaConsumer();
             var list = MediaSessionService.Instance.ListSessions();
             string current = media.FollowSession ?? "";
 

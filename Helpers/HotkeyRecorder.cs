@@ -109,10 +109,13 @@ public static class HotkeyRecorder
                 {
                     // Non-modifier key — capture combo
                     uint mods = pressedToMods();
+                    // ponytail 2026-11-14(审查 P2): StopRecording() 会把 _onComboCaptured/_onCancelled
+                    // 置空，旧写法先 Stop 再 `?.Invoke` 导致回调永远不触发。先取局部再停。
+                    var onCombo = _onComboCaptured;
                     Application.Current.Dispatcher.Invoke(() =>
                     {
                         StopRecording();
-                        _onComboCaptured?.Invoke(mods, vk);
+                        onCombo?.Invoke(mods, vk);
                     });
                     return (IntPtr)1; // swallow key
                 }
@@ -120,10 +123,11 @@ public static class HotkeyRecorder
                 // Escape cancels
                 if (vk == 0x1B)
                 {
+                    var onCancelled = _onCancelled;
                     Application.Current.Dispatcher.Invoke(() =>
                     {
                         StopRecording();
-                        _onCancelled?.Invoke();
+                        onCancelled?.Invoke();
                     });
                     return (IntPtr)1;
                 }

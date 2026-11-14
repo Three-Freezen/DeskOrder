@@ -102,35 +102,56 @@ public sealed class FileSyncService : IDisposable
             }
         }
 
-        // 移除不再需要的 watcher。
-        foreach (var dir in _watchers.Keys.Where(d => !needed.Contains(d)).ToList())
+        // ponytail 2026-11-14(审查 P1-7): _watchers 的读写在 UI 线程（本方法/Enabled）和
+        // ThreadPool 线程（FSW 的 Error 回调 → OnWatcherError）之间共享，之前只有后者加锁，
+        // 会撞 "Collection was modified"。这里统一在 _lock 内改集合，Dispose 放到锁外
+        // （Dispose 不回调本类，放锁外可缩短持锁时间）。
+        List<DirWatcher> toDispose = new();
+        lock (_lock)
         {
-            _watchers[dir].Dispose();
-            _watchers.Remove(dir);
+            // 移除不再需要的 watcher。
+            foreach (var dir in _watchers.Keys.Where(d => !needed.Contains(d)).ToList())
+            {
+                toDispose.Add(_watchers[dir]);
+                _watchers.Remove(dir);
+            }
+
+            // 创建缺失的 watcher。
+            foreach (var dir in needed)
+            {
+                if (_watchers.ContainsKey(dir)) continue;
+                if (!Directory.Exists(dir)) continue;
+                try
+                {
+                    _watchers[dir] = new DirWatcher(dir, OnFileEvent, OnWatcherError);
+                }
+                catch
+                {
+                    // 无法创建 watcher（权限不足等）→ 跳过该目录。
+                }
+            }
         }
 
-        // 创建缺失的 watcher。
-        foreach (var dir in needed)
+        foreach (var w in toDispose)
         {
-            if (_watchers.ContainsKey(dir)) continue;
-            if (!Directory.Exists(dir)) continue;
-            try
-            {
-                _watchers[dir] = new DirWatcher(dir, OnFileEvent, OnWatcherError);
-            }
-            catch
-            {
-                // 无法创建 watcher（权限不足等）→ 跳过该目录。
-            }
+            try { w.Dispose(); } catch { }
         }
     }
 
     /// <summary>释放所有 watcher。</summary>
     void ClearWatchers()
     {
-        foreach (var w in _watchers.Values) w.Dispose();
-        _watchers.Clear();
-        _dirtyDirs.Clear();
+        List<DirWatcher> toDispose;
+        lock (_lock)
+        {
+            toDispose = _watchers.Values.ToList();
+            _watchers.Clear();
+            _dirtyDirs.Clear();
+        }
+        foreach (var w in toDispose)
+        {
+            try { w.Dispose(); } catch { }
+        }
         _debounce.Stop();
     }
 

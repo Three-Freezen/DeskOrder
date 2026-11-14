@@ -263,13 +263,29 @@ public class PropertyWindowManager
         var snapTitle = PropertyWindowManager.TitleOf(target);
         var snap = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
         int ticks = 0;
-        snap.Tick += (_, _) =>
+        // ponytail 2026-11-14(审计修复 P2-12): 诊断 timer 必须随窗口关闭而停 ——
+        // 否则窗口 2s 内被关掉时它还会继续 tick(并在已关窗上访属性),同时把窗口多留 2s。
+        EventHandler? snapClosedHandler = null;
+        snapClosedHandler = (_, _) =>
+        {
+            snap.Stop();
+            snap.Tick -= TickSnap;
+            snapWin.Closed -= snapClosedHandler;
+        };
+        void TickSnap(object? s, EventArgs e)
         {
             ticks++;
             DzTrace.Log(
                 $"[PropWin] 快照{ticks}: '{snapTitle}' IsVisible={snapWin.IsVisible} Opacity={snapWin.Opacity:F2} Visibility={snapWin.Visibility} State={snapWin.WindowState} at ({snapWin.Left:F0},{snapWin.Top:F0}) {snapWin.ActualWidth:F0}x{snapWin.ActualHeight:F0}");
-            if (ticks >= 4) snap.Stop();
-        };
+            if (ticks >= 4)
+            {
+                snap.Stop();
+                snap.Tick -= TickSnap;
+                if (snapClosedHandler != null) snapWin.Closed -= snapClosedHandler;
+            }
+        }
+        snap.Tick += TickSnap;
+        snapWin.Closed += snapClosedHandler;
         snap.Start();
     }
 

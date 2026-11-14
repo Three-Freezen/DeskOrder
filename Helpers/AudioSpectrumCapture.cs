@@ -35,6 +35,14 @@ public static class AudioSpectrumCapture
     private static volatile float[] _bands = Array.Empty<float>();
     private static int _bandCount = 32;
 
+    /// <summary>持有该采集器的组件数（ponytail 2026-11-14，审查 P0-1）：此前只有 App 退出才停线程，
+    /// 播放器组件关闭后 WASAPI 环回采集 + FFT 仍永久运行。现在归零即停（下一次 EnsureStarted 可重启）。</summary>
+    private static int _refs;
+
+    /// <summary>采集线程代数（ponytail 2026-11-14）：Release 后立刻递增，让可能还在收尾的旧线程失效，
+    /// 避免「关闭后马上重开」时新旧两个采集线程同时跑。</summary>
+    private static volatile int _runToken;
+
     /// <summary>当前分频电平（0..1），长度 = <see cref="BandCount"/>。没数据时全 0。</summary>
     public static float[] Bands => _bands;
 
@@ -55,7 +63,8 @@ public static class AudioSpectrumCapture
         }
         if (_running) return;
         _running = true;
-        var thread = new Thread(Loop)
+        int token = ++_runToken;
+        var thread = new Thread(() => Loop(token))
         {
             IsBackground = true,
             Name = "AudioSpectrumCapture",
@@ -76,23 +85,43 @@ public static class AudioSpectrumCapture
 
     public static void Shutdown()
     {
+        Interlocked.Exchange(ref _refs, 0);
         _running = false;
+        _runToken++;
         _available = false;
         _thread = null;
     }
 
+    /// <summary>组件持有（成对调用 <see cref="Release"/>）；首个持有者由 EnsureStarted 启动线程。</summary>
+    public static void Acquire()
+    {
+        Interlocked.Increment(ref _refs);
+    }
+
+    /// <summary>组件释放；计数归零时停采集线程（后台线程在 Loop 里看到 _running=false 后自然退出）。</summary>
+    public static void Release()
+    {
+        if (Interlocked.Decrement(ref _refs) > 0) return;
+        Interlocked.Exchange(ref _refs, 0);
+        _running = false;
+        _runToken++;
+        _available = false;
+        _thread = null;
+        DzTrace.Log("[Spectrum] 无消费者，停止采集线程");
+    }
+
     // ── 采集线程 ──
 
-    private static void Loop()
+    private static void Loop(int token)
     {
         bool comReady = CoInitializeEx(IntPtr.Zero, 0 /*COINIT_MULTITHREADED*/) >= 0;
         try
         {
-            while (_running)
+            while (_running && token == _runToken)
             {
                 try
                 {
-                    CaptureOnce();
+                    CaptureOnce(token);
                 }
                 catch (Exception ex)
                 {
@@ -112,12 +141,13 @@ public static class AudioSpectrumCapture
     }
 
     /// <summary>打开一次环回流并一直读到出错为止（设备切换 / 独占会抛，由外层重建）。</summary>
-    private static void CaptureOnce()
+    private static void CaptureOnce(int token)
     {
         IMMDeviceEnumerator? enumerator = null;
         IMMDevice? device = null;
         object? clientObj = null;
         IAudioClient? client = null;
+        IAudioCaptureClient? capture = null;
         IntPtr formatPtr = IntPtr.Zero;
         try
         {
@@ -174,7 +204,9 @@ public static class AudioSpectrumCapture
                 Thread.Sleep(1000);
                 return;
             }
-            var capture = (IAudioCaptureClient)Marshal.GetObjectForIUnknown(capturePtr);
+            // ponytail 2026-11-14(审查 P0-4): GetObjectForIUnknown 增加的引用归 RCW 所有，
+            // 必须在 finally 里 ReleaseComObject；旧实现让它在每次设备切换/重连时漏一个 COM 引用。
+            capture = (IAudioCaptureClient)Marshal.GetObjectForIUnknown(capturePtr);
             Marshal.Release(capturePtr);
 
             var bands = BuildBands(_bandCount, fmt.nSamplesPerSec);
@@ -188,7 +220,7 @@ public static class AudioSpectrumCapture
             }
             _available = true;
 
-            while (_running && _bandCount == bandCountAtStart)
+            while (_running && token == _runToken && _bandCount == bandCountAtStart)
             {
                 bool got = false;
                 while (capture.GetNextPacketSize(out uint packetFrames) == 0 && packetFrames > 0)
@@ -217,11 +249,14 @@ public static class AudioSpectrumCapture
         }
         finally
         {
-            if (client != null) { try { Marshal.ReleaseComObject(client); } catch { } }
+            // ponytail 2026-11-14(审查 P0-4): ① 补上 capture 的释放；② client 与 clientObj 是同一个
+            // RCW 的两个托管引用（cast 不增加 RCW 引用计数），之前各 Release 一次是双重释放
+            // （第二次会被 catch 吞掉，但引用计数语义已经错了）。只释放 clientObj 即可。
+            if (capture != null) { try { Marshal.ReleaseComObject(capture); } catch { } }
             if (clientObj != null) { try { Marshal.ReleaseComObject(clientObj); } catch { } }
             if (device != null) { try { Marshal.ReleaseComObject(device); } catch { } }
             // 枚举器是 CoreAudioInterop 里共享的那一份，不释放（会打断别的模块）。
-            if (formatPtr != IntPtr.Zero) Marshal.FreeCoTaskMem(formatPtr);
+            if (formatPtr != IntPtr.Zero) { try { Marshal.FreeCoTaskMem(formatPtr); } catch { } }
         }
     }
 

@@ -31,7 +31,8 @@ public partial class CalendarPage : UserControl
     // ponytail: live row collection bound to ListHost — drag reorder moves rows
     // through this OC (mirroring PropertyTabStrip's Tabs OC) so the ItemsControl
     // shifts live while the model collection moves in parallel for persistence.
-    readonly ObservableCollection<EditableListRow> _rows = new();
+    // ponytail 2026-11-14(性能审计): 批量替换行集合,只发一次 Reset。
+    readonly BulkObservableCollection<EditableListRow> _rows = new();
 
     public CalendarPage(ManagementWindow main, ManagementViewModel vm, WidgetService? widgetService)
     {
@@ -63,8 +64,7 @@ public partial class CalendarPage : UserControl
         var cals = _widgetService.Calendars;
         CountLabel.Text = _loc.Get("CalendarPage.ItemCount", cals.Count);
         // 拖动排序即列表顺序：不再重排，Rows 直接镜像 Calendars 的持久化顺序。
-        _rows.Clear();
-        foreach (var c in cals) _rows.Add(BuildRow(c));
+        _rows.ReplaceAll(cals.Select(BuildRow));
         EmptyHint.Visibility = cals.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         SetSelection(ListHost, _selected);
     }

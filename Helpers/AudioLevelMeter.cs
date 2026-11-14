@@ -25,15 +25,43 @@ public static class AudioLevelMeter
     private static volatile bool _running;
     private static volatile float _level;
 
+    /// <summary>采样线程代数：Release 后递增，让可能还在收尾的旧线程立即失效
+    /// （避免「关闭后马上重开」时新旧两个 16ms 采样线程同时跑）。</summary>
+    private static volatile int _runToken;
+
+    /// <summary>持有该服务的组件数（ponytail 2026-11-14，审查 P0-1）：此前只有 App 退出才停线程，
+    /// 播放器组件全部关闭后仍永久 16ms 采样。现在由 MediaPlayerWidget 在窗口关闭时 Release，
+    /// 归零即停。</summary>
+    private static int _refs;
+
     /// <summary>最近一次峰值电平，0..1。没启动 / 采不到时是 0。</summary>
     public static float Level => _level;
+
+    /// <summary>组件持有（成对调用 <see cref="Release"/>）；首个持有者启动线程。</summary>
+    public static void Acquire()
+    {
+        Interlocked.Increment(ref _refs);
+        EnsureStarted();
+    }
+
+    /// <summary>组件释放；计数归零时停 16ms 采样线程（后台线程自然退出，不 Join）。</summary>
+    public static void Release()
+    {
+        if (Interlocked.Decrement(ref _refs) > 0) return;
+        Interlocked.Exchange(ref _refs, 0);
+        _running = false;
+        _runToken++;
+        _thread = null;
+        DzTrace.Log("[AudioLevelMeter] 无消费者，停止采样线程");
+    }
 
     /// <summary>幂等启动。</summary>
     public static void EnsureStarted()
     {
         if (_running) return;
         _running = true;
-        var thread = new Thread(Loop)
+        int token = ++_runToken;
+        var thread = new Thread(() => Loop(token))
         {
             IsBackground = true,
             Name = "AudioLevelMeter",
@@ -52,11 +80,13 @@ public static class AudioLevelMeter
     /// <summary>进程退出时停采样（不调也不会阻塞退出：线程是后台线程）。</summary>
     public static void Shutdown()
     {
+        Interlocked.Exchange(ref _refs, 0);
         _running = false;
+        _runToken++;
         _thread = null;
     }
 
-    private static void Loop()
+    private static void Loop(int token)
     {
         // 后台线程自己初始化 COM（MTA），避免依赖线程池的隐式初始化
         bool comReady = CoInitializeEx(IntPtr.Zero, CoInitMultithreaded) >= 0;
@@ -66,7 +96,7 @@ public static class AudioLevelMeter
 
         try
         {
-            while (_running)
+            while (_running && token == _runToken)
             {
                 long now = Environment.TickCount64;
                 if (meter == null || now - lastAcquire > DeviceRefreshMs)

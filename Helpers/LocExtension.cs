@@ -48,55 +48,79 @@ public class LocExtension : MarkupExtension
         var targetProperty = valueService?.TargetProperty as DependencyProperty;
 
         if (targetObject != null && targetProperty != null)
-        {
-            // Per-instance handler — closes over Key, targetObject, targetProperty.
-            // Fires on every LanguageChanged to push the new value to the target.
-            // The handler is the only strong reference to the LocExtension closure,
-            // so when the target's Unloaded fires we unsubscribe to avoid leaking
-            // handlers every time a window is closed and reopened.
-            Action<string> handler = _ => Refresh(targetObject, targetProperty);
-            loc.LanguageChanged += handler;
-
-            // Unloaded only exists on FrameworkElement; skip the leak guard for raw
-            // DOs (Freezables, etc.) — those live for the duration of the binding
-            // expression so the static event reference is reclaimed with the binding.
-            if (targetObject is FrameworkElement fe)
-            {
-                var unsub = new LocUnsubscriber(fe, handler);
-                fe.Unloaded += unsub.OnUnloaded;
-            }
-        }
+            RegisterTarget(loc, targetObject, targetProperty, Key);
 
         return loc[Key] ?? "";
     }
 
-    void Refresh(DependencyObject target, DependencyProperty property)
+    // ── 语言变化重刷（ponytail 2026-11-14，审查 P1-11）──
+    // 旧实现每个 {loc:Loc} 都直接订阅静态 LanguageChanged，退订只靠 FrameworkElement.Unloaded：
+    // 非 FE 目标永远不退订、Popup/ContextMenu/模板内容可能不触发 Unloaded → 静态事件把已关闭的
+    // 局部 UI 树钉住。现在只订阅一次语言事件，内部维护**弱引用**目标表，语言变化时逐个 SetValue
+    // 并顺手清掉已回收目标 —— 不再强引用任何元素。
+    sealed class LocalizedTarget
     {
-        var loc = LocalizationService.Instance;
-        var value = loc[Key] ?? "";
-
-        if (Arg0 != null || Arg1 != null)
-        {
-            // ponytail: format-arg path. None of the XAML {loc:Loc ...} usages in the
-            // dashboard pass Arg0/Arg1 — that path is reserved for future dialog text.
-            // For now just push the raw template; revisit when a real caller needs it.
-            target.SetValue(property, value);
-            return;
-        }
-
-        target.SetValue(property, value);
+        public WeakReference<DependencyObject> Target = null!;
+        public DependencyProperty Property = null!;
+        public string Key = "";
     }
 
-    sealed class LocUnsubscriber
+    static readonly object _targetsLock = new();
+    static readonly System.Collections.Generic.List<LocalizedTarget> _targets = new();
+    static bool _languageHookInstalled;
+
+    static void RegisterTarget(LocalizationService loc, DependencyObject target, DependencyProperty property, string key)
     {
-        readonly FrameworkElement _target;
-        readonly Action<string> _handler;
-        public LocUnsubscriber(FrameworkElement target, Action<string> handler)
-        { _target = target; _handler = handler; }
-        public void OnUnloaded(object? s, RoutedEventArgs e)
+        if (!_languageHookInstalled)
         {
-            LocalizationService.Instance.LanguageChanged -= _handler;
-            _target.Unloaded -= OnUnloaded;
+            _languageHookInstalled = true;
+            loc.LanguageChanged += OnLanguageChanged;
+        }
+        lock (_targetsLock)
+        {
+            // 同一元素/属性/Key 只登记一次（模板重挂载会重复 ProvideValue）。
+            foreach (var existing in _targets)
+            {
+                if (existing.Property != property || existing.Key != key) continue;
+                if (existing.Target.TryGetTarget(out var t) && ReferenceEquals(t, target)) return;
+            }
+            _targets.Add(new LocalizedTarget
+            {
+                Target = new WeakReference<DependencyObject>(target),
+                Property = property,
+                Key = key,
+            });
+        }
+    }
+
+    static void OnLanguageChanged(string lang)
+    {
+        var loc = LocalizationService.Instance;
+        System.Collections.Generic.List<LocalizedTarget> alive;
+        lock (_targetsLock)
+        {
+            for (int i = _targets.Count - 1; i >= 0; i--)
+            {
+                if (!_targets[i].Target.TryGetTarget(out _)) _targets.RemoveAt(i);
+            }
+            alive = new System.Collections.Generic.List<LocalizedTarget>(_targets);
+        }
+        foreach (var entry in alive)
+        {
+            if (!entry.Target.TryGetTarget(out var target)) continue;
+            try
+            {
+                var value = loc[entry.Key] ?? "";
+                if (target is System.Windows.Threading.DispatcherObject d && !d.CheckAccess())
+                {
+                    d.Dispatcher.BeginInvoke(new Action(() => target.SetValue(entry.Property, value)));
+                }
+                else
+                {
+                    target.SetValue(entry.Property, value);
+                }
+            }
+            catch { }
         }
     }
 }

@@ -222,7 +222,9 @@ public class TrayIconService : IDisposable
     public void ShowBalloonTip(string title, string message, int timeoutMs = 5000)
     {
         var nid = BaseData();
-        nid.uFlags = NIF_INFO;
+        // ponytail 2026-11-14(审查 P1-10): 原来用 `=` 赋值把 NIF_GUID 冲掉，固定 GUID 身份下
+        // NIM_MODIFY 按 (hWnd,uID) 找不到图标 → 所有托盘气泡静默失败。必须用 |= 保留身份位。
+        nid.uFlags |= NIF_INFO;
         nid.szInfoTitle = title.Length > 63 ? title[..63] : title;
         nid.szInfo = message.Length > 255 ? message[..255] : message;
         nid.dwInfoFlags = NIIF_INFO;

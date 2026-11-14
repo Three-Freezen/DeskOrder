@@ -71,6 +71,18 @@ public partial class App : System.Windows.Application
     private readonly Dictionary<Guid, int> _noteIdToHotkeyId = new();
     private IntPtr _mainHwnd;
 
+    // ponytail 2026-11-14(审计修订 views P2-15): 保存 HwndSource 引用，退出时 RemoveHook/Dispose，
+    // 原来 AddHook 后从不移除 —— HwndSource 与 App 互相钉住，退出路径上还留着热键 WndProc 回调。
+    private System.Windows.Interop.HwndSource? _hotkeySource;
+
+    // ponytail 2026-11-14(审计修订 P1-7): 未处理异常弹窗限流状态。
+    // 原来任何 DispatcherUnhandledException 都弹一个模态 MessageBox 并 Handled=true；
+    // 如果异常源是 1s 定时器 / 60fps 渲染回调，就会变成"每秒一个模态框"的风暴（用户只能强杀）。
+    // 现在：同类异常 30s 内只弹一次，30s 内最多弹 3 次，其余只写 crash log + trace。
+    private readonly Dictionary<string, long> _recentUnhandledKeys = new();
+    private int _unhandledDialogsInWindow;
+    private long _unhandledWindowStartMs;
+
     // ── Crash logging ──
     // ponytail 2026-09-26: 崩溃现场落盘(配合 csproj 里的 DisableStylusAndTouchSupport)。
     // 格式刻意自包含:版本、打包/便携形态、异常链各层类型+消息+堆栈,拿到一个文件就够定位。
@@ -91,6 +103,43 @@ public partial class App : System.Windows.Application
                 + e.Exception.GetType().Name + ": " + e.Exception.Message);
             e.SetObserved();
         };
+    }
+
+    /// <summary>
+    /// 未处理异常是否值得弹模态框（限流）。返回 false = 只写日志。
+    /// ponytail 2026-11-14(审计修订 P1-7): 「同类异常 30s 一次 + 每 30s 最多 3 次」，
+    /// 避免定时器/渲染回调里反复抛异常时把 UI 变成弹窗风暴。
+    /// </summary>
+    private bool ShouldShowUnhandledDialog(Exception ex)
+    {
+        const long WindowMs = 30_000;
+        const int MaxDialogsPerWindow = 3;
+        long now = Environment.TickCount64;
+
+        string key = (ex.GetType().FullName ?? "?") + "|" + (ex.Message ?? "");
+        if (key.Length > 200) key = key[..200];
+
+        // 字典很小；超过 64 项时顺手清掉过期键，避免长时间运行无界增长
+        if (_recentUnhandledKeys.Count > 64)
+        {
+            var stale = new List<string>();
+            foreach (var kv in _recentUnhandledKeys)
+                if (now - kv.Value > WindowMs) stale.Add(kv.Key);
+            foreach (var k in stale) _recentUnhandledKeys.Remove(k);
+        }
+
+        if (_recentUnhandledKeys.TryGetValue(key, out long last) && now - last < WindowMs)
+            return false;
+        _recentUnhandledKeys[key] = now;
+
+        if (now - _unhandledWindowStartMs > WindowMs)
+        {
+            _unhandledWindowStartMs = now;
+            _unhandledDialogsInWindow = 0;
+        }
+        if (_unhandledDialogsInWindow >= MaxDialogsPerWindow) return false;
+        _unhandledDialogsInWindow++;
+        return true;
     }
 
     internal static void WriteCrashLog(string source, Exception? ex)
@@ -252,6 +301,19 @@ public partial class App : System.Windows.Application
             var pluginCulprit = Services.PluginService.Instance.DescribeCulprit(args.Exception);
             if (pluginCulprit != null)
                 sb.AppendLine($"[Plugin] {pluginCulprit} crashed");
+
+            // ponytail 2026-11-14(审计修订 P1-7): 限流再弹窗（见字段注释）。
+            // 抛异常的地方不能变成"模态框风暴"：同类 30s 一次、窗口内最多 3 次。
+            bool show = ShouldShowUnhandledDialog(args.Exception);
+            if (!show)
+            {
+                Helpers.DzTrace.Always(
+                    "[Crash] 未处理异常（已限流，不再弹窗）: "
+                    + args.Exception.GetType().Name + ": " + args.Exception.Message);
+                args.Handled = true;
+                return;
+            }
+
             MessageBox.Show(sb.ToString(), LocalizationService.Instance["App.ErrorTitle"], MessageBoxButton.OK, MessageBoxImage.Error);
             args.Handled = true;
         };
@@ -336,6 +398,7 @@ public partial class App : System.Windows.Application
         _mainHwnd = new WindowInteropHelper(MainWindow).Handle;
         var source = HwndSource.FromHwnd(_mainHwnd);
         source?.AddHook(HotkeyWndProc);
+        _hotkeySource = source;   // ponytail 2026-11-14: 退出时要移除（见 DetachHotkeySource）
 
         CreateTrayIcon();
         StartupTrace("08 tray icon created");
@@ -851,8 +914,8 @@ public partial class App : System.Windows.Application
 
     private void ToggleNoteByHotkey(Guid noteId)
     {
-        if (_notesService == null) return;
-        if (_notesService.Windows.TryGetValue(noteId, out var window))
+        if (_notesService is not { } notes) return;
+        if (notes.Windows.TryGetValue(noteId, out var window))
         {
             // NotesService.Windows is typed Dictionary<Guid, StickyNoteWindow>, so every
             // branch below routes through the SAME ShowNote/HideNote code the note's own
@@ -884,13 +947,13 @@ public partial class App : System.Windows.Application
         }
         else
         {
-            var note = _notesService?.Notes.FirstOrDefault(n => n.Id == noteId);
+            var note = notes.Notes.FirstOrDefault(n => n.Id == noteId);
             if (note != null)
             {
                 OpenNoteWindow(note);
                 // 快捷键新建/唤出的窗口:只有勾了「固定位置打开」才落到聚焦显示器
                 // 中央;默认(不勾)保持 OpenNoteWindow 按便签自身 X/Y 建窗的位置。
-                if (note.OpenAtFixedPosition && _notesService.Windows.TryGetValue(noteId, out var w))
+                if (note.OpenAtFixedPosition && notes.Windows.TryGetValue(noteId, out var w))
                     w.CenterOnFocusedScreen();
             }
         }
@@ -2051,6 +2114,11 @@ public partial class App : System.Windows.Application
         // ponytail 2026-08-27: 拆卸桌面双击钩子,避免 DLL 注入残留。
         AppDesktopDoubleClick.Uninstall();
         DisposeSingleInstance();
+        // ponytail 2026-11-14: 拆钩子 + 静态服务收口 + 等后台写盘落完，再关进程
+        // （幂等，Application_Exit 里还会再来一次）
+        DetachHotkeySource();
+        ShutdownStaticServices();
+        FlushPendingConfigWrites();
         Current.Shutdown();
     }
 
@@ -2071,6 +2139,7 @@ public partial class App : System.Windows.Application
             NativeMethods.UnregisterHotKey(_mainHwnd, HOTKEY_ID_HIDE_ALL);
             NativeMethods.UnregisterHotKey(_mainHwnd, HOTKEY_ID_MIN_ALL);
         }
+        DetachHotkeySource();   // ponytail 2026-11-14: 拆热键 WndProc 钩子
         _reminderService?.Dispose();
         AutoOrganizeService.Instance.Dispose();
         FileSyncService.Instance.Dispose();
@@ -2084,6 +2153,10 @@ public partial class App : System.Windows.Application
         // ponytail 2026-08-27: 拆卸桌面双击钩子,避免 DLL 注入残留。
         AppDesktopDoubleClick.Uninstall();
         DisposeSingleInstance();
+        // ponytail 2026-11-14: 静态 timer / SystemEvents 收口 + 异步写盘收口
+        // （必须在所有 Shutdown 之后，保证最后一次配置修改真的落盘）
+        ShutdownStaticServices();
+        FlushPendingConfigWrites();
     }
 
     void DisposeSingleInstance()
@@ -2097,6 +2170,41 @@ public partial class App : System.Windows.Application
         }
         try { _mutex?.Dispose(); } catch { }
         _mutex = null;
+    }
+
+    /// <summary>退出时拆掉热键 WndProc 钩子（幂等）。
+    /// ponytail 2026-11-14(审计修订 views P2-15): 原来 AddHook 之后从不 RemoveHook，
+    /// HwndSource 与 App 互相持有到进程结束。
+    /// 注意：**只 RemoveHook，不 Dispose HwndSource** —— 它是 MainWindow 自己创建的源，
+    /// 提前 Dispose 会在 WPF 关闭序列里销毁窗口 HWND；交给窗口/Dispatcher 正常收尾。</summary>
+    void DetachHotkeySource()
+    {
+        var src = _hotkeySource;
+        _hotkeySource = null;
+        if (src == null) return;
+        try { src.RemoveHook(HotkeyWndProc); } catch { }
+    }
+
+    /// <summary>退出前把后台写盘队列清空（见 ConfigService.FlushPendingWrites）。</summary>
+    void FlushPendingConfigWrites()
+    {
+        try
+        {
+            if (!Services.ConfigService.FlushPendingWrites())
+                System.Diagnostics.Debug.WriteLine("[ConfigService] 退出时仍有未落盘的配置写入（超时）");
+        }
+        catch { }
+    }
+
+    /// <summary>静态服务收口：停静态 DispatcherTimer / 退订 SystemEvents / 释放壁纸指纹 timer。
+    /// ponytail 2026-11-14(审计修订 P2): ThemeService.Shutdown / MenuThemeService.Shutdown /
+    /// WallpaperSource.Shutdown 由各自 owner 提供；不调用时进程退出虽会回收，但 WPF 关闭后
+    /// SystemEvents 仍可能回调进已停的 Dispatcher。</summary>
+    void ShutdownStaticServices()
+    {
+        try { Helpers.ThemeService.Shutdown(); } catch { }
+        try { Helpers.MenuThemeService.Shutdown(); } catch { }
+        try { Helpers.WallpaperSource.Shutdown(); } catch { }
     }
 
     static AppThemeMode ParseThemeMode(string? s) => s switch

@@ -85,6 +85,10 @@ public class HoverExpandBehavior : IDisposable
     // Cancelled by any direct state change (snap/expand/collapse/SetEnabled/Dispose)
     // so a queued wave action can never fight a newer user interaction.
     DispatcherTimer? _waveTimer;
+    // ponytail 2026-11-14(审计修复 P1-3): 收起动画的兜底 timer 提成字段 —— 之前是
+    // CollapseAnimated 内的局部变量,Dispose 后仍会触发,并在窗口关闭(_collapsedButton
+    // 已置 null)时解引用 `_collapsedButton!` → Dispatcher 上未处理 NRE。
+    DispatcherTimer? _safetyTimer;
     // ponytail: true while a staggered collapse is queued by CollapseAfterDelay.
     // The widgets' "ghost-stamp" model-sync (model hidden + still expanded + content
     // visible → SnapToCollapsed) reads this so a queued collapse is not instantly
@@ -385,7 +389,7 @@ public class HoverExpandBehavior : IDisposable
         _scale.ScaleY = 1;
         _expandedContent.Opacity = 1;
         _expandedContent.Visibility = Visibility.Visible;
-        _collapsedButton!.Visibility = Visibility.Collapsed;
+        if (_collapsedButton is { } collapsedBtn) collapsedBtn.Visibility = Visibility.Collapsed;
         if (_expandedModeElement != null) _expandedModeElement.Visibility = Visibility.Visible;
 #if DEBUG
         DzTrace.Log($"[hover:{Host}] SnapToExpanded -> scale=1 op=1 content=Visible btn=Collapsed");
@@ -419,7 +423,7 @@ public class HoverExpandBehavior : IDisposable
         _scale.ScaleY = 0;
         _expandedContent.Opacity = 0;
         _expandedContent.Visibility = Visibility.Collapsed;
-        _collapsedButton!.Visibility = Visibility.Visible;
+        if (_collapsedButton is { } collapsedBtn) collapsedBtn.Visibility = Visibility.Visible;
         if (_expandedModeElement != null) _expandedModeElement.Visibility = Visibility.Collapsed;
         // ponytail: 2026-08-23 — notify hosts when collapsing from an expanded state so
         // their acrylic gate disables the DWM glass. A model-driven SnapToCollapsed
@@ -479,6 +483,8 @@ public class HoverExpandBehavior : IDisposable
         if (_disposed) return;
         _disposed = true;
         CancelWave();
+        _safetyTimer?.Stop();
+        _safetyTimer = null;
         _enterTimer.Stop();
         _exitTimer.Stop();
         _pollTimer.Stop();
@@ -619,6 +625,7 @@ public class HoverExpandBehavior : IDisposable
     /// </summary>
     public void ExpandAnimated(bool permanent, bool force)
     {
+        if (_disposed) return;
         if ((!IsEnabled && !force) || _isExpanded) return;
         CancelWave();
         _isExpanded = true;
@@ -628,7 +635,7 @@ public class HoverExpandBehavior : IDisposable
         ApplyOrigin();                                    // re-apply in case origin changed
         NormalizeFor(isExpanded: true);                   // snap stable axes BEFORE visibility flip
         _expandedContent.Visibility = Visibility.Visible;
-        _collapsedButton!.Visibility = Visibility.Collapsed;
+        if (_collapsedButton is { } collapsedBtn) collapsedBtn.Visibility = Visibility.Collapsed;
         if (_expandedModeElement != null) _expandedModeElement.Visibility = Visibility.Visible;
         // ponytail: notify hosts AFTER the state flip so their acrylic re-apply sees
         // IsExpanded == true (ghost-glass fix: liquid glass only while expanded).
@@ -646,6 +653,7 @@ public class HoverExpandBehavior : IDisposable
     /// </summary>
     public void CollapseAnimated(Action? onComplete = null)
     {
+        if (_disposed) return;
         if (!_isExpanded) return;
         CancelWave();
         _isExpanded = false;
@@ -667,13 +675,22 @@ public class HoverExpandBehavior : IDisposable
         // delayed DispatcherTimer so even if Completed is lost, Visibility gets
         // corrected after the animation's worst-case duration.
         int delayMs = (int)Math.Max(260, 260.0 / Math.Max(0.1, _speedGetter()));
-        var safetyTimer = new DispatcherTimer
+        // ponytail 2026-11-14(审计修复 P1-3): 复用字段 timer 并先停掉上一轮;tick 内
+        // 检查 _disposed 且所有按钮解引用都判空(窗口在动画期间关闭时 _collapsedButton
+        // 已被 Dispose 置 null,旧实现这里会抛 NRE 到 Dispatcher)。
+        _safetyTimer?.Stop();
+        var safetyTickTimer = new DispatcherTimer
         {
             Interval = TimeSpan.FromMilliseconds(delayMs)
         };
-        safetyTimer.Tick += (_, _) =>
+        _safetyTimer = safetyTickTimer;
+        safetyTickTimer.Tick += (_, _) =>
         {
-            safetyTimer.Stop();
+            // 用局部引用停自己 —— 若期间又发起了一次收起(字段已换成新 timer),
+            // 不能把新 timer 误停/置空。
+            safetyTickTimer.Stop();
+            if (ReferenceEquals(_safetyTimer, safetyTickTimer)) _safetyTimer = null;
+            if (_disposed) return;
 #if DEBUG
             DzTrace.Log($"[hover:{Host}] Collapse SAFETY tick expanded={_isExpanded} scale={_scale.ScaleX:0.###} op={_expandedContent.Opacity:0.###}");
 #endif
@@ -688,23 +705,24 @@ public class HoverExpandBehavior : IDisposable
                 _scale.ScaleY = 0;
                 _expandedContent.Opacity = 0;
                 _expandedContent.Visibility = Visibility.Collapsed;
-                _collapsedButton!.Visibility = Visibility.Visible;
+                if (_collapsedButton is { } collapsedBtn) collapsedBtn.Visibility = Visibility.Visible;
                 if (_expandedModeElement != null) _expandedModeElement.Visibility = Visibility.Collapsed;
                 // ponytail: ghost-glass fix — hosts disable DWM acrylic once collapsed.
                 Collapsed?.Invoke();
             }
         };
-        safetyTimer.Start();
+        _safetyTimer.Start();
 
         StartAnimation(isExpand: false, onComplete: () =>
         {
+            if (_disposed) return;
             // ponytail: also zero scale/opacity on the normal completion path —
             // idempotent belt-and-braces with the safety timer above.
             _scale.ScaleX = 0;
             _scale.ScaleY = 0;
             _expandedContent.Opacity = 0;
             _expandedContent.Visibility = Visibility.Collapsed;
-            _collapsedButton!.Visibility = Visibility.Visible;
+            if (_collapsedButton is { } collapsedBtn2) collapsedBtn2.Visibility = Visibility.Visible;
             if (_expandedModeElement != null) _expandedModeElement.Visibility = Visibility.Collapsed;
             Collapsed?.Invoke();
             onComplete?.Invoke();

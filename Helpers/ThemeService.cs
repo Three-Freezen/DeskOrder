@@ -509,22 +509,15 @@ public static class ThemeService
         return null;
     }
 
+    static bool _listening;
+
     public static void StartListeningToSystem()
     {
-        SystemEvents.UserPreferenceChanged += (_, e) =>
-        {
-            if (_current != AppThemeMode.System) return;
-            // ponytail: HC toggle fires Accessibility, accent color fires Color,
-            // AppsUseLightTheme fires General. Filter on all three so live changes
-            // actually re-resolve the palette. Without Accessibility the user could
-            // flip Windows HC on and the app would silently stay on Light/Dark.
-            if (e.Category is UserPreferenceCategory.General
-                or UserPreferenceCategory.Color
-                or UserPreferenceCategory.Accessibility)
-            {
-                Apply(AppThemeMode.System);
-            }
-        };
+        // ponytail 2026-11-14: 幂等，避免二次调用把 SystemEvents 处理器/兜底轮询挂两遍。
+        if (_listening) return;
+        _listening = true;
+
+        SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
 
         // ponytail: Win32 broadcasts "ImmersiveColorSet" on accent color changes,
         // but .NET's SystemEvents.UserPreferenceChanged only maps a small fixed
@@ -536,12 +529,65 @@ public static class ThemeService
         // 行为退化只是把延迟从 1s 拉长到 15s，不会丢功能。
         EnsureAccentMessageWindow();
         _accentSafetyPoll = new DispatcherTimer { Interval = TimeSpan.FromSeconds(15) };
-        _accentSafetyPoll.Tick += (_, _) =>
-        {
-            if (_current != AppThemeMode.System) return;
-            ApplySystemAccentIfApplicable();
-        };
+        _accentSafetyPoll.Tick += OnAccentSafetyPollTick;
         _accentSafetyPoll.Start();
+    }
+
+    /// <summary>ponytail 2026-11-14(审查 P1-9): SystemEvents 的事件在专用 SystemEvents 线程上触发，
+    /// 而 Apply 会改写 ResourceDictionary / 未冻结画刷 / 遍历窗口可视树 —— 必须切回 Dispatcher。
+    /// 之前这里直接 Apply，和 MenuThemeService.MarshalAndApply 的既有做法不一致。</summary>
+    static void OnUserPreferenceChanged(object? sender, UserPreferenceChangedEventArgs e)
+    {
+        if (_current != AppThemeMode.System) return;
+        // ponytail: HC toggle fires Accessibility, accent color fires Color,
+        // AppsUseLightTheme fires General. Filter on all three so live changes
+        // actually re-resolve the palette. Without Accessibility the user could
+        // flip Windows HC on and the app would silently stay on Light/Dark.
+        if (e.Category is UserPreferenceCategory.General
+            or UserPreferenceCategory.Color
+            or UserPreferenceCategory.Accessibility)
+        {
+            ApplyOnUiThread(AppThemeMode.System);
+        }
+    }
+
+    static void ApplyOnUiThread(AppThemeMode mode)
+    {
+        var app = Application.Current;
+        var d = app?.Dispatcher;
+        if (d == null || d.CheckAccess())
+        {
+            Apply(mode);
+            return;
+        }
+        try { d.BeginInvoke(new Action(() => Apply(mode))); } catch { }
+    }
+
+    static void OnAccentSafetyPollTick(object? sender, EventArgs e)
+    {
+        if (_current != AppThemeMode.System) return;
+        ApplySystemAccentIfApplicable();
+    }
+
+    /// <summary>ponytail 2026-11-14(审查 P2 静态 timer): 进程退出前收口 —— 停兜底轮询、
+    /// 退订 SystemEvents、销毁收广播的 HwndSource。App.OnExit 尚未调用（不在本次改动范围），
+    /// 需要 Lead 协调。不调用时进程退出也会由 OS 回收。</summary>
+    public static void Shutdown()
+    {
+        _listening = false;
+        try { SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged; } catch { }
+        if (_accentSafetyPoll != null)
+        {
+            try { _accentSafetyPoll.Stop(); } catch { }
+            try { _accentSafetyPoll.Tick -= OnAccentSafetyPollTick; } catch { }
+            _accentSafetyPoll = null;
+        }
+        if (_accentMsgSource != null)
+        {
+            try { _accentMsgSource.RemoveHook(WndProc); } catch { }
+            try { _accentMsgSource.Dispose(); } catch { }
+            _accentMsgSource = null;
+        }
     }
 
     const int WM_SETTINGCHANGE = 0x001A;

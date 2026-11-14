@@ -1207,6 +1207,9 @@ public partial class ClockWidget : Window
         if (_savePending) { _savePending = false; _widgetService.Save(); }
         if (_langChanged != null) _loc.LanguageChanged -= _langChanged;
         _langChanged = null;
+        // ponytail 2026-11-14: 审计修复 —— ctor 里订阅了 ClocksChanged(单例 WidgetService),
+        // 之前 OnClosed 漏退 → 每个关掉的时钟窗口被单例事件永久持有(窗口+可视树+图标位图)。
+        _widgetService.ClocksChanged -= OnClocksChanged;
         _widgetService.LockChanged -= OnServiceLockChanged;
         _clock.HoverExpandSettingsChanged -= OnHoverExpandSettingsChanged;
         _snapDrag?.Detach();

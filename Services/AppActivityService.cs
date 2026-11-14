@@ -290,6 +290,17 @@ public static class AppActivityService
 
     static List<(string Path, IntPtr Hwnd)>? _explorerCache;
     static DateTime _explorerCacheAt = DateTime.MinValue;
+    static readonly object _explorerGate = new();
+    static bool _explorerRefreshing;
+    static bool _explorerBgBroken;
+
+    /// <summary>等价于 <see cref="ExplorerLocations"/> 缓存多久算新鲜。
+    ///
+    /// ponytail 2026-11-14(审计修订 P0-1): 原值 400ms，而快捷栏的轮询周期是 700ms ——
+    /// 每一 tick 必然 miss，于是「每 700ms 在 UI 线程起一个 Shell.Application COM 实例 +
+    /// 逐窗口 dynamic 取 LocationURL」。现在 2000ms（远大于轮询周期），并在过期时**先返回旧值**、
+    /// 后台刷新（stale-while-revalidate），UI 线程不再碰 COM。</summary>
+    static readonly TimeSpan ExplorerCacheTtl = TimeSpan.FromSeconds(2);
 
     /// <summary>
     /// 资源管理器当前打开的文件夹窗口（规范化路径 + 窗口句柄）。
@@ -297,7 +308,13 @@ public static class AppActivityService
     /// 取法用 Shell.Application 的 Windows() 集合：窗口标题会受"在标题栏显示完整路径"
     /// 设置和同名目录影响，不可靠；而 <c>LocationURL</c> 就是那个窗口**真正在浏览的路径**
     /// （压缩包打开后给出 .zip 自身，正好对上快捷栏里的 zip 条目）。
-    /// 缓存 400ms —— 快捷栏每 700ms 轮询一次，多个快捷栏同时问不该每次都起一个 COM 实例。
+    ///
+    /// ponytail 2026-11-14(审计修订 P0-1/P0-2): 两处改动 ——
+    /// ① 缓存 TTL 400ms → 2000ms，且过期后**先返回旧快照**，真正的 COM 查询丢到
+    ///    <see cref="Task.Run"/> 后台线程（`Shell.Application` 是 out-of-proc 服务器，
+    ///    从 MTA 线程池调用是安全的）；第一次调用（冷启动、还没有任何快照）仍同步取一次，
+    ///    保持启动行为不变。后台取失败则熔断回同步路径，不会让功能静默失效。
+    /// ② COM 对象显式 `FinalReleaseComObject`（原实现每次轮询泄漏 3~N 个 RCW，靠 GC 兜底）。
     /// </summary>
     /// <summary>最近一次 <see cref="ExplorerLocations"/> 的过程诊断（自测用）。</summary>
     public static string ExplorerDiag { get; private set; } = "";
@@ -305,18 +322,81 @@ public static class AppActivityService
     public static List<(string Path, IntPtr Hwnd)> ExplorerLocations()
     {
         var now = DateTime.UtcNow;
-        if (_explorerCache != null && (now - _explorerCacheAt).TotalMilliseconds < 400) return _explorerCache;
+        List<(string Path, IntPtr Hwnd)>? cached;
+        bool expired;
+        lock (_explorerGate)
+        {
+            cached = _explorerCache;
+            expired = cached == null || (now - _explorerCacheAt) >= ExplorerCacheTtl;
+        }
 
+        if (expired)
+        {
+            if (cached == null || _explorerBgBroken)
+            {
+                // 冷启动 / 后台路径不可用 → 同步取一次（与历史行为一致，只发生在首个 tick）
+                var fresh = QueryExplorerLocations();
+                lock (_explorerGate)
+                {
+                    _explorerCache = fresh;
+                    _explorerCacheAt = DateTime.UtcNow;
+                }
+                return fresh;
+            }
+
+            lock (_explorerGate)
+            {
+                if (!_explorerRefreshing)
+                {
+                    _explorerRefreshing = true;
+                    System.Threading.Tasks.Task.Run(() =>
+                    {
+                        try
+                        {
+                            var fresh = QueryExplorerLocations();
+                            lock (_explorerGate)
+                            {
+                                _explorerCache = fresh;
+                                _explorerCacheAt = DateTime.UtcNow;
+                            }
+                        }
+                        catch
+                        {
+                            // 后台 COM 不通（安全策略 / 无 STA 代理）→ 熔断，回同步路径
+                            lock (_explorerGate) _explorerBgBroken = true;
+                        }
+                        finally
+                        {
+                            lock (_explorerGate) _explorerRefreshing = false;
+                        }
+                    });
+                }
+            }
+        }
+
+        return cached ?? new List<(string, IntPtr)>(0);
+    }
+
+    /// <summary>真正去问 Shell.Application。可能阻塞 5~20ms，**不要在 UI 线程调用**
+    /// （冷启动那一次除外，见 <see cref="ExplorerLocations"/>）。所有 COM 引用都在 finally 释放。</summary>
+    static List<(string Path, IntPtr Hwnd)> QueryExplorerLocations()
+    {
         var list = new List<(string, IntPtr)>(8);
         var diag = new StringBuilder();
+        object? shellObj = null;
+        object? windowsObj = null;
+        var transient = new List<object>(16);
         try
         {
             var t = Type.GetTypeFromProgID("Shell.Application");
             diag.Append($"progid={(t == null ? "null" : t.FullName)}; ");
-            if (t != null && Activator.CreateInstance(t) is { } shellObj)
+            if (t != null && Activator.CreateInstance(t) is { } created)
             {
-                dynamic shell = shellObj;
-                dynamic windows = shell.Windows();
+                shellObj = created;
+                dynamic shell = created;
+                windowsObj = shell.Windows();
+                transient.Add(windowsObj);
+                dynamic windows = windowsObj;
                 int n = 0;
                 try { n = Convert.ToInt32(windows.Count); } catch (Exception ex) { diag.Append("countEXC=" + ex.Message + "; "); }
                 diag.Append($"n={n}; ");
@@ -326,6 +406,7 @@ public static class AppActivityService
                     {
                         // IShellWindows.Item 是 0 基
                         dynamic w = windows.Item(i);
+                        transient.Add(w);
                         string url = "";
                         try { url = Convert.ToString(w.LocationURL) ?? ""; } catch { }
                         if (!url.StartsWith("file:", StringComparison.OrdinalIgnoreCase)) { diag.Append($"[{i}]skip'{url}'; "); continue; }
@@ -344,10 +425,20 @@ public static class AppActivityService
             else diag.Append("create failed; ");
         }
         catch (Exception ex) { diag.Append("OUTER EXC=" + ex.GetType().Name + ": " + ex.Message); }
+        finally
+        {
+            // ponytail 2026-11-14: RCW 显式释放（逐项，先 Item 后集合，最后根对象）
+            for (int i = transient.Count - 1; i >= 0; i--)
+            {
+                try { Marshal.FinalReleaseComObject(transient[i]); } catch { }
+            }
+            if (shellObj != null)
+            {
+                try { Marshal.FinalReleaseComObject(shellObj); } catch { }
+            }
+        }
 
         ExplorerDiag = diag.ToString();
-        _explorerCache = list;
-        _explorerCacheAt = now;
         return list;
     }
 
@@ -443,16 +534,37 @@ public static class AppActivityService
         return true;
     }
 
-    /// <summary>资源管理器文件夹窗口的（标题, 句柄）列表。</summary>
+    /// <summary>资源管理器文件夹窗口的（标题, 句柄）列表。
+    ///
+    /// ponytail 2026-11-14(审计修订 P0-1): 加 500ms 快照缓存。原实现每次
+    /// <see cref="FolderOpenWindow"/> 兜底都做一遍全量 EnumWindows，而快捷栏一次
+    /// RefreshDockRunStates 会对**每个文件夹条目**各问一次 —— 10 个文件夹 = 10 遍全量枚举/tick。
+    /// 缓存后同一 tick 内只枚举一次；过期判定与快捷栏 700ms 轮询同量级，最多晚一 tick 发现新窗口。</summary>
     public static List<(string Title, IntPtr Hwnd)> ExplorerWindowTitles()
     {
+        var now = DateTime.UtcNow;
+        lock (_titlesGate)
+        {
+            if (_titlesCache != null && (now - _titlesCacheAt).TotalMilliseconds < 500) return _titlesCache;
+        }
+
         var list = new List<(string, IntPtr)>(8);
         _titles = list;
         try { NativeMethods.EnumWindows(_titlesProc, IntPtr.Zero); }
         catch { }
         finally { _titles = null; }
+
+        lock (_titlesGate)
+        {
+            _titlesCache = list;
+            _titlesCacheAt = now;
+        }
         return list;
     }
+
+    static List<(string Title, IntPtr Hwnd)>? _titlesCache;
+    static DateTime _titlesCacheAt = DateTime.MinValue;
+    static readonly object _titlesGate = new();
 
     /// <summary>点开始按钮：敲一下 Win 键（系统自己弹开始菜单 / 已弹出就收起）。</summary>
     public static void OpenStartMenu()

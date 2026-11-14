@@ -74,17 +74,25 @@ public static class WallpaperSource
     static Cache? _cache;
     static readonly object _lock = new();
 
+    /// <summary>检测（可能含抓屏）用独立的串行锁 —— 不持 <see cref="_lock"/>。
+    /// ponytail 2026-11-14(审计修订 P2): 见 <see cref="GetDesktop"/> 的说明。</summary>
+    static readonly object _detectGate = new();
+
     static string _sigCache = "";
     static DateTime _sigAtUtc;
 
     /// <summary>指纹节流窗口(见 <see cref="QuickSignature"/>)。</summary>
     static readonly TimeSpan SignatureTtl = TimeSpan.FromMilliseconds(1500);
 
+    /// <summary>缓存世代号：检测不再持 _lock（见 <see cref="GetDesktop"/>），
+    /// 若检测期间有人 <see cref="Invalidate"/>，这次检测结果必须作废而不是把旧图写回缓存。</summary>
+    static int _generation;
+
     /// <summary>清空缓存,下次 <see cref="GetDesktop"/> 重新检测与采集。
     /// 顺带把虚拟桌面矩形缓存也置零(显示器可能刚变过),并丢掉节流中的指纹。</summary>
     public static void Invalidate()
     {
-        lock (_lock) { _cache = null; Describe = ""; _sigCache = ""; }
+        lock (_lock) { _cache = null; Describe = ""; _sigCache = ""; _generation++; }
         _layoutVw = 0;
     }
 
@@ -100,15 +108,33 @@ public static class WallpaperSource
     public static BitmapSource? GetDesktop()
     {
         EnsureWatch();
+
+        string sig;
         lock (_lock)
         {
             // 先用轻量指纹判断要不要重新检测 —— 检测本身可能包含一次抓屏(约 100ms),
             // 不能每帧都跑。指纹只读注册表/进程/文件时间,不做任何位图工作。
-            var sig = QuickSignature();
+            sig = QuickSignature();
             if (_cache != null && _cache.Origin == sig)
             {
                 Describe = Summarize(_cache.Kind, _cache.Display, cached: true);
                 return _cache.Image;
+            }
+        }
+
+        // ponytail 2026-11-14(审计修订 P2): 检测/抓屏**不再持 _lock**。
+        // 原实现整个 Detect()（含隐藏窗口 + 两次 DwmFlush + Thread.Sleep + 全屏 BitBlt）
+        // 都在 `lock (_lock)` 里，抓一次屏就把任何想读缓存/改缓存的线程一起堵住几十上百毫秒。
+        // 现在锁只保护缓存读写；检测用独立的 _detectGate 串行化（避免并发抓两次屏）。
+        Cache newCache;
+        int genAtDetect;
+        lock (_detectGate)
+        {
+            lock (_lock)
+            {
+                // 双检：等锁期间可能已有别的线程填好缓存
+                if (_cache != null && _cache.Origin == sig) return _cache.Image;
+                genAtDetect = _generation;
             }
 
             var now = Enabled ? Detect() : DetectSystemOnly();
@@ -120,11 +146,18 @@ public static class WallpaperSource
             //   • 全部失败 → Origin="none"/"none:off",和任何签名都不等。
             // 任一条命中,缓存就**永远不命中** → 每次重画玻璃都重跑整次检测(含抓屏 +
             // 隐藏/cloak 全部窗口),正是下面 Detect 注释里记的那个老坑。存签名则天然一致。
-            _cache = new Cache(sig, now.Kind, now.Stamp, now.Image, now.Display);
-            Describe = Summarize(now.Kind, now.Display, cached: false);
-            DzTrace.Log($"[WallpaperSource] 来源={now.Kind} 图={(now.Image == null ? "NULL" : $"{now.Image.PixelWidth}x{now.Image.PixelHeight}")} 显示={now.Display}");
-            return now.Image;
+            newCache = new Cache(sig, now.Kind, now.Stamp, now.Image, now.Display);
         }
+
+        lock (_lock)
+        {
+            // 检测期间被 Invalidate（换壁纸/显示器变化）→ 这次结果作废，别把旧图写回缓存
+            if (genAtDetect != _generation) return null;
+            _cache = newCache;
+            Describe = Summarize(newCache.Kind, newCache.Display, cached: false);
+            DzTrace.Log($"[WallpaperSource] 来源={newCache.Kind} 图={(newCache.Image == null ? "NULL" : $"{newCache.Image.PixelWidth}x{newCache.Image.PixelHeight}")} 显示={newCache.Display}");
+        }
+        return newCache.Image;
     }
 
     /// <summary>轻量指纹:足以判断"壁纸换没换"的最小信息,不碰位图。
@@ -534,7 +567,7 @@ public static class WallpaperSource
         _displayHookInstalled = true;
         try
         {
-            Microsoft.Win32.SystemEvents.DisplaySettingsChanged += (_, _) => WallpaperBackdrop.Invalidate();
+            Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
             Microsoft.Win32.SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
             DzTrace.Log("[WallpaperSource] 已订阅 DisplaySettingsChanged / UserPreferenceChanged");
         }
@@ -542,6 +575,32 @@ public static class WallpaperSource
         {
             DzTrace.Log($"[WallpaperSource] 订阅 DisplaySettingsChanged 失败: {ex.Message}");
         }
+    }
+
+    /// <summary>显示器拓扑变化 → 整体失效（见 <see cref="EnsureDisplayHook"/>）。</summary>
+    static void OnDisplaySettingsChanged(object? sender, EventArgs e) => WallpaperBackdrop.Invalidate();
+
+    /// <summary>进程退出前收口：停壁纸指纹轮询 timer、退订 SystemEvents、清缓存。
+    /// ponytail 2026-11-14(审计修订 P2 静态 timer): 仿 ThemeService.Shutdown；
+    /// 不调用时进程退出也会由 OS 回收，但 SystemEvents 在 WPF 关闭后仍可能回调进已死的
+    /// Dispatcher —— 显式退订更干净。由 App.Application_Exit 调用。</summary>
+    public static void Shutdown()
+    {
+        try { Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged; } catch { }
+        try { Microsoft.Win32.SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged; } catch { }
+        lock (_watchLock)
+        {
+            try { _watch?.Dispose(); } catch { }
+            _watch = null;
+        }
+        lock (_lock)
+        {
+            _cache = null;
+            _sigCache = "";
+            _generation++;
+        }
+        _layoutVw = 0;
+        _displayHookInstalled = false;
     }
 
     // ── 抓屏(场景类壁纸唯一可行路径) ──
