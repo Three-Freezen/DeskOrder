@@ -19,11 +19,12 @@
         <TextBlock Text="{loc:Loc Key=Plugin.Detail}" FontSize="14" FontWeight="SemiBold"
                    VerticalAlignment="Center" Foreground="{DynamicResource Brush.Text.Primary}"/>
         <Button HorizontalAlignment="Right" VerticalAlignment="Center" Width="28" Height="28"
-                Cursor="Hand" Style="{DynamicResource OutlineBtn}" Click="Close_Click"
-                ToolTip="{loc:Loc Key=Common.Close}">
+                Cursor="Hand" Foreground="{DynamicResource Brush.Text.Secondary}"
+                Click="Close_Click" ToolTip="{loc:Loc Key=Common.Close}">
           <Path Data="{StaticResource Icon.Close}" Width="10" Height="10" Stretch="Uniform"
                 Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                StrokeThickness="1.2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                StrokeLineJoin="Round"/>
         </Button>
       </Grid>
 
