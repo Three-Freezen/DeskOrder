@@ -136,6 +136,11 @@ public partial class App : System.Windows.Application
         // ponytail 2026-08-29: 数据落点定位必须先于一切 DataLocator.Root 消费者
         // (Trace 监听器 / ConfigService / LocalizationService):建根目录 + 便携模式
         // 首启接管 AppData 既有数据。
+        // 自测台：--data-root=<dir> 把配置/插件/日志全部指向隔离目录，不碰用户数据。
+        const string dataRootPrefix = "--data-root=";
+        var dataRootArg = e.Args.FirstOrDefault(a => a.StartsWith(dataRootPrefix, StringComparison.OrdinalIgnoreCase));
+        if (dataRootArg != null && dataRootArg.Length > dataRootPrefix.Length)
+            Services.DataLocator.OverrideRoot = dataRootArg[dataRootPrefix.Length..];
         Services.DataLocator.Initialize();
         StartupTrace("03 data-locator initialized");
         // ponytail 2026-08-30: 勾选"更新完成后自动删除安装包"时,新版首启在此消费
@@ -221,6 +226,9 @@ public partial class App : System.Windows.Application
             }
             sb.AppendLine("--- Stack ---");
             sb.AppendLine(args.Exception.StackTrace);
+            var pluginCulprit = Services.PluginService.Instance.DescribeCulprit(args.Exception);
+            if (pluginCulprit != null)
+                sb.AppendLine($"[Plugin] {pluginCulprit} crashed");
             MessageBox.Show(sb.ToString(), LocalizationService.Instance["App.ErrorTitle"], MessageBoxButton.OK, MessageBoxImage.Error);
             args.Handled = true;
         };
@@ -263,6 +271,26 @@ public partial class App : System.Windows.Application
         _widgetService = new WidgetService(_configService);
         _panelService = new PanelService(_zoneManager, _configService);
 
+        // 插件系统：--safe-mode / --no-plugins 本次不加载任何插件（排查崩溃用）。
+        var pluginsSuppressed = e.Args.Any(a =>
+            a.Equals("--safe-mode", StringComparison.OrdinalIgnoreCase)
+            || a.Equals("--no-plugins", StringComparison.OrdinalIgnoreCase));
+        // 开发者模式：--plugin-dev=<目录>，把目录下每个子目录当「已启用的代码插件」直接挂上。
+        // 不写 plugins.json、不校验 SHA、不计崩溃次数，退出即消失。
+        var devDir = e.Args
+            .FirstOrDefault(a => a.StartsWith("--plugin-dev=", StringComparison.OrdinalIgnoreCase))
+            ?["--plugin-dev=".Length..];
+        if (!string.IsNullOrWhiteSpace(devDir))
+        {
+#if DEBUG
+            Services.PluginService.Instance.DevDirectory = devDir.Trim().Trim('"');
+            DzTrace.Always("[Plugin] developer mode: " + devDir);
+#else
+            DzTrace.Always("[Plugin] --plugin-dev is ignored in release builds");
+#endif
+        }
+        Services.PluginService.Instance.Initialize(_configService, pluginsSuppressed);
+
         var appIcon = AppIcon;
 
         MainWindow = new Window
@@ -288,12 +316,26 @@ public partial class App : System.Windows.Application
 
         CreateTrayIcon();
         StartupTrace("08 tray icon created");
+        Services.PluginService.Instance.NotifySink =
+            (title, body) => _trayIcon?.ShowBalloonTip(title, body);
+        // 只有 --safe-mode 提示；--no-plugins 是「我不要插件」，不该弹安全模式告警。
+        var safeModeRequested = e.Args.Any(a => a.Equals("--safe-mode", StringComparison.OrdinalIgnoreCase));
+        if (safeModeRequested && Services.PluginService.Instance.Records.Count > 0)
+        {
+            _trayIcon?.ShowBalloonTip(_loc["Plugin.PageTitle"], _loc["Plugin.SafeMode"]);
+        }
 
         // Listen to language changes
         _loc.LanguageChanged += _ => UpdateTrayTooltip();
+        _loc.LanguageFallback += OnLanguageFallback;
 
         _zoneManager.Initialize();
         StartupTrace("09 zone manager initialized");
+
+        // 分区坞：在分区/插件都就绪后对账建窗；插件未装/未启用时什么都不做。
+        Services.ZoneBayService.Instance.Initialize(
+            Services.PluginService.Instance, _zoneManager, _configService);
+        StartupTrace("09b zone bay initialized");
 
         // 自动整理：注入 ZoneManager + 启动时挂载已启用分区；之后跟随 ZonesChanged
         // 自动同步 watcher 集合（规则/监听路径/启停即时生效，删除分区自动卸载）。
@@ -324,12 +366,17 @@ public partial class App : System.Windows.Application
         // Apply persisted language preference
         if (!string.IsNullOrEmpty(config.Language))
         {
-            _loc.CurrentLanguage = config.Language switch
+            // 语言包被卸载/停用后，旧配置里的 code 会失效：回退到中文并写回配置，
+            // 免得每次启动都空转一次。
+            if (!_loc.TrySetLanguage(config.Language))
             {
-                "en" => "en",
-                _ => "zh"
-            };
+                Helpers.DzTrace.Always($"[i18n] language '{config.Language}' is not available, falling back to zh");
+                config.Language = "zh";
+                try { _configService.Save(config); } catch { }
+            }
         }
+        Helpers.DzTrace.Always($"[i18n] language={_loc.CurrentLanguage} " +
+                               $"available={string.Join(",", _loc.AvailableLanguages)}");
 
         // Load existing widgets
         _notesService.Load(config);
@@ -416,6 +463,32 @@ public partial class App : System.Windows.Application
             {
                 try { await RunDockLabAsync(dockLabDir, labCase); }
                 catch (Exception ex) { try { System.IO.File.WriteAllText(dockLabDir + "\\dock-lab-error.txt", ex.ToString()); } catch { } }
+                Shutdown();
+            }), DispatcherPriority.ApplicationIdle);
+            return;
+        }
+        // 自测台：--plugin-lab=<目录> 跑安装/加载/重启/禁用/卸载/离线/恶意包/崩溃。
+        var pluginLabDir = ParsePluginLabArg(e.Args);
+        if (pluginLabDir != null)
+        {
+            var pluginCase = ParsePluginLabCase(e.Args);
+            Dispatcher.BeginInvoke(new Action(async () =>
+            {
+                try { await RunPluginLabAsync(pluginLabDir, pluginCase); }
+                catch (Exception ex) { try { System.IO.File.WriteAllText(pluginLabDir + "\\plugin-lab-error.txt", ex.ToString()); } catch { } }
+                Shutdown();
+            }), DispatcherPriority.ApplicationIdle);
+            return;
+        }
+
+        // 自测台：--zonebay-lab=<目录> 跑安装/吸收/展开/释放/卸载。
+        var zoneBayLabDir = ParseZoneBayLabArg(e.Args);
+        if (zoneBayLabDir != null)
+        {
+            Dispatcher.BeginInvoke(new Action(async () =>
+            {
+                try { await RunZoneBayLabAsync(zoneBayLabDir); }
+                catch (Exception ex) { try { System.IO.File.WriteAllText(zoneBayLabDir + "\\zonebay-lab-error.txt", ex.ToString()); } catch { } }
                 Shutdown();
             }), DispatcherPriority.ApplicationIdle);
             return;
@@ -1578,6 +1651,27 @@ public partial class App : System.Windows.Application
         UpdateTrayEvents();
     }
 
+    /// <summary>
+    /// 当前语言包被卸载/停用 → 界面已回退。写回配置并把托盘气泡打出来，
+    /// 避免下次启动又拿着一个不存在的 code。
+    /// </summary>
+    private void OnLanguageFallback(string previous, string current)
+    {
+        try
+        {
+            var cfg = _configService?.Load();
+            if (cfg != null && !string.Equals(cfg.Language, current, StringComparison.OrdinalIgnoreCase))
+            {
+                cfg.Language = current;
+                _configService!.Save(cfg);
+            }
+        }
+        catch { }
+        var name = _loc.NativeLanguageNames.TryGetValue(current, out var native) ? native : current;
+        _trayIcon?.ShowBalloonTip(_loc["Plugin.PageTitle"], _loc.Get("Plugin.Language.Fallback", name));
+        Helpers.DzTrace.Always($"[i18n] language pack for '{previous}' is gone; fell back to '{current}'");
+    }
+
     private void UpdateTrayEvents()
     {
         if (_trayIcon == null) return;
@@ -1586,6 +1680,7 @@ public partial class App : System.Windows.Application
         _trayIcon.DoubleClick -= TrayDoubleClick;
         _trayIcon.ManageZones -= TrayManage;
         _trayIcon.Exit -= TrayExit;
+        _trayIcon.LanguageSelected -= TrayLanguage;
 
         _trayIcon.LeftClick += TrayLeftClick;
         // 只挂一次：UpdateTrayEvents 在切语言 / 更新 tooltip 时也会调用，
@@ -1598,6 +1693,7 @@ public partial class App : System.Windows.Application
         _trayIcon.DoubleClick += TrayDoubleClick;
         _trayIcon.ManageZones += TrayManage;
         _trayIcon.Exit += TrayExit;
+        _trayIcon.LanguageSelected += TrayLanguage;
     }
 
     /// <summary>托盘出错：写日志（Release 也写）+ 尝试弹气泡（图标没注册上时气泡也会失败）。</summary>
@@ -1641,6 +1737,7 @@ public partial class App : System.Windows.Application
     private void TrayShowAll(bool staggered = true)
     {
         _zoneManager?.ShowAll(staggered);
+        Services.ZoneBayService.Instance.ShowAll();
         if (_managementWindow != null)
         {
             if (staggered) _managementWindow.ShowAllWidgetsFromVm();
@@ -1658,6 +1755,8 @@ public partial class App : System.Windows.Application
                     w.ShowPlayer();
                 foreach (var w in System.Windows.Application.Current.Windows.OfType<StickyNoteWindow>().ToList())
                     w.ShowNote();
+                foreach (var w in System.Windows.Application.Current.Windows.OfType<PluginWidgetWindow>().ToList())
+                    w.ShowWidget();
             }
             catch { }
         }
@@ -1665,6 +1764,7 @@ public partial class App : System.Windows.Application
     private void TrayHideAll()
     {
         _zoneManager?.HideAll();
+        Services.ZoneBayService.Instance.HideAll();
         if (_managementWindow != null)
         {
             _managementWindow.HideAllWidgetsFromVm();
@@ -1717,6 +1817,8 @@ public partial class App : System.Windows.Application
                 foreach (var n in _notesService.Notes)
                     if (!n.IsVisible) return true;
             }
+            foreach (var pw in Services.PluginService.Instance.Widgets)
+                if (!pw.IsVisible) return true;
         }
         catch { }
         return false;
@@ -1744,6 +1846,26 @@ public partial class App : System.Windows.Application
 
     private void TrayManage() => ShowManagementWindow();
     private void TrayExit() => ShutdownApplication();
+
+    /// <summary>托盘语言菜单：写配置 + 立即切换（含语言包新增的语言）。</summary>
+    private void TrayLanguage(string code)
+    {
+        if (string.IsNullOrWhiteSpace(code)) return;
+        try
+        {
+            var cfg = _configService?.Load();
+            if (cfg != null && !string.Equals(cfg.Language, code, StringComparison.OrdinalIgnoreCase))
+            {
+                cfg.Language = code;
+                _configService!.Save(cfg);
+            }
+        }
+        catch (Exception ex)
+        {
+            Helpers.DzTrace.Always("[i18n] cannot persist language: " + ex.Message);
+        }
+        _loc.TrySetLanguage(code);
+    }
 
     // ── Widget window management ──
 
@@ -1896,7 +2018,9 @@ public partial class App : System.Windows.Application
         MediaSessionService.Instance.Shutdown();
         AudioLevelMeter.Shutdown();
         AudioSpectrumCapture.Shutdown();
+        Services.ZoneBayService.Instance.Shutdown();
         _zoneManager?.Shutdown();
+        Services.PluginService.Instance.ShutdownAll();
         _trayIcon?.Dispose();
         // ponytail 2026-08-27: 拆卸桌面双击钩子,避免 DLL 注入残留。
         AppDesktopDoubleClick.Uninstall();
@@ -1921,7 +2045,9 @@ public partial class App : System.Windows.Application
         MediaSessionService.Instance.Shutdown();
         AudioLevelMeter.Shutdown();
         AudioSpectrumCapture.Shutdown();
+        Services.ZoneBayService.Instance.Shutdown();
         _zoneManager?.Shutdown();
+        Services.PluginService.Instance.ShutdownAll();
         _trayIcon?.Dispose();
         // ponytail 2026-08-27: 拆卸桌面双击钩子,避免 DLL 注入残留。
         AppDesktopDoubleClick.Uninstall();

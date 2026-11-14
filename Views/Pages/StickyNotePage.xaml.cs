@@ -79,8 +79,6 @@ public partial class StickyNotePage : UserControl
             Tag = note,
             Title = title,
             Subtitle = string.Format(_loc["StickyNotePage.Subtitle"], chars, updated),
-            IsLocked = note.IsLocked,
-            IsVisible = note.IsVisible,
         };
         ApplyIcon(row, note.IconChar, "Icon.Sticky");
         row.ReorderRequested += (src, targetIdx) =>
@@ -90,20 +88,6 @@ public partial class StickyNotePage : UserControl
             MoveRow(_rows, src, targetIdx);              // 列表实时换位（镜像标签栏）
         };
         // ponytail: status badge removed (lock/hidden/hotkey chips no longer shown).
-        row.LockCommand = new RelayCommand(_ =>
-        {
-            note.IsLocked = !note.IsLocked;
-            _notesService?.UpdateNote(note);
-            RefreshList();
-        });
-        row.VisibilityCommand = new RelayCommand(_ =>
-        {
-            // ponytail: 2026-08-26 — route straight through ToggleNoteWindow (see
-            // ClockPage). Pre-flipping the model fired NotesChanged → ghost-stamp snap,
-            // which reversed the toggle and left a transparent ghost.
-            _main.ToggleNoteWindow(note);
-        });
-        row.DeleteCommand = new RelayCommand(_ => Delete(note));
         row.RenameCommand = new RelayCommand(p =>
         {
             var n = p?.ToString();
@@ -114,20 +98,7 @@ public partial class StickyNotePage : UserControl
                 RefreshList();
             }
         });
-        row.PreviewMouseLeftButtonUp += (_, e) =>
-        {
-            if (e.OriginalSource is DependencyObject src)
-            {
-                var parent = src;
-                while (parent != null && parent is not Button)
-                    parent = LogicalTreeHelper.GetParent(parent);
-                if (parent is Button) return;
-            }
-            // ponytail: workspace direction (dock only). Old code also called
-            // PropertyWindowService.OpenOrFocus which created a duplicate
-            // floating editor while the docked panel already showed this note.
-            Select(note);
-        };
+        row.PreviewMouseLeftButtonUp += (_, _) => Select(note);
         // 右键菜单已取消：显示/隐藏、删除、快捷键设置全部移到属性面板顶部状态区。
         return row;
     }
@@ -147,15 +118,6 @@ public partial class StickyNotePage : UserControl
     void NewNote_Click(object sender, RoutedEventArgs e)
     {
         _main.NewNote();
-        RefreshList();
-    }
-
-    void Delete(StickyNote note)
-    {
-        if (MessageBox.Show(_loc.Get("StickyNotePage.DeleteConfirm", note.Title), _loc["StickyNotePage.DeleteTitle"],
-            MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
-        _main.DeleteNote(note);
-        if (ReferenceEquals(_selected, note)) _selected = null;
         RefreshList();
     }
 }

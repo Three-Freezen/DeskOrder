@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using DeskOrder.PluginApi;
 
 namespace DesktopZones.Models;
 
@@ -119,6 +120,40 @@ public class AppConfig
         get => _mediaPlayers;
         set => _mediaPlayers = value ?? new();
     }
+
+    // ── Plugins（插件市场） ──
+    private List<PluginRecord> _plugins = new();
+    /// <summary>已安装插件记录。旧配置没有该字段 → 空列表，零迁移。</summary>
+    public List<PluginRecord> Plugins
+    {
+        get => _plugins;
+        set => _plugins = value ?? new();
+    }
+
+    private List<PluginWidget> _pluginWidgets = new();
+    /// <summary>插件桌面组件实例（窗口位置 / 尺寸 / 每实例设置）。</summary>
+    public List<PluginWidget> PluginWidgets
+    {
+        get => _pluginWidgets;
+        set => _pluginWidgets = value ?? new();
+    }
+
+    /// <summary>插件系统总开关（排查时一键全关）；默认开。</summary>
+    public bool PluginsEnabled { get; set; } = true;
+
+    /// <summary>索引地址覆盖（镜像 / 本地测试）；空串 = 内置默认 registry。</summary>
+    public string PluginRegistryUrl { get; set; } = "";
+
+    private List<PluginZoneBar> _pluginZoneBars = new();
+    /// <summary>插件分区坞（吸附边 / 外观 / 芯片顺序）。</summary>
+    public List<PluginZoneBar> PluginZoneBars
+    {
+        get => _pluginZoneBars;
+        set => _pluginZoneBars = value ?? new();
+    }
+
+    /// <summary>首次启用分区坞插件时自动建过一条；用户删掉后不再自动重建。</summary>
+    public bool ZoneBaySeeded { get; set; }
 
     // ── Property window (per-instance design system, spec §7.1 #6) ──
     public double PropertyWindowX { get; set; } = double.NaN;

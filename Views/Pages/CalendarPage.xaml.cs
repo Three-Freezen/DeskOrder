@@ -76,8 +76,6 @@ public partial class CalendarPage : UserControl
             Tag = cal,
             Title = $"Calendar {cal.DisplayYear}-{cal.DisplayMonth:D2}",
             Subtitle = $"{(int)cal.Width}×{(int)cal.Height} · {_loc.Get("CalendarPage.Subtitle", cal.Notes.Count)}",
-            IsLocked = cal.IsLocked,
-            IsVisible = cal.IsVisible,
         };
         ApplyIcon(row, cal.IconChar, "Icon.Calendar");
         row.ReorderRequested += (src, targetIdx) =>
@@ -87,35 +85,8 @@ public partial class CalendarPage : UserControl
             MoveRow(_rows, src, targetIdx);               // 列表实时换位（镜像标签栏）
         };
         // ponytail: status badge removed (lock/hidden chips no longer shown).
-        row.LockCommand = new RelayCommand(_ =>
-        {
-            cal.IsLocked = !cal.IsLocked;
-            _widgetService?.UpdateCalendar(cal);
-            RefreshList();
-        });
-        row.VisibilityCommand = new RelayCommand(_ =>
-        {
-            // ponytail: 2026-08-26 — route straight through ToggleCalendarWindow (see
-            // ClockPage). Pre-flipping the model fired CalendarsChanged → ghost-stamp
-            // snap + SetEnabled, which reversed the toggle and left a transparent ghost.
-            _main.ToggleCalendarWindow(cal);
-        });
-        row.DeleteCommand = new RelayCommand(_ => Delete(cal));
         row.RenameCommand = new RelayCommand(_ => { /* calendars don't have a free-form name */ });
-        row.PreviewMouseLeftButtonUp += (_, e) =>
-        {
-            if (e.OriginalSource is DependencyObject src)
-            {
-                var parent = src;
-                while (parent != null && parent is not Button)
-                    parent = LogicalTreeHelper.GetParent(parent);
-                if (parent is Button) return;
-            }
-            // ponytail: workspace direction (dock only). Old code also called
-            // PropertyWindowService.OpenOrFocus which created a duplicate
-            // floating editor while the docked panel already showed this calendar.
-            Select(cal);
-        };
+        row.PreviewMouseLeftButtonUp += (_, _) => Select(cal);
         // 右键菜单已取消：显示/隐藏与删除移到属性面板顶部状态区。
         return row;
     }
@@ -135,15 +106,6 @@ public partial class CalendarPage : UserControl
     void NewCalendar_Click(object sender, RoutedEventArgs e)
     {
         _main.NewCalendar();
-        RefreshList();
-    }
-
-    void Delete(DesktopCalendar cal)
-    {
-        if (MessageBox.Show(_loc.Get("CalendarPage.DeleteConfirm", $"Calendar {cal.DisplayYear}-{cal.DisplayMonth:D2}"),
-            _loc["CalendarPage.DeleteTitle"], MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
-        _main.DeleteCalendar(cal);
-        if (ReferenceEquals(_selected, cal)) _selected = null;
         RefreshList();
     }
 }

@@ -70,6 +70,23 @@ public partial class ZoneWindow : Window
     private Canvas? _itemCanvas;
     private Action<string>? _langChanged;
 
+    // ── 分区坞临时展开态（见 ZoneBayService / ZoneBayWindow） ──
+    private bool _bayActive;
+    /// <summary>本次菜单是「坞内芯片右键」打开的（不是展开态、也不是普通分区）。
+    /// 该模式下锁定/最小化/完全隐藏都不提供，只留「从分区坞移出」等真正有意义的项。</summary>
+    private bool _bayChipMenu;
+    private bool _bayStrip;
+    private bool _bayVertical;
+    private Rect _baySavedRect;
+    private ItemsPanelTemplate? _baySavedPanel;
+    private DataTemplateSelector? _baySavedSelector;
+    private DataTemplate? _baySavedTemplate;
+    private ScaleTransform? _bayScale;
+    private TranslateTransform? _bayTranslate;
+    private bool _bayClosing;
+    private int _bayCloseToken;
+    public bool IsBayExpanded => _bayActive;
+
     private bool _dragging;
     private Point _ds, _is;
     private ZoneItemViewModel? _dv;
@@ -262,7 +279,7 @@ public partial class ZoneWindow : Window
         };
         _vm.Items.CollectionChanged += _vmItemsChangedHandler;
         Loaded += OnLoad;
-        LocationChanged += (_, _) => { _zone.X = Left; _zone.Y = Top; ScheduleSave(); };
+        LocationChanged += (_, _) => { if (_bayActive) return; _zone.X = Left; _zone.Y = Top; ScheduleSave(); };
         SizeChanged += OnSize;
         _saveDebounce.Tick += (_, _) => { _saveDebounce.Stop(); if (_savePending) { _savePending = false; _mgr.SaveConfig(); } };
         // 标题栏改名:停手 700ms 自动提交 + 窗口失去激活时提交 —— 用户"改完点别处"
@@ -322,6 +339,8 @@ public partial class ZoneWindow : Window
             }
         };
         ItemsHost.ItemContainerGenerator.StatusChanged += _itemsHostStatusChangedHandler;
+        // 长条展开时用滚轮沿长边滚（条目溢出 / P1）。
+        ItemsViewport.PreviewMouseWheel += OnBayStripWheel;
         if (!_zone.IsVisible) ApplyHidden();
         // ponytail: ApplyStyle rebuilds sub-zone tabs internally with the resolved title
         // text color. No external RebuildSubZoneTabs call needed here.
@@ -415,6 +434,7 @@ public partial class ZoneWindow : Window
         CtxMapFolder2.Header = _loc["FolderMap.MenuMap"];
         CtxDisbandAll.Header = _loc["Merge.DisbandAll"];
         CtxSettings.Header = _loc["ZoneMenu.Settings"];
+        CtxReleaseFromBay.Header = _loc["ZoneBay.Menu.Release"];
         // ponytail 2026-08-27: 切语言时同步刷新 CtxLock(吸取教训 — ApplyLockState 不在
         // LanguageChanged 路径上,XAML 静态绑定只读一次,需手动同步)。
         CtxLock.Header = _loc[_zone.IsLocked ? "Common.Unlock" : "Common.Lock"];
@@ -1589,6 +1609,14 @@ public partial class ZoneWindow : Window
 
     public void HideZone(double waveDelayMs = 0)
     {
+        // 坞内展开态点「最小化/收起」= 收回到坞里。绝不能走下面的收起分支 ——
+        // 那会在分区原来的位置留下一个 36×36 的恢复按钮（坞里已经有一颗芯片，
+        // 桌面上那颗是纯残影，点它还会把分区重新拉回桌面）。
+        if (_bayActive)
+        {
+            ZoneBayService.Instance.CollapseInBay(_zone.Id);
+            return;
+        }
 #if DEBUG
         DzTrace.Log($"[ZoneWindow] HideZone(wave={waveDelayMs}) ENTRY winVisible={IsVisible} content={MainContent.Visibility} btn={RestoreButton.Visibility} hoverExpanded={_hover?.IsExpanded} modelVisible={_zone.IsVisible} restoreEnabled={_zone.EnableRestoreButton} size={Width}x{Height}");
 #endif
@@ -1756,6 +1784,326 @@ public partial class ZoneWindow : Window
             // visibility/scale from here.
             _hover?.SnapToCollapsed();
         }
+    }
+
+    /// <summary>
+    /// 坞内临时展开：不写模型几何、不把 IsVisible 改成 true；长条模式只换 ItemsPanel/模板，
+    /// 原始模式保持原分区样式（只隐藏锁定）。
+    /// </summary>
+    public void ShowForBay(Rect rect, bool strip, bool vertical, string edge)
+    {
+        CancelBayClose();
+        _baySavedRect = new Rect(Left, Top, Width, Height);
+        _baySavedPanel = ItemsHost.ItemsPanel;
+        _baySavedSelector = ItemsHost.ItemTemplateSelector;
+        _baySavedTemplate = ItemsHost.ItemTemplate;
+        _bayActive = true;
+        _bayStrip = strip;
+        _bayVertical = vertical;
+        _hover?.SetEnabled(false);
+        _hover?.SnapToExpanded();
+
+        // 先把分区自己的样式铺好，再按坞模式收掉标题/按钮。
+        ApplyStyle();
+        MainContent.Visibility = Visibility.Visible;
+        RestoreButton.Visibility = Visibility.Collapsed;
+        _zone.IsVisible = false;
+
+        if (strip)
+        {
+            TitleBarBg.Visibility = Visibility.Collapsed;
+            BottomBarBg.Visibility = Visibility.Collapsed;
+            ControlPoint.Visibility = Visibility.Collapsed;
+            ItemsListHost.Visibility = Visibility.Collapsed;
+            ItemsHost.Visibility = Visibility.Visible;
+            FolderMappingView.Visibility = Visibility.Collapsed;
+            DockChromeLayer.Visibility = Visibility.Collapsed;
+            SubZoneTabsRow.Visibility = _zone.MergedGroupMembership.SubZoneIds.Count > 0
+                ? Visibility.Visible : Visibility.Collapsed;
+
+            _baySavedPanel ??= ItemsHost.ItemsPanel;
+            _baySavedSelector ??= ItemsHost.ItemTemplateSelector;
+            var factory = new FrameworkElementFactory(typeof(StackPanel));
+            factory.SetValue(StackPanel.OrientationProperty,
+                vertical ? Orientation.Vertical : Orientation.Horizontal);
+            factory.SetValue(StackPanel.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+            factory.SetValue(StackPanel.VerticalAlignmentProperty, VerticalAlignment.Center);
+            ItemsHost.ItemsPanel = new ItemsPanelTemplate(factory);
+            ItemsHost.ItemTemplate = null;
+            ItemsHost.ItemTemplateSelector = (DataTemplateSelector)Resources["DockItemSelector"];
+            ItemsHost.HorizontalAlignment = HorizontalAlignment.Stretch;
+            ItemsHost.VerticalAlignment = VerticalAlignment.Stretch;
+            _itemCanvas = null;
+
+            // P1 溢出滚动：长条里的条目再多也只在坞所在方向上滚，另一轴锁死。
+            ItemsViewport.HorizontalScrollBarVisibility = vertical ? ScrollBarVisibility.Disabled : ScrollBarVisibility.Hidden;
+            ItemsViewport.VerticalScrollBarVisibility = vertical ? ScrollBarVisibility.Hidden : ScrollBarVisibility.Disabled;
+            ItemsViewport.PanningMode = vertical ? PanningMode.VerticalOnly : PanningMode.HorizontalOnly;
+
+            // 长条的胶囊圆角与坞本体一致；玻璃/填充沿用分区自己的原生外观，
+            // 不再在这里盖一层不透明深色（那会把液态玻璃完全挡掉）。
+            MainContent.CornerRadius = new CornerRadius(12);
+            ZoneBorder.CornerRadius = new CornerRadius(12);
+        }
+        else
+        {
+            // 原始展开：标题/磁贴样式沿用分区自己的设置（ApplyStyle 已处理），
+            // 只让锁定失效。
+            LockBtn.Visibility = Visibility.Collapsed;
+        }
+
+        CtxLock.Visibility = Visibility.Collapsed;
+        CtxMinimize.Header = _loc["ZoneBay.Chip.Recall"];
+
+        Width = Math.Max(1, rect.Width);
+        Height = Math.Max(1, rect.Height);
+        Left = rect.X;
+        Top = rect.Y;
+        if (!IsVisible) Show();
+        DesktopLayer.BringToFront(this);
+        NativeMethods.SetToolWindow(this);
+        if (_zone.EnableLiquidGlass && !AcrylicHelper.ResolveSelfDrawn())
+            NativeMethods.SetRoundedCorners(this, (int)AcrylicHelper.DwmWindowCornerRadiusDip);
+        else
+            NativeMethods.DisableRoundedCorners(this);
+        ItemsHost.UpdateLayout();
+        PlayBayOpenAnimation(edge, strip);
+    }
+
+    // ── 坞内展开 / 收起动效（原生 flyout 的缩放 + 淡入，朝坞所在的边生长） ──
+
+    /// <summary>长条展开溢出时：滚轮沿长边滚动（横向坞滚横向、纵向坞滚纵向）。</summary>
+    void OnBayStripWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (!_bayActive || !_bayStrip) return;
+        if (_bayVertical) ItemsViewport.ScrollToVerticalOffset(ItemsViewport.VerticalOffset - e.Delta);
+        else ItemsViewport.ScrollToHorizontalOffset(ItemsViewport.HorizontalOffset - e.Delta);
+        e.Handled = true;
+    }
+
+    /// <summary>组合分区标签栏横向滚动（长条比标签总宽还窄时）。</summary>
+    void SubZoneTabs_Wheel(object sender, MouseWheelEventArgs e)
+    {
+        if (SubZoneTabsScroll == null) return;
+        SubZoneTabsScroll.ScrollToHorizontalOffset(SubZoneTabsScroll.HorizontalOffset - e.Delta);
+        e.Handled = true;
+    }
+
+    void EnsureBayTransform()
+    {
+        if (MainContent.RenderTransform is TransformGroup tg
+            && tg.Children.Count >= 2
+            && tg.Children[0] is ScaleTransform st
+            && tg.Children[1] is TranslateTransform tr)
+        {
+            _bayScale = st;
+            _bayTranslate = tr;
+            return;
+        }
+        _bayScale = new ScaleTransform(1, 1);
+        _bayTranslate = new TranslateTransform(0, 0);
+        var group = new TransformGroup();
+        group.Children.Add(_bayScale);
+        group.Children.Add(_bayTranslate);
+        MainContent.RenderTransform = group;
+    }
+
+    void SetBayOrigin(string edge)
+    {
+        MainContent.RenderTransformOrigin = edge switch
+        {
+            ZoneBayEdges.Top => new Point(0.5, 0),
+            ZoneBayEdges.Left => new Point(1, 0.5),
+            ZoneBayEdges.Right => new Point(0, 0.5),
+            _ => new Point(0.5, 1)
+        };
+    }
+
+    static (double X, double Y) BayOffset(string edge, double amount) => edge switch
+    {
+        ZoneBayEdges.Top => (0, -amount),
+        ZoneBayEdges.Left => (amount, 0),
+        ZoneBayEdges.Right => (-amount, 0),
+        _ => (0, amount)
+    };
+
+    void PlayBayOpenAnimation(string edge, bool strip)
+    {
+        EnsureBayTransform();
+        if (_bayScale == null || _bayTranslate == null) return;
+        SetBayOrigin(edge);
+        double fromScale = strip ? 0.82 : 0.92;
+        var (ox, oy) = BayOffset(edge, strip ? 10 : 6);
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+        var dur = TimeSpan.FromMilliseconds(200);
+
+        _bayScale.ScaleX = 1;
+        _bayScale.ScaleY = 1;
+        _bayTranslate.X = 0;
+        _bayTranslate.Y = 0;
+        MainContent.Opacity = 1;
+
+        _bayScale.BeginAnimation(ScaleTransform.ScaleXProperty,
+            new DoubleAnimation(fromScale, 1, dur) { EasingFunction = ease, FillBehavior = FillBehavior.Stop });
+        _bayScale.BeginAnimation(ScaleTransform.ScaleYProperty,
+            new DoubleAnimation(fromScale, 1, dur) { EasingFunction = ease, FillBehavior = FillBehavior.Stop });
+        _bayTranslate.BeginAnimation(TranslateTransform.XProperty,
+            new DoubleAnimation(ox, 0, dur) { EasingFunction = ease, FillBehavior = FillBehavior.Stop });
+        _bayTranslate.BeginAnimation(TranslateTransform.YProperty,
+            new DoubleAnimation(oy, 0, dur) { EasingFunction = ease, FillBehavior = FillBehavior.Stop });
+        MainContent.BeginAnimation(OpacityProperty,
+            new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(160)) { EasingFunction = ease, FillBehavior = FillBehavior.Stop });
+    }
+
+    /// <summary>收起：先淡出缩回坞边，再恢复原分区模板并隐藏。返回 false 表示没有在动画。</summary>
+    public void BeginBayCloseAnimation(string edge, Action? done = null)
+    {
+        if (!_bayActive) { done?.Invoke(); return; }
+        if (_bayClosing) return;
+        EnsureBayTransform();
+        if (_bayScale == null || _bayTranslate == null) { ExitBay(); done?.Invoke(); return; }
+
+        _bayClosing = true;
+        int token = ++_bayCloseToken;
+        SetBayOrigin(edge);
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+        var (ox, oy) = BayOffset(edge, 8);
+        double toScale = _bayStrip ? 0.86 : 0.93;
+        double fromScale = _bayScale.ScaleX;
+        double fromOpacity = MainContent.Opacity;
+        double fromX = _bayTranslate.X, fromY = _bayTranslate.Y;
+
+        var fade = new DoubleAnimation(fromOpacity, 0, TimeSpan.FromMilliseconds(140))
+        {
+            EasingFunction = ease,
+            FillBehavior = FillBehavior.Stop
+        };
+        fade.Completed += (_, _) =>
+        {
+            // 收起动画跑到一半又被重新展开（同一个 ZoneWindow 复用）：token 变了就作废，
+            // 否则这里会把刚展开的窗口再 ExitBay 一次。
+            if (!_bayActive || !_bayClosing || token != _bayCloseToken) return;
+            ResetBayContentVisual();
+            _bayClosing = false;
+            ExitBay();
+            done?.Invoke();
+        };
+        MainContent.BeginAnimation(OpacityProperty, fade);
+        _bayScale.BeginAnimation(ScaleTransform.ScaleXProperty,
+            new DoubleAnimation(fromScale, toScale, TimeSpan.FromMilliseconds(160)) { EasingFunction = ease, FillBehavior = FillBehavior.Stop });
+        _bayScale.BeginAnimation(ScaleTransform.ScaleYProperty,
+            new DoubleAnimation(fromScale, toScale, TimeSpan.FromMilliseconds(160)) { EasingFunction = ease, FillBehavior = FillBehavior.Stop });
+        _bayTranslate.BeginAnimation(TranslateTransform.XProperty,
+            new DoubleAnimation(fromX, ox, TimeSpan.FromMilliseconds(160)) { EasingFunction = ease, FillBehavior = FillBehavior.Stop });
+        _bayTranslate.BeginAnimation(TranslateTransform.YProperty,
+            new DoubleAnimation(fromY, oy, TimeSpan.FromMilliseconds(160)) { EasingFunction = ease, FillBehavior = FillBehavior.Stop });
+    }
+
+    void CancelBayClose()
+    {
+        if (!_bayClosing) { ResetBayContentVisual(); return; }
+        _bayClosing = false;
+        _bayCloseToken++;
+        ResetBayContentVisual();
+    }
+
+    void ResetBayContentVisual()
+    {
+        try
+        {
+            MainContent.BeginAnimation(OpacityProperty, null);
+            MainContent.Opacity = 1;
+            if (_bayScale != null)
+            {
+                _bayScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+                _bayScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+                _bayScale.ScaleX = 1;
+                _bayScale.ScaleY = 1;
+            }
+            if (_bayTranslate != null)
+            {
+                _bayTranslate.BeginAnimation(TranslateTransform.XProperty, null);
+                _bayTranslate.BeginAnimation(TranslateTransform.YProperty, null);
+                _bayTranslate.X = 0;
+                _bayTranslate.Y = 0;
+            }
+        }
+        catch { }
+    }
+
+    /// <summary>收起坞内展开：恢复原尺寸/模板/菜单，隐藏窗口；不改模型。</summary>
+    public void ExitBay()
+    {
+        if (!_bayActive) return;
+
+        _bayClosing = false;
+        _bayCloseToken++;
+        ResetBayContentVisual();
+        if (_baySavedPanel != null) ItemsHost.ItemsPanel = _baySavedPanel;
+        ItemsHost.ItemTemplateSelector = _baySavedSelector;
+        ItemsHost.ItemTemplate = _baySavedTemplate;
+
+        ApplyStyle();
+        ApplyLockState();
+        ItemsHost.UpdateLayout();
+        _itemCanvas = FindVisualChild<Canvas>(ItemsHost);
+        ItemsHost.Visibility = _isGridView ? Visibility.Visible : Visibility.Collapsed;
+        ItemsListHost.Visibility = _isGridView ? Visibility.Collapsed : Visibility.Visible;
+        RefreshFolderMapping();
+        CtxLock.Visibility = Visibility.Visible;
+        ApplyLoc();
+
+        Width = Math.Max(40, _baySavedRect.Width);
+        Height = Math.Max(40, _baySavedRect.Height);
+        Left = _baySavedRect.X;
+        Top = _baySavedRect.Y;
+        _bayActive = false;
+        Hide();
+        _zone.IsVisible = false;
+        _hover?.SetEnabled(_zone.EnableRestoreButton);
+    }
+
+    /// <summary>释放回桌面时把窗口直接摆成 36×36 恢复按钮态（不闪全窗）。</summary>
+    public void SnapToCollapsedForBay()
+    {
+        _bayActive = false;
+        MainContent.Visibility = Visibility.Visible;
+        _hover?.SetEnabled(_zone.EnableRestoreButton);
+        _hover?.SnapToCollapsed();
+        RestoreButton.Visibility = _zone.EnableRestoreButton ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    // ── 坞内芯片右键（P0 修复第 4 条：芯片右键 = 这个分区自己的菜单） ──
+
+    /// <summary>
+    /// 在坞里的芯片上右键：把本窗口的**原生分区菜单**在鼠标处打开。
+    /// 窗口本身可以是不显示的（分区被吸进坞后通常已经关窗），ContextMenu 是独立
+    /// 弹出层，只要 PlacementTarget 已连到视觉树（坞窗口里的芯片）就能正常定位/渲染。
+    /// </summary>
+    public void OpenBayChipMenu(FrameworkElement? anchor, Action? closed = null)
+    {
+        var cm = ZoneBorder.ContextMenu;
+        if (cm == null) { closed?.Invoke(); return; }
+
+        _bayChipMenu = true;
+        RoutedEventHandler? handler = null;
+        handler = (_, _) =>
+        {
+            if (handler != null) cm.Closed -= handler;
+            _bayChipMenu = false;
+            try { closed?.Invoke(); } catch { }
+        };
+        cm.Closed += handler;
+
+        cm.PlacementTarget = anchor ?? ZoneBorder;
+        cm.Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint;
+        cm.IsOpen = true;
+    }
+
+    /// <summary>坞菜单项「从分区坞移出」：把分区放回桌面（36×36 恢复按钮），坞里那颗芯片消失。</summary>
+    void ReleaseFromBay_Click(object s, RoutedEventArgs e)
+    {
+        ZoneBayService.Instance.Release(_zone.Id);
     }
 
     protected override void OnClosed(EventArgs e)
@@ -2743,6 +3091,7 @@ public partial class ZoneWindow : Window
 
     void RearrangeAll(bool center = true)
     {
+        if (_bayActive) return;   // 坞内展开是只读布局，不改 item 坐标
         if (IsDock) { ArrangeDockItems(); return; }
         if (!_zone.AutoArrange) return;
         var (items, gridSize) = ResolveRearrangeTarget();
@@ -2828,6 +3177,36 @@ public partial class ZoneWindow : Window
         // 粘贴项上方的分割线跟粘贴项同显隐:无映射时保持菜单整洁(避免双分割线)。
         CtxPasteSep.Visibility = CtxPaste.Visibility;
 
+        // 分区坞展开态：锁定失效；最小化 = 收回到坞；完全隐藏不提供（修复要求第 7 条）。
+        if (_bayActive)
+        {
+            CtxLock.Visibility = Visibility.Collapsed;
+            CtxMinimize.Visibility = Visibility.Visible;
+            CtxMinimize.Header = _loc["ZoneBay.Chip.Recall"];
+            CtxDockAddApp.Visibility = Visibility.Collapsed;
+            CtxDockSep.Visibility = Visibility.Collapsed;
+            CtxFullHide.Visibility = Visibility.Collapsed;
+            CtxReleaseFromBay.Visibility = Visibility.Visible;
+            CtxDelete.Header = _loc["ZoneMenu.DeleteZone"];
+            NormalizeMenuSeparators((ContextMenu)s);
+            return;
+        }
+
+        // 坞内芯片右键：同一个原生菜单，但「锁定/最小化/完全隐藏」对一颗收在坞里的芯片
+        // 没有意义；「从分区坞移出」是这里的主操作。
+        if (_bayChipMenu)
+        {
+            CtxLock.Visibility = Visibility.Collapsed;
+            CtxMinimize.Visibility = Visibility.Collapsed;
+            CtxFullHide.Visibility = Visibility.Collapsed;
+            CtxDockAddApp.Visibility = Visibility.Collapsed;
+            CtxDockSep.Visibility = Visibility.Collapsed;
+            CtxReleaseFromBay.Visibility = Visibility.Visible;
+            CtxDelete.Header = _loc["ZoneMenu.DeleteZone"];
+            NormalizeMenuSeparators((ContextMenu)s);
+            return;
+        }
+
         // 快捷栏：和分区菜单对齐（缺的功能补齐），只去掉两条快捷栏里没有意义的东西：
         // ①「文件夹映射」以及依赖它的「粘贴」（快捷栏不做映射/监听）
         // ② 组合分区的「解散」（快捷栏不参与合并组）
@@ -2851,6 +3230,7 @@ public partial class ZoneWindow : Window
             CtxMergeSep.Visibility = Visibility.Collapsed;
             CtxPaste.Visibility = Visibility.Collapsed;
             CtxPasteSep.Visibility = Visibility.Collapsed;
+            CtxReleaseFromBay.Visibility = Visibility.Collapsed;
             CtxDelete.Header = _loc["DockMenu.DeleteDock"];
             NormalizeMenuSeparators((ContextMenu)s);
             return;
@@ -2861,6 +3241,8 @@ public partial class ZoneWindow : Window
         CtxDockAddApp.Visibility = Visibility.Collapsed;
         CtxDockSep.Visibility = Visibility.Collapsed;
         CtxFullHide.Visibility = Visibility.Collapsed;
+        CtxReleaseFromBay.Visibility = Visibility.Collapsed;
+        CtxMinimize.Visibility = Visibility.Visible;
     }
 
     /// <summary>收拾右键菜单里的空段：开头/结尾的分隔线与相邻重复的分隔线都藏起来。
@@ -3026,6 +3408,7 @@ public partial class ZoneWindow : Window
     // Minimized state drag — uses SnapDrag (manual drag loop) like title bar
     private bool _restoreDragging;
     private Point _restoreDown;
+    private Point _restoreOriginalPos;
 
     void Restore_MouseDown(object s, MouseButtonEventArgs e)
     {
@@ -3034,6 +3417,7 @@ public partial class ZoneWindow : Window
 #endif
         _restoreDragging = false;
         _restoreDown = e.GetPosition(this);
+        _restoreOriginalPos = new Point(_zone.X, _zone.Y);
         RestoreButton.CaptureMouse();
         e.Handled = true;
     }
@@ -3048,6 +3432,8 @@ public partial class ZoneWindow : Window
         {
             _restoreDragging = true;
             RestoreButton.ReleaseMouseCapture();
+            _snapDrag?.DragMoved -= OnRestoreDragMoved;
+            _snapDrag?.DragMoved += OnRestoreDragMoved;
             _snapDrag?.Start(e, () =>
             {
                 DesktopLayer.BringToFront(this); if (IsDock) SyncDockGlassWindow();
@@ -3062,6 +3448,25 @@ public partial class ZoneWindow : Window
         DzTrace.Log($"[Restore] up dragging={_restoreDragging}");
 #endif
         RestoreButton.ReleaseMouseCapture();
+        if (_restoreDragging)
+        {
+            _snapDrag?.DragMoved -= OnRestoreDragMoved;
+            Point cursor = _snapDrag?.CurrentScreenPos ?? new Point(0, 0);
+            if (NativeMethods.GetCursorPos(out var pt)) cursor = new Point(pt.x, pt.y);
+            ZoneBayService.Instance.EndDrag();
+            if (ZoneBayService.Instance.TryAbsorb(_zone, cursor, out var bayError))
+            {
+                // 拖进坞：位置回到拖动前，窗口由 Absorb 关掉，落盘的是原位置。
+                _zone.X = _restoreOriginalPos.X;
+                _zone.Y = _restoreOriginalPos.Y;
+                _mgr.SaveConfig();
+                e.Handled = true;
+                return;
+            }
+            if (!string.IsNullOrEmpty(bayError))
+                DzTrace.Always("[ZoneBay] absorb failed: " + bayError);
+        }
+
         // ponytail: click = permanent expand (no auto-collapse); the hover path
         // (1 s on RestoreButton) is the temporary preview with 3 s auto-collapse.
         // Both share the same animation from HoverExpandBehavior's animationGetter.
@@ -3075,6 +3480,11 @@ public partial class ZoneWindow : Window
             _mgr.SaveConfig();
             _mgr.FireZoneVisibilityChanged(_zone.Id, true);
         }
+    }
+
+    void OnRestoreDragMoved(Point screenPx)
+    {
+        if (_restoreDragging) ZoneBayService.Instance.DragMoved(screenPx);
     }
 
     void Restore_Enter(object s, MouseEventArgs e) { RestoreButton.SetResourceReference(Border.BackgroundProperty, "Menu.Bg.Hover"); }
@@ -4598,6 +5008,12 @@ public partial class ZoneWindow : Window
             EnableLiquidGlass: _zone.EnableLiquidGlass);
 
         // Step 2: merged-group override.
+        // 合并分区的「标题栏透明度」在属性面板里改的是 TitleBarFillColor 的 alpha
+        // （PropertyPanel 组合分区段），TitleBarOpacity 是 2026-10 改成「整条标题栏
+        // 元素 Opacity」新口径之前的旧字段（旧值 = 填充色 alpha 百分比，默认 6），
+        // 没有 UI 入口。若沿用旧值，整条标题栏（标题文字 + 右侧按钮）会被压到 ~6%
+        // 不透明度，看起来一片死黑、内容看不清 —— 所以合并模式恒定 100，透明感交给
+        // TitleBarFillColor 的 alpha 与三段式（主栏 / 子标签栏 / 映射头）承担。
         bool isMerged = _zone.MergedGroupMembership.SubZoneIds.Count > 0 || _zone.MergedGroupMembership.GroupId.HasValue;
         if (!isMerged) return regular;
 
@@ -4610,7 +5026,7 @@ public partial class ZoneWindow : Window
                 BorderColor =      _zone.MergedGroupStyle.BorderColor,
                 BorderThickness =  _zone.MergedGroupStyle.BorderThickness,
                 TitleBarFillColor = _zone.MergedGroupStyle.TitleBarFillColor,
-                TitleBarOpacity =  _zone.MergedGroupStyle.TitleBarOpacity,
+                TitleBarOpacity =  100,
                 TitleTextColor =   _zone.MergedGroupStyle.TitleTextColor,
                 IconColor =        _zone.MergedGroupStyle.IconColor,
                 ButtonColor =      _zone.MergedGroupStyle.ButtonColor,
@@ -4652,7 +5068,7 @@ public partial class ZoneWindow : Window
             BorderColor =      _zone.MergedGroupStyle.BorderColor,
             BorderThickness =  _zone.MergedGroupStyle.BorderThickness,
             TitleBarFillColor = _zone.MergedGroupStyle.TitleBarFillColor,
-            TitleBarOpacity =  _zone.MergedGroupStyle.TitleBarOpacity,
+            TitleBarOpacity =  100,
             TitleTextColor =   _zone.MergedGroupStyle.TitleTextColor,
             IconColor =        _zone.MergedGroupStyle.IconColor,
             ButtonColor =      _zone.MergedGroupStyle.ButtonColor,
@@ -4838,6 +5254,30 @@ public partial class ZoneWindow : Window
         // title-bar band); items use the resolved body content color.
         RebuildSubZoneTabs(s.TitleTextColor);
         ApplyItemTextColor(s.TextColor);
+
+        // 坞内长条：无论 ApplyStyle 在 Show()/刷新时跑几次，都保持“一格高的胶囊”外观。
+        if (_bayActive && _bayStrip)
+        {
+            // 玻璃开着时保留分区自己的原生玻璃配方（ApplyAcrylic 已经铺好，FillRect 是
+            // 命中层）；只有分区没开玻璃时才补一层深色，免得图标浮在桌面上。
+            if (!_zone.EnableLiquidGlass)
+            {
+                FillRect.Fill = new SolidColorBrush(Color.FromArgb(0xB8, 0x14, 0x1A, 0x24));
+                FillRect.Opacity = 1.0;
+            }
+            double stripRadius = _zone.EnableLiquidGlass && !AcrylicHelper.ResolveSelfDrawn()
+                ? AcrylicHelper.DwmWindowCornerRadiusDip
+                : 12;
+            MainContent.CornerRadius = new CornerRadius(stripRadius);
+            ZoneBorder.CornerRadius = new CornerRadius(stripRadius);
+            TitleBarBg.Visibility = Visibility.Collapsed;
+            BottomBarBg.Visibility = Visibility.Collapsed;
+            ControlPoint.Visibility = Visibility.Collapsed;
+            ItemsListHost.Visibility = Visibility.Collapsed;
+            ItemsHost.Visibility = Visibility.Visible;
+            SubZoneTabsRow.Visibility = _zone.MergedGroupMembership.SubZoneIds.Count > 0
+                ? Visibility.Visible : Visibility.Collapsed;
+        }
     }
 
     /// <summary>遍历 ItemsHost / ItemsListHost 内的容器，根据 hide 切换名称 TextBlock
@@ -5056,6 +5496,7 @@ public partial class ZoneWindow : Window
     }
     void OnSize(object s, SizeChangedEventArgs e)
     {
+        if (_bayActive) return;
         if (!IsLoaded || MainContent.Visibility != Visibility.Visible) return;
         if (IsDock)
         {
@@ -5578,7 +6019,7 @@ public partial class ZoneWindow : Window
     void SubZoneTab_MouseDown(object s, MouseButtonEventArgs e)
     {
         var vm = DataContext as ZoneViewModel;
-        if (vm?.IsLocked == true) return;
+        if (vm?.IsLocked == true && !_bayActive) return;
         if (s is not Border tab || tab.Tag is not Guid zoneId) return;
         if (_zone.MergedGroupMembership.SubZoneIds.Count == 0) return;
 
@@ -7505,9 +7946,7 @@ public partial class ZoneWindow : Window
 
     /// <summary>自测用：把条体右键菜单按当前形态打开一次，返回可见项文字串
     /// （分隔线记作 |），用来核对快捷栏菜单是否与分区对齐。</summary>
-    public string DebugOpenZoneMenu()
-    {
-        var cm = ZoneBorder.ContextMenu;
+    public string DebugOpenZoneMenu()    {        var cm = ZoneBorder.ContextMenu;
         if (cm == null) return "no-menu";
         var sb = new System.Text.StringBuilder();
         try
@@ -7538,6 +7977,12 @@ public partial class ZoneWindow : Window
             cm.IsOpen = false;
         }
         return sb.ToString();
+    }
+
+    /// <summary>自测用：关掉当前打开的分区菜单（DebugOpenZoneMenu / 坞内芯片菜单共用）。</summary>
+    public void DebugCloseZoneMenu()
+    {
+        try { if (ZoneBorder.ContextMenu != null) ZoneBorder.ContextMenu.IsOpen = false; } catch { }
     }
 
     /// <summary>自测用：手动摆两个运行状态（不依赖真的开程序），离屏渲染检查灰/蓝短线。</summary>

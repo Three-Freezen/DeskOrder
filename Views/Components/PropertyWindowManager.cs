@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Threading;
+using DeskOrder.PluginApi;
 using DesktopZones.Helpers;
 using DesktopZones.Models;
 using DesktopZones.Services;
@@ -498,6 +499,11 @@ public class PropertyWindowManager
                 : $"{loc["Manage.MediaPlayers"]} ({loc["Media.ModeVinyl"]})",
             StickyNote => loc["StickyNotePage.FallbackTitle"],
             PanelConfig => loc["PanelPage.PanelTitle"],
+            // 分区坞：标题就是坞名；没名字时回落到「分区坞」。
+            PluginZoneBar bay => string.IsNullOrWhiteSpace(bay.Name) ? loc["ZoneBay.Title"] : bay.Name,
+            // 插件组件：标题取插件声明的组件名（describe 可能已卸载 → 回落插件 id）。
+            PluginWidget w => PluginService.Instance.FindDescriptor(w.PluginId, w.WidgetTypeId)?.DisplayName
+                              ?? w.PluginId,
             // ponytail 2026-08-26: SubFolder 编辑面板的标题直接取 ZoneItem.Name
             // (用户消息:右键重命名即可),不要回落到 "ZoneItem"。
             ZoneItem si => si.Name,
@@ -519,6 +525,10 @@ public class PropertyWindowManager
         // of the generic Settings gear so the docked/undocked panel tab is
         // visually distinct from the four property editors.
         PanelConfig => "Icon.Panel",
+        // 分区坞用自己的图标（与侧栏条目、管理页行同一枚）。
+        PluginZoneBar => "Icon.ZoneBay",
+        // 插件组件用插件市场同一枚插头图标。
+        PluginWidget => "Icon.Plugin",
         // ponytail 2026-08-26: SubFolder 沿用 Icon.Folder 视觉一致性。
         ZoneItem si when si.Type == ItemType.SubFolder => "Icon.Folder",
         _ => "Icon.Settings",

@@ -14,7 +14,8 @@ namespace DesktopZones.Views.Components;
 
 /// <summary>
 /// One row in an instance list (zone / panel / widget / sticky / clock / calendar).
-/// 3-column grid: 28x28 icon | title + subtitle | hover ops (lock / eye / trash).
+/// 2-column grid: 28x28 icon | title + subtitle (+ optional status badge).
+/// 行上没有任何操作按钮：点行 = 右侧属性面板，显示/锁定/删除走面板顶部状态区。
 /// Double-click title → inline rename → fires RenameCommand with the new name.
 ///
 /// ponytail 2026-08-25: drag-to-reorder (arm-on-move, mirrors the tab strips).
@@ -36,10 +37,6 @@ public partial class EditableListRow : UserControl
         nameof(IconKey), typeof(string), typeof(EditableListRow), new PropertyMetadata(""));
     public static readonly DependencyProperty IsSelectedProperty = DependencyProperty.Register(
         nameof(IsSelected), typeof(bool), typeof(EditableListRow), new PropertyMetadata(false));
-    public static readonly DependencyProperty IsLockedProperty = DependencyProperty.Register(
-        nameof(IsLocked), typeof(bool), typeof(EditableListRow), new PropertyMetadata(false));
-    public static readonly DependencyProperty IsVisibleProperty = DependencyProperty.Register(
-        nameof(IsVisible), typeof(bool), typeof(EditableListRow), new PropertyMetadata(true));
     public static readonly DependencyProperty IconTextProperty = DependencyProperty.Register(
         nameof(IconText), typeof(string), typeof(EditableListRow), new PropertyMetadata(""));
     public static readonly DependencyProperty StatusBadgeProperty = DependencyProperty.Register(
@@ -48,11 +45,6 @@ public partial class EditableListRow : UserControl
         nameof(HasStatusBadge), typeof(bool), typeof(EditableListRow), new PropertyMetadata(false));
     public static readonly DependencyProperty StatusBadgeBrushProperty = DependencyProperty.Register(
         nameof(StatusBadgeBrush), typeof(Brush), typeof(EditableListRow));
-    /// <summary>锁定按钮的可见性。快捷栏没有「锁定」这一态，行上要把那个按钮收掉
-    /// （传 <c>Visibility.Collapsed</c>）；其它列表默认可见。</summary>
-    public static readonly DependencyProperty LockVisibilityProperty = DependencyProperty.Register(
-        nameof(LockVisibility), typeof(Visibility), typeof(EditableListRow),
-        new PropertyMetadata(Visibility.Visible));
     // ponytail: drag-source / drop-target DPs from the old indicator-style design
     // were removed in the live-shift rewrite — siblings slide via DragTranslate.Y now.
 
@@ -61,17 +53,11 @@ public partial class EditableListRow : UserControl
     public string IconKey  { get => (string)GetValue(IconKeyProperty);  set => SetValue(IconKeyProperty, value); }
     public string IconText { get => (string)GetValue(IconTextProperty); set => SetValue(IconTextProperty, value); }
     public bool   IsSelected { get => (bool)GetValue(IsSelectedProperty); set => SetValue(IsSelectedProperty, value); }
-    public bool   IsLocked   { get => (bool)GetValue(IsLockedProperty);   set => SetValue(IsLockedProperty, value); }
-    public bool   IsVisible  { get => (bool)GetValue(IsVisibleProperty);  set => SetValue(IsVisibleProperty, value); }
     public string StatusBadge      { get => (string)GetValue(StatusBadgeProperty);      set => SetValue(StatusBadgeProperty, value); }
     public bool   HasStatusBadge   { get => (bool)GetValue(HasStatusBadgeProperty);   set => SetValue(HasStatusBadgeProperty, value); }
     public Brush? StatusBadgeBrush { get => (Brush?)GetValue(StatusBadgeBrushProperty); set => SetValue(StatusBadgeBrushProperty, value); }
-    public Visibility LockVisibility { get => (Visibility)GetValue(LockVisibilityProperty); set => SetValue(LockVisibilityProperty, value); }
 
     public ICommand? EditCommand       { get; set; }
-    public ICommand? LockCommand       { get; set; }
-    public ICommand? VisibilityCommand { get; set; }
-    public ICommand? DeleteCommand     { get; set; }
     public ICommand? RenameCommand     { get; set; }
 
     /// <summary>Fires on drag reorder. <c>targetIndex</c> is the final insertion
@@ -88,17 +74,6 @@ public partial class EditableListRow : UserControl
         PreviewMouseLeftButtonDown += OnPreviewMouseLeftButtonDown;
         PreviewMouseLeftButtonUp += OnPreviewMouseLeftButtonUp;
     }
-
-    void LockBtn_Click(object sender, RoutedEventArgs e) => LockCommand?.Execute(null);
-
-    void EyeBtn_Click(object sender, RoutedEventArgs e)
-    {
-        // Flip visibility locally then notify; consumer decides what "hidden" means.
-        IsVisible = !IsVisible;
-        VisibilityCommand?.Execute(IsVisible);
-    }
-
-    void TrashBtn_Click(object sender, RoutedEventArgs e) => DeleteCommand?.Execute(null);
 
     void TitleText_DoubleClick(object sender, MouseButtonEventArgs e)
     {
@@ -197,8 +172,6 @@ public partial class EditableListRow : UserControl
     void OnPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (e.ChangedButton != MouseButton.Left) return;
-        // Skip ops-button presses (lock/eye/trash) — those own their own click semantics.
-        if (IsClickOnButton(e.OriginalSource as DependencyObject)) return;
 
         var ic = FindItemsControl();
         if (ic == null) return;
@@ -450,15 +423,5 @@ public partial class EditableListRow : UserControl
             d = VisualTreeHelper.GetParent(d);
         }
         return null;
-    }
-
-    static bool IsClickOnButton(DependencyObject? d)
-    {
-        while (d != null && d is not UserControl)
-        {
-            if (d is ButtonBase) return true;
-            d = VisualTreeHelper.GetParent(d);
-        }
-        return false;
     }
 }

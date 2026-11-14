@@ -71,8 +71,6 @@ public partial class MediaPlayerPage : UserControl
             Tag = player,
             Title = _loc["Manage.MediaPlayers"],
             Subtitle = $"{mode} · {state} · {(int)w}×{(int)h}",
-            IsLocked = player.IsLocked,
-            IsVisible = player.IsVisible,
         };
         ApplyIcon(row, player.IconChar, "Icon.Media");
         row.ReorderRequested += (src, targetIdx) =>
@@ -81,26 +79,8 @@ public partial class MediaPlayerPage : UserControl
             _widgetService.MoveMediaPlayer(p.Id, targetIdx);
             MoveRow(_rows, src, targetIdx);
         };
-        row.LockCommand = new RelayCommand(_ =>
-        {
-            player.IsLocked = !player.IsLocked;
-            _widgetService?.UpdateMediaPlayer(player);
-            RefreshList();
-        });
-        row.VisibilityCommand = new RelayCommand(_ => _main.ToggleMediaPlayerWindow(player));
-        row.DeleteCommand = new RelayCommand(_ => Delete(player));
         row.RenameCommand = new RelayCommand(_ => { /* 播放器没有自由命名 */ });
-        row.PreviewMouseLeftButtonUp += (_, e) =>
-        {
-            if (e.OriginalSource is DependencyObject src)
-            {
-                var parent = src;
-                while (parent != null && parent is not Button)
-                    parent = LogicalTreeHelper.GetParent(parent);
-                if (parent is Button) return;
-            }
-            Select(player);
-        };
+        row.PreviewMouseLeftButtonUp += (_, _) => Select(player);
         return row;
     }
 
@@ -117,15 +97,6 @@ public partial class MediaPlayerPage : UserControl
     void NewPlayer_Click(object sender, RoutedEventArgs e)
     {
         _main.NewMediaPlayer();
-        RefreshList();
-    }
-
-    void Delete(DesktopMediaPlayer player)
-    {
-        if (MessageBox.Show(_loc["MediaPage.DeleteConfirm"], _loc["MediaPage.DeleteTitle"],
-                MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
-        _main.DeleteMediaPlayer(player);
-        if (ReferenceEquals(_selected, player)) _selected = null;
         RefreshList();
     }
 }

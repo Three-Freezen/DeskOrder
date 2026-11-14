@@ -1,0 +1,124 @@
+<UserControl x:Class="DesktopZones.Views.Pages.PluginsPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="clr-namespace:DesktopZones.Helpers"
+             xmlns:components="clr-namespace:DesktopZones.Views.Components">
+  <UserControl.Resources>
+    <Style x:Key="PluginFilterChip" TargetType="ToggleButton">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Foreground" Value="{DynamicResource Brush.Text.Secondary}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border.Subtle}"/>
+      <Setter Property="Padding" Value="14,5"/>
+      <Setter Property="Margin" Value="0,0,8,8"/>
+      <Setter Property="FontSize" Value="11.5"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ToggleButton">
+            <Border x:Name="Bd" CornerRadius="14"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="1"
+                    Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Accent.Wash}"/>
+                <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Brush.Accent}"/>
+                <Setter Property="Foreground" Value="{DynamicResource Brush.Accent}"/>
+              </Trigger>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Brush.Border.Default}"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+  </UserControl.Resources>
+  <DockPanel>
+    <Border DockPanel.Dock="Top" Padding="20,16,20,8">
+      <StackPanel>
+        <StackPanel Orientation="Horizontal">
+          <TextBlock Text="{loc:Loc Key=Plugin.PageTitle}" FontSize="16" FontWeight="SemiBold"
+                     Foreground="{DynamicResource Brush.Text.Primary}" VerticalAlignment="Center"/>
+          <TextBlock x:Name="CountLabel" Margin="10,0,0,0" FontSize="11"
+                     FontFamily="Cascadia Code, Consolas, monospace"
+                     Foreground="{DynamicResource Brush.Text.Tertiary}" VerticalAlignment="Center"/>
+        </StackPanel>
+
+        <DockPanel Margin="0,12,0,0">
+          <Button DockPanel.Dock="Right" Content="{loc:Loc Key=Plugin.ImportLocal}" Margin="8,0,0,0"
+                  Height="30" Padding="14,0" Cursor="Hand" FontWeight="SemiBold"
+                  Style="{DynamicResource FillBtn}" Click="ImportLocal_Click"/>
+          <Button DockPanel.Dock="Right" Content="{loc:Loc Key=Plugin.Refresh}" Margin="8,0,0,0"
+                  Height="30" Padding="14,0" Cursor="Hand"
+                  Style="{DynamicResource OutlineBtn}" Click="Refresh_Click"/>
+          <Border Height="30" CornerRadius="6" Background="{DynamicResource Brush.Bg.Input}"
+                  BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1">
+            <Grid>
+              <TextBox x:Name="SearchBox" BorderThickness="0" Background="Transparent" Padding="9,0"
+                       VerticalContentAlignment="Center" FontSize="12"
+                       Foreground="{DynamicResource Brush.Text.Primary}"
+                       TextChanged="SearchBox_TextChanged"/>
+              <TextBlock x:Name="SearchHint" Text="{loc:Loc Key=Plugin.Search}" Margin="10,0,0,0"
+                         FontSize="12" VerticalAlignment="Center" IsHitTestVisible="False"
+                         Foreground="{DynamicResource Brush.Text.Tertiary}"/>
+            </Grid>
+          </Border>
+        </DockPanel>
+      </StackPanel>
+    </Border>
+
+    <Border x:Name="WarningBar" DockPanel.Dock="Top" Margin="20,0,20,10" Padding="12,9"
+            CornerRadius="6" Background="#14FFB020" BorderBrush="#40FFB020" BorderThickness="1">
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto"/>
+          <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+        <TextBlock Text="⚠" FontSize="12" Margin="0,0,8,0" Foreground="#FFB020" VerticalAlignment="Top"/>
+        <TextBlock Grid.Column="1" Text="{loc:Loc Key=Plugin.Warning}" FontSize="11.5" TextWrapping="Wrap"
+                   Foreground="{DynamicResource Brush.Text.Secondary}"/>
+      </Grid>
+    </Border>
+
+    <Border DockPanel.Dock="Top" Margin="20,0,20,0">
+      <StackPanel>
+        <components:Segmented x:Name="Tabs" HorizontalAlignment="Left" Width="360"/>
+        <WrapPanel x:Name="Filters" Margin="0,10,0,0"/>
+      </StackPanel>
+    </Border>
+
+    <Border x:Name="StatusBar" DockPanel.Dock="Top" Margin="20,10,20,0" Padding="10,7"
+            CornerRadius="6" Background="{DynamicResource Brush.Bg.Hover}" Visibility="Collapsed">
+      <DockPanel>
+        <Button DockPanel.Dock="Right" Content="{loc:Loc Key=Plugin.Refresh}" FontSize="11"
+                Padding="10,2" Cursor="Hand" Style="{DynamicResource OutlineBtn}" Click="Refresh_Click"/>
+        <TextBlock x:Name="StatusText" FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap"
+                   Foreground="{DynamicResource Brush.Text.Secondary}"/>
+      </DockPanel>
+    </Border>
+
+    <Grid Margin="20,12,20,0">
+      <ScrollViewer x:Name="MarketScroll" VerticalScrollBarVisibility="Auto">
+        <WrapPanel x:Name="CardsHost" Orientation="Horizontal"/>
+      </ScrollViewer>
+      <ScrollViewer x:Name="InstalledScroll" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
+        <StackPanel x:Name="InstalledHost"/>
+      </ScrollViewer>
+
+      <StackPanel x:Name="EmptyHint" Visibility="Collapsed" HorizontalAlignment="Center"
+                  VerticalAlignment="Center" Margin="0,40,0,0">
+        <Path Width="40" Height="40" Stretch="Uniform" Fill="{DynamicResource Brush.Text.Tertiary}"
+              Data="{StaticResource Icon.Plugin}" HorizontalAlignment="Center"/>
+        <TextBlock x:Name="EmptyTitle" FontSize="14" FontWeight="SemiBold" Margin="0,14,0,0"
+                   Foreground="{DynamicResource Brush.Text.Secondary}" HorizontalAlignment="Center"/>
+        <TextBlock x:Name="EmptyBody" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap" MaxWidth="420"
+                   TextAlignment="Center" Foreground="{DynamicResource Brush.Text.Tertiary}"
+                   HorizontalAlignment="Center"/>
+      </StackPanel>
+    </Grid>
+  </DockPanel>
+</UserControl>

@@ -1,4 +1,5 @@
 using System;
+using System.Text.Json.Serialization;
 
 namespace DesktopZones.Models;
 
@@ -41,6 +42,13 @@ public class PresetRecord
     public string Name { get; set; } = "New Preset";
     public DateTime CreatedAt { get; set; } = DateTime.Now;
     public PresetKind Kind { get; set; } = PresetKind.Zone;
+
+    /// <summary>
+    /// 外观包导入的预设会带上来源插件 id；卸载/停用外观包时按它清理。
+    /// 用户自己保存的预设为 null，不写进 JSON（旧文件也不会多出字段）。
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SourcePackId { get; set; }
 
     /// <summary>Sub-folder under ./Presets where files for this kind are stored.</summary>
     public static string SubFolderFor(PresetKind kind) => kind switch

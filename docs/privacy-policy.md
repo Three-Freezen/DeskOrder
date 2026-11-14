@@ -59,6 +59,10 @@ The DeskOrder application **does not connect to any server on its own**. The onl
 - 唯一的联网场景是**检查和下载新版本**：你可以在「设置」里手动检查，应用也会每隔约 24 小时在后台检查一次，有新版本时仅通过系统托盘提示
 - 版本信息通过 GitHub Releases API 获取，更新包从 GitHub 的服务器下载
 - 这个过程**不包含你的任何个人数据**——请求中只有版本号等应用自身信息
+- **插件市场**（GitHub 版）：打开「插件」页时，应用会从 GitHub 拉取社区维护的 `registry.json` 索引与插件图标/预览图；安装插件时从插件作者的 GitHub Release 下载 `.dopkg` 包，官方包还会额外下载一个 `.minisig` 签名文件用于本地验签。这些请求不带账号、设备标识或使用统计，只带应用自身版本
+- **禁用名单**：`registry.json` 里的 `blocked` 列表会保存到本机 `Plugins\.state\blocked.json`，仅用于在本地停用被官方判定为危险的插件版本；这份文件不会上传。**只要本机装了插件**，启动时会后台刷新一次索引（6 小时内不重复请求），以便及时收到紧急禁用；没有安装任何插件时不会发起这个请求
+- **举报**：点「举报」只是用系统浏览器打开 GitHub 的 issue 表单，应用本身不提交任何内容
+- 插件本身可能联网（由作者声明 `network` 权限，安装前会显示）；插件的行为由作者负责，不属于本应用
 - 你也可以在设置中关闭自动检查更新，关闭后仅在手动点击时联网
 
 **GitHub version (installer / portable)**
@@ -66,16 +70,20 @@ The DeskOrder application **does not connect to any server on its own**. The onl
 - The only network use is **checking for and downloading updates**: check manually in Settings, or the app checks in the background about every 24 hours and only notifies you via the system tray when a new version exists
 - Version information is fetched from the GitHub Releases API, and the update package is downloaded from GitHub's servers
 - This traffic **contains none of your personal data** — requests carry only the app's own version information
+- **Plugin marketplace** (GitHub build): opening the Plugins page fetches the community-maintained `registry.json`, plugin icons and preview images from GitHub; installing a plugin downloads its `.dopkg` from the author's GitHub Release, plus a `.minisig` signature file for official packages so the app can verify it locally. These requests carry no account, device identifier or analytics — only the app's own version
+- **Blocklist**: the `blocked` list inside `registry.json` is copied to `Plugins\.state\blocked.json` on your machine, only to disable plugin versions the maintainers have flagged as dangerous. That file is never uploaded. **If any plugin is installed**, the app refreshes the index once in the background at startup (no more than once every 6 hours) so emergency blocks arrive in time; with no plugins installed, this request is never made
+- **Reporting**: the Report button merely opens GitHub's issue form in your browser; the app submits nothing itself
+- Plugins may use the network themselves (declared via the `network` permission and shown before install); their behaviour is the author's responsibility, not this app's
 - You can also turn off automatic update checks in Settings; after that, the network is used only when you check manually
 
 ## 4. 第三方服务 / Third-Party Services
 
 - **Microsoft Store 版**：Microsoft Store（更新与安装），由微软运营
-- **GitHub 版**：GitHub Releases（仅用于获取版本信息和下载更新包）
+- **GitHub 版**：GitHub Releases（获取版本信息、下载更新包）、GitHub 上的社区插件索引与插件包（仅当你打开插件市场或安装插件时）
 - 除此之外，DeskOrder 不连接任何第三方服务，不内嵌任何统计或广告组件
 
 - **Microsoft Store version**: the Microsoft Store (updates and installation), operated by Microsoft
-- **GitHub version**: GitHub Releases (used only to fetch version information and download updates)
+- **GitHub version**: GitHub Releases (version information and update packages), plus the community plugin index and packages hosted on GitHub (only when you open the marketplace or install a plugin)
 - Beyond this, DeskOrder connects to no third-party services and embeds no analytics or advertising components
 
 ## 5. 数据的去留 / Keeping or Deleting Your Data

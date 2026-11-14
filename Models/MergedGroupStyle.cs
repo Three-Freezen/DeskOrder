@@ -26,7 +26,12 @@ public class MergedGroupStyle
     public string TitleTextColor { get; set; } = "#A0FFFFFF";
     public string IconColor { get; set; } = "";          // emoji tint color
     public double ControlOpacity { get; set; } = 40;
-    public double TitleBarOpacity { get; set; } = 6;
+    /// <summary>整条标题栏的不透明度（%，100 = 完全不透明）。<b>合并分区渲染已不再使用</b>：
+    /// 2026-10 把该字段改成「整条标题栏元素 Opacity」新口径后，合并分区没有对应的 UI
+    /// 入口（面板里的「标题栏透明度」改的是 <see cref="TitleBarFillColor"/> 的 alpha），
+    /// 旧配置留下的 6 会把整条标题栏压到 6% 导致文字/按钮看不清 —— 渲染固定按 100 处理，
+    /// 这里只是保留字段兼容旧 JSON / 旧预设。详见 ZoneWindow.ResolveStyle。</summary>
+    public double TitleBarOpacity { get; set; } = 100;
     public bool UseUnifiedFill { get; set; } = true;     // true=unified fill, false=keep original
     /// <summary>磁贴模式 — 隐藏两层标题栏与底部 8px 分割条（组合分区整体形态）。</summary>
     public bool TileMode { get; set; } = false;

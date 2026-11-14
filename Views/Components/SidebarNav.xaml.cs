@@ -39,10 +39,12 @@ public partial class SidebarNav : UserControl
         _sectionKeys[NavMerged]   = "merged";
         _sectionKeys[NavDocks]    = "docks";
         _sectionKeys[NavPanel]    = "panel";
+        _sectionKeys[NavZoneBays] = "zonebays";
         _sectionKeys[NavCalendar] = "calendar";
         _sectionKeys[NavClock]    = "clock";
         _sectionKeys[NavMedia]    = "media";
         _sectionKeys[NavSticky]   = "sticky";
+        _sectionKeys[NavPlugins]  = "plugins";
         _sectionKeys[NavSettings] = "settings";
         _sectionKeys[NavAbout]    = "about";
         Loaded += (_, _) => HighlightActive();
@@ -56,10 +58,12 @@ public partial class SidebarNav : UserControl
             "merged"   => NavMerged,
             "docks"    => NavDocks,
             "panel"    => NavPanel,
+            "zonebays" => NavZoneBays,
             "calendar" => NavCalendar,
             "clock"    => NavClock,
             "media"    => NavMedia,
             "sticky"   => NavSticky,
+            "plugins"  => NavPlugins,
             "about"    => NavAbout,
             "settings" => NavSettings,
             _          => NavZones,
@@ -84,4 +88,13 @@ public partial class SidebarNav : UserControl
     private void ShowAll_Click(object sender, RoutedEventArgs e) => ShowAllClicked?.Invoke(this, EventArgs.Empty);
     private void MinimizeAll_Click(object sender, RoutedEventArgs e) => MinimizeAllClicked?.Invoke(this, EventArgs.Empty);
     private void HideAll_Click(object sender, RoutedEventArgs e) => HideAllClicked?.Invoke(this, EventArgs.Empty);
+
+    /// <summary>分区坞入口只在已安装并启用 zonebar 插件时出现。</summary>
+    public void SetZoneBaysEntry(bool visible)
+    {
+        if (NavZoneBays == null) return;
+        var target = visible ? Visibility.Visible : Visibility.Collapsed;
+        if (NavZoneBays.Visibility != target) NavZoneBays.Visibility = target;
+        if (visible) NavZoneBays.BringIntoView();
+    }
 }

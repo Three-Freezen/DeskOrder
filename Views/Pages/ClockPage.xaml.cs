@@ -79,8 +79,6 @@ public partial class ClockPage : UserControl
             Tag = clock,
             Title = $"Clock ({mode})",
             Subtitle = $"{format} · {(int)clock.Width}×{(int)clock.Height}",
-            IsLocked = clock.IsLocked,
-            IsVisible = clock.IsVisible,
         };
         ApplyIcon(row, clock.IconChar, "Icon.Clock");
         row.ReorderRequested += (src, targetIdx) =>
@@ -90,38 +88,8 @@ public partial class ClockPage : UserControl
             MoveRow(_rows, src, targetIdx);              // 列表实时换位（镜像标签栏）
         };
         // ponytail: status badge removed (lock/hidden chips no longer shown).
-        row.LockCommand = new RelayCommand(_ =>
-        {
-            clock.IsLocked = !clock.IsLocked;
-            _widgetService?.UpdateClock(clock);
-            RefreshList();
-        });
-        row.VisibilityCommand = new RelayCommand(_ =>
-        {
-            // ponytail: 2026-08-26 — do NOT pre-flip the model here. clock.IsVisible =
-            // row.IsVisible + UpdateClock fired ClocksChanged → the ghost-stamp in
-            // OnClocksChanged snapped the window to the RestoreButton, so the following
-            // toggle saw MainContent.Collapsed and re-SHOWED it — the eye toggle reversed
-            // itself. Route straight through ToggleClockWindow; ShowClock/HideClock update
-            // the model and refresh the list themselves.
-            _main.ToggleClockWindow(clock);
-        });
-        row.DeleteCommand = new RelayCommand(_ => Delete(clock));
         row.RenameCommand = new RelayCommand(_ => { /* clocks don't have a free-form name */ });
-        row.PreviewMouseLeftButtonUp += (_, e) =>
-        {
-            if (e.OriginalSource is DependencyObject src)
-            {
-                var parent = src;
-                while (parent != null && parent is not Button)
-                    parent = LogicalTreeHelper.GetParent(parent);
-                if (parent is Button) return;
-            }
-            // ponytail: workspace direction (dock only). Old code also called
-            // PropertyWindowService.OpenOrFocus which created a duplicate
-            // floating editor while the docked panel already showed this clock.
-            Select(clock);
-        };
+        row.PreviewMouseLeftButtonUp += (_, _) => Select(clock);
         // 右键菜单已取消：显示/隐藏与删除移到属性面板顶部状态区。
         return row;
     }
@@ -144,15 +112,6 @@ public partial class ClockPage : UserControl
     void NewClock_Click(object sender, RoutedEventArgs e)
     {
         _main.NewClock();
-        RefreshList();
-    }
-
-    void Delete(DesktopClock clock)
-    {
-        if (MessageBox.Show(_loc.Get("ClockPage.DeleteConfirm", "Clock"), _loc["ClockPage.DeleteTitle"],
-            MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
-        _main.DeleteClock(clock);
-        if (ReferenceEquals(_selected, clock)) _selected = null;
         RefreshList();
     }
 }

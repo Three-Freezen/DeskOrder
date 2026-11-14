@@ -40,12 +40,16 @@
             </Grid.ColumnDefinitions>
             <TextBlock Text="{loc:Loc Key=Settings.Language}" VerticalAlignment="Center" Margin="0,0,0,0"
                        Foreground="{DynamicResource Brush.Text.Primary}"/>
-            <ComboBox x:Name="LanguageCombo" Grid.Column="1" Width="120"
-                      SelectionChanged="Language_Changed">
-              <ComboBoxItem Content="{loc:Loc Key=Menu.Chinese}" Tag="zh"/>
-              <ComboBoxItem Content="{loc:Loc Key=Menu.English}" Tag="en"/>
-            </ComboBox>
+            <ComboBox x:Name="LanguageCombo" Grid.Column="1" Width="236"
+                      SelectionChanged="Language_Changed"/>
           </Grid>
+          <TextBlock x:Name="LanguageHint" FontSize="11" Margin="0,0,0,8"
+                     Foreground="{DynamicResource Brush.Text.Tertiary}" TextWrapping="Wrap"/>
+          <CheckBox x:Name="PluginsEnabledBox" Content="{loc:Loc Key=Settings.Plugins}" Margin="0,8,0,2"
+                    Foreground="{DynamicResource Brush.Text.Primary}"
+                    Checked="PluginsEnabled_Changed" Unchecked="PluginsEnabled_Changed"/>
+          <TextBlock Text="{loc:Loc Key=Settings.Plugins.Hint}" FontSize="11" Margin="24,0,0,8"
+                     Foreground="{DynamicResource Brush.Text.Tertiary}" TextWrapping="Wrap"/>
         </StackPanel>
       </Border>
 

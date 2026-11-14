@@ -64,25 +64,14 @@ public partial class DocksPage : UserControl
             Title = z.Name,
             // 副标题：「快捷栏 · 322×80 · 6 项」——形态 + 尺寸 + 图标数
             Subtitle = $"{loc["Dock.ManageSubtitle"]} · {(int)z.Width}×{(int)z.Height} · {z.Items.Count} {loc["Manage.Count.Unit"]}",
-            IsLocked = z.IsLocked,
-            IsVisible = z.IsVisible,
         };
         ApplyIcon(row, z.IconChar, "Icon.DockBar");
-        // 锁定：与分区列表同一个语义（锁定后条体不再跟手、窗口压到桌面层）。
-        row.LockCommand = new RelayCommand(_ => { z.IsLocked = !z.IsLocked; _zoneManager.UpdateZone(z); });
         row.ReorderRequested += (src, targetIdx) =>
         {
             if (src.Tag is not Zone z2) return;
             _zoneManager.MoveZone(z2.Id, ToZoneIndex(targetIdx));
             MoveRow(_rows, src, targetIdx);
         };
-        row.VisibilityCommand = new RelayCommand(v =>
-        {
-            // 与分区的眼睛按钮同一路径：显示 = ShowZone，隐藏 = HideZone（快捷栏有恢复按钮
-            // 时收成 36×36 的小方块，没有时直接关窗）；「完全隐藏」只用右键菜单。
-            if (z.IsVisible) _zoneManager.HideZone(z.Id); else _zoneManager.ShowZone(z);
-        });
-        row.DeleteCommand = new RelayCommand(_ => Delete(z));
         row.RenameCommand = new RelayCommand(p =>
         {
             var n = p?.ToString();
@@ -93,17 +82,7 @@ public partial class DocksPage : UserControl
                 RefreshList();
             }
         });
-        row.PreviewMouseLeftButtonUp += (_, e) =>
-        {
-            if (e.OriginalSource is DependencyObject src)
-            {
-                var parent = src;
-                while (parent != null && parent is not Button)
-                    parent = LogicalTreeHelper.GetParent(parent);
-                if (parent is Button) return;
-            }
-            Select(z);
-        };
+        row.PreviewMouseLeftButtonUp += (_, _) => Select(z);
         return row;
     }
 
@@ -136,16 +115,5 @@ public partial class DocksPage : UserControl
         var dock = _main.NewDock();
         RefreshList();
         if (dock != null) Select(dock);
-    }
-
-    void Delete(Zone z)
-    {
-        var loc = LocalizationService.Instance;
-        var msg = string.Format(loc["Dock.DeleteConfirm"], z.Name);
-        if (MessageBox.Show(msg, loc["Manage.Zone.DeleteTitle"],
-            MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
-        _zoneManager.DeleteZone(z.Id);
-        if (ReferenceEquals(_selected, z)) _selected = null;
-        RefreshList();
     }
 }

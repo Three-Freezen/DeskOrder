@@ -26,6 +26,8 @@ public partial class SettingsPage : UserControl
     bool _updateSubscribed;
     // 保存委托引用以便 Unloaded 时退订(LanguageChanged 订阅点需要同一引用才能 -=)。
     readonly Action<string> _onLangChanged;
+    // 语言列表是动态的（语言包安装/卸载后重建下拉框）。
+    readonly Action _onLanguagesChanged;
 
     // 当前值 TextBlock + 取值委托，改键后/注入 getter 后增量刷新，避免一直停留在「未设置」。
     readonly System.Collections.Generic.List<(TextBlock Value, Func<string> Getter)> _hotkeyValueBindings = new();
@@ -52,8 +54,12 @@ public partial class SettingsPage : UserControl
         _suppress = true;
         try { SelectExpandCorner(_configService.Load().SubfolderExpandCorner); }
         finally { _suppress = prevSuppress; }
-        _onLangChanged = _ => RebuildHotkeys();
+        _onLangChanged = _ => { RebuildHotkeys(); UpdateLanguageHint(); };
         LocalizationService.Instance.LanguageChanged += _onLangChanged;
+        _onLanguagesChanged = () => { RebuildLanguageCombo(); UpdateLanguageHint(); };
+        LocalizationService.Instance.LanguagesChanged += _onLanguagesChanged;
+        RebuildLanguageCombo();
+        UpdateLanguageHint();
         // ponytail: two-way bind to ThemeService so the title-bar cycle button
         // (ManagementWindow.ThemeBtn_Click) and any other runtime theme flip
         // (System accent change, UserPreferenceChanged → Apply(System)) keeps
@@ -82,6 +88,7 @@ public partial class SettingsPage : UserControl
         {
             ThemeService.Changed -= SyncThemeRadios;
             LocalizationService.Instance.LanguageChanged -= _onLangChanged;
+            LocalizationService.Instance.LanguagesChanged -= _onLanguagesChanged;
             if (_updates != null && _updateSubscribed)
             {
                 _updates.StateChanged -= OnUpdateStateChanged;
@@ -230,7 +237,9 @@ public partial class SettingsPage : UserControl
             SelectExpandCorner(cfg.SubfolderExpandCorner);
             AutoCheckUpdateBox.IsChecked = cfg.AutoCheckUpdate;
             DeleteSetupAfterUpdateBox.IsChecked = cfg.DeleteSetupAfterUpdate;
-            SelectComboByTag(LanguageCombo, cfg.Language);
+            // 以运行中的语言为准（语言包卸载回退后 cfg 可能还是旧 code）。
+            SelectComboByTag(LanguageCombo, LocalizationService.Instance.CurrentLanguage);
+            PluginsEnabledBox.IsChecked = cfg.PluginsEnabled;
             WallpaperRendererBox.IsChecked = cfg.UseWallpaperRenderer;
             SyncRendererUi();
             SyncThemeRadios(cfg.ThemeMode switch
@@ -241,6 +250,14 @@ public partial class SettingsPage : UserControl
             });
         }
         finally { _suppress = false; }
+    }
+
+    void PluginsEnabled_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_suppress) return;
+        var cfg = _configService.Load();
+        cfg.PluginsEnabled = PluginsEnabledBox.IsChecked == true;
+        _configService.Save(cfg);
     }
 
     // ── 玻璃渲染方案(二期) ──
@@ -432,8 +449,43 @@ public partial class SettingsPage : UserControl
             var cfg = _configService.Load();
             cfg.Language = lang;
             _configService.Save(cfg);
-            LocalizationService.Instance.CurrentLanguage = lang == "zh" ? "zh" : "en";
+            // 语言包提供的语言也是合法 code；TrySetLanguage 对已卸载的包返回 false。
+            LocalizationService.Instance.TrySetLanguage(lang);
+            UpdateLanguageHint();
         }
+    }
+
+    /// <summary>重建语言下拉框（内置 zh/en + 已安装语言包，显示覆盖率与作者）。</summary>
+    void RebuildLanguageCombo()
+    {
+        var loc = LocalizationService.Instance;
+        var previous = _suppress;
+        _suppress = true;
+        try
+        {
+            LanguageCombo.Items.Clear();
+            foreach (var code in loc.AvailableLanguages)
+            {
+                LanguageCombo.Items.Add(new ComboBoxItem
+                {
+                    Content = loc.GetLanguageDisplay(code),
+                    Tag = code
+                });
+            }
+            SelectComboByTag(LanguageCombo, loc.CurrentLanguage);
+        }
+        finally { _suppress = previous; }
+    }
+
+    /// <summary>当前语言来自语言包时显示覆盖率；否则提示去插件市场装语言包。</summary>
+    void UpdateLanguageHint()
+    {
+        if (LanguageHint == null) return;
+        var loc = LocalizationService.Instance;
+        var pack = loc.GetLanguagePack(loc.CurrentLanguage);
+        LanguageHint.Text = pack != null
+            ? loc.Get("Settings.Language.CoverageHint", pack.CoveragePercent, pack.Base)
+            : loc["Settings.Language.Hint"];
     }
 
     void ThemeRb_Changed(object sender, RoutedEventArgs e)

@@ -102,6 +102,9 @@ public class TrayIconService : IDisposable
     public event Action? ManageZones;
     public event Action? Exit;
 
+    /// <summary>托盘「语言」子菜单选中某项；参数为语言 code（含语言包新增语言）。</summary>
+    public event Action<string>? LanguageSelected;
+
     /// <summary>Raised when a Shell_NotifyIcon call fails. Payload is a short diagnostic message.</summary>
     public event Action<string>? NotifyError;
 
@@ -285,22 +288,21 @@ public class TrayIconService : IDisposable
         manage.Click += (_, _) => ManageZones?.Invoke();
         menu.Items.Add(manage);
 
-        // Language submenu
+        // Language submenu：内置 zh/en + 已安装语言包（动态列表，每次右键重建）。
         var langMenu = new MenuItem { Header = loc["Menu.Language"] };
-        var chineseItem = new MenuItem
+        foreach (var code in loc.AvailableLanguages)
         {
-            Header = loc["Menu.Chinese"],
-            IsChecked = loc.CurrentLanguage == "zh"
-        };
-        chineseItem.Click += (_, _) => { loc.CurrentLanguage = "zh"; };
-        var englishItem = new MenuItem
-        {
-            Header = loc["Menu.English"],
-            IsChecked = loc.CurrentLanguage == "en"
-        };
-        englishItem.Click += (_, _) => { loc.CurrentLanguage = "en"; };
-        langMenu.Items.Add(chineseItem);
-        langMenu.Items.Add(englishItem);
+            var name = loc.NativeLanguageNames.TryGetValue(code, out var native) ? native : code;
+            var item = new MenuItem
+            {
+                Header = name,
+                IsChecked = string.Equals(loc.CurrentLanguage, code, StringComparison.OrdinalIgnoreCase),
+                Tag = code
+            };
+            var selected = code;
+            item.Click += (_, _) => LanguageSelected?.Invoke(selected);
+            langMenu.Items.Add(item);
+        }
         menu.Items.Add(langMenu);
 
         var exit = new MenuItem { Header = loc["Tray.Exit"] };

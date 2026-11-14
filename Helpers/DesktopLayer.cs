@@ -34,7 +34,7 @@ public static class DesktopLayer
         foreach (Window w in Application.Current.Windows)
         {
             if (ReferenceEquals(w, window) || !w.IsVisible
-                || w is not (ZoneWindow or ClockWidget or CalendarWidget)) continue;
+                || w is not (ZoneWindow or ClockWidget or CalendarWidget or PluginWidgetWindow or ZoneBayWindow)) continue;
             // 未 SourceInitialized 的窗口 Handle 为零且不在 z 序链上，直接跳过
             var h = new WindowInteropHelper(w).Handle;
             if (h != IntPtr.Zero) siblings.Add(h);

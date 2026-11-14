@@ -1,3 +1,4 @@
+using System;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
@@ -42,6 +43,9 @@ public partial class SliderWithValue : UserControl
     public double Tick  { get => (double)GetValue(TickProperty);  set => SetValue(TickProperty, value); }
     public bool IsIntegerValue { get => (bool)GetValue(IsIntegerValueProperty); set => SetValue(IsIntegerValueProperty, value); }
 
+    /// <summary>值变化（拖动 / 双击输入 / 程序回填）后触发，供设置页即时生效。</summary>
+    public event EventHandler? ValueChanged;
+
     public SliderWithValue()
     {
         InitializeComponent();
@@ -65,6 +69,7 @@ public partial class SliderWithValue : UserControl
         var snapped = Snap(self.Value, self.IsIntegerValue);
         if (snapped != self.Value) self.Value = snapped;
         self.UpdateValueText();
+        self.ValueChanged?.Invoke(self, EventArgs.Empty);
     }
 
     void UpdateValueText()

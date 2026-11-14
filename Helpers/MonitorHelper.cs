@@ -123,6 +123,54 @@ public static class MonitorHelper
         return SystemParameters.WorkArea;
     }
 
+    /// <summary>显示器块数（枚举失败时按 1 块算）。</summary>
+    public static int MonitorCount() => MonitorsWithWork().Count;
+
+    /// <summary>按「主屏优先」顺序取第 <paramref name="index"/> 块显示器的 rcWork，单位是
+    /// 与该显示器上窗口 <c>Left/Top</c> 同空间的 DIP（物理像素 ÷ 该屏缩放）。
+    /// 越界 / -1 回退主显示器。多屏混合 DPI 下坞的贴边几何全部走这里，
+    /// 不再用只覆盖主屏的 <c>SystemParameters.WorkArea</c>。</summary>
+    public static Rect WorkAreaDipAt(int index)
+    {
+        var list = MonitorsWithWork();
+        if (list.Count == 0) return SystemParameters.WorkArea;
+        if (index < 0 || index >= list.Count) index = 0;
+        return list[index];
+    }
+
+    static List<Rect> MonitorsWithWork()
+    {
+        var list = new List<(Rect Rect, bool Primary, int Order)>();
+        try
+        {
+            int order = 0;
+            EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (IntPtr h, IntPtr hdc, ref RECT r, IntPtr dw) =>
+            {
+                var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+                if (!GetMonitorInfo(h, ref info)) return true;
+                var w = info.rcWork;
+                int ww = w.Right - w.Left, hh = w.Bottom - w.Top;
+                if (ww <= 0 || hh <= 0) return true;
+                if (GetDpiForMonitor(h, MDT_EFFECTIVE_DPI, out var dx, out var dy) != 0 || dx == 0 || dy == 0)
+                {
+                    dx = 96; dy = 96;
+                }
+                double sx = dx / 96.0, sy = dy / 96.0;
+                list.Add((new Rect(w.Left / sx, w.Top / sy, ww / sx, hh / sy),
+                    (info.dwFlags & MONITORINFOF_PRIMARY) != 0, order++));
+                return true;
+            }, IntPtr.Zero);
+        }
+        catch { }
+
+        if (list.Count == 0) list.Add((SystemParameters.WorkArea, true, 0));
+        return list
+            .OrderByDescending(m => m.Primary)
+            .ThenBy(m => m.Order)
+            .Select(m => m.Rect)
+            .ToList();
+    }
+
     static MONITORINFO GetFocusedMonitorInfo()
     {
         IntPtr mon = IntPtr.Zero;

@@ -94,22 +94,30 @@ public static class DataLocator
     /// <summary>true = 数据存安装目录 Data;false = 存 %APPDATA%\DesktopZones。
     /// 进程内缓存首判结果(运行中安装目录结构不会变化)。MSIX 包内容只读,
     /// 便携标记写不进去,再防御一刀保证打包态恒走 AppData。</summary>
-    public static bool IsPortable => !IsPackaged && (_portable ??= File.Exists(PortableFlagPath));
+    public static bool IsPortable => OverrideRoot == null && !IsPackaged && (_portable ??= File.Exists(PortableFlagPath));
+
+    /// <summary>
+    /// 测试 / 自测台用的数据根覆盖（<c>--data-root=&lt;dir&gt;</c>）。
+    /// 必须在 <see cref="Initialize"/> 之前设置；正常启动保持 null。
+    /// </summary>
+    public static string? OverrideRoot { get; set; }
 
     /// <summary>用户数据根目录(config.json / Notes / Presets / lang 的共同父目录)。</summary>
-    public static string Root => IsPortable
+    public static string Root => OverrideRoot ?? (IsPortable
         ? Path.Combine(AppContext.BaseDirectory, "Data")
         : Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "DesktopZones");
+            "DesktopZones"));
 
     /// <summary>日志根目录(debug.log / dz_trace.log 的父目录)。便携模式随 Data 走;
     /// 标准模式维持历史路径 %LOCALAPPDATA%\DeskOrder\logs 不变。</summary>
-    public static string LogsRoot => IsPortable
-        ? Path.Combine(Root, "logs")
-        : Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "DeskOrder", "logs");
+    public static string LogsRoot => OverrideRoot != null
+        ? Path.Combine(OverrideRoot, "logs")
+        : IsPortable
+            ? Path.Combine(Root, "logs")
+            : Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "DeskOrder", "logs");
 
     /// <summary>
     /// App 启动最早处调用一次(先于任何 ConfigService / LocalizationService 访问):

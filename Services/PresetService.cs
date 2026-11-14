@@ -103,6 +103,119 @@ public class PresetService
         return results.OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
     }
 
+    // ── 外观包导入 / 校验 ──
+
+    /// <summary>
+    /// 校验一个预设文件（外观包导入前）：JSON 可解析、Kind 与本服务的类型一致、
+    /// 名称非空。文件里的 Kind 缺失时只接受 Zone（v5 之前只有分区预设）。
+    /// </summary>
+    public PresetRecord? ValidateFile(string path, out string? error)
+    {
+        error = null;
+        try
+        {
+            if (!File.Exists(path))
+            {
+                error = "preset file is missing";
+                return null;
+            }
+            var info = new FileInfo(path);
+            if (info.Length > 2 * 1024 * 1024)
+            {
+                error = "preset file is larger than 2 MB";
+                return null;
+            }
+
+            var text = File.ReadAllText(path);
+            var hasKind = TryReadKind(text, out var kindInt);
+            if (hasKind && kindInt != (int)_kind)
+            {
+                error = $"preset kind is {(PresetKind)kindInt}, expected {_kind}";
+                return null;
+            }
+            if (!hasKind && _kind != PresetKind.Zone)
+            {
+                error = $"preset kind is Zone, expected {_kind}";
+                return null;
+            }
+
+            var preset = DeserializeAny(text);
+            if (preset == null)
+            {
+                error = "preset is not valid JSON";
+                return null;
+            }
+            if (string.IsNullOrWhiteSpace(preset.Name))
+            {
+                error = "preset name is required";
+                return null;
+            }
+            preset.Kind = _kind;
+            return preset;
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return null;
+        }
+    }
+
+    /// <summary>把外观包里的预设复制进本类型目录，并打上 SourcePackId 供卸载清理。</summary>
+    public PresetRecord? ImportFile(string sourcePath, string sourcePackId, out string? error)
+    {
+        var preset = ValidateFile(sourcePath, out error);
+        if (preset == null) return null;
+        try
+        {
+            preset.Id = Guid.NewGuid();
+            preset.SourcePackId = sourcePackId;
+            preset.CreatedAt = DateTime.Now;
+            Directory.CreateDirectory(_folder);
+            var target = Path.Combine(_folder, $"{preset.Id}.json");
+            File.WriteAllText(target, JsonSerializer.Serialize(preset, preset.GetType(), Opts));
+            return preset;
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return null;
+        }
+    }
+
+    /// <summary>删除某个外观包导入的全部预设（用户自己的预设 SourcePackId 为 null，不受影响）。</summary>
+    public int DeleteForPack(string pluginId)
+    {
+        if (!Directory.Exists(_folder)) return 0;
+        var removed = 0;
+        foreach (var preset in LoadAll())
+        {
+            if (!string.Equals(preset.SourcePackId, pluginId, StringComparison.OrdinalIgnoreCase)) continue;
+            if (Delete(preset.Id)) removed++;
+        }
+        return removed;
+    }
+
+    static bool TryReadKind(string text, out int kind)
+    {
+        kind = -1;
+        try
+        {
+            using var doc = JsonDocument.Parse(text);
+            if (!doc.RootElement.TryGetProperty("Kind", out var prop)) return false;
+            kind = prop.ValueKind switch
+            {
+                JsonValueKind.Number => prop.GetInt32(),
+                JsonValueKind.String => int.TryParse(prop.GetString(), out var n) ? n : -1,
+                _ => -1
+            };
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     /// <summary>
     /// Read a preset JSON and return the strongly-typed preset (ZonePreset /
     /// ClockPreset / …). Falls back to ZonePreset for legacy files that lack a

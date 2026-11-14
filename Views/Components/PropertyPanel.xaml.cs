@@ -8,6 +8,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Shapes;
+using DeskOrder.PluginApi;
 using DesktopZones.Helpers;
 using DesktopZones.Models;
 using DesktopZones.Services;
@@ -348,8 +349,11 @@ public partial class PropertyPanel : UserControl
     void UpdateButtonBarEnabled()
     {
         var enabled = _snapshot != null;
-        if (LoadPresetBtn != null) LoadPresetBtn.IsEnabled = enabled;
-        if (SavePresetBtn != null) SavePresetBtn.IsEnabled = enabled;
+        // 分区坞没有「预设卡」概念（外观字段集与分区不通用），只保留应用/取消。
+        // 插件组件同理：外观字段集是 SDK 的扁平结构，与分区预设卡不通用。
+        bool presets = enabled && Target is not PluginZoneBar and not PluginWidget;
+        if (LoadPresetBtn != null) LoadPresetBtn.IsEnabled = presets;
+        if (SavePresetBtn != null) SavePresetBtn.IsEnabled = presets;
         if (CancelBtn != null) CancelBtn.IsEnabled = enabled;
         if (ApplyBtn != null) ApplyBtn.IsEnabled = enabled;
     }
@@ -382,6 +386,10 @@ public partial class PropertyPanel : UserControl
             case MergedGroupTarget g when _snapshot is Zone sz: CopyMergedGroupFields(sz, g.Master); break;
             // ponytail 2026-08-26: SubFolder 取消 — 还原到 snapshot 时的字段值。
             case ZoneItem sub when _snapshot is ZoneItem ssub && sub.Type == ItemType.SubFolder: CopySubfolderFields(ssub, sub); break;
+            // 分区坞取消：整份快照拷回（含边/模式/颜色/玻璃/名称），再按快照重绘坞。
+            case PluginZoneBar bar when _snapshot is PluginZoneBar sbar: bar.CopyFrom(sbar); break;
+            // 插件组件取消：只回滚窗口外观/几何，不碰插件自己的 SettingsJson。
+            case PluginWidget w when _snapshot is PluginWidget sw: w.CopyFrom(sw); break;
         }
         Save(Target);  // live-preview refresh back to snapshot (no disk write)
         OnTargetChanged();  // rebuild UI from restored model + refresh snapshot
@@ -703,6 +711,10 @@ public partial class PropertyPanel : UserControl
             DesktopMediaPlayer mp => mp.Clone(),
             StickyNote n => n.Clone(),
             PanelConfig p => PanelPresetConfig.FromConfig(new AppConfig { Panel = p }).Clone(),
+            // 分区坞：Clone() 深拷贝 ZoneIds，取消时按快照整体还原（坞有自己的外观字段集）。
+            PluginZoneBar bar => bar.Clone(),
+            // 插件组件：外观字段全在 SDK 的扁平结构上，浅拷即够（没有引用型可变字段）。
+            PluginWidget widget => widget.Clone(),
             // ponytail 2026-08-26: SubFolder 用 ZoneItem.Clone() (已有,深拷贝 SubItems + 所有专属字段)。
             ZoneItem sub when sub.Type == ItemType.SubFolder => sub.Clone(),
             _ => null,
@@ -773,6 +785,22 @@ public partial class PropertyPanel : UserControl
                 InstanceName = sub.Name;
                 SetInstanceIcon("Icon.Folder");
                 BuildSubfolderFields(sub);
+                break;
+            // 分区坞：宿主侧组件，没有宽/高、没有磁贴/标题栏/图标/预设；
+            // 字段树只有「基本 / 行为 / 外观 / 液态玻璃」四节（见《组件插件-初步方案》§6）。
+            case PluginZoneBar bar:
+                InstanceName = string.IsNullOrWhiteSpace(bar.Name) ? _loc["ZoneBay.Title"] : bar.Name;
+                SetInstanceIcon("Icon.ZoneBay");
+                BuildZoneBayFields(bar);
+                break;
+            // 插件组件：插件只画内容，窗口外观（几何/填充/边框/圆角/玻璃/锁定）由宿主负责，
+            // 所以这里的字段树和内置组件同一套语义，但字段集受 SDK 的 PluginWidget 限制。
+            case PluginWidget widget:
+                InstanceName = PluginService.Instance
+                                   .FindDescriptor(widget.PluginId, widget.WidgetTypeId)?.DisplayName
+                               ?? widget.PluginId;
+                SetInstanceIcon("Icon.Plugin");
+                BuildPluginWidgetFields(widget);
                 break;
             default:
                 InstanceName = "";
@@ -866,6 +894,9 @@ public partial class PropertyPanel : UserControl
     // 状态 chips（文件夹映射 / 监听中 / 组合分区中 — 激活亮起、未激活变暗）、
     // 面板与便签的快捷键设置行。破坏性/窗口级操作经宿主回调执行。
 
+    /// <summary>删除分区坞（属性面板状态区那个按钮）。由宿主 DeleteTarget 接线：确认后删坞、
+    /// 把坞里的分区放回桌面，并关掉编辑器。分区坞没有行内按钮，这里是删除的主入口。</summary>
+
     /// <summary>按当前 Target 全量构建状态区。SubFolder 等无适用内容的目标折叠整个区域。</summary>
     void BuildStatusArea(object? target)
     {
@@ -874,6 +905,7 @@ public partial class PropertyPanel : UserControl
         // 清空增量刷新引用，由各构建器重新登记。
         _statusVisibleCb = null;
         _statusLockCb = null;
+        _zoneBayStatusChips = null;
         _statusChips.Clear();
         _statusHotkeyText = null;
         _statusHotkeyGetter = null;
@@ -886,6 +918,8 @@ public partial class PropertyPanel : UserControl
             case DesktopMediaPlayer media: BuildMediaPlayerStatus(media); break;
             case StickyNote n: BuildNoteStatus(n); break;
             case PanelConfig p: BuildPanelStatus(p); break;
+            case PluginZoneBar bar: BuildZoneBayStatus(bar); break;
+            case PluginWidget widget: BuildPluginWidgetStatus(widget); break;
             default:
                 StatusArea.Visibility = Visibility.Collapsed;
                 _statusBuiltFor = null;
@@ -927,6 +961,15 @@ public partial class PropertyPanel : UserControl
             case PanelConfig p:
                 if (_statusVisibleCb != null) _statusVisibleCb.IsChecked = p.PanelEnabled;
                 break;
+            case PluginZoneBar bar:
+                // 开关跟真实可见性走；位置/展开方式词条单独重刷（不重建开关）。
+                if (_statusVisibleCb != null) _statusVisibleCb.IsChecked = bar.IsVisible;
+                RefreshZoneBayChips(bar);
+                break;
+            case PluginWidget widget:
+                if (_statusVisibleCb != null) _statusVisibleCb.IsChecked = widget.IsVisible;
+                if (_statusLockCb != null) _statusLockCb.IsChecked = widget.IsLocked;
+                break;
         }
         foreach (var (chip, isActive) in _statusChips)
             ApplyChipState(chip, isActive());
@@ -937,6 +980,7 @@ public partial class PropertyPanel : UserControl
     CheckBox? _statusVisibleCb;
     CheckBox? _statusLockCb;
     object? _statusBuiltFor;
+    StackPanel? _zoneBayStatusChips;
     readonly List<(Border Chip, Func<bool> IsActive)> _statusChips = new();
     TextBlock? _statusHotkeyText;
     Func<string>? _statusHotkeyGetter;
@@ -3450,6 +3494,454 @@ public partial class PropertyPanel : UserControl
             () => p.PanelTextColor, v => p.PanelTextColor = v, () => Save(p)));
 
         SetFieldRoot(root);
+    }
+
+    // ── 分区坞（PluginZoneBar）──
+    //
+    // 分区坞是宿主侧组件，不是分区：字段集只有《组件插件-初步方案》§6 的
+    // 「基本 / 行为 / 外观 / 液态玻璃」四节，没有宽/高、磁贴、标题栏、图标、预设卡。
+    // 状态区（顶部绿色词条那一行）按 2026-11-07 修复要求只留「位置」「展开方式」两项。
+
+    void BuildZoneBayFields(PluginZoneBar bar)
+    {
+        _tileGated.Clear();
+        var root = new StackPanel { Margin = new Thickness(16, 12, 16, 12) };
+
+        var basic = MakeSection(_loc["ZoneBay.Prop.Basic"]);
+        basic.Children.Add(MakeNameRow(_loc["ZoneBay.Name"], bar.Name, v =>
+        {
+            bar.Name = (v ?? "").Trim();
+            Save(bar);
+        }));
+        root.Children.Add(basic);
+
+        var behavior = MakeSection(_loc["ZoneBay.Prop.Behavior"]);
+        behavior.Children.Add(MakeZoneBayEdgeRow(bar));
+        behavior.Children.Add(MakeZoneBayModeRow(bar));
+        // 多显示器才给「贴在哪块屏」；单屏时这一行没有意义。
+        if (MonitorHelper.MonitorCount() > 1)
+            behavior.Children.Add(MakeZoneBayMonitorRow(bar));
+        behavior.Children.Add(MakeCheckRow(_loc["ZoneBay.Prop.AutoHide"], bar.AutoHide,
+            v => { bar.AutoHide = v; Save(bar); }));
+        behavior.Children.Add(MakeCheckRow(_loc["ZoneBay.Prop.HoverExpand"], bar.ExpandOnHover,
+            v => { bar.ExpandOnHover = v; Save(bar); }));
+        behavior.Children.Add(MakeCheckRow(_loc["ZoneBay.Prop.RestoreButton"], bar.EnableRestoreButton,
+            v =>
+            {
+                bar.EnableRestoreButton = v;
+                // 关掉可恢复按钮时如果正缩着，先恢复整条坞（否则用户找不到它）。
+                if (!v) bar.IsCollapsed = false;
+                Save(bar);
+            }));
+        root.Children.Add(behavior);
+
+        var style = MakeSection(_loc["ZoneBay.Prop.Style"]);
+        style.Children.Add(MakeColorRow(_loc["ZoneBay.Prop.Fill"], bar.FillColor,
+            v => { bar.FillColor = v; Save(bar); }));
+        style.Children.Add(MakeSliderRow(_loc["ZoneBay.Prop.FillOpacity"], 0, 100, 5,
+            bar.FillOpacity * 100, v => { bar.FillOpacity = v / 100.0; Save(bar); }));
+        style.Children.Add(MakeColorRow(_loc["ZoneBay.ChipFill"], bar.ChipFillColor,
+            v => { bar.ChipFillColor = v; Save(bar); }));
+        style.Children.Add(MakeSliderRow(_loc["ZoneBay.Prop.Opacity"], 0, 100, 5,
+            bar.ChipOpacity * 100, v => { bar.ChipOpacity = v / 100.0; Save(bar); }));
+        style.Children.Add(MakeZoneBayIconFillRow(bar));
+        style.Children.Add(MakeColorRow(_loc["ZoneBay.Prop.Border"], bar.BorderColor,
+            v => { bar.BorderColor = v; Save(bar); }));
+        style.Children.Add(MakeSliderRow(_loc["ZoneBay.Prop.BorderThickness"], 0, 4, 1,
+            bar.BorderThickness, v => { bar.BorderThickness = v; Save(bar); }, integer: false));
+        style.Children.Add(MakeSliderRow(_loc["ZoneBay.Prop.Corner"], 0, 24, 1,
+            bar.CornerRadius, v => { bar.CornerRadius = (int)Math.Round(v); Save(bar); }));
+        root.Children.Add(style);
+
+        var glass = MakeSection(_loc["ZoneProp.Section.LiquidGlass"]);
+        glass.Children.Add(MakeCheckRowWithSideBtn(_loc["ZoneProp.LiquidGlass"], bar.EnableLiquidGlass,
+            v => { bar.EnableLiquidGlass = v; Save(bar); },
+            _loc["ZoneProp.LiquidGlassSettingsEllipsis"], _ => OpenZoneBayGlassDialog(bar)));
+        root.Children.Add(glass);
+
+        root.Children.Add(new TextBlock
+        {
+            Text = _loc["ZoneBay.Prop.NoReflection"],
+            FontSize = 11,
+            Foreground = (Brush)FindResource("Brush.Text.Tertiary"),
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 2, 0, 0),
+        });
+
+        SetFieldRoot(root);
+    }
+
+    /// <summary>状态区：显示 / 锁定两个开关 + 删除按钮 + 所属插件词条。</summary>
+    void BuildPluginWidgetStatus(PluginWidget widget)
+    {
+        var row1 = new DockPanel { LastChildFill = false };
+        _statusVisibleCb = AddStatusSwitch(row1, _loc["PropertyPanel.Status.Visible"], widget.IsVisible,
+            on => ApplyPluginWidgetVisibility(widget, on));
+        _statusLockCb = AddStatusSwitch(row1, _loc["PropertyPanel.Status.Locked"], widget.IsLocked,
+            on => ApplyPluginWidgetLock(widget, on));
+        StatusHost.Children.Add(row1);
+
+        AddDeleteRow(_loc["Plugin.DeleteWidget"], widget);
+
+        var chips = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Margin = new Thickness(0, 10, 0, 0),
+        };
+        var kindLabel = PluginService.Instance.GetRecord(widget.PluginId)?.KindValue.I18nKey();
+        if (kindLabel != null) chips.Children.Add(MakeStatusChip(_loc[kindLabel], true));
+        chips.Children.Add(MakeStatusChip(widget.PluginId, true));
+        StatusHost.Children.Add(chips);
+    }
+
+    /// <summary>显示/隐藏：与窗口右键菜单、插件管理页走同一条服务路径。</summary>
+    static void ApplyPluginWidgetVisibility(PluginWidget widget, bool visible)
+    {
+        var service = PluginService.Instance;
+        if (visible) service.ShowWidget(widget);
+        else service.HideWidget(widget);
+    }
+
+    /// <summary>锁定：真锁窗口拖动与缩放手柄（服务层还会在窗口上刷新菜单文案）。</summary>
+    static void ApplyPluginWidgetLock(PluginWidget widget, bool locked)
+    {
+        widget.IsLocked = locked;
+        PluginService.Instance.GetWindow(widget.Id)?.RefreshAppearance();
+        PluginService.Instance.SaveWidgets();
+    }
+
+    /// <summary>
+    /// 插件组件的字段树。插件只负责内容，窗口外观全部由宿主负责，所以这里和内置组件
+    /// 是同一套语义；字段集受 SDK 的 <see cref="PluginWidget"/> 限制（扁平结构）。
+    /// 与分区坞一样不提供「预设卡」：外观字段集跨类型不通用，存成卡再套到别处会失效。
+    /// </summary>
+    void BuildPluginWidgetFields(PluginWidget widget)
+    {
+        _tileGated.Clear();
+        var root = new StackPanel { Margin = new Thickness(16, 12, 16, 12) };
+
+        var switches = MakeSection(_loc["ZoneProp.Section.Switches"]);
+        // 锁定只在顶部状态区出现一次（与分区/便签一致），这里不重复。
+        switches.Children.Add(MakeCheckRow(_loc["ZoneProp.TileMode"], widget.TileMode,
+            v => { widget.TileMode = v; Save(widget); }));
+        switches.Children.Add(MakeCheckRow(_loc["ZoneProp.RestoreButton"], widget.EnableRestoreButton,
+            v => { widget.EnableRestoreButton = v; Save(widget); }));
+        root.Children.Add(switches);
+
+        var layout = MakeSection(_loc["ZoneProp.Section.Basic"]);
+        layout.Children.Add(MakeSliderRow(_loc["ZoneProp.Width"], 120, 1200, 10, widget.Width,
+            v => { widget.Width = Math.Round(v); Save(widget); }));
+        layout.Children.Add(MakeSliderRow(_loc["ZoneProp.Height"], 80, 900, 10, widget.Height,
+            v => { widget.Height = Math.Round(v); Save(widget); }));
+        root.Children.Add(layout);
+
+        var bf = MakeSection(_loc["ZoneProp.Section.BorderFill"]);
+        bf.Children.Add(MakeColorRow(_loc["ZoneProp.FillColor"], widget.FillColor,
+            v => { widget.FillColor = v; Save(widget); }));
+        bf.Children.Add(MakeSliderRow(_loc["ZoneProp.FillOpacity"], 0, 100, 5,
+            ParsePercent(widget.FillColor, 3),
+            p => { widget.FillColor = SetPercent(widget.FillColor, p, "000000"); Save(widget); }));
+        bf.Children.Add(MakeColorRow(_loc["ZoneProp.BorderColor"], widget.BorderColor,
+            v => { widget.BorderColor = v; Save(widget); }));
+        bf.Children.Add(MakeSliderRow(_loc["ZoneProp.BorderOpacity"], 0, 100, 5,
+            ParsePercent(widget.BorderColor, 25),
+            p => { widget.BorderColor = SetPercent(widget.BorderColor, p, "FFFFFF"); Save(widget); }));
+        bf.Children.Add(MakeTextRow(_loc["ZoneProp.BorderThickness"],
+            widget.BorderThickness.ToString("0.0", CultureInfo.InvariantCulture),
+            v =>
+            {
+                if (double.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out var d))
+                {
+                    widget.BorderThickness = Math.Clamp(d, 0, 8);
+                    Save(widget);
+                }
+            }));
+        bf.Children.Add(MakeSliderRow(_loc["ZoneProp.RoundedCorners"], 0, 32, 1, widget.CornerRadius,
+            v => { widget.CornerRadius = (int)Math.Round(v); Save(widget); }));
+        root.Children.Add(bf);
+
+        var opacity = MakeSection(_loc["ZoneProp.Section.Appearance"]);
+        opacity.Children.Add(MakeSliderRow(_loc["PluginWidget.Prop.Opacity"], 20, 100, 5,
+            Math.Clamp(widget.Opacity, 0.2, 1.0) * 100,
+            v => { widget.Opacity = Math.Clamp(v / 100.0, 0.2, 1.0); Save(widget); }));
+        root.Children.Add(opacity);
+
+        var glass = MakeSection(_loc["ZoneProp.Section.LiquidGlass"]);
+        glass.Children.Add(MakeCheckRowWithSideBtn(_loc["ZoneProp.LiquidGlass"], widget.EnableAcrylic,
+            v => { widget.EnableAcrylic = v; Save(widget); },
+            _loc["ZoneProp.LiquidGlassSettingsEllipsis"], _ => OpenPluginWidgetGlassDialog(widget)));
+        root.Children.Add(glass);
+
+        root.Children.Add(new TextBlock
+        {
+            Text = _loc["PluginWidget.Prop.Hint"],
+            FontSize = 11,
+            Foreground = (Brush)FindResource("Brush.Text.Tertiary"),
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 2, 0, 0),
+        });
+
+        SetFieldRoot(root);
+    }
+
+    /// <summary>插件组件的液态玻璃设置（与分区/分区坞同一套对话框，只是回写字段不同）。</summary>
+    void OpenPluginWidgetGlassDialog(PluginWidget widget)
+    {
+        var owner = CachedOwner ?? Window.GetWindow(this);
+        if (owner == null) return;
+
+        int blur = widget.GlassBlurAmount;
+        int tint = widget.GlassTintOpacity;
+        int lum = widget.GlassTintLuminosity;
+        string mode = widget.GlassColorMode;
+        string material = widget.GlassMaterial;
+        // 取消回滚用：预览会直接改到模型上。
+        int oldBlur = blur, oldTint = tint, oldLum = lum;
+        string oldMode = mode, oldMaterial = material;
+        var chinese = _loc.CurrentLanguage == "zh";
+
+        var ok = AcrylicHelper.ShowLiquidGlassDialog(owner, _loc["ZoneProp.Section.LiquidGlass"],
+            ref blur, ref tint, ref lum, ref mode, ref material, chinese,
+            (b, t, l, c, m) =>
+            {
+                widget.GlassBlurAmount = b;
+                widget.GlassTintOpacity = t;
+                widget.GlassTintLuminosity = l;
+                widget.GlassColorMode = c;
+                widget.GlassMaterial = m;
+                Save(widget);
+            });
+
+        if (!ok)
+        {
+            widget.GlassBlurAmount = oldBlur;
+            widget.GlassTintOpacity = oldTint;
+            widget.GlassTintLuminosity = oldLum;
+            widget.GlassColorMode = oldMode;
+            widget.GlassMaterial = oldMaterial;
+            Save(widget);
+        }
+    }
+
+    /// <summary>状态区，与分区/挂件同一套排布：第一行「显示」滑动开关（坞没有锁定态），
+    /// 第二行删除按钮，最后一行才是「位置 · 展开方式」只读词条。</summary>
+    void BuildZoneBayStatus(PluginZoneBar bar)
+    {
+        var row1 = new DockPanel { LastChildFill = false };
+        _statusVisibleCb = AddStatusSwitch(row1, _loc["PropertyPanel.Status.Visible"], bar.IsVisible,
+            on => ZoneBayService.Instance.SetVisible(bar, on));
+        StatusHost.Children.Add(row1);
+
+        AddDeleteRow(_loc["ZoneBay.Menu.Delete"], bar);
+
+        _zoneBayStatusChips = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 10, 0, 0),
+        };
+        StatusHost.Children.Add(_zoneBayStatusChips);
+        RefreshZoneBayChips(bar);
+    }
+
+    /// <summary>只重刷最后那行状态词条（改吸附边/展开方式后立即跟上，不重建开关）。</summary>
+    void RefreshZoneBayChips(PluginZoneBar bar)
+    {
+        if (_zoneBayStatusChips == null) return;
+        _zoneBayStatusChips.Children.Clear();
+        _zoneBayStatusChips.Children.Add(MakeStatusChip(_loc[ZoneBayEdges.I18nKey(bar.Edge)], true));
+        _zoneBayStatusChips.Children.Add(MakeStatusChip(
+            _loc[bar.NormalizedExpandMode == ZoneBayExpandModes.Original
+                ? "ZoneBay.Prop.Mode.Original" : "ZoneBay.Prop.Mode.Strip"], true));
+    }
+
+    /// <summary>「吸附位置」四段。切边前先收起正在展开的分区，避免窗口还悬在旧边上。</summary>
+    FrameworkElement MakeZoneBayEdgeRow(PluginZoneBar bar)
+    {
+        int selected = bar.NormalizedEdge switch
+        {
+            ZoneBayEdges.Top => 0,
+            ZoneBayEdges.Left => 2,
+            ZoneBayEdges.Right => 3,
+            _ => 1,
+        };
+        return MakeSegmentedField(_loc["ZoneBay.Prop.Edge"], new[]
+        {
+            _loc["ZoneBay.Edge.Top"], _loc["ZoneBay.Edge.Bottom"],
+            _loc["ZoneBay.Edge.Left"], _loc["ZoneBay.Edge.Right"],
+        }, selected, index =>
+        {
+            bar.Edge = index switch
+            {
+                0 => ZoneBayEdges.Top,
+                2 => ZoneBayEdges.Left,
+                3 => ZoneBayEdges.Right,
+                _ => ZoneBayEdges.Bottom,
+            };
+            ZoneBayService.Instance.CollapseAll();
+            Save(bar);
+            RefreshStatusArea();
+        });
+    }
+
+    /// <summary>「展开方式」两段：长条展开 / 原始展开。</summary>
+    FrameworkElement MakeZoneBayModeRow(PluginZoneBar bar)
+    {
+        int selected = bar.NormalizedExpandMode == ZoneBayExpandModes.Original ? 1 : 0;
+        return MakeSegmentedField(_loc["ZoneBay.Prop.ExpandMode"], new[]
+        {
+            _loc["ZoneBay.Prop.Mode.Strip"], _loc["ZoneBay.Prop.Mode.Original"],
+        }, selected, index =>
+        {
+            bar.ExpandMode = index == 1 ? ZoneBayExpandModes.Original : ZoneBayExpandModes.Strip;
+            // 换展开方式对正在展开的那个不生效，直接收回，下次点击用新方式。
+            ZoneBayService.Instance.CollapseAll();
+            Save(bar);
+            RefreshStatusArea();
+        });
+    }
+
+    FrameworkElement MakeZoneBayMonitorRow(PluginZoneBar bar)
+    {
+        int count = Math.Max(1, MonitorHelper.MonitorCount());
+        var panel = new StackPanel { Margin = new Thickness(0, 6, 0, 0) };
+        panel.Children.Add(new TextBlock
+        {
+            Text = _loc["ZoneBay.Prop.Monitor"],
+            FontSize = 11,
+            Foreground = (Brush)FindResource("Brush.Text.Secondary"),
+            Margin = new Thickness(0, 0, 0, 4),
+        });
+        var combo = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch };
+        for (int i = 0; i < count; i++)
+            combo.Items.Add(new ComboBoxItem
+            {
+                Content = string.Format(_loc["ZoneBay.Prop.MonitorItem"], i + 1),
+                Tag = i,
+            });
+        combo.SelectedIndex = bar.MonitorIndex >= 0 && bar.MonitorIndex < count ? bar.MonitorIndex : 0;
+        combo.SelectionChanged += (_, _) =>
+        {
+            if (combo.SelectedItem is not ComboBoxItem item || item.Tag is not int index) return;
+            if (bar.MonitorIndex == index) return;
+            bar.MonitorIndex = index;
+            ZoneBayService.Instance.CollapseAll();
+            Save(bar);
+        };
+        panel.Children.Add(combo);
+        return panel;
+    }
+
+    /// <summary>图标填充：色板 + 「跟随分区」。空串 = 跟随原分区的图标色（宿主约定）。</summary>
+    FrameworkElement MakeZoneBayIconFillRow(PluginZoneBar bar)
+    {
+        var grid = new Grid { Margin = new Thickness(0, 4, 0, 0) };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        var label = new TextBlock
+        {
+            Text = _loc["ZoneBay.Prop.IconFill"],
+            FontSize = 11,
+            Foreground = (Brush)FindResource("Brush.Text.Secondary"),
+            VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(0, 7, 8, 0),
+        };
+        var swatch = new ColorSwatchButton
+        {
+            CurrentColor = bar.IconColor ?? "",
+            VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(0, 7, 0, 0),
+        };
+        HookDpChange(ColorSwatchButton.CurrentColorProperty, typeof(ColorSwatchButton), swatch,
+            () => { bar.IconColor = swatch.CurrentColor; Save(bar); });
+        var follow = MakeSideButton(_loc["ZoneBay.Prop.FollowZone"], _ =>
+        {
+            bar.IconColor = "";
+            swatch.CurrentColor = "";
+            Save(bar);
+        });
+        follow.Margin = new Thickness(8, 4, 0, 0);
+        follow.VerticalAlignment = VerticalAlignment.Top;
+
+        Grid.SetColumn(label, 0);
+        Grid.SetColumn(swatch, 1);
+        Grid.SetColumn(follow, 2);
+        follow.HorizontalAlignment = HorizontalAlignment.Left;
+        grid.Children.Add(label);
+        grid.Children.Add(swatch);
+        grid.Children.Add(follow);
+        return grid;
+    }
+
+    /// <summary>分段选择行：标签在上、`Segmented` 在下（与滑块/数字块同一套间距）。</summary>
+    FrameworkElement MakeSegmentedField(string label, IReadOnlyList<string> options, int selected,
+        Action<int> onChange)
+    {
+        var panel = new StackPanel { Margin = new Thickness(0, 6, 0, 0) };
+        panel.Children.Add(new TextBlock
+        {
+            Text = label,
+            FontSize = 11,
+            Foreground = (Brush)FindResource("Brush.Text.Secondary"),
+            Margin = new Thickness(0, 0, 0, 4),
+        });
+        var seg = new Segmented { SelectedIndex = selected, HorizontalAlignment = HorizontalAlignment.Stretch };
+        foreach (var option in options) seg.Items.Add(new SegmentItem { Text = option });
+        seg.SelectedIndexChanged += (_, _) =>
+        {
+            if (seg.SelectedIndex >= 0) onChange(seg.SelectedIndex);
+        };
+        panel.Children.Add(seg);
+        return panel;
+    }
+
+    /// <summary>液态玻璃设置：与分区/快捷栏同一个对话框（材质 + 模糊 + 着色 + 亮度），
+    /// 预览即时生效、取消回滚。</summary>
+    void OpenZoneBayGlassDialog(PluginZoneBar bar)
+    {
+        var owner = CachedOwner ?? Window.GetWindow(this);
+        if (owner == null) return;
+        int blur = bar.GlassBlurAmount;
+        int tint = bar.GlassTintOpacity;
+        int lum = bar.GlassTintLuminosity;
+        string mode = bar.GlassColorMode;
+        string material = bar.GlassMaterial;
+        // 取消时回滚用（预览会直接改到模型上）。
+        int oldBlur = blur, oldTint = tint, oldLum = lum;
+        string oldMode = mode, oldMaterial = material;
+        bool chinese = _loc.CurrentLanguage == "zh";
+
+        var ok = AcrylicHelper.ShowLiquidGlassDialog(owner, _loc["ZoneProp.Section.LiquidGlass"],
+            ref blur, ref tint, ref lum, ref mode, ref material, chinese,
+            (b, t, l, c, m) =>
+            {
+                bar.GlassBlurAmount = b;
+                bar.GlassTintOpacity = t;
+                bar.GlassTintLuminosity = l;
+                bar.GlassColorMode = c;
+                bar.GlassMaterial = m;
+                Save(bar);
+            });
+
+        if (ok)
+        {
+            bar.GlassBlurAmount = blur;
+            bar.GlassTintOpacity = tint;
+            bar.GlassTintLuminosity = lum;
+            bar.GlassColorMode = mode;
+            bar.GlassMaterial = material;
+        }
+        else
+        {
+            bar.GlassBlurAmount = oldBlur;
+            bar.GlassTintOpacity = oldTint;
+            bar.GlassTintLuminosity = oldLum;
+            bar.GlassColorMode = oldMode;
+            bar.GlassMaterial = oldMaterial;
+        }
+        Save(bar);
     }
 
     // ── Section + row builders ──

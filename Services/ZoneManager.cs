@@ -436,6 +436,13 @@ public class ZoneManager
 
     public void ShowZone(Zone zone, double waveDelayMs = 0)
     {
+        // 坞内分区：显示 = 在坞里展开，不把窗口搬回桌面。
+        if (ZoneBayService.Instance.IsAbsorbed(zone.Id))
+        {
+            ZoneBayService.Instance.ExpandInBay(zone.Id);
+            return;
+        }
+
         // If this zone is a sub-zone of a merged group, show the master instead
         if (zone.MergedGroupMembership.GroupId.HasValue && zone.MergedGroupMembership.SubZoneIds.Count == 0)
         {
@@ -486,6 +493,13 @@ public class ZoneManager
     }
     public void HideZone(Guid zoneId, double waveDelayMs = 0)
     {
+        // 坞内分区：隐藏 = 收回到坞里，不生成 36×36 恢复按钮。
+        if (ZoneBayService.Instance.IsAbsorbed(zoneId))
+        {
+            ZoneBayService.Instance.CollapseInBay(zoneId);
+            return;
+        }
+
         var zone = Zones.FirstOrDefault(z => z.Id == zoneId);
         if (_zoneWindows.TryGetValue(zoneId, out var window))
         {
@@ -546,6 +560,7 @@ public class ZoneManager
             foreach (var zone in Zones
                          .Where(z => !(z.MergedGroupMembership.GroupId.HasValue
                                        && z.MergedGroupMembership.SubZoneIds.Count == 0))
+                         .Where(z => !ZoneBayService.Instance.IsAbsorbed(z.Id))
                          .OrderBy(z => z.Y).ThenBy(z => z.X))
             {
                 // (i+1) 保证第一个分区也拿到 >0 的 waveDelay，走动画分支；
@@ -578,6 +593,9 @@ public class ZoneManager
     /// <summary>Fully close the zone window (no restore button).</summary>
     public void FullHideZone(Guid zoneId)
     {
+        if (ZoneBayService.Instance.IsAbsorbed(zoneId))
+            ZoneBayService.Instance.Release(zoneId, showCollapsed: false);
+
         if (_zoneWindows.TryGetValue(zoneId, out var window))
         {
             var z = Zones.FirstOrDefault(x => x.Id == zoneId);
@@ -615,7 +633,33 @@ public class ZoneManager
 
     public bool IsZoneShown(Guid zoneId) => _zoneWindows.ContainsKey(zoneId);
     public ZoneWindow? GetZoneWindow(Guid zoneId) => _zoneWindows.TryGetValue(zoneId, out var w) ? w : null;
-    public bool IsZoneMinimized(Guid zoneId) => _zoneWindows.TryGetValue(zoneId, out var w) && w.RestoreButton.Visibility == System.Windows.Visibility.Visible;
+
+    /// <summary>坞展开时取一个窗口：已有就复用，没有就新建（不 Show）。</summary>
+    public ZoneWindow GetOrCreateWindow(Zone zone)
+    {
+        if (_zoneWindows.TryGetValue(zone.Id, out var existing)) return existing;
+        var window = new ZoneWindow(zone, this, ShellIconService.Instance);
+        _zoneWindows[zone.Id] = window;
+        return window;
+    }
+
+    /// <summary>释放回桌面时建一个“已收起”的窗口（构造即 36×36，不闪全窗）。</summary>
+    public void CreateCollapsedWindow(Zone zone)
+    {
+        if (_zoneWindows.ContainsKey(zone.Id)) return;
+        zone.IsVisible = false;
+        var window = new ZoneWindow(zone, this, ShellIconService.Instance);
+        _zoneWindows[zone.Id] = window;
+        window.Show();
+        window.SnapToCollapsedForBay();
+    }
+
+    /// <summary>把窗口从字典里摘掉（调用方负责 Close），避免旧窗口被 ShowZone 再拉出来。</summary>
+    public void ForgetZoneWindow(Guid zoneId) => _zoneWindows.Remove(zoneId);
+
+    public bool IsZoneMinimized(Guid zoneId) =>
+        ZoneBayService.Instance.IsAbsorbed(zoneId)
+        || (_zoneWindows.TryGetValue(zoneId, out var w) && w.RestoreButton.Visibility == System.Windows.Visibility.Visible);
 
     public void ToggleAll()
     {

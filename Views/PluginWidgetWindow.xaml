@@ -1,0 +1,61 @@
+<Window x:Class="DesktopZones.Views.PluginWidgetWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:DesktopZones.Helpers"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ResizeMode="NoResize"
+        Topmost="False"
+        ShowInTaskbar="False"
+        SnapsToDevicePixels="True">
+
+  <Grid x:Name="WindowRoot">
+    <Border x:Name="MainContent" CornerRadius="12" BorderThickness="1"
+            BorderBrush="#40FFFFFF" Background="#08000000" ClipToBounds="True">
+      <Grid x:Name="DragSurface" Background="Transparent"
+            PreviewMouseLeftButtonDown="DragSurface_PreviewMouseLeftButtonDown">
+        <Grid.ContextMenu>
+          <ContextMenu>
+            <MenuItem x:Name="CtxSettings" Header="{loc:Loc Key=ZoneMenu.Settings}" Click="Settings_Click"/>
+            <MenuItem x:Name="CtxLock" Header="{loc:Loc Key=Common.Lock}" Click="Lock_Click"/>
+            <MenuItem x:Name="CtxHide" Header="{loc:Loc Key=Clock.Minimize}" Click="Hide_Click"/>
+            <Separator/>
+            <MenuItem x:Name="CtxDelete" Header="{loc:Loc Key=Clock.Delete}" Click="Delete_Click" Foreground="#FF6666"/>
+          </ContextMenu>
+        </Grid.ContextMenu>
+
+        <ContentControl x:Name="ContentHost" Margin="12" VerticalContentAlignment="Stretch"
+                        HorizontalContentAlignment="Stretch"/>
+        <Border x:Name="ErrorHost" Visibility="Collapsed" Background="Transparent" Margin="12">
+          <TextBlock x:Name="ErrorText" TextWrapping="Wrap" FontSize="12"
+                     Foreground="{DynamicResource Brush.Text.Secondary}"
+                     HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center"/>
+        </Border>
+
+        <Thumb x:Name="ResizeGrip" Width="18" Height="18" HorizontalAlignment="Right"
+               VerticalAlignment="Bottom" Cursor="SizeNWSE" Visibility="Collapsed"
+               DragDelta="ResizeGrip_DragDelta">
+          <Thumb.Template>
+            <ControlTemplate TargetType="Thumb">
+              <Grid Background="Transparent">
+                <Path Data="M 16,7 L 16,16 L 7,16" Stroke="#60FFFFFF" StrokeThickness="1.4"
+                      StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+              </Grid>
+            </ControlTemplate>
+          </Thumb.Template>
+        </Thumb>
+      </Grid>
+    </Border>
+
+    <Border x:Name="RestoreButton" Width="44" Height="44" CornerRadius="10"
+            Background="{DynamicResource Brush.Bg.Surface}"
+            BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1"
+            Visibility="Collapsed" Cursor="Hand" MouseLeftButtonUp="RestoreButton_Click"
+            ToolTip="{loc:Loc Key=Plugin.Nav}">
+      <Path Width="18" Height="18" Stretch="Uniform"
+            Fill="{DynamicResource Brush.Text.Secondary}"
+            Data="{StaticResource Icon.Plugin}"/>
+    </Border>
+  </Grid>
+</Window>

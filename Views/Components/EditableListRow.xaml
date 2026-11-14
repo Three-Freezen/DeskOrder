@@ -113,7 +113,6 @@
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="Auto"/>
           <ColumnDefinition Width="*"/>
-          <ColumnDefinition Width="Auto"/>
         </Grid.ColumnDefinitions>
 
       <!-- Icon slot: show Path when IconKey set, TextBlock when IconText (emoji) set -->
@@ -165,40 +164,7 @@
                      Text="{Binding StatusBadge, RelativeSource={RelativeSource AncestorType=UserControl}}"/>
         </Border>
       </Grid>
-
-      <StackPanel x:Name="Ops" Grid.Column="2" Orientation="Horizontal"
-                  Visibility="Collapsed" VerticalAlignment="Center">
-        <StackPanel.Style>
-          <Style TargetType="StackPanel">
-            <Style.Triggers>
-              <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=Border}}"
-                           Value="True">
-                <Setter Property="Visibility" Value="Visible"/>
-              </DataTrigger>
-            </Style.Triggers>
-          </Style>
-        </StackPanel.Style>
-        <Button Width="24" Height="24" Margin="2,0" Cursor="Hand" Click="LockBtn_Click"
-                Visibility="{Binding LockVisibility, RelativeSource={RelativeSource AncestorType=UserControl}, FallbackValue=Visible}"
-                Background="Transparent" BorderThickness="0" ToolTip="{loc:Loc Key=Common.Lock}">
-          <Path Width="14" Height="14" StrokeThickness="1.5"
-                Stroke="{DynamicResource Brush.Text.Tertiary}" StrokeLineJoin="Round"
-                Data="{StaticResource Icon.Lock}"/>
-        </Button>
-        <Button Width="24" Height="24" Margin="2,0" Cursor="Hand" Click="EyeBtn_Click"
-                Background="Transparent" BorderThickness="0" ToolTip="{loc:Loc Key=ToolTip.Show}">
-          <Path Width="14" Height="14" StrokeThickness="1.5"
-                Stroke="{DynamicResource Brush.Text.Tertiary}" StrokeLineJoin="Round"
-                Data="{StaticResource Icon.Eye}"/>
-        </Button>
-        <Button Width="24" Height="24" Margin="2,0" Cursor="Hand" Click="TrashBtn_Click"
-                Background="Transparent" BorderThickness="0" ToolTip="{loc:Loc Key=Manage.DeleteBtn}">
-          <Path Width="14" Height="14" StrokeThickness="1.5"
-                Stroke="{DynamicResource Brush.Text.Tertiary}" StrokeLineJoin="Round"
-                Data="{StaticResource Icon.Trash}"/>
-        </Button>
-      </StackPanel>
-    </Grid>
+      </Grid>
     </Grid>
   </Border>
 </UserControl>

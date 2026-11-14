@@ -124,6 +124,9 @@ public partial class ManagementWindow : Window
             if (ConfirmHideAll()) FullHideAll();
         };
 
+        Services.PluginService.Instance.PluginsChanged += RefreshZoneBayEntry;
+        Services.ZoneBayService.Instance.BarsChanged += RefreshZoneBayEntry;
+
         DockedPanel.CollapseRequested += (_, _) => TogglePropertyPanel();
         // ponytail 2026-08-25: central Persist wiring for BOTH panels. Pages
         // previously overwrote DockedPanel.Persist with a type-specific handler,
@@ -167,6 +170,7 @@ public partial class ManagementWindow : Window
         {
             UpdateThemeIcon();
             ShowSection("zones");
+            RefreshZoneBayEntry();
             try
             {
                 var config = _configService.Load();
@@ -307,8 +311,9 @@ public partial class ManagementWindow : Window
         var loc = LocalizationService.Instance;
         return section switch
         {
-            "zones" or "merged" or "panel" or "docks" => loc["Breadcrumb.GroupZones"],
+            "zones" or "merged" or "panel" or "docks" or "zonebays" => loc["Breadcrumb.GroupZones"],
             "calendar" or "clock" or "sticky" => loc["Breadcrumb.GroupWidgets"],
+            "plugins" => loc["Breadcrumb.GroupPlugins"],
             _ => "DeskOrder",
         };
     }
@@ -322,9 +327,11 @@ public partial class ManagementWindow : Window
             "merged"   => loc["Breadcrumb.Merged"],
             "docks"    => loc["Manage.Docks"],
             "panel"    => loc["Breadcrumb.Panel"],
+            "zonebays" => loc["ZoneBay.Title"],
             "calendar" => loc["Breadcrumb.Calendar"],
             "clock"    => loc["Breadcrumb.Clock"],
             "sticky"   => loc["Breadcrumb.Sticky"],
+            "plugins"  => loc["Breadcrumb.Plugins"],
             "settings" => loc["Breadcrumb.Settings"],
             "about"    => loc["Breadcrumb.About"],
             _          => "",
@@ -539,6 +546,15 @@ public partial class ManagementWindow : Window
                     // — UpdateZone refreshes the merged window + persists.
                     _zoneManager.UpdateZone(g.Master);
                     break;
+                case PluginZoneBar bar:
+                    // 分区坞：ApplySettings 把外观/行为铺到坞窗口（含芯片条），Save 落盘。
+                    Services.ZoneBayService.Instance.ApplySettings(bar);
+                    Services.ZoneBayService.Instance.Save();
+                    break;
+                case DeskOrder.PluginApi.PluginWidget pw:
+                    // 插件组件：外观/几何都在宿主侧，SaveWidgetsNow 落盘即完成持久化。
+                    Services.PluginService.Instance.SaveWidgetsNow();
+                    break;
                 case ZoneItem sub when sub.Type == ItemType.SubFolder:
                     // ponytail 2026-08-26: ZoneItem edits mutate the live instance
                     // in place (sub is the same reference as parentZone.Items[i]),
@@ -602,6 +618,14 @@ public partial class ManagementWindow : Window
                     // Panel POCO 在 live AppConfig 上原地改动 — RefreshAppearance
                     // 读 _zoneManager.GetConfig().Panel,即被预览改动的同一实例。
                     _panelService?.RefreshAppearance();
+                    break;
+                case PluginZoneBar bar:
+                    // 即时预览：只重画坞窗口，不写盘（取消时按快照还原再重画）。
+                    Services.ZoneBayService.Instance.ApplySettings(bar);
+                    break;
+                case DeskOrder.PluginApi.PluginWidget pw:
+                    // 即时预览：把外观/几何铺到插件组件窗口，不写盘。
+                    Services.PluginService.Instance.GetWindow(pw.Id)?.RefreshAppearance();
                     break;
                 case ZoneItem sub when sub.Type == ItemType.SubFolder:
                     var parentP = _zoneManager.Zones.FirstOrDefault(z => z.Items.Contains(sub));
@@ -681,6 +705,25 @@ public partial class ManagementWindow : Window
                             MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
                         DeleteNote(n);
                     break;
+                case PluginZoneBar bar:
+                    // 删坞：坞里的分区先回桌面（36×36），不会丢；确认文案带分区数。
+                    if (MessageBox.Show(_loc.Get("ZoneBay.Menu.DeleteConfirm", bar.Name, bar.ZoneIds.Count),
+                            _loc["ZoneBay.Menu.Delete"],
+                            MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
+                        Services.ZoneBayService.Instance.DeleteBar(bar);
+                    break;
+                case DeskOrder.PluginApi.PluginWidget pw:
+                    // 删插件组件：先关窗口再删记录（与窗口右键「删除组件」同一路径）。
+                    if (MessageBox.Show(_loc.Get("Plugin.DeleteWidgetConfirm",
+                                Services.PluginService.Instance.FindDescriptor(pw.PluginId, pw.WidgetTypeId)?.DisplayName
+                                ?? pw.PluginId),
+                            _loc["Plugin.DeleteWidgetTitle"],
+                            MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
+                    {
+                        Services.PluginService.Instance.CloseWindow(pw.Id);
+                        Services.PluginService.Instance.DeleteWidget(pw);
+                    }
+                    break;
             }
         };
 
@@ -724,6 +767,12 @@ public partial class ManagementWindow : Window
                 z.MergedGroupMembership.SubZoneIds.Count > 0);
             return master != null ? MergedGroupTarget.For(master) : null;
         }
+        // 分区坞是宿主侧组件，不在 ZoneManager 里 —— 按 Id 从 ZoneBayService 取。
+        if (typeName == nameof(PluginZoneBar) && Guid.TryParse(idStr, out var barId))
+            return Services.ZoneBayService.Instance.Bars.FirstOrDefault(b => b.Id == barId);
+        // 插件组件同理：记录在 PluginService.Widgets 里。
+        if (typeName == nameof(DeskOrder.PluginApi.PluginWidget) && Guid.TryParse(idStr, out var widgetId))
+            return Services.PluginService.Instance.Widgets.FirstOrDefault(w => w.Id == widgetId);
         if (!Guid.TryParse(idStr, out var id)) return null;
         return typeName switch
         {
@@ -879,19 +928,23 @@ public partial class ManagementWindow : Window
         // then widgets/notes continue the same cascade after the zone slots.
         // staggered=false → 即时显示(双击桌面切换路径用)。
         _zoneManager.ShowAll(staggered);
+        Services.ZoneBayService.Instance.ShowAll();
         ShowAllWidgets(
             baseDelayMs: staggered ? (_zoneManager?.Zones?.Count ?? 0) * HoverExpandBehavior.BatchStaggerMs : 0,
             staggered: staggered);
+        PluginService.Instance.ShowAllWidgets();
     }
     public void HideAll()
     {
         // ponytail: batch wave — mirror of ShowAll (zones first, then widgets/notes).
         _zoneManager.HideAll();
+        Services.ZoneBayService.Instance.HideAll();
         HideAllWidgets(baseDelayMs: (_zoneManager?.Zones?.Count ?? 0) * HoverExpandBehavior.BatchStaggerMs);
     }
     public void FullHideAll()
     {
         _zoneManager.FullHideAll();
+        Services.ZoneBayService.Instance.HideAll();
         FullHideAllWidgets();
     }
 
@@ -930,14 +983,23 @@ public partial class ManagementWindow : Window
             count += _widgetService.MediaPlayers.Count;
         }
         if (_notesService != null) count += _notesService.Notes.Count;
+        count += PluginService.Instance.Widgets.Count;
         return count;
     }
 
-    public void ShowAllWidgetsFromVm() => ShowAllWidgets(baseDelayMs: (_zoneManager?.Zones?.Count ?? 0) * HoverExpandBehavior.BatchStaggerMs);
+    public void ShowAllWidgetsFromVm()
+    {
+        ShowAllWidgets(baseDelayMs: (_zoneManager?.Zones?.Count ?? 0) * HoverExpandBehavior.BatchStaggerMs);
+        PluginService.Instance.ShowAllWidgets();
+    }
     public void HideAllWidgetsFromVm() => HideAllWidgets(baseDelayMs: (_zoneManager?.Zones?.Count ?? 0) * HoverExpandBehavior.BatchStaggerMs);
     public void FullHideAllWidgetsFromVm() => FullHideAllWidgets();
     /// <summary>双击桌面切换专用：即时显示所有挂件（不走分批级联动画）。</summary>
-    public void ShowAllWidgetsInstant() => ShowAllWidgets(baseDelayMs: 0, staggered: false);
+    public void ShowAllWidgetsInstant()
+    {
+        ShowAllWidgets(baseDelayMs: 0, staggered: false);
+        PluginService.Instance.ShowAllWidgets();
+    }
 
     void ShowAllWidgets(double baseDelayMs = 0, bool staggered = true)
     {
@@ -1119,7 +1181,8 @@ public partial class ManagementWindow : Window
             // animation at its stagger slot (sorted by screen position), mirroring the
             // "Show All" cascade.
             var live = System.Windows.Application.Current.Windows.OfType<Window>()
-                .Where(w => w is ClockWidget or CalendarWidget or StickyNoteWindow or MediaPlayerWidget)
+                .Where(w => w is ClockWidget or CalendarWidget or StickyNoteWindow or MediaPlayerWidget
+                    or PluginWidgetWindow)
                 .OrderBy(w => w.Top).ThenBy(w => w.Left)
                 .ToList();
             int i = 0;
@@ -1142,6 +1205,9 @@ public partial class ManagementWindow : Window
                             break;
                         case MediaPlayerWidget mpw when mpw.MainContent.Visibility == Visibility.Visible:
                             mpw.HidePlayer(delay);
+                            break;
+                        case PluginWidgetWindow pww when pww.MainContent.Visibility == Visibility.Visible:
+                            pww.HideWidget(delay);
                             break;
                     }
                 }
@@ -1173,6 +1239,7 @@ public partial class ManagementWindow : Window
                 try { w.Close(); } catch { }
             foreach (var w in System.Windows.Application.Current.Windows.OfType<StickyNoteWindow>().ToList())
                 try { w.Close(); } catch { }
+            PluginService.Instance.FullHideAllWidgets();
             _openClockWindows.Clear();
             _openCalendarWindows.Clear();
             _openMediaWindows.Clear();
@@ -1321,6 +1388,8 @@ public partial class ManagementWindow : Window
                 catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[RestoreVisibleWidgets] media {media.Id} failed: {ex}"); }
             }
         }
+        try { PluginService.Instance.RestoreWidgets(); }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[RestoreVisibleWidgets] plugin widgets failed: {ex}"); }
     }
 
     // ── Visibility sync ──
@@ -2103,12 +2172,14 @@ public partial class ManagementWindow : Window
         {
             "zones"    => new ZonesPage(this, _viewModel, _zoneManager),
             "docks"    => new DocksPage(this, _viewModel, _zoneManager),
+            "zonebays" => new ZoneBaysPage(this),
             "merged"   => new MergedGroupsPage(this, _viewModel, _zoneManager),
             "panel"    => new PanelPage(this, _configService, _panelService),
             "calendar" => new CalendarPage(this, _viewModel, _widgetService),
             "clock"    => new ClockPage(this, _viewModel, _widgetService),
             "media"    => new MediaPlayerPage(this, _viewModel, _widgetService),
             "sticky"   => new StickyNotePage(this, _viewModel, _notesService),
+            "plugins"  => new PluginsPage(),
             "about"    => new AboutPage(),
             "settings" => BuildSettingsPage(),
             _          => new ZonesPage(this, _viewModel, _zoneManager)
@@ -2127,6 +2198,18 @@ public partial class ManagementWindow : Window
         ShowSection(section);
     }
 
+    /// <summary>分区坞入口的显隐：有已启用 zonebar 插件才出现；插件没了就跳回分区页。</summary>
+    void RefreshZoneBayEntry()
+    {
+        try
+        {
+            bool has = Services.ZoneBayService.Instance.HasAnyZoneBayPlugin;
+            SideNav?.SetZoneBaysEntry(has);
+            if (!has && _lastSection == "zonebays") ShowSection("zones");
+        }
+        catch { }
+    }
+
     private string GetSectionCountLabel(string section)
     {
         int zones = _zoneManager?.Zones?.Count(z => !z.DockMode) ?? 0;
@@ -2140,12 +2223,14 @@ public partial class ManagementWindow : Window
         {
             "zones"    => _loc.Get("Manage.Sidebar.Zones", zones),
             "docks"    => _loc.Get("Manage.Sidebar.Docks", docks),
+            "zonebays" => _loc.Get("ZoneBay.Count", ZoneBayService.Instance.Bars.Count),
             "merged"   => _loc.Get("Manage.Sidebar.MergedGroups", merged),
             "panel"    => _loc["Manage.Sidebar.Panel"],
             "calendar" => _loc.Get("Manage.Sidebar.Calendars", calendars),
             "clock"    => _loc.Get("Manage.Sidebar.Clocks", clocks),
             "media"    => _loc.Get("Manage.Sidebar.MediaPlayers", mediaPlayers),
             "sticky"   => _loc.Get("Manage.Sidebar.Notes", notes),
+            "plugins"  => _loc.Get("Manage.Sidebar.Plugins", PluginService.Instance.Records.Count),
             "about"    => _loc["Manage.Sidebar.About"],
             "settings" => _loc["Manage.Sidebar.Settings"],
             _          => ""

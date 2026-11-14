@@ -71,8 +71,6 @@ public partial class MergedGroupsPage : UserControl
             Tag = master,
             Title = master.MergedGroupMembership.DisplayName,
             Subtitle = _loc.Get("MergedGroupsPage.Subtitle", subCount, master.Items.Count),
-            IsLocked = master.IsLocked,
-            IsVisible = master.IsVisible,
         };
         ApplyIcon(row, master.MergedGroupMembership.Icon, "Icon.Merged");
         // ponytail: no status badge on merged-group rows (lock/hidden/merged chips
@@ -89,14 +87,6 @@ public partial class MergedGroupsPage : UserControl
             MoveRow(_rows, src, targetIdx);
         };
 
-        row.LockCommand = new RelayCommand(_ => { master.IsLocked = !master.IsLocked; _zoneManager.UpdateZone(master); });
-        row.VisibilityCommand = new RelayCommand(v =>
-        {
-            // ponytail 2026-08-26: no model pre-flip — same code as the zone's own
-            // hide button (see ZonesPage).
-            if (master.IsVisible) _zoneManager.HideZone(master.Id); else _zoneManager.ShowZone(master);
-        });
-        row.DeleteCommand = new RelayCommand(_ => Delete(master));
         row.RenameCommand = new RelayCommand(p =>
         {
             var n = p?.ToString();
@@ -107,17 +97,7 @@ public partial class MergedGroupsPage : UserControl
                 RefreshList();
             }
         });
-        row.PreviewMouseLeftButtonUp += (_, e) =>
-        {
-            if (e.OriginalSource is DependencyObject src)
-            {
-                var parent = src;
-                while (parent != null && parent is not Button)
-                    parent = LogicalTreeHelper.GetParent(parent);
-                if (parent is Button) return;
-            }
-            Select(master);
-        };
+        row.PreviewMouseLeftButtonUp += (_, _) => Select(master);
         // 右键菜单已取消：显示/锁定/分离单个/解散全部移到属性面板顶部状态区。
         return row;
     }
@@ -144,14 +124,5 @@ public partial class MergedGroupsPage : UserControl
         var master = _main.ShowCreateMergedGroupDialog();
         RefreshList();
         if (master != null) Select(master);
-    }
-
-    void Delete(Zone master)
-    {
-        if (MessageBox.Show(_loc.Get("MergePage.DisbandConfirm", master.MergedGroupMembership.DisplayName), _loc["MergePage.DisbandTitle"],
-            MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
-        _main.DisbandEntireGroup(master);
-        if (ReferenceEquals(_selected, master)) _selected = null;
-        RefreshList();
     }
 }

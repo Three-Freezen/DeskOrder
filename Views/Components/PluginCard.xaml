@@ -1,0 +1,63 @@
+<UserControl x:Class="DesktopZones.Views.Components.PluginCard"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="clr-namespace:DesktopZones.Helpers"
+             Width="484" Height="214" Margin="0,0,12,16">
+  <Border x:Name="CardRoot" CornerRadius="10" Background="{DynamicResource Brush.Bg.Surface}"
+          BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1"
+          Cursor="Hand" MouseLeftButtonUp="CardRoot_MouseLeftButtonUp"
+          MouseEnter="CardRoot_MouseEnter" MouseLeave="CardRoot_MouseLeave">
+    <Grid Margin="14">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="168"/>
+        <ColumnDefinition Width="*"/>
+      </Grid.ColumnDefinitions>
+
+      <Border Width="168" Height="168" CornerRadius="8" Background="{DynamicResource Brush.Bg.Hover}"
+              ClipToBounds="True">
+        <Grid>
+          <Path x:Name="PlaceholderIcon" Width="44" Height="44" Stretch="Uniform"
+                Fill="{DynamicResource Brush.Text.Tertiary}"
+                Data="{StaticResource Icon.Plugin}"
+                HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          <Image x:Name="PreviewImage" Stretch="UniformToFill" Visibility="Collapsed"/>
+        </Grid>
+      </Border>
+
+      <Grid Grid.Column="1" Margin="16,2,0,2">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="*"/>
+          <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Orientation="Horizontal">
+          <TextBlock x:Name="NameText" FontSize="15" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
+                     Foreground="{DynamicResource Brush.Text.Primary}" VerticalAlignment="Center"
+                     MaxWidth="210"/>
+          <Border x:Name="OfficialPill" Visibility="Collapsed" Margin="8,0,0,0" Height="18" Padding="7,0"
+                  CornerRadius="9" Background="{DynamicResource Brush.Accent.Wash}" VerticalAlignment="Center">
+            <TextBlock Text="{loc:Loc Key=Plugin.Official}" FontSize="10" FontWeight="SemiBold"
+                       Foreground="{DynamicResource Brush.Accent}" VerticalAlignment="Center"/>
+          </Border>
+        </StackPanel>
+
+        <TextBlock x:Name="MetaText" Grid.Row="1" FontSize="11" Margin="0,3,0,0"
+                   Foreground="{DynamicResource Brush.Text.Tertiary}" TextTrimming="CharacterEllipsis"/>
+
+        <TextBlock x:Name="SummaryText" Grid.Row="2" FontSize="11.5" Margin="0,8,0,0"
+                   Foreground="{DynamicResource Brush.Text.Secondary}" TextWrapping="Wrap"
+                   TextTrimming="CharacterEllipsis" MaxHeight="52" VerticalAlignment="Top"/>
+
+        <Grid Grid.Row="3" Margin="0,6,0,0">
+          <TextBlock x:Name="DownloadsText" FontSize="10.5" VerticalAlignment="Center"
+                     Foreground="{DynamicResource Brush.Text.Tertiary}"/>
+          <Button x:Name="ActionButton" HorizontalAlignment="Right" Width="92" Height="30"
+                  FontSize="11.5" FontWeight="SemiBold" Cursor="Hand"
+                  Style="{DynamicResource FillBtn}" Click="ActionButton_Click"/>
+        </Grid>
+      </Grid>
+    </Grid>
+  </Border>
+</UserControl>

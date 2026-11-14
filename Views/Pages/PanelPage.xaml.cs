@@ -70,36 +70,15 @@ public partial class PanelPage : UserControl
             Title = _loc["PanelPage.PanelTitle"],
             Subtitle = _loc.Get("PanelPage.Hotkey", ManagementWindow.GetHotkeyLabel(cfg.PanelHotkey.PanelHotkeyModifiers, cfg.PanelHotkey.PanelHotkeyKey)),
             IconKey = "Icon.Panel",
-            IsLocked = false,
-            IsVisible = cfg.Panel.PanelEnabled,
         };
         // ponytail: no status badge on the panel row — enabled-state chip removed.
-        row.LockCommand = new RelayCommand(_ => { /* panel lock not applicable */ });
-        row.VisibilityCommand = new RelayCommand(_ =>
-        {
-            cfg.Panel.PanelEnabled = row.IsVisible;
-            _configService.Save(cfg);
-            if (cfg.Panel.PanelEnabled) _panelService?.Show(cfg); else _panelService?.CloseAndClear();
-            RefreshList();
-        });
-        row.DeleteCommand = new RelayCommand(_ => { /* panel cannot be deleted */ });
         row.RenameCommand = new RelayCommand(_ => { /* panel has no name */ });
         // ponytail 2026-08-24: Panel row previously had no click handler — the
         // right-side PropertyPanel never opened for the singleton panel.
         // Mirror ClockPage/CalendarPage: route through DockTarget with the
         // live PanelConfig instance as the target so the existing PropertyPanel
         // dispatcher can build its field tree.
-        row.PreviewMouseLeftButtonUp += (_, e) =>
-        {
-            if (e.OriginalSource is DependencyObject src)
-            {
-                var parent = src;
-                while (parent != null && parent is not Button)
-                    parent = LogicalTreeHelper.GetParent(parent);
-                if (parent is Button) return;
-            }
-            Select();
-        };
+        row.PreviewMouseLeftButtonUp += (_, _) => Select();
         return row;
     }
 

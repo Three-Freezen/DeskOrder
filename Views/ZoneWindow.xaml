@@ -414,6 +414,9 @@
                             <MenuItem x:Name="CtxMapFolderNew" Header="{loc:Loc Key=FolderMap.MenuMap}" Click="FolderMapChoose_Click"/>
                             <Separator/>
                             <MenuItem x:Name="CtxSettings" Header="{loc:Loc Key=ZoneMenu.Settings}" Click="SettingsZone_Click"/>
+                            <!-- 分区坞专用：把吸在坞里的分区放回桌面（36×36 恢复按钮），
+                                 只在坞展开态 / 坞内芯片右键时出现。 -->
+                            <MenuItem x:Name="CtxReleaseFromBay" Header="{loc:Loc Key=ZoneBay.Menu.Release}" Click="ReleaseFromBay_Click" Visibility="Collapsed"/>
                             <Separator/>
                             <MenuItem x:Name="CtxDisbandAll" Header="{loc:Loc Key=Merge.DisbandAll}" Click="DisbandAll_Click" Visibility="Collapsed"/>
                             <MenuItem x:Name="CtxDisbandThis" Header="{loc:Loc Key=Merge.DisbandSingle}" Click="DisbandThis_Click" Visibility="Collapsed"/>
@@ -586,9 +589,16 @@
 
                         <!-- Sub-zone tabs (visible only when merged) -->
                         <Border x:Name="SubZoneTabsRow" Grid.Row="1" Height="24"
-                                Background="#08FFFFFF" Visibility="Collapsed">
-                            <StackPanel x:Name="SubZoneTabs" Orientation="Horizontal"
-                                        Margin="4,0,0,0"/>
+                                Background="#08FFFFFF" Visibility="Collapsed"
+                                MouseWheel="SubZoneTabs_Wheel">
+                            <!-- 长条展开时坞可能很窄：标签栏横向可滚（滚动条隐藏）。 -->
+                            <ScrollViewer x:Name="SubZoneTabsScroll"
+                                          HorizontalScrollBarVisibility="Hidden"
+                                          VerticalScrollBarVisibility="Disabled"
+                                          PanningMode="HorizontalOnly">
+                                <StackPanel x:Name="SubZoneTabs" Orientation="Horizontal"
+                                            Margin="4,0,0,0"/>
+                            </ScrollViewer>
                         </Border>
 
                         <!-- Items (scrollable) -->

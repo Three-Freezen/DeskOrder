@@ -151,7 +151,9 @@ public static class AcrylicHelper
         string Key, string DisplayNameKey,
         int AccentState, bool UseClassicBlur,
         int BlurAmount, int TintOpacity, int TintLuminosity, string ColorMode,
-        double NoiseOpacity = 0);
+        double NoiseOpacity = 0,
+        // 社区外观包材质：名字来自 manifest（{zh,en}），不走 i18n key。
+        string? ZhName = null, string? EnName = null);
 
     /// <summary>材质清单(数组顺序 = 下拉框顺序)。第 0 项 = 「默认」= 老配置(空串)渲染出来的
     /// 那套参数(state4 亚克力 + 经典模糊 + 18/50/100/Default + 无颗粒),所以"选中默认材质"
@@ -185,13 +187,41 @@ public static class AcrylicHelper
     public const string CustomMaterialKey = "Custom";
 
     /// <summary>按 key 找材质;空串(从没选过)/Custom(显式自定义)/未知 → null
-    /// (= 沿用已存参数,即历史行为)。</summary>
+    /// (= 沿用已存参数,即历史行为)。外观包材质也走这里。</summary>
     public static GlassMaterialRecipe? FindMaterial(string? key)
-        => string.IsNullOrEmpty(key) ? null : Materials.FirstOrDefault(m => m.Key == key);
+    {
+        if (string.IsNullOrEmpty(key)) return null;
+        return Materials.FirstOrDefault(m => m.Key == key)
+               ?? AppearancePackService.Instance.FindMaterial(key);
+    }
+
+    /// <summary>内置材质 + 已启用外观包材质（下拉框顺序：内置优先，社区包按 key 排序）。</summary>
+    public static IReadOnlyList<GlassMaterialRecipe> AllMaterials
+    {
+        get
+        {
+            var pack = AppearancePackService.Instance.Materials;
+            if (pack.Count == 0) return Materials;
+            var list = new List<GlassMaterialRecipe>(Materials.Count + pack.Count);
+            list.AddRange(Materials);
+            list.AddRange(pack);
+            return list;
+        }
+    }
 
     /// <summary>材质显示名 — 每次按当前语言读,切语言后下次开对话框即生效。</summary>
     public static string GetMaterialDisplayName(string? key)
-        => FindMaterial(key) is { } m ? _loc[m.DisplayNameKey] : _loc["LiquidGlass.Mat.Custom"];
+    {
+        var material = FindMaterial(key);
+        if (material == null) return _loc["LiquidGlass.Mat.Custom"];
+        if (!string.IsNullOrWhiteSpace(material.ZhName))
+        {
+            return string.Equals(_loc.CurrentLanguage, "zh", StringComparison.OrdinalIgnoreCase)
+                ? material.ZhName!
+                : string.IsNullOrWhiteSpace(material.EnName) ? material.ZhName! : material.EnName!;
+        }
+        return _loc[material.DisplayNameKey];
+    }
 
     /// <summary>材质在**当前渲染方案**下是否生效 —— DWM 方案(设置页开关关闭)恒返回 null。
     ///
@@ -1114,11 +1144,12 @@ public static class AcrylicHelper
         };
         var materialCombo = ComboBoxHelper.Create(width: 200, fontSize: 12,
             margin: new Thickness(8, 0, 0, 0));
+        var allMaterials = AllMaterials;
         int materialIdx = 0;
-        for (int i = 0; i < Materials.Count; i++)
+        for (int i = 0; i < allMaterials.Count; i++)
         {
-            materialCombo.Items.Add(_loc[Materials[i].DisplayNameKey]);
-            if (Materials[i].Key == localMaterial) materialIdx = i;
+            materialCombo.Items.Add(GetMaterialDisplayName(allMaterials[i].Key));
+            if (allMaterials[i].Key == localMaterial) materialIdx = i;
         }
         materialCombo.SelectedIndex = materialIdx;
         var materialRow = new StackPanel
@@ -1319,7 +1350,7 @@ public static class AcrylicHelper
             materialCombo.IsEnabled = on;
             if (on)
             {
-                ApplyMaterial(Materials[Math.Clamp(materialCombo.SelectedIndex, 0, Materials.Count - 1)]);
+                ApplyMaterial(allMaterials[Math.Clamp(materialCombo.SelectedIndex, 0, allMaterials.Count - 1)]);
             }
             else
             {
@@ -1333,8 +1364,8 @@ public static class AcrylicHelper
         {
             if (syncingMaterial || !useMaterialPreset) return;
             int i = materialCombo.SelectedIndex;
-            if (i < 0 || i >= Materials.Count) return;
-            ApplyMaterial(Materials[i]);
+            if (i < 0 || i >= allMaterials.Count) return;
+            ApplyMaterial(allMaterials[i]);
         };
         materialCb.Checked += (_, _) => { if (!useMaterialPreset) SetMaterialPreset(true); };
         materialCb.Unchecked += (_, _) => { if (useMaterialPreset) SetMaterialPreset(false); };

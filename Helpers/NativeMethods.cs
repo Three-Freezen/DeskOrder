@@ -590,6 +590,12 @@ public static class NativeMethods
     public const byte VK_LWIN = 0x5B;
     public const uint KEYEVENTF_KEYUP = 0x0002;
     public const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
+
+    [DllImport("user32.dll")]
+    public static extern bool GetCursorPos(out POINT lpPoint);
+
+    [DllImport("user32.dll")]
+    public static extern short GetAsyncKeyState(int vKey);
 }
 
 // ponytail 2026-08-27: 桌面双击全局监听 — LowLevel 鼠标钩子。
@@ -835,6 +841,10 @@ public static class DesktopHook
 
     [DllImport("user32.dll")]
     public static extern bool GetCursorPos(out NativeMethods.POINT lpPoint);
+
+    /// <summary>全局鼠标按键状态（点坞外收起永久展开用）。</summary>
+    [DllImport("user32.dll")]
+    public static extern short GetAsyncKeyState(int vKey);
 
     public struct MSLLHOOKSTRUCT { public NativeMethods.POINT pt; public uint mouseData; public uint flags; public uint time; public IntPtr dwExtraInfo; }
 }

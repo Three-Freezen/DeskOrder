@@ -170,6 +170,16 @@
               <TextBlock Text="{loc:Loc Key=Panel.Title}" VerticalAlignment="Center"/>
             </StackPanel>
           </Button>
+          <Button x:Name="NavZoneBays" Style="{StaticResource NavItem}" Tag="zonebays" Click="NavItem_Click"
+                  Visibility="Collapsed">
+            <StackPanel Orientation="Horizontal">
+              <Path Width="16" Height="16" Margin="0,0,12,0" Stretch="Uniform"
+                    Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                    StrokeThickness="1.5" StrokeLineJoin="Round"
+                    Data="{StaticResource Icon.ZoneBay}"/>
+              <TextBlock Text="{loc:Loc Key=ZoneBay.Nav}" VerticalAlignment="Center"/>
+            </StackPanel>
+          </Button>
 
           <!-- Group: 组件 -->
           <TextBlock Text="{loc:Loc Key=Sidebar.Widgets}" Margin="16,16,16,8" FontSize="11" FontWeight="SemiBold"
@@ -208,6 +218,19 @@
                     StrokeThickness="1.5" StrokeLineJoin="Round"
                     Data="{StaticResource Icon.Sticky}"/>
               <TextBlock Text="{loc:Loc Key=Manage.Notes}" VerticalAlignment="Center"/>
+            </StackPanel>
+          </Button>
+
+          <!-- Group: 插件（独立分组，放在「组件」下面） -->
+          <TextBlock Text="{loc:Loc Key=Sidebar.Plugins}" Margin="16,16,16,8" FontSize="11" FontWeight="SemiBold"
+                     Foreground="{DynamicResource Brush.Text.Tertiary}"/>
+          <Button x:Name="NavPlugins" Style="{StaticResource NavItem}" Tag="plugins" Click="NavItem_Click">
+            <StackPanel Orientation="Horizontal">
+              <Path Width="16" Height="16" Margin="0,0,12,0" Stretch="Uniform"
+                    Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                    StrokeThickness="1.5" StrokeLineJoin="Round"
+                    Data="{StaticResource Icon.PluginMarket}"/>
+              <TextBlock Text="{loc:Loc Key=Plugin.Nav}" VerticalAlignment="Center"/>
             </StackPanel>
           </Button>
 
