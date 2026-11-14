@@ -818,6 +818,83 @@ public partial class App
                 item.Check(File.Exists(Path.Combine(dir, "shot-settings.png")), "settings screenshot written");
                 break;
             }
+            case "ja-gallery":
+            {
+                // 官方日语全量语言包：装包 → 切到日语 → 抓主界面几张图当插件展示图。
+                // 需要 lab 目录里有 lang-ja-full-<ver>.dopkg（plugin-community\tools\build-ja-pack.ps1 生成）。
+                const string JapanesePackId = "three-freezen.ja";
+                var loc = LocalizationService.Instance;
+                var package = Path.Combine(dir, "lang-ja-full-1.0.0.dopkg");
+                item.Check(File.Exists(package), "japanese package is staged");
+                if (File.Exists(package) && service.GetRecord(JapanesePackId) == null)
+                {
+                    var install = await service.Installer!.InstallFromFileAsync(package);
+                    item.Check(install.Success,
+                        "japanese package installs" + (install.Success ? "" : ": " + install.Error));
+                    service.RefreshRecords();
+                }
+                item.Check(service.GetRecord(JapanesePackId) != null, "japanese record exists");
+                if (service.GetRecord(JapanesePackId)?.Enabled != true) service.SetEnabled(JapanesePackId, true);
+                loc.ReloadLanguagePacks();
+
+                item.Check(loc.TrySetLanguage("ja"), "switched to japanese");
+                var hostSource = LocalizationService.ReadHostSource();
+                var jaTable = LanguagePackService.Instance.GetTable("ja");
+                item.Check(jaTable != null && jaTable.Count == hostSource.Count,
+                    $"full japanese coverage ({jaTable?.Count ?? 0}/{hostSource.Count})");
+                item.Check(loc["Manage.Zones"] == "ゾーン", "lookup comes from the full pack");
+
+                // 市场页要有卡片：把 lab 目录里的 registry 当成缓存。
+                var registry = Path.Combine(dir, "registry.json");
+                if (File.Exists(registry))
+                {
+                    PluginPaths.EnsureCreated();
+                    File.Copy(registry, PluginPaths.RegistryCachePath, overwrite: true);
+                    File.WriteAllText(PluginPaths.RegistryMetaPath,
+                        "{\"Etag\":null,\"FetchedAtUtc\":\"" + DateTime.UtcNow.ToString("O") + "\"}");
+                }
+
+                EnsureManagementWindow();
+                var window = ManagementWindow;
+                if (window == null) { item.Check(false, "management window exists"); break; }
+                var shotRoot = Path.Combine(dir, "ja-shots");
+                Directory.CreateDirectory(shotRoot);
+                window.Show();
+                var shots = new (string Section, string File, int Delay)[]
+                {
+                    ("zones", "ja-main.png", 900),
+                    ("plugins", "ja-plugins.png", 1500),
+                    ("settings", "ja-settings.png", 800),
+                    ("panel", "ja-panel.png", 800),
+                    ("calendar", "ja-widgets.png", 800),
+                };
+                foreach (var shot in shots)
+                {
+                    window.ShowSection(shot.Section);
+                    await Task.Delay(shot.Delay);
+                    SaveScreenshot(window, Path.Combine(shotRoot, shot.File));
+                    item.Check(File.Exists(Path.Combine(shotRoot, shot.File)), shot.File + " written");
+                }
+
+                // 分区属性面板（日语字段树，语言包最密集的一屏）
+                var zone = _zoneManager?.Zones?.FirstOrDefault(z => !z.DockMode);
+                if (zone != null)
+                {
+                    DesktopZones.Helpers.PropertyWindowService.OpenOrFocus(zone);
+                    await Task.Delay(900);
+                    var panel = DesktopZones.Views.Components.PropertyWindowManager.Instance.GetFloating(zone);
+                    item.Check(panel != null, "the property panel opens for a zone");
+                    if (panel != null)
+                    {
+                        SaveScreenshot(panel, Path.Combine(shotRoot, "ja-property.png"));
+                        item.Check(File.Exists(Path.Combine(shotRoot, "ja-property.png")),
+                            "ja-property.png written");
+                        panel.Close();
+                    }
+                }
+                loc.SetLanguage("zh");
+                break;
+            }
             case "dev":
             {
                 // 开发者模式：直接把源码输出目录当已启用插件加载，不落配置。
