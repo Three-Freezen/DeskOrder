@@ -123,6 +123,9 @@ public partial class ManagementWindow : Window
 
         Services.PluginService.Instance.PluginsChanged += RefreshZoneBayEntry;
         Services.ZoneBayService.Instance.BarsChanged += RefreshZoneBayEntry;
+        // 「插件组件」侧栏入口跟着代码插件加载状态走；组件实例增删（含孤儿清理）也更新入口。
+        Services.PluginService.Instance.PluginsChanged += RefreshPluginWidgetEntry;
+        Services.PluginService.Instance.WidgetsChanged += OnPluginWidgetsChanged;
 
         DockedPanel.CollapseRequested += (_, _) => TogglePropertyPanel();
         // ponytail 2026-08-25: central Persist wiring for BOTH panels. Pages
@@ -168,6 +171,7 @@ public partial class ManagementWindow : Window
             UpdateThemeIcon();
             ShowSection("zones");
             RefreshZoneBayEntry();
+            RefreshPluginWidgetEntry();
             try
             {
                 var config = _configService.Load();
@@ -206,6 +210,8 @@ public partial class ManagementWindow : Window
         }
         try { Services.PluginService.Instance.PluginsChanged -= RefreshZoneBayEntry; } catch { }
         try { Services.ZoneBayService.Instance.BarsChanged -= RefreshZoneBayEntry; } catch { }
+        try { Services.PluginService.Instance.PluginsChanged -= RefreshPluginWidgetEntry; } catch { }
+        try { Services.PluginService.Instance.WidgetsChanged -= OnPluginWidgetsChanged; } catch { }
         base.OnClosed(e);
     }
 
@@ -223,6 +229,7 @@ public partial class ManagementWindow : Window
                 else if (page is CalendarPage cp) cp.ApplyLoc();
                 else if (page is ClockPage clkp) clkp.ApplyLoc();
                 else if (page is StickyNotePage snp) snp.ApplyLoc();
+                else if (page is PluginWidgetsPage pwp) pwp.ApplyLoc();
                 else if (page is SettingsPage sp) sp.ApplyLoc();
                 else if (page is AboutPage ap) ap.ApplyLoc();
             }
@@ -337,7 +344,7 @@ public partial class ManagementWindow : Window
         return section switch
         {
             "zones" or "merged" or "panel" or "docks" or "zonebays" => loc["Breadcrumb.GroupZones"],
-            "calendar" or "clock" or "sticky" => loc["Breadcrumb.GroupWidgets"],
+            "calendar" or "clock" or "sticky" or "pluginwidgets" => loc["Breadcrumb.GroupWidgets"],
             "plugins" => loc["Breadcrumb.GroupPlugins"],
             _ => "DeskOrder",
         };
@@ -356,6 +363,7 @@ public partial class ManagementWindow : Window
             "calendar" => loc["Breadcrumb.Calendar"],
             "clock"    => loc["Breadcrumb.Clock"],
             "sticky"   => loc["Breadcrumb.Sticky"],
+            "pluginwidgets" => loc["PluginWidget.Nav"],
             "plugins"  => loc["Breadcrumb.Plugins"],
             "settings" => loc["Breadcrumb.Settings"],
             "about"    => loc["Breadcrumb.About"],
@@ -2204,6 +2212,7 @@ public partial class ManagementWindow : Window
             "clock"    => new ClockPage(this, _viewModel, _widgetService),
             "media"    => new MediaPlayerPage(this, _viewModel, _widgetService),
             "sticky"   => new StickyNotePage(this, _viewModel, _notesService),
+            "pluginwidgets" => new PluginWidgetsPage(this),
             "plugins"  => new PluginsPage(),
             "about"    => new AboutPage(),
             "settings" => BuildSettingsPage(),
@@ -2235,6 +2244,25 @@ public partial class ManagementWindow : Window
         catch { }
     }
 
+    /// <summary>
+    /// 「插件组件」入口的显隐：有可新建的组件描述符，或已有实例（含插件被卸载/停用后的
+    /// 孤儿实例 —— 用户需要入口进页面清理）才出现。没有入口时若正停在该页，跳回分区页。
+    /// </summary>
+    void RefreshPluginWidgetEntry()
+    {
+        try
+        {
+            var service = Services.PluginService.Instance;
+            bool has = service.Loaded.Any(l => l.Registry.Descriptors.Count > 0) || service.Widgets.Count > 0;
+            SideNav?.SetPluginWidgetsEntry(has);
+            if (!has && _lastSection == "pluginwidgets") ShowSection("zones");
+        }
+        catch { }
+    }
+
+    /// <summary>组件实例增删时刷新入口（<see cref="PluginService.WidgetsChanged"/> 删除时传 null）。</summary>
+    void OnPluginWidgetsChanged(DeskOrder.PluginApi.PluginWidget _) => RefreshPluginWidgetEntry();
+
     private string GetSectionCountLabel(string section)
     {
         int zones = _zoneManager?.Zones?.Count(z => !z.DockMode) ?? 0;
@@ -2255,6 +2283,7 @@ public partial class ManagementWindow : Window
             "clock"    => _loc.Get("Manage.Sidebar.Clocks", clocks),
             "media"    => _loc.Get("Manage.Sidebar.MediaPlayers", mediaPlayers),
             "sticky"   => _loc.Get("Manage.Sidebar.Notes", notes),
+            "pluginwidgets" => _loc.Get("PluginWidget.Count", PluginService.Instance.Widgets.Count),
             "plugins"  => _loc.Get("Manage.Sidebar.Plugins", PluginService.Instance.Records.Count),
             "about"    => _loc["Manage.Sidebar.About"],
             "settings" => _loc["Manage.Sidebar.Settings"],

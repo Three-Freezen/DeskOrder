@@ -676,6 +676,33 @@ public partial class PluginsPage : UserControl
             actions.Children.Add(toggle);
         }
 
+        // widget 插件启用后，行上直接给「新建组件」入口（与「插件组件」页共用同一个菜单）；
+        // 已启用但描述符还没加载（装了没重启/加载失败）时禁用并提示重启。
+        if (record.KindValue == PluginKind.Widget && record.Enabled)
+        {
+            var newWidget = new Button
+            {
+                Content = Loc["PluginWidget.New"],
+                Height = 30,
+                Width = 84,
+                Margin = new Thickness(8, 0, 0, 0),
+                FontSize = 11.5,
+                Cursor = Cursors.Hand,
+                Style = (Style)FindResource("OutlineBtn"),
+            };
+            if (_service.GetDescriptors(record.Id).Count > 0)
+            {
+                newWidget.Click += (_, _) => CreateWidgetFromRow(newWidget);
+            }
+            else
+            {
+                newWidget.IsEnabled = false;
+                newWidget.Opacity = 0.45;
+                newWidget.ToolTip = Loc["PluginWidget.NeedsRestart"];
+            }
+            actions.Children.Add(newWidget);
+        }
+
         var open = new Button
         {
             Content = Loc["Plugin.Detail"],
@@ -711,6 +738,10 @@ public partial class PluginsPage : UserControl
         border.Child = grid;
         return border;
     }
+
+    /// <summary>已安装行「新建组件」：打开与「插件组件」页共用的创建菜单，建完重绘本页。</summary>
+    void CreateWidgetFromRow(FrameworkElement anchor)
+        => PluginWidgetCreateMenu.Open(anchor, Window.GetWindow(this), _ => Render());
 
     FrameworkElement BuildInstalledIcon(PluginRecord record)
     {

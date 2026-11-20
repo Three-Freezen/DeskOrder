@@ -80,6 +80,15 @@ public sealed class PluginService
     public bool SafeMode => _suppressLoading;
     public bool IsInitialized => _initialized;
 
+    /// <summary>
+    /// 设置页「插件」总开关的本次进程快照。关闭后重启不恢复组件、不新建组件 ——
+    /// 否则旧实例会以「插件不可用」占位窗的形式重新出现在桌面上。
+    /// </summary>
+    public bool PluginsEnabled { get; private set; } = true;
+
+    /// <summary>自测台专用：模拟设置里关/开总开关后的进程内状态（不写配置、不重启）。</summary>
+    internal void SetPluginsEnabledForLab(bool enabled) => PluginsEnabled = enabled;
+
     public event Action? PluginsChanged;
     public event Action<PluginWidget>? WidgetsChanged;
 
@@ -116,6 +125,7 @@ public sealed class PluginService
         PluginInstaller.ProcessPendingDeletes();
 
         var config = configService.Load();
+        PluginsEnabled = config.PluginsEnabled;
         if (!string.IsNullOrWhiteSpace(config.PluginRegistryUrl))
             Catalog.RegistryUrl = config.PluginRegistryUrl.Trim();
 
@@ -511,6 +521,17 @@ public sealed class PluginService
     public IReadOnlyList<PluginWidgetDescriptor> GetDescriptors(string pluginId)
         => GetLoaded(pluginId)?.Registry.Descriptors.Values.ToList() ?? new List<PluginWidgetDescriptor>();
 
+    /// <summary>
+    /// 已加载且至少注册了一种组件的代码插件（顺序即 <see cref="Loaded"/> 的加载顺序）。
+    /// 「插件组件」页与市场页的「新建组件」菜单共用：页面不再直接摸内部字典。
+    /// </summary>
+    public IReadOnlyList<(PluginRecord Record, IReadOnlyList<PluginWidgetDescriptor> Descriptors)>
+        GetWidgetPlugins()
+        => Loaded
+            .Where(l => l.Registry.Descriptors.Count > 0)
+            .Select(l => (l.Record, (IReadOnlyList<PluginWidgetDescriptor>)l.Registry.Descriptors.Values.ToList()))
+            .ToList();
+
     public int CountWidgets(string pluginId)
         => Widgets.Count(w => string.Equals(w.PluginId, pluginId, StringComparison.OrdinalIgnoreCase));
 
@@ -650,6 +671,8 @@ public sealed class PluginService
 
     public PluginWidget? CreateWidget(string pluginId, string widgetTypeId)
     {
+        // 总开关关闭时组件系统整体停用：不新建实例，也不留占位窗。
+        if (!PluginsEnabled) return null;
         var descriptor = FindDescriptor(pluginId, widgetTypeId);
         if (descriptor == null) return null;
         var offset = Widgets.Count(w => w.PluginId == pluginId) * 24;
@@ -722,6 +745,9 @@ public sealed class PluginService
     /// <summary>启动 / 显示全部时恢复可见组件（插件加载完成之后调用）。</summary>
     public void RestoreWidgets()
     {
+        // 插件系统被关掉时旧实例只是数据：恢复它们会开出「插件不可用」占位窗，
+        // 用户看到一桌面残留却没处关。直接跳过，等用户重新打开插件再恢复。
+        if (!PluginsEnabled) return;
         foreach (var widget in Widgets.Where(w => w.IsVisible).ToList())
         {
             try { ShowWidget(widget); }
@@ -731,6 +757,7 @@ public sealed class PluginService
 
     public void ShowAllWidgets()
     {
+        if (!PluginsEnabled) return;
         foreach (var widget in Widgets.ToList())
         {
             if (!widget.IsVisible) ShowWidget(widget);
