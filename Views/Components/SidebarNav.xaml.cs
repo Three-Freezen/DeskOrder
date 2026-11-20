@@ -44,6 +44,7 @@ public partial class SidebarNav : UserControl
         _sectionKeys[NavClock]    = "clock";
         _sectionKeys[NavMedia]    = "media";
         _sectionKeys[NavSticky]   = "sticky";
+        _sectionKeys[NavPluginWidgets] = "pluginwidgets";
         _sectionKeys[NavPlugins]  = "plugins";
         _sectionKeys[NavSettings] = "settings";
         _sectionKeys[NavAbout]    = "about";
@@ -63,6 +64,7 @@ public partial class SidebarNav : UserControl
             "clock"    => NavClock,
             "media"    => NavMedia,
             "sticky"   => NavSticky,
+            "pluginwidgets" => NavPluginWidgets,
             "plugins"  => NavPlugins,
             "about"    => NavAbout,
             "settings" => NavSettings,
@@ -96,5 +98,14 @@ public partial class SidebarNav : UserControl
         var target = visible ? Visibility.Visible : Visibility.Collapsed;
         if (NavZoneBays.Visibility != target) NavZoneBays.Visibility = target;
         if (visible) NavZoneBays.BringIntoView();
+    }
+
+    /// <summary>「插件组件」入口：有可用组件描述符或已有组件实例（含孤儿实例）时出现。</summary>
+    public void SetPluginWidgetsEntry(bool visible)
+    {
+        if (NavPluginWidgets == null) return;
+        var target = visible ? Visibility.Visible : Visibility.Collapsed;
+        if (NavPluginWidgets.Visibility != target) NavPluginWidgets.Visibility = target;
+        if (visible) NavPluginWidgets.BringIntoView();
     }
 }

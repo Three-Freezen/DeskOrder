@@ -220,6 +220,17 @@
               <TextBlock Text="{loc:Loc Key=Manage.Notes}" VerticalAlignment="Center"/>
             </StackPanel>
           </Button>
+          <!-- 插件组件：有可用组件描述符或已有实例时才出现（入口显隐由管理窗口驱动）。 -->
+          <Button x:Name="NavPluginWidgets" Style="{StaticResource NavItem}" Tag="pluginwidgets"
+                  Click="NavItem_Click" Visibility="Collapsed">
+            <StackPanel Orientation="Horizontal">
+              <Path Width="16" Height="16" Margin="0,0,12,0" Stretch="Uniform"
+                    Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                    StrokeThickness="1.5" StrokeLineJoin="Round"
+                    Data="{StaticResource Icon.Plugin}"/>
+              <TextBlock Text="{loc:Loc Key=PluginWidget.Nav}" VerticalAlignment="Center"/>
+            </StackPanel>
+          </Button>
 
           <!-- Group: 插件（独立分组，放在「组件」下面） -->
           <TextBlock Text="{loc:Loc Key=Sidebar.Plugins}" Margin="16,16,16,8" FontSize="11" FontWeight="SemiBold"

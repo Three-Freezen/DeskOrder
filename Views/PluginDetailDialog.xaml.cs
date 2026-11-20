@@ -96,11 +96,24 @@ public partial class PluginDetailDialog : Window
 
         if (Record == null)
         {
-            PrimaryButton.Content = Loc["Plugin.Install"];
             PrimaryButton.Visibility = Visibility.Visible;
             ToggleButton.Visibility = Visibility.Collapsed;
             UninstallButton.Visibility = Visibility.Collapsed;
             StateText.Text = "";
+            // 工具/数据源插件当前版本还不提供安装：市场卡片已经禁用，详情弹窗也别给一个
+            // 「点下去、下载完才报错」的安装按钮。
+            if (Entry.KindValue is PluginKind.Tool or PluginKind.Integration)
+            {
+                PrimaryButton.Content = Loc["Plugin.NotAvailable"];
+                PrimaryButton.IsEnabled = false;
+                PrimaryButton.Opacity = 0.45;
+            }
+            else
+            {
+                PrimaryButton.Content = Loc["Plugin.Install"];
+                PrimaryButton.IsEnabled = true;
+                PrimaryButton.Opacity = 1.0;
+            }
         }
         else
         {
