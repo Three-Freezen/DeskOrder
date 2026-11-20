@@ -1050,6 +1050,29 @@ public partial class App
                 item.Check(File.Exists(Path.Combine(dir, "shot-plugin-widgets.png")),
                     "plugin widgets screenshot written");
 
+                // 详情弹窗里的文字版入口：已安装行把按钮压成「＋」图标后，这里必须还能新建。
+                var sampleRecord = service5.GetRecord(SamplePluginId);
+                var sampleEntry = new PluginCatalogEntry
+                {
+                    Id = SamplePluginId,
+                    Kind = "widget",
+                    Name = new LocalizedText { Zh = "Hello", En = "Hello" },
+                    Version = sampleRecord?.Version ?? "1.0.0",
+                    ApiVersion = 1
+                };
+                var detail = new PluginDetailDialog(sampleEntry, sampleRecord) { Owner = window };
+                detail.Show();
+                await Task.Delay(400);
+                item.Check(detail.NewWidgetButton.Visibility == Visibility.Visible,
+                    "the detail dialog shows the widget creation entry for a widget plugin");
+                item.Check(detail.NewWidgetButton.IsEnabled,
+                    "the detail dialog entry is enabled while descriptors are loaded");
+                SaveScreenshot(detail, Path.Combine(dir, "shot-detail-widget-new.png"));
+                item.Check(File.Exists(Path.Combine(dir, "shot-detail-widget-new.png")),
+                    "detail dialog screenshot with the widget entry written");
+                detail.Close();
+                await Task.Delay(200);
+
                 // 总开关守卫：先把窗口关掉、模型标成可见（模拟上次退出时是可见的），
                 // 关闭总开关后 RestoreWidgets 必须什么都不开 —— 否则会开出「插件不可用」占位窗。
                 service5.CloseWindow(created.Id);

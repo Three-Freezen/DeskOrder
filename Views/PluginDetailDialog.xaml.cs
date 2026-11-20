@@ -19,6 +19,8 @@ public partial class PluginDetailDialog : Window
     public event Action? InstallRequested;
     public event Action? UninstallRequested;
     public event Action? ToggleRequested;
+    /// <summary>点「新建组件」：由调用方打开共用的创建菜单（菜单需要页面级锚点与刷新回调）。</summary>
+    public event Action? NewWidgetRequested;
 
     bool _busy;
     readonly bool _delisted;
@@ -99,6 +101,7 @@ public partial class PluginDetailDialog : Window
             PrimaryButton.Visibility = Visibility.Visible;
             ToggleButton.Visibility = Visibility.Collapsed;
             UninstallButton.Visibility = Visibility.Collapsed;
+            NewWidgetButton.Visibility = Visibility.Collapsed;
             StateText.Text = "";
             // 工具/数据源插件当前版本还不提供安装：市场卡片已经禁用，详情弹窗也别给一个
             // 「点下去、下载完才报错」的安装按钮。
@@ -124,6 +127,7 @@ public partial class PluginDetailDialog : Window
             ToggleButton.Visibility = Entry.KindValue is PluginKind.Widget or PluginKind.ZoneBar or PluginKind.Language or PluginKind.Appearance
             ? Visibility.Visible : Visibility.Collapsed;
             UninstallButton.Visibility = Visibility.Visible;
+            UpdateNewWidgetButton();
             var source = PluginDisplay.DescribeSource(Record.Source);
             var widgets = PluginService.Instance.CountWidgets(Record.Id);
             var state = $"v{Record.Version} · {source} · {Record.InstalledAtUtc.ToLocalTime():yyyy-MM-dd}";
@@ -165,6 +169,25 @@ public partial class PluginDetailDialog : Window
     {
         NoticeText.Text = text;
         NoticeBar.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>
+    /// 已安装的 widget 插件才有「新建组件」：插件启用但描述符还没加载（装了没重启/加载失败）
+    /// 时按钮置灰并提示重启 —— 菜单本身也只列已加载的描述符。
+    /// </summary>
+    void UpdateNewWidgetButton()
+    {
+        var descriptors = Record is { KindValue: PluginKind.Widget, Enabled: true }
+            ? PluginService.Instance.GetDescriptors(Record.Id)
+            : null;
+        NewWidgetButton.Visibility = descriptors == null ? Visibility.Collapsed : Visibility.Visible;
+        if (descriptors == null) return;
+        var available = descriptors.Count > 0;
+        NewWidgetButton.IsEnabled = available;
+        NewWidgetButton.Opacity = available ? 1 : 0.45;
+        NewWidgetButton.ToolTip = available
+            ? Loc["PluginWidget.New"]
+            : Loc["PluginWidget.NeedsRestart"];
     }
 
     string DescribeSignature()
@@ -266,12 +289,19 @@ public partial class PluginDetailDialog : Window
         UninstallRequested?.Invoke();
     }
 
+    void NewWidget_Click(object sender, RoutedEventArgs e)
+    {
+        if (_busy) return;
+        NewWidgetRequested?.Invoke();
+    }
+
     public void SetBusy(bool busy)
     {
         _busy = busy;
         PrimaryButton.IsEnabled = !busy;
         ToggleButton.IsEnabled = !busy;
         UninstallButton.IsEnabled = !busy;
+        NewWidgetButton.IsEnabled = !busy;
         if (busy) PrimaryButton.Content = Loc["Plugin.Installing"];
         // 安装失败/取消后重算一次：被禁用名单置灰的开关不能被 SetBusy(false) 重新点亮。
         else Apply();

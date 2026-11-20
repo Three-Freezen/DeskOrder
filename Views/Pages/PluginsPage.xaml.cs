@@ -585,6 +585,9 @@ public partial class PluginsPage : UserControl
             Text = $"{kind} · v{record.Version} · {source} · {record.InstalledAtUtc.ToLocalTime():yyyy-MM-dd}",
             FontSize = 11,
             Margin = new Thickness(0, 4, 0, 0),
+            // 已安装行右侧按钮多（启用/新建/详情/卸载），窗口窄时这一行会被硬裁掉半行字；
+            // 用省略号收尾，比「桌面组件」后面直接消失更可读。
+            TextTrimming = TextTrimming.CharacterEllipsis,
             Foreground = ThemeBrushes.TextTertiaryModern
         });
 
@@ -678,17 +681,23 @@ public partial class PluginsPage : UserControl
 
         // widget 插件启用后，行上直接给「新建组件」入口（与「插件组件」页共用同一个菜单）；
         // 已启用但描述符还没加载（装了没重启/加载失败）时禁用并提示重启。
+        // 行上已有 4 个按钮，这里只放一个「＋」图标按钮（文字入口在插件组件页与详情弹窗里），
+        // 否则 84px 的文字按钮会把左侧信息列挤到换行。
         if (record.KindValue == PluginKind.Widget && record.Enabled)
         {
             var newWidget = new Button
             {
-                Content = Loc["PluginWidget.New"],
+                // 用文本「＋」而不是 Icon.Plus 几何：OutlineBtn 的 Padding=(14,6) 会把 30px 按钮的
+                // 内容区压到 2px 宽，几何图形会被裁成一条横杠（属性面板的 MakeAddButton 也是文本写法）。
+                Content = "+",
+                FontSize = 15,
+                Padding = new Thickness(0),
                 Height = 30,
-                Width = 84,
+                Width = 30,
                 Margin = new Thickness(8, 0, 0, 0),
-                FontSize = 11.5,
                 Cursor = Cursors.Hand,
                 Style = (Style)FindResource("OutlineBtn"),
+                ToolTip = Loc["PluginWidget.New"]
             };
             if (_service.GetDescriptors(record.Id).Count > 0)
             {
@@ -873,6 +882,16 @@ public partial class PluginsPage : UserControl
             if (current == null) return;
             dialog.Close();
             UninstallRecord(current);
+        };
+        dialog.NewWidgetRequested += () =>
+        {
+            // 菜单挂在弹窗里的「新建组件」按钮上（弹窗是模态的，用弹窗自己做 owner）。
+            PluginWidgetCreateMenu.Open(dialog.NewWidgetButton, dialog, widget =>
+            {
+                if (widget == null) return;
+                // 建完把弹窗状态区里的「N 个组件」刷新一下；市场列表在 ShowDialog 返回后统一重绘。
+                dialog.SetRecord(_service.GetRecord(entry.Id));
+            });
         };
         dialog.ShowDialog();
         // 应用退出时 WPF 会强制关掉这个模态窗口，ShowDialog() 立刻返回；页面已经 Unloaded，
