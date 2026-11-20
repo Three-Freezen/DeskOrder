@@ -62,7 +62,7 @@ public partial class App
         // 用例自己构造缓存与禁用名单；禁掉启动后台拉取，避免线上 registry 在用例跑到一半时覆盖它们。
         PluginService.SuppressBackgroundRefreshForLab = true;
         var cases = caseName == "all"
-            ? new[] { "install", "load", "restart", "disable", "enable", "hide", "uninstall", "offline", "bad", "crash", "cache", "signature", "signature-policy", "lang-install", "lang-switch", "lang-bad", "lang-override", "lang-uninstall", "appearance-install", "appearance-toggle", "appearance-render", "appearance-bad", "appearance-uninstall", "update", "blocked", "dialog", "ui", "dev", "widget-panel" }
+            ? new[] { "install", "load", "restart", "disable", "enable", "hide", "uninstall", "offline", "bad", "crash", "cache", "signature", "signature-policy", "lang-install", "lang-switch", "lang-bad", "lang-override", "lang-uninstall", "appearance-install", "appearance-toggle", "appearance-render", "appearance-bad", "appearance-uninstall", "update", "blocked", "dialog", "ui", "dev", "widget-panel", "security" }
             : new[] { caseName };
         var results = new List<LabCase>();
         foreach (var name in cases)
@@ -1013,6 +1013,10 @@ public partial class App
                     "the panel closes cleanly");
                 break;
             }
+            case "security":
+                // 安装/索引安全加固用例，实现见 App.PluginLab.Security.cs（并行开发时只改那个文件）。
+                await RunSecurityLabCaseAsync(item, name, dir);
+                break;
             default:
                 item.Check(false, "unknown case: " + name);
                 break;
