@@ -13,7 +13,7 @@ public static class PluginApiVersion
 }
 
 /// <summary>
-/// 代码类插件（widget / tool / integration）的唯一入口。
+/// 代码类插件（widget / zonebar / tool / integration）的唯一入口。
 /// <see cref="Initialize"/> 在 UI 线程调用；抛异常 = 加载失败，宿主会记录并禁用。
 /// </summary>
 public interface IDeskOrderPlugin
@@ -34,7 +34,7 @@ public interface IPluginHost
     /// <summary>宿主版本（如 1.0.27）。</summary>
     Version HostVersion { get; }
 
-    /// <summary>宿主支持的 API 版本（当前 = 1）。</summary>
+    /// <summary>宿主支持的 API 版本（当前 = 2）。</summary>
     int ApiVersion { get; }
 
     /// <summary>插件级数据目录（跨实例共享）。</summary>
