@@ -152,7 +152,8 @@ public sealed class PluginCatalogService
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 
-    PluginCatalogResult ParseRegistry(byte[] bytes)
+    /// <summary>解析 registry 字节。internal：自测台要直接验证「不合格条目被丢弃」。</summary>
+    internal PluginCatalogResult ParseRegistry(byte[] bytes)
     {
         var result = new PluginCatalogResult();
         PluginCatalogFile? file;
@@ -181,23 +182,67 @@ public sealed class PluginCatalogService
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var entry in file.Plugins ?? new List<PluginCatalogEntry>())
         {
-            // registry 是外部数据：单条畸形不能让整个市场变空/渲染崩。
+            // registry 是外部数据：单条畸形不能让整个市场变空/渲染崩，但也不能「兜底后放行」——
+            // 缺 sha256 / 尺寸离谱的条目一旦进市场，安装器就只能跳过校验或下载垃圾。
+            // 所以这里逐条严格校验，不合规的整条丢弃并留日志。
             if (entry == null) continue;
             try
             {
                 entry.Id = entry.Id?.Trim() ?? "";
-                if (string.IsNullOrWhiteSpace(entry.Id) || !seen.Add(entry.Id)) continue;
+                if (string.IsNullOrWhiteSpace(entry.Id)) continue;
+                if (!PluginManifest.IdRe.IsMatch(entry.Id))
+                {
+                    DzTrace.Always($"[Plugin] registry entry '{entry.Id}' dropped: id is not a valid plugin id");
+                    continue;
+                }
+                if (seen.Contains(entry.Id)) continue;
+
                 entry.Name ??= new LocalizedText();
                 entry.Summary ??= new LocalizedText();
                 entry.Author ??= new PluginAuthor();
-                entry.Version ??= "";
+                entry.Version = entry.Version?.Trim() ?? "";
+                entry.Kind = entry.Kind?.Trim() ?? "";
                 entry.License ??= "";
-                entry.MinAppVersion ??= "";
+                entry.MinAppVersion = entry.MinAppVersion?.Trim() ?? "";
                 if (string.IsNullOrWhiteSpace(entry.Name.Get("zh")) && string.IsNullOrWhiteSpace(entry.Name.Get("en")))
                     continue;
-                if (string.IsNullOrWhiteSpace(entry.Version)) continue;
-                if (string.IsNullOrWhiteSpace(entry.DownloadUrl)) continue;
-                if (!entry.DownloadUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) continue;
+
+                if (!PluginManifest.SemVerRe.IsMatch(entry.Version)
+                    || entry.Version.EndsWith('.') || entry.Version.Contains(".."))
+                {
+                    DzTrace.Always($"[Plugin] registry entry '{entry.Id}' dropped: version '{entry.Version}' is not SemVer");
+                    continue;
+                }
+                if (!PluginKinds.TryParse(entry.Kind, out _))
+                {
+                    DzTrace.Always($"[Plugin] registry entry '{entry.Id}' dropped: kind '{entry.Kind}' is unknown");
+                    continue;
+                }
+                if (!string.IsNullOrEmpty(entry.MinAppVersion)
+                    && !PluginManifest.SemVerRe.IsMatch(entry.MinAppVersion))
+                {
+                    DzTrace.Always($"[Plugin] registry entry '{entry.Id}' dropped: " +
+                                   $"minAppVersion '{entry.MinAppVersion}' is not SemVer");
+                    continue;
+                }
+                if (string.IsNullOrWhiteSpace(entry.DownloadUrl)
+                    || !entry.DownloadUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+                if (entry.Size < 1 || entry.Size > PluginPackages.MaxPackageBytes)
+                {
+                    DzTrace.Always($"[Plugin] registry entry '{entry.Id}' dropped: size {entry.Size} " +
+                                   $"is outside 1..{PluginPackages.MaxPackageBytes}");
+                    continue;
+                }
+                if (!PluginPackages.IsValidSha256(entry.Sha256))
+                {
+                    DzTrace.Always($"[Plugin] registry entry '{entry.Id}' dropped: sha256 is missing or not 64 hex chars");
+                    continue;
+                }
+
+                seen.Add(entry.Id);
                 result.Entries.Add(entry);
             }
             catch (Exception ex)

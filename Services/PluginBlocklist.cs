@@ -54,7 +54,13 @@ public static class PluginBlocklist
                 if (!File.Exists(path)) return;
                 var text = File.ReadAllText(path).TrimStart('\uFEFF');
                 var file = JsonSerializer.Deserialize<BlockedFile>(text, JsonOptions);
-                if (file?.Entries != null) _entries = file.Entries.Where(e => !string.IsNullOrWhiteSpace(e.Id)).ToList();
+                if (file == null) return;
+                // 来源时间必须一起读回来：SaveFromRegistry 的单调性保护靠它判断「本地名单是否
+                // 有更强的旧证据」。以前只恢复 Entries、丢掉 SourceUpdatedAtUtc，重启后
+                // localSourceKnown 永远为 false，旧 registry 就能把本地封禁清空。
+                _sourceUpdatedAtUtc = file.SourceUpdatedAtUtc;
+                if (file.Entries != null)
+                    _entries = file.Entries.Where(e => !string.IsNullOrWhiteSpace(e.Id)).ToList();
             }
             catch (Exception ex)
             {
@@ -65,7 +71,13 @@ public static class PluginBlocklist
 
     public static void Reload()
     {
-        lock (Gate) { _loaded = false; _entries = new List<BlockedPlugin>(); }
+        lock (Gate)
+        {
+            _loaded = false;
+            _entries = new List<BlockedPlugin>();
+            // 重新解析 blocked.json 时来源时间也要重新读：旧的「本地来源时间」不属于新文件。
+            _sourceUpdatedAtUtc = default;
+        }
         Load();
     }
 
@@ -77,6 +89,18 @@ public static class PluginBlocklist
             lock (Gate) return _entries.ToList();
         }
     }
+
+#if DEBUG
+    /// <summary>自测台断言用：本地副本记录的「来源 registry updatedAt」。Release 构建不存在。</summary>
+    internal static DateTime SourceUpdatedAtUtc
+    {
+        get
+        {
+            Load();
+            lock (Gate) return _sourceUpdatedAtUtc;
+        }
+    }
+#endif
 
     public static BlockedPlugin? Find(string pluginId, string version)
     {
