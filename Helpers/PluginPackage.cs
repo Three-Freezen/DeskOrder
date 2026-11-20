@@ -34,6 +34,22 @@ public static class PluginPackages
         return AllowedExtensions.Contains(ext);
     }
 
+    /// <summary>
+    /// sha256 是否是规范的 64 位十六进制（大小写不敏感）。
+    /// registry 是外部数据：缺字段、写个 "TODO"、截断成 8 位都出现过。安装前必须能拿它比对字节，
+    /// 否则「跳过哈希校验直接安装」和「没写 sha256」没区别。
+    /// </summary>
+    public static bool IsValidSha256(string? value)
+    {
+        var text = value?.Trim();
+        if (text is not { Length: 64 }) return false;
+        foreach (var ch in text)
+        {
+            if (!char.IsAsciiHexDigit(ch)) return false;
+        }
+        return true;
+    }
+
     public static string Sha256OfFile(string path)
     {
         using var stream = File.OpenRead(path);

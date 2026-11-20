@@ -39,6 +39,10 @@ public partial class EditableListRow : UserControl
         nameof(IsSelected), typeof(bool), typeof(EditableListRow), new PropertyMetadata(false));
     public static readonly DependencyProperty IconTextProperty = DependencyProperty.Register(
         nameof(IconText), typeof(string), typeof(EditableListRow), new PropertyMetadata(""));
+    // 插件组件的图标是插件包里的 icon.png 位图：行原本只有「矢量 IconKey / emoji IconText」两个
+    // 槽位，这里补一个位图槽。默认 null，既有页面（分区/快捷栏/坞/便签…）行为不变。
+    public static readonly DependencyProperty IconSourceProperty = DependencyProperty.Register(
+        nameof(IconSource), typeof(ImageSource), typeof(EditableListRow), new PropertyMetadata(null));
     public static readonly DependencyProperty StatusBadgeProperty = DependencyProperty.Register(
         nameof(StatusBadge), typeof(string), typeof(EditableListRow), new PropertyMetadata(""));
     public static readonly DependencyProperty HasStatusBadgeProperty = DependencyProperty.Register(
@@ -52,6 +56,7 @@ public partial class EditableListRow : UserControl
     public string Subtitle { get => (string)GetValue(SubtitleProperty); set => SetValue(SubtitleProperty, value); }
     public string IconKey  { get => (string)GetValue(IconKeyProperty);  set => SetValue(IconKeyProperty, value); }
     public string IconText { get => (string)GetValue(IconTextProperty); set => SetValue(IconTextProperty, value); }
+    public ImageSource? IconSource { get => (ImageSource?)GetValue(IconSourceProperty); set => SetValue(IconSourceProperty, value); }
     public bool   IsSelected { get => (bool)GetValue(IsSelectedProperty); set => SetValue(IsSelectedProperty, value); }
     public string StatusBadge      { get => (string)GetValue(StatusBadgeProperty);      set => SetValue(StatusBadgeProperty, value); }
     public bool   HasStatusBadge   { get => (bool)GetValue(HasStatusBadgeProperty);   set => SetValue(HasStatusBadgeProperty, value); }

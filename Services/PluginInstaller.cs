@@ -4,6 +4,7 @@ using System.IO.Compression;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Windows.Media.Imaging;
 using DeskOrder.PluginApi;
 using DesktopZones.Helpers;
 using DesktopZones.Models;
@@ -48,6 +49,14 @@ public sealed class PluginInstaller
     public static readonly Version HostVersion = ParseHostVersion();
 
     const long MaxSignatureBytes = 16 * 1024;
+
+    // 图标 / 截图也要限：manifest 只保证路径在包内，不保证文件真的是图片。
+    // 卡片与详情页都会把 icon 解成位图，一张 100 MB 的「png」或 PNG 炸弹会直接把 UI 拖死。
+    const long MaxIconBytes = 256 * 1024;
+    const long MaxPreviewBytes = 1536 * 1024;
+    const int MinIconSide = 16;
+    const int MaxIconSide = 1024;
+    const int MaxPreviews = 4;
     static readonly string[] SignatureHosts =
     {
         "github.com", "raw.githubusercontent.com", "objects.githubusercontent.com"
@@ -108,6 +117,13 @@ public sealed class PluginInstaller
             return new PluginInstallResult { Error = "downloadUrl is missing" };
         if (entry.Size > PluginPackages.MaxPackageBytes)
             return new PluginInstallResult { Error = "package is larger than 50 MB" };
+        // 市场安装必须能核对字节：registry 没写 sha256（或被改成非法值）时直接拒装，
+        // 不能退回「下载完就当它是真的」——那就是给中间人/CDN 错误一份免费通行证。
+        if (!PluginPackages.IsValidSha256(entry.Sha256))
+            return new PluginInstallResult
+            {
+                Error = "the marketplace entry has no valid sha256; refusing to install"
+            };
 
         var blocked = PluginBlocklist.Find(entry.Id, entry.Version);
         if (blocked != null)
@@ -120,7 +136,6 @@ public sealed class PluginInstaller
         PluginPaths.EnsureCreated();
         // 临时文件名不能直接用 registry 里的 id/version：id 允许 "."，像 "..\\..\\x" 这样的值
         // 拼进路径就能写到 Plugins 目录之外。改成 id@version 的 SHA-256 前缀，永不含分隔符。
-        var safeId = entry.Id.Replace('/', '_');
         var tempName = Convert.ToHexString(
             System.Security.Cryptography.SHA256.HashData(
                 System.Text.Encoding.UTF8.GetBytes($"{entry.Id}@{entry.Version}")))[..16].ToLowerInvariant();
@@ -150,15 +165,12 @@ public sealed class PluginInstaller
                 }
             }
 
-            if (!string.IsNullOrWhiteSpace(entry.Sha256))
-            {
-                var actual = PluginPackages.Sha256OfFile(partPath);
-                if (!string.Equals(actual, entry.Sha256.Trim(), StringComparison.OrdinalIgnoreCase))
-                    return new PluginInstallResult
-                    {
-                        Error = "SHA-256 mismatch (the package may have been replaced)"
-                    };
-            }
+            var actual = PluginPackages.Sha256OfFile(partPath);
+            if (!string.Equals(actual, entry.Sha256.Trim(), StringComparison.OrdinalIgnoreCase))
+                return new PluginInstallResult
+                {
+                    Error = "SHA-256 mismatch (the package may have been replaced)"
+                };
 
             var signatureText = await LoadSignatureTextAsync(entry, ct).ConfigureAwait(false);
             var existingEnabled = _configService.Load().Plugins
@@ -168,7 +180,8 @@ public sealed class PluginInstaller
                 // 验签在后台线程：Ed25519 + BLAKE2b 是纯 CPU 工作，别卡 UI。
                 var trust = PluginTrust.Check(partPath, signatureText);
                 return InstallPackageCore(partPath, "market", entry.Official,
-                    entry.Sha256, entry.Id, entry.Version, trust, entry.Permissions, existingEnabled);
+                    entry.Sha256, entry.Id, entry.Version, trust, entry.Permissions, existingEnabled,
+                    entry.KindValue);
             }, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
@@ -297,9 +310,15 @@ public sealed class PluginInstaller
         return result;
     }
 
-    PluginInstallResult InstallPackageCore(string packagePath, string source, bool official,
+    /// <remarks>
+    /// <paramref name="expectedKind"/> 是市场条目声明的类型（本地导入传 null）。确认弹窗按
+    /// registry 的类型渲染（「声明式，不执行代码」等文案全来自它），真正执行的是包内 manifest；
+    /// 两者不一致时必须拒装，否则作者能把代码插件伪装成不执行代码的类型展示给用户。
+    /// </remarks>
+    internal PluginInstallResult InstallPackageCore(string packagePath, string source, bool official,
         string? expectedSha, string? expectedId, string? expectedVersion, TrustVerdict? trust = null,
-        IReadOnlyList<string>? declaredPermissions = null, bool? enabledOverride = null)
+        IReadOnlyList<string>? declaredPermissions = null, bool? enabledOverride = null,
+        PluginKind? expectedKind = null)
     {
         trust ??= TrustVerdict.Unsigned;
         var stage = Path.Combine(PluginPaths.CacheDir, "stage-" + Guid.NewGuid().ToString("N"));
@@ -333,6 +352,12 @@ public sealed class PluginInstaller
             if (expectedVersion != null
                 && !string.Equals(expectedVersion, manifest.Version, StringComparison.OrdinalIgnoreCase))
                 return new PluginInstallResult { Error = "plugin version does not match the registry entry" };
+            if (expectedKind is { } declaredKind && manifest.KindValue != declaredKind)
+                return new PluginInstallResult
+                {
+                    Error = "plugin kind does not match the registry entry "
+                            + $"(registry: {declaredKind.ToId()}, package: {manifest.KindValue.ToId()})"
+                };
 
             var kind = manifest.KindValue;
             if (kind is not (PluginKind.Widget or PluginKind.ZoneBar or PluginKind.Language or PluginKind.Appearance))
@@ -353,7 +378,9 @@ public sealed class PluginInstaller
             // 权限不得超出市场条目的声明：更新弹窗的「新增联网权限要重新确认」全都基于
             // registry 里的 permissions，而真正执行的是包内 plugin.json 的 permissions。
             // 两者不一致时必须拒绝——否则作者只要在包里偷偷加 network 就能绕过确认。
-            if (source == "market" && declaredPermissions != null)
+            // registry 没写 permissions 时按空集处理：以前整体跳过，等于让「没声明条目」
+            // 上的任何权限都自动获批。
+            if (source == "market")
             {
                 var declared = NormalizePermissions(declaredPermissions);
                 var actual = NormalizePermissions(manifest.Permissions);
@@ -396,9 +423,10 @@ public sealed class PluginInstaller
                     };
             }
 
-            var iconPath = PluginPaths.ResolveInside(stage, manifest.Icon);
-            if (iconPath == null || !File.Exists(iconPath))
-                return new PluginInstallResult { Error = "icon file is missing: " + manifest.Icon };
+            // 落盘前把图标/预览也验一遍：manifest 只保证路径在包内，不保证文件存在、是图片、
+            // 或者不是一张 1024x1024 的噪声图。失败信息必须点名是 icon 还是第几张 preview。
+            var artworkError = ValidateArtwork(stage, manifest);
+            if (artworkError != null) return new PluginInstallResult { Error = artworkError };
 
             if (manifest.Entry != null)
             {
@@ -504,6 +532,94 @@ public sealed class PluginInstaller
             if (!string.IsNullOrEmpty(normalized)) set.Add(normalized);
         }
         return set;
+    }
+
+    /// <summary>
+    /// 图标与预览图的落盘前校验：存在 / 大小 / 可解码 / 尺寸。返回错误文案；null = 通过。
+    /// manifest.Validate 只保证路径安全，没有任何一条能挡住「icon.png 其实是 100MB 的文本」。
+    /// </summary>
+    static string? ValidateArtwork(string stage, PluginManifest manifest)
+    {
+        var iconPath = PluginPaths.ResolveInside(stage, manifest.Icon);
+        if (iconPath == null || !File.Exists(iconPath))
+            return "icon file is missing: " + manifest.Icon;
+        long iconSize;
+        try { iconSize = new FileInfo(iconPath).Length; }
+        catch (Exception ex) { return "cannot read the icon file: " + ex.Message; }
+        if (iconSize > MaxIconBytes)
+            return $"icon is larger than 256 KB ({iconSize} bytes): {manifest.Icon}";
+        if (!TryReadImageSize(iconPath, out var iconWidth, out var iconHeight))
+            return "icon cannot be decoded as an image: " + manifest.Icon;
+        if (iconWidth < MinIconSide || iconHeight < MinIconSide
+            || iconWidth > MaxIconSide || iconHeight > MaxIconSide)
+            return $"icon must be between {MinIconSide} and {MaxIconSide} pixels wide and high " +
+                   $"({iconWidth}x{iconHeight}): {manifest.Icon}";
+
+        var previews = manifest.Previews;
+        if (previews == null) return null;
+        if (previews.Count > MaxPreviews)
+            return $"at most {MaxPreviews} preview images are allowed (found {previews.Count})";
+        for (var index = 0; index < previews.Count; index++)
+        {
+            var relative = previews[index];
+            var number = index + 1;
+            var previewPath = PluginPaths.ResolveInside(stage, relative);
+            if (previewPath == null || !File.Exists(previewPath))
+                return $"preview image #{number} is missing: {relative}";
+            long previewSize;
+            try { previewSize = new FileInfo(previewPath).Length; }
+            catch (Exception ex) { return $"cannot read preview image #{number}: " + ex.Message; }
+            if (previewSize > MaxPreviewBytes)
+                return $"preview image #{number} is larger than 1.5 MB ({previewSize} bytes): {relative}";
+            if (!TryReadImageSize(previewPath, out _, out _))
+                return $"preview image #{number} cannot be decoded as an image: {relative}";
+        }
+        return null;
+    }
+
+    /// <summary>只读宽高，不解码整张图到内存（BitmapDecoder 用 WIC 的头部信息）。</summary>
+    static bool TryReadImageSize(string path, out int width, out int height)
+    {
+        if (TryReadImageSizeOnThisThread(path, out width, out height)) return true;
+
+        // 安装走 Task.Run（MTA 线程），而 WPF 的图片解码底层是 WIC/COM：某些机器上在 MTA
+        // 线程直接解码会抛 InvalidOperationException（COM 未初始化）而不是「图片坏了」。
+        // 那种情况下回 UI 线程（STA，自测台与真实应用都有 Dispatcher）再解一次；
+        // 真正损坏的图片两次都会失败，所以不会放过坏图。
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher == null || dispatcher.CheckAccess()) return false;
+        try
+        {
+            var size = dispatcher.Invoke(() =>
+                TryReadImageSizeOnThisThread(path, out var w, out var h) ? (w, h) : (0, 0));
+            width = size.Item1;
+            height = size.Item2;
+            return width > 0 && height > 0;
+        }
+        catch
+        {
+            width = height = 0;
+            return false;
+        }
+    }
+
+    static bool TryReadImageSizeOnThisThread(string path, out int width, out int height)
+    {
+        width = height = 0;
+        try
+        {
+            using var stream = File.OpenRead(path);
+            var decoder = BitmapDecoder.Create(stream, BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
+            if (decoder.Frames.Count == 0) return false;
+            var frame = decoder.Frames[0];
+            width = frame.PixelWidth;
+            height = frame.PixelHeight;
+            return width > 0 && height > 0;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     void UpsertRecord(PluginRecord record)

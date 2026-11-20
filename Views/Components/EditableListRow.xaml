@@ -135,6 +135,10 @@
                      Text="{Binding IconText, RelativeSource={RelativeSource AncestorType=UserControl}}"
                      Visibility="{Binding IconText, RelativeSource={RelativeSource AncestorType=UserControl},
                                   Converter={StaticResource StrToVis}}"/>
+          <!-- 位图图标槽（插件组件的 icon.png）。Source 为 null 时不渲染，不影响现有页面。 -->
+          <Image Width="20" Height="20" Stretch="Uniform"
+                 HorizontalAlignment="Center" VerticalAlignment="Center"
+                 Source="{Binding IconSource, RelativeSource={RelativeSource AncestorType=UserControl}}"/>
         </Grid>
       </Border>
 

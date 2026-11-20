@@ -118,6 +118,10 @@
                   ToolTip="{loc:Loc Key=Plugin.Report.Hint}"/>
         </StackPanel>
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+          <!-- widget 插件启用后：已安装行的入口是压缩的「＋」图标，这里的文字按钮是主要入口。 -->
+          <Button x:Name="NewWidgetButton" Content="{loc:Loc Key=PluginWidget.New}" Height="32" Width="104"
+                  Margin="0,0,10,0" Cursor="Hand" FontSize="12"
+                  Style="{DynamicResource OutlineBtn}" Click="NewWidget_Click" Visibility="Collapsed"/>
           <Button x:Name="UninstallButton" Content="{loc:Loc Key=Plugin.Uninstall}" Height="32" Width="92"
                   Cursor="Hand" FontSize="12" Foreground="#FFE05A5A" Background="#14FF5A5A"
                   BorderBrush="#66FF5A5A"

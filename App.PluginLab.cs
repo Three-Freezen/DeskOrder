@@ -62,7 +62,7 @@ public partial class App
         // 用例自己构造缓存与禁用名单；禁掉启动后台拉取，避免线上 registry 在用例跑到一半时覆盖它们。
         PluginService.SuppressBackgroundRefreshForLab = true;
         var cases = caseName == "all"
-            ? new[] { "install", "load", "restart", "disable", "enable", "hide", "uninstall", "offline", "bad", "crash", "cache", "signature", "signature-policy", "lang-install", "lang-switch", "lang-bad", "lang-override", "lang-uninstall", "appearance-install", "appearance-toggle", "appearance-render", "appearance-bad", "appearance-uninstall", "update", "blocked", "dialog", "ui", "dev", "widget-panel" }
+            ? new[] { "install", "load", "restart", "disable", "enable", "hide", "uninstall", "offline", "bad", "crash", "cache", "signature", "signature-policy", "lang-install", "lang-switch", "lang-bad", "lang-override", "lang-uninstall", "appearance-install", "appearance-toggle", "appearance-render", "appearance-bad", "appearance-uninstall", "update", "blocked", "dialog", "ui", "dev", "widget-panel", "widgets-page", "security" }
             : new[] { caseName };
         var results = new List<LabCase>();
         foreach (var name in cases)
@@ -1013,6 +1013,103 @@ public partial class App
                     "the panel closes cleanly");
                 break;
             }
+            case "widgets-page":
+            {
+                // 「插件组件」页：新建入口 → 实例出现 → 截图 → 删除回退；
+                // 顺便验证总开关关闭时 RestoreWidgets / ShowAllWidgets / CreateWidget 都不产生占位窗。
+                await EnsureEnabledAsync(dir);
+                var service5 = PluginService.Instance;
+                EnsureManagementWindow();
+                var window = ManagementWindow;
+                if (window == null) { item.Check(false, "management window exists"); break; }
+                window.Show();
+                window.ShowSection("pluginwidgets");
+                await Task.Delay(900);
+                item.Check(window.MainContent.Content is PluginWidgetsPage,
+                    "the plugin widgets page is shown");
+                if (window.MainContent.Content is not PluginWidgetsPage page) break;
+                item.Check(page.AvailableDescriptorCount() >= 1,
+                    "the page sees at least one widget descriptor");
+                item.Check(page.NewButtonEnabled,
+                    "the New widget button is enabled when a descriptor is available");
+                var createMenu = DesktopZones.Views.Components.PluginWidgetCreateMenu.Build(window, null);
+                item.Check(createMenu.Items.Count >= 1,
+                    "the shared create menu lists the available widget types");
+
+                var before = service5.Widgets.Count;
+                var beforeRows = page.RowCount;
+                var created = page.CreateFirstWidgetForTest();
+                item.Check(created != null, "creating a widget from the page succeeds");
+                if (created == null) break;
+                item.Check(service5.Widgets.Count == before + 1, "widget instance count grows by one");
+                item.Check(service5.GetWindow(created.Id)?.IsVisible == true,
+                    "the new widget window is visible");
+                await Task.Delay(600);
+                item.Check(page.RowCount == beforeRows + 1, "the list shows the new row");
+                SaveScreenshot(window, Path.Combine(dir, "shot-plugin-widgets.png"));
+                item.Check(File.Exists(Path.Combine(dir, "shot-plugin-widgets.png")),
+                    "plugin widgets screenshot written");
+
+                // 详情弹窗里的文字版入口：已安装行把按钮压成「＋」图标后，这里必须还能新建。
+                var sampleRecord = service5.GetRecord(SamplePluginId);
+                var sampleEntry = new PluginCatalogEntry
+                {
+                    Id = SamplePluginId,
+                    Kind = "widget",
+                    Name = new LocalizedText { Zh = "Hello", En = "Hello" },
+                    Version = sampleRecord?.Version ?? "1.0.0",
+                    ApiVersion = 1
+                };
+                var detail = new PluginDetailDialog(sampleEntry, sampleRecord) { Owner = window };
+                detail.Show();
+                await Task.Delay(400);
+                item.Check(detail.NewWidgetButton.Visibility == Visibility.Visible,
+                    "the detail dialog shows the widget creation entry for a widget plugin");
+                item.Check(detail.NewWidgetButton.IsEnabled,
+                    "the detail dialog entry is enabled while descriptors are loaded");
+                SaveScreenshot(detail, Path.Combine(dir, "shot-detail-widget-new.png"));
+                item.Check(File.Exists(Path.Combine(dir, "shot-detail-widget-new.png")),
+                    "detail dialog screenshot with the widget entry written");
+                detail.Close();
+                await Task.Delay(200);
+
+                // 总开关守卫：先把窗口关掉、模型标成可见（模拟上次退出时是可见的），
+                // 关闭总开关后 RestoreWidgets 必须什么都不开 —— 否则会开出「插件不可用」占位窗。
+                service5.CloseWindow(created.Id);
+                created.IsVisible = true;
+                item.Check(service5.GetWindow(created.Id) == null,
+                    "the widget window is closed before the guard checks");
+                service5.SetPluginsEnabledForLab(false);
+                try
+                {
+                    service5.RestoreWidgets();
+                    service5.ShowAllWidgets();
+                    item.Check(service5.GetWindow(created.Id) == null,
+                        "no placeholder window is restored while the plugin system is off");
+                    item.Check(service5.CreateWidget(SamplePluginId, "hello") == null,
+                        "CreateWidget is a no-op while the plugin system is off");
+                    item.Check(service5.Widgets.Count == before + 1,
+                        "no instance is added while the plugin system is off");
+                }
+                finally
+                {
+                    service5.SetPluginsEnabledForLab(true);
+                }
+
+                service5.DeleteWidget(created);
+                page.RefreshList();
+                await Task.Delay(300);
+                item.Check(service5.Widgets.Count == before,
+                    "deleting the widget restores the instance count");
+                item.Check(page.RowCount == beforeRows, "the list drops the deleted row");
+                item.Check(service5.GetWindow(created.Id) == null,
+                    "no window is left behind after deleting the widget");
+                break;
+            }
+            case "security":
+                // 安装/索引安全加固用例，实现见 App.PluginLab.Security.cs（并行开发时只改那个文件）。
+                await RunSecurityLabCaseAsync(item, name, dir);
+                break;
             default:
                 item.Check(false, "unknown case: " + name);
                 break;

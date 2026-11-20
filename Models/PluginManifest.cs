@@ -175,8 +175,10 @@ public sealed class PluginManifest
 
     [JsonIgnore] public PluginKind KindValue => PluginKinds.TryParse(Kind, out var k) ? k : PluginKind.Widget;
 
-    static readonly Regex IdRe = new("^[a-z0-9][a-z0-9.-]{2,63}$", RegexOptions.Compiled);
-    static readonly Regex SemVerRe = new(@"^\d+\.\d+\.\d+([-+][0-9A-Za-z.-]+)?$", RegexOptions.Compiled);
+    // internal：registry（PluginCatalogService）必须用同一套规则校验 id / version，
+    // 否则市场卡片能展示一条 manifest 装不上的条目（点安装才发现）。
+    internal static readonly Regex IdRe = new("^[a-z0-9][a-z0-9.-]{2,63}$", RegexOptions.Compiled);
+    internal static readonly Regex SemVerRe = new(@"^\d+\.\d+\.\d+([-+][0-9A-Za-z.-]+)?$", RegexOptions.Compiled);
     static readonly Regex RepoRe = new(@"^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$", RegexOptions.Compiled);
     static readonly Regex LangRe = new(@"^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$", RegexOptions.Compiled);
 
