@@ -1,0 +1,58 @@
+<Window x:Class="DesktopZones.Views.PluginSettingsDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:DesktopZones.Helpers"
+        Width="660" Height="600" WindowStyle="None" AllowsTransparency="True"
+        Background="Transparent" ShowInTaskbar="False" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner">
+  <!-- API v5：插件通过 host.Settings.Register(...) 声明设置项，宿主在这里统一渲染。
+       RTL 由 App.Rtl 的 Window.Loaded 类处理器自动设置 FlowDirection，本窗口不用单独处理。 -->
+  <Border Background="{DynamicResource Brush.Bg.Chrome}" CornerRadius="12"
+          BorderBrush="{DynamicResource Brush.Border.Default}" BorderThickness="1">
+    <Grid Margin="22,18,22,18">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto"/>
+        <RowDefinition Height="Auto"/>
+        <RowDefinition Height="*"/>
+        <RowDefinition Height="Auto"/>
+        <RowDefinition Height="Auto"/>
+      </Grid.RowDefinitions>
+
+      <Grid Grid.Row="0" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown" Background="Transparent">
+        <TextBlock x:Name="TitleText" Text="{loc:Loc Key=Plugin.Settings.Title}"
+                   FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource Brush.Text.Primary}"/>
+      </Grid>
+
+      <TextBlock Grid.Row="1" Text="{loc:Loc Key=Plugin.Settings.Hint}" Margin="0,8,0,0"
+                 FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource Brush.Text.Tertiary}"/>
+
+      <Border Grid.Row="2" Margin="0,14,0,0" Padding="16,4,10,4" CornerRadius="8"
+              Background="{DynamicResource Brush.Bg.Surface}" BorderThickness="1"
+              BorderBrush="{DynamicResource Brush.Border.Subtle}">
+        <Grid>
+          <ScrollViewer x:Name="ScrollHost" VerticalScrollBarVisibility="Auto"
+                        HorizontalScrollBarVisibility="Disabled">
+            <StackPanel x:Name="SectionsHost" Margin="0,8,6,8"/>
+          </ScrollViewer>
+          <!-- 没有任何插件注册 schema 时的空态（正常入口不会走到：设置页按钮此时是禁用的）。 -->
+          <TextBlock x:Name="EmptyText" Text="{loc:Loc Key=Plugin.Settings.Empty}"
+                     FontSize="12" TextWrapping="Wrap" TextAlignment="Center"
+                     HorizontalAlignment="Center" VerticalAlignment="Center" Margin="24"
+                     Foreground="{DynamicResource Brush.Text.Tertiary}" Visibility="Collapsed"/>
+        </Grid>
+      </Border>
+
+      <TextBlock x:Name="StatusText" Grid.Row="3" Margin="0,10,0,0" FontSize="11"
+                 TextWrapping="Wrap" Foreground="{DynamicResource Brush.Text.Tertiary}"
+                 Visibility="Collapsed"/>
+
+      <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+        <Button Content="{loc:Loc Key=Plugin.Settings.Cancel}" Width="92" Height="32" Cursor="Hand"
+                Style="{DynamicResource OutlineBtn}" Click="Cancel_Click"/>
+        <Button x:Name="SaveButton" Content="{loc:Loc Key=Plugin.Settings.Save}" Width="92" Height="32"
+                Margin="10,0,0,0" Cursor="Hand" FontWeight="SemiBold"
+                Style="{DynamicResource FillBtn}" Click="Save_Click"/>
+      </StackPanel>
+    </Grid>
+  </Border>
+</Window>

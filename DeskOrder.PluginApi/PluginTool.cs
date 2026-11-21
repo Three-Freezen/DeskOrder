@@ -41,8 +41,17 @@ public sealed class PluginToolCommand
     /// <summary>插件内唯一，1..64 个字符，只允许 <c>[a-z0-9._-]</c>。</summary>
     public required string Id { get; init; }
 
-    /// <summary>菜单显示名（宿主原样显示，不做翻译；想本地化请自己在 Initialize 里按 <see cref="IPluginHost"/> 判断，或直接用英文）。</summary>
+    /// <summary>
+    /// 菜单显示名（旧插件 / 未提供 <see cref="LocalizedDisplayName"/> 时的回退值，宿主原样显示、不翻译）。
+    /// 需要中英双语时请填 <see cref="LocalizedDisplayName"/>，宿主会优先用解析后的本地化名。
+    /// </summary>
     public required string DisplayName { get; init; }
+
+    /// <summary>
+    /// 可选本地化显示名（API v5）：填了之后菜单 / 插件工具页 / 执行失败提示都按宿主当前语言解析；
+    /// 只填一种语言时另一种回退到它；为 null（默认）时回退 <see cref="DisplayName"/>，旧插件零改动。
+    /// </summary>
+    public PluginLocalizedText? LocalizedDisplayName { get; init; }
 
     /// <summary>可选说明，作为菜单项的 ToolTip。</summary>
     public string? Description { get; init; }
