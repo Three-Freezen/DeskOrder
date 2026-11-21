@@ -1,9 +1,12 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
+using DesktopZones.Helpers;
 using DesktopZones.Models;
 using DesktopZones.Services;
 
@@ -18,6 +21,15 @@ public partial class PluginCard : UserControl
 
     public event Action<PluginCard>? ActionRequested;
     public event Action<PluginCard>? OpenRequested;
+
+    /// <summary>自测台只读访问器：操作按钮是否可用（不兼容条目应置灰）。</summary>
+    internal bool ActionEnabledForLab => ActionButton.IsEnabled;
+
+    /// <summary>自测台只读访问器：操作按钮的 ToolTip（不兼容原因）。</summary>
+    internal string? ActionToolTipForLab => ActionButton.ToolTip as string;
+
+    /// <summary>自测台只读访问器：权限角标是否显示（仅代码类 + 有权限）。</summary>
+    internal bool PermissionBadgeVisibleForLab => PermissionsPill.Visibility == Visibility.Visible;
 
     // 点开详情：按下点 + 拖动阈值 + 重入闩（见 CardRoot_MouseLeftButtonUp 的注释）。
     const double DragThreshold = 4.0;
@@ -48,12 +60,27 @@ public partial class PluginCard : UserControl
         DownloadsText.Text = entry.Downloads > 0
             ? Loc.Get("Plugin.Downloads", FormatCount(entry.Downloads))
             : "";
+        ApplyPermissionBadge(entry);
 
         ActionButton.IsEnabled = true;
+        ActionButton.Opacity = 1.0;
+        ActionButton.ToolTip = null;
         if (busy)
         {
             ActionButton.Content = Loc["Plugin.Installing"];
             ActionButton.IsEnabled = false;
+            return;
+        }
+        // 不兼容只挡「装 / 更新」这个动作：已安装的旧版本该启用还是能启用，
+        // 不能因为市场里的新版本要求更高宿主就把旧版本一起锁死。
+        var installable = record == null || updateAvailable;
+        var incompatible = installable ? PluginDisplay.IncompatibilityReason(entry) : null;
+        if (incompatible != null)
+        {
+            ActionButton.Content = record == null ? Loc["Plugin.Install"] : Loc["Plugin.Update"];
+            ActionButton.IsEnabled = false;
+            ActionButton.Opacity = 0.45;
+            ActionButton.ToolTip = incompatible;
             return;
         }
         if (record == null)
@@ -69,6 +96,25 @@ public partial class PluginCard : UserControl
         }
         ActionButton.Content = record.Enabled ? Loc["Plugin.Installed"] : Loc["Plugin.Enable"];
         ActionButton.IsEnabled = !record.Enabled;
+    }
+
+    /// <summary>
+    /// 权限角标：代码类插件且真的申请了权限才显示。声明式包（语言/外观）不加载 DLL，
+    /// 没有权限概念；空数组和 null 都当「不申请」，别在卡片上刷一个「0 项权限」。
+    /// </summary>
+    void ApplyPermissionBadge(PluginCatalogEntry entry)
+    {
+        var permissions = entry.Permissions?.Where(p => !string.IsNullOrWhiteSpace(p)).ToList();
+        var show = entry.KindValue.IsCode() && permissions is { Count: > 0 };
+        PermissionsPill.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        if (!show)
+        {
+            PermissionsPill.ToolTip = null;
+            return;
+        }
+        PermissionsPillText.Text = Loc.Plural("Plugin.Permissions.Badge", permissions!.Count);
+        PermissionsPill.ToolTip = Loc["Plugin.Permissions"] + "："
+                                  + PluginDisplay.DescribePermissions(permissions);
     }
 
     public void SetPreview(ImageSource? source)

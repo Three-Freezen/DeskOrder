@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using DeskOrder.PluginApi;
+using DesktopZones.Models;
 using DesktopZones.Services;
 
 namespace DesktopZones.Helpers;
@@ -41,4 +42,26 @@ public static class PluginDisplay
         => permissions == null || !permissions.Any()
             ? ""
             : string.Join(" · ", permissions.Select(DescribePermission));
+
+    /// <summary>
+    /// 这个条目能不能在当前宿主上安装 / 更新；能则返回 null，否则返回本地化原因。
+    ///
+    /// 两条门禁都在「下载之前」判掉，避免用户点完安装、等完下载才看到一句英文报错：
+    /// <list type="bullet">
+    /// <item><c>apiVersion</c> 高于宿主支持的 <see cref="PluginApiVersion.Current"/>：插件会调用
+    /// 宿主还没有的接口，装上也会在加载时抛 MissingMethod。apiVersion=0 是声明式包（不加载 DLL），
+    /// 不受这条约束。</item>
+    /// <item><c>minAppVersion</c> 高于当前宿主版本：manifest 校验本来就拒绝安装，提前在卡片上置灰。</item>
+    /// </list>
+    /// 卡片、详情弹窗、市场安装入口共用这一个判定，避免三处规则各写一份后逐渐漂移。
+    /// </summary>
+    internal static string? IncompatibilityReason(PluginCatalogEntry entry)
+    {
+        if (entry.ApiVersion > PluginApiVersion.Current && entry.ApiVersion > 0)
+            return Loc.Get("Plugin.Requires.Api", entry.ApiVersion);
+        if (!string.IsNullOrWhiteSpace(entry.MinAppVersion)
+            && !PluginVersion.HostSatisfies(entry.MinAppVersion, PluginInstaller.HostVersion))
+            return Loc.Get("Plugin.Update.Requires", entry.MinAppVersion);
+        return null;
+    }
 }
