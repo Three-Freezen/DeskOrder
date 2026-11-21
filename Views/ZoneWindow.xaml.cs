@@ -363,6 +363,10 @@ public partial class ZoneWindow : Window
                 _hideAppNameApplied = null;   // ponytail 2026-11-14: 容器重建 → 名称可见性要重走一遍
                 ApplyItemTextColor();
                 ReapplyTileItemVisuals();
+                // 容器/面板都生成好了 —— 这时候才找得到条目画布，补一次边界尺寸
+                // （否则 ScrollViewer 的 Extent 永远等于视口，溢出图标滚不到）。
+                EnsureItemCanvas();
+                UpdateCanvasSize();
                 // 容器重建后短线是新实例（宽度 0、画刷透明）→ 按当前状态补一次
                 if (IsDock) { _dockRunBarsDirty = true; RefreshDockRunBars(animate: false); }
                 // 倒影要读图标的**实际渲染矩形**（TransformToAncestor），容器/布局没好时
@@ -386,6 +390,8 @@ public partial class ZoneWindow : Window
         ItemsHost.ItemContainerGenerator.StatusChanged += _itemsHostStatusChangedHandler;
         // 长条展开时用滚轮沿长边滚（条目溢出 / P1）。
         ItemsViewport.PreviewMouseWheel += OnBayStripWheel;
+        // 普通分区：条目超出窗口时用滚轮纵向滚动（网格 / 列表都适用）。
+        ItemsViewport.PreviewMouseWheel += OnZoneWheel;
         if (!_zone.IsVisible) ApplyHidden();
         // ponytail: ApplyStyle rebuilds sub-zone tabs internally with the resolved title
         // text color. No external RebuildSubZoneTabs call needed here.
@@ -535,7 +541,7 @@ public partial class ZoneWindow : Window
         _src = HwndSource.FromHwnd(hwnd); _src?.AddHook(WndProc);
 
         // Find the Canvas for size updates
-        _itemCanvas = FindVisualChild<Canvas>(this);
+        EnsureItemCanvas();
         UpdateCanvasSize();
         ApplyLockState();
     }
@@ -1953,6 +1959,26 @@ public partial class ZoneWindow : Window
         e.Handled = true;
     }
 
+    /// <summary>普通分区：条目超出窗口（图标排在窗口外）时，滚轮纵向滚动把它们带进视野。
+    /// 坞内展开走 <see cref="OnBayStripWheel"/>；列表视图本身也能滚，这里统一接管，
+    /// 避免"网格里图标被窗口裁掉却完全滚不动"（用户反馈）。</summary>
+    void OnZoneWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (_bayActive) return;
+        var vp = ItemsViewport;
+        if (vp == null) return;
+        if (vp.ScrollableHeight > 0.5)
+        {
+            vp.ScrollToVerticalOffset(Math.Max(0, vp.VerticalOffset - e.Delta));
+            e.Handled = true;
+        }
+        else if (vp.ScrollableWidth > 0.5)
+        {
+            vp.ScrollToHorizontalOffset(Math.Max(0, vp.HorizontalOffset - e.Delta));
+            e.Handled = true;
+        }
+    }
+
     /// <summary>组合分区标签栏横向滚动（长条比标签总宽还窄时）。</summary>
     void SubZoneTabs_Wheel(object sender, MouseWheelEventArgs e)
     {
@@ -3291,17 +3317,30 @@ public partial class ZoneWindow : Window
             }
             idx++;
         }
+        // 重排后内容边界变了（可能从"溢出"变成"放得下"）—— 同步画布尺寸，
+        // 让 ScrollViewer 的 Extent 跟着收敛/扩大；同时回到顶部（重排后从第一个图标开始看）。
+        UpdateCanvasSize();
+        ResetItemsScroll();
     }
 
-    /// <summary>当前图标是否已越过右边界 — 只在「缩小到放不下」时为 true,触发换行重排;
-    /// 放大窗口时为 false,图标原地不动(修复「放大分区后图标向中间偏移」)。</summary>
+    /// <summary>当前图标是否已越过右/下边界 — 需要在「尺寸变化」时按新宽度重排。
+    ///
+    /// 旧实现只查右边界：**缩窄**时换行重排（正常），但**放大**时永远不重排 —— 如果之前被
+    /// 缩成过一列（图标全在窗口下方、越过下边界），再拖宽也永远是一列，用户看到的就是
+    /// "放大窗口后图标不自动排列"。现在同时查下边界：放大后如果图标仍放不下，按新宽度
+    /// 重新折行；本来就放得下时不动（保留"放大不向中间漂移"的观感）。</summary>
     bool ShouldReflowForResize()
     {
         var (items, gridSize) = ResolveRearrangeTarget();
         if (items == null || items.Count == 0) return false;
-        double right = 0;
-        foreach (var i in items) right = Math.Max(right, i.X + gridSize);
-        return right > _zone.Width - ZoneLayout.Pad;
+        double right = 0, bottom = 0;
+        foreach (var i in items)
+        {
+            if (i.X + gridSize > right) right = i.X + gridSize;
+            if (i.Y + gridSize > bottom) bottom = i.Y + gridSize;
+        }
+        double contentBottom = Math.Max(0, _zone.Height - 50);   // 与 UpdateCanvasSize 同一口径
+        return right > _zone.Width - ZoneLayout.Pad || bottom > contentBottom;
     }
 
     // ── Right-click zone ──
@@ -3769,9 +3808,9 @@ public partial class ZoneWindow : Window
         ApplyViewToggleBackgrounds();
         if (grid)
         {
-            // 切回网格：重找一次画布实例（宿主显隐后容器可能被重建），再补一次画布尺寸，
+            // 切回网格：重新锚定画布实例（宿主显隐后容器可能被重建），再补一次画布尺寸，
             // 否则 UpdateCanvasSize 可能还在给旧 Canvas 设 Width/Height。
-            _itemCanvas = FindVisualChild<Canvas>(this);
+            EnsureItemCanvas();
             UpdateCanvasSize();
         }
         else
@@ -5829,7 +5868,25 @@ public partial class ZoneWindow : Window
         if (!tileSync && _snapResize?.IsActive == true && ShouldReflowForResize())
             RearrangeAll(center: false);
         UpdateCanvasSize();
+        ResetItemsScroll();
         NativeMethods.UpdateRoundedCorners(this, (int)_zone.CornerRadius);
+    }
+
+    /// <summary>尺寸变化后把条目视口滚回顶部。
+    ///
+    /// 画布有显式尺寸之前 ScrollViewer 永远不可滚，"没有滚动位置"这件事不会暴露；现在溢出
+    /// 可以滚动之后，**缩小窗口时 ScrollViewer 会保留原来的 VerticalOffset** —— 表现出来
+    /// 就是"内容整体被往上推、上面的图标先消失"，和分区自顶向下阅读的习惯相反。
+    /// 尺寸变化（拖拽缩放 / 磁贴切换）统一回到顶部；用户主动滚轮滚动时不受影响。</summary>
+    void ResetItemsScroll()
+    {
+        try
+        {
+            if (ItemsViewport == null) return;
+            if (ItemsViewport.VerticalOffset > 0.5) ItemsViewport.ScrollToVerticalOffset(0);
+            if (ItemsViewport.HorizontalOffset > 0.5) ItemsViewport.ScrollToHorizontalOffset(0);
+        }
+        catch { }
     }
 
     // 拖拽缩放结束的收尾:补齐最后一次(可能晚于 IsActive=false 到达的)尺寸重排,
@@ -5841,6 +5898,7 @@ public partial class ZoneWindow : Window
         _zone.Height = FullHeightFromWindowHeight();
         if (ShouldReflowForResize()) RearrangeAll(center: false);
         UpdateCanvasSize();
+        ResetItemsScroll();
         ScheduleSave();
     }
 
@@ -5848,6 +5906,7 @@ public partial class ZoneWindow : Window
 
     void UpdateCanvasSize()
     {
+        if (_itemCanvas == null) EnsureItemCanvas();
         if (_itemCanvas == null) return;
 
         // 快捷栏：画布就是整窗（没有标题栏/底条可减），单行不折行。
@@ -5858,25 +5917,59 @@ public partial class ZoneWindow : Window
             return;
         }
 
-        // Use the actually displayed items list (sub-zone's items when a sub-zone tab is selected)
-        List<Models.ZoneItem> displayItems;
         int gs = _zone.GridSize;
         if (_zone.MergedGroupMembership.SubZoneIds.Count > 0 && _vm.SelectedSubZoneId.HasValue && _vm.SelectedSubZoneId.Value != _zone.Id)
         {
             var subZone = _mgr.Zones.FirstOrDefault(z => z.Id == _vm.SelectedSubZoneId.Value);
-            displayItems = subZone?.Items ?? _zone.Items;
             if (subZone != null) gs = subZone.GridSize;
         }
-        else
+
+        // 用**实际渲染的集合**（ItemsHost.ItemsSource）算边界 —— 合并分区/子分区标签显示的是
+        // 合并后的集合，和 _zone.Items 不一定一致；之前按 _zone.Items 算，合并分区会算出
+        // 偏小的画布 → ScrollViewer 的 Extent 永远等于视口，溢出图标既看不到也滚不到。
+        double maxRight = 0, maxBottom = 0;
+        int count = 0;
+        foreach (var o in ItemsHost.Items)
         {
-            displayItems = _zone.Items;
+            double x, y;
+            if (o is ViewModels.ZoneItemViewModel vm) { x = vm.X; y = vm.Y; }
+            else if (o is Models.ZoneItem zi) { x = zi.X; y = zi.Y; }
+            else continue;
+            count++;
+            if (x + gs + 20 > maxRight) maxRight = x + gs + 20;
+            if (y + gs + 20 > maxBottom) maxBottom = y + gs + 20;
         }
 
-        if (displayItems.Count == 0) { _itemCanvas.Width = Math.Max(0, _zone.Width - 2); _itemCanvas.Height = Math.Max(0, _zone.Height - 50); return; }
-        double maxX = 0, maxY = 0;
-        foreach (var i in displayItems) { if (i.X + gs + 20 > maxX) maxX = i.X + gs + 20; if (i.Y + gs + 20 > maxY) maxY = i.Y + gs + 20; }
-        _itemCanvas.Width = Math.Max(_zone.Width - 20, maxX + 20);
-        _itemCanvas.Height = Math.Max(_zone.Height - 50, maxY + 20);
+        if (count == 0)
+        {
+            _itemCanvas.Width = Math.Max(0, _zone.Width - 2);
+            _itemCanvas.Height = Math.Max(0, _zone.Height - 50);
+            return;
+        }
+        _itemCanvas.Width = Math.Max(_zone.Width - 20, maxRight + 20);
+        _itemCanvas.Height = Math.Max(_zone.Height - 50, maxBottom + 20);
+    }
+
+    bool _itemCanvasRetryPending;
+
+    /// <summary>拿到「条目画布」的正确实例（ItemsHost 的 ItemsPanel —— x:Name=ItemCanvas）。
+    ///
+    /// 旧实现有两处用 `FindVisualChild&lt;Canvas&gt;(this)`：窗口可视树里第一个 Canvas 其实是
+    /// XAML 里画开始按钮的 DockChromeLayer，不是条目画布 —— 尺寸全设到那个隐藏画布上了，
+    /// 条目画布永远没有显式高度。结果：ScrollViewer 的 Extent 永远 == 视口，
+    /// **图标超出窗口后既显示不出来、也无法用滚轮滚动**（用户反馈的"超出窗口不能滚动"）。
+    /// 现在只在 ItemsHost 里找；ItemsPanel 还没生成时推迟一帧重试。</summary>
+    void EnsureItemCanvas()
+    {
+        _itemCanvas = FindVisualChild<Canvas>(ItemsHost);
+        if (_itemCanvas != null || _itemCanvasRetryPending) return;
+        _itemCanvasRetryPending = true;
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            _itemCanvasRetryPending = false;
+            _itemCanvas = FindVisualChild<Canvas>(ItemsHost);
+            UpdateCanvasSize();
+        }), System.Windows.Threading.DispatcherPriority.Loaded);
     }
 
     // ── Acrylic / frosted glass ──    /// <summary>
