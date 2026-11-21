@@ -4,8 +4,9 @@ using System.Threading.Tasks;
 namespace DeskOrder.PluginApi;
 
 /// <summary>
-/// 工具命令可以出现在哪些入口。菜单类（<see cref="Menus"/> 三项）由宿主画成子菜单项；
-/// <see cref="Hotkey"/> 只表示「允许被分配全局热键」，不会出现在任何菜单里。
+/// 工具命令可以出现在哪些入口。<see cref="Menus"/> 三项由宿主画成子菜单项（作者声明用）；
+/// <see cref="Hotkey"/> 只作为执行上下文里的「来源」取值出现——命令**不需要**声明它，
+/// 任意命令都可以由用户在「插件工具」页分配全局热键。
 /// </summary>
 [Flags]
 public enum PluginToolSurface
@@ -17,7 +18,7 @@ public enum PluginToolSurface
     Panel = 2,
     /// <summary>分区右键菜单</summary>
     Zone = 4,
-    /// <summary>全局热键触发（不是菜单；命令需自行带 <see cref="Menus"/> 之外的这个标记才会出现在热键页）</summary>
+    /// <summary>全局热键触发。只用于 <see cref="PluginToolContext.Source"/>，菜单声明里忽略。</summary>
     Hotkey = 8,
     Menus = Tray | Panel | Zone
 }
@@ -46,7 +47,7 @@ public sealed class PluginToolCommand
     /// <summary>可选说明，作为菜单项的 ToolTip。</summary>
     public string? Description { get; init; }
 
-    /// <summary>出现在哪些菜单，默认只上托盘。菜单与热键互相独立：只上菜单不填 Hotkey 也能执行，但不会出现在热键分配里。</summary>
+    /// <summary>出现在哪些菜单，默认只上托盘。菜单与热键互相独立：任意命令都能在「插件工具」页分配热键，不要求在这里声明任何东西。</summary>
     public PluginToolSurface Menus { get; init; } = PluginToolSurface.Tray;
 
     /// <summary>宿主在 UI 线程调用，内部 try/catch：抛异常不会冒到界面，只记日志 + 托盘提示。</summary>
