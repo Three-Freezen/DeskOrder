@@ -14,6 +14,7 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Interop;
+using DeskOrder.PluginApi;
 using DesktopZones.Helpers;
 using DesktopZones.Models;
 using DesktopZones.Services;
@@ -3311,6 +3312,16 @@ public partial class ZoneWindow : Window
     /// <summary>Zone context menu opened — show Paste only while a folder mapping is active.</summary>
     void ZoneMenu_Opened(object s, RoutedEventArgs e)
     {
+        // API v3：插件工具子菜单。插在「删除分区 / 删除快捷栏」之前（删除是危险项，
+        // 工具命令不该排在它后面）；同一条 XAML 菜单被分区/坞/坞内芯片复用，Opened
+        // 会反复触发，Attach 内部先清旧项，不会越叠越多。
+        if (s is ContextMenu zoneMenu)
+        {
+            var deleteIndex = zoneMenu.Items.IndexOf(CtxDelete);
+            PluginToolService.Instance.Attach(zoneMenu, PluginToolSurface.Zone,
+                deleteIndex < 0 ? null : deleteIndex);
+        }
+
         var (enabled, path) = ResolveFolderMapping();
         bool canPaste = enabled && !string.IsNullOrEmpty(path) && Directory.Exists(path);
         CtxPaste.Visibility = canPaste ? Visibility.Visible : Visibility.Collapsed;

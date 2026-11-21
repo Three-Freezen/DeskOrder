@@ -212,7 +212,7 @@ public sealed class PluginManifest
             if (parsedKind.IsCode())
             {
                 if (ApiVersion < 1 || ApiVersion > PluginApiVersion.Current)
-                    Err($"apiVersion {ApiVersion} is not supported (host supports 1)");
+                    Err($"apiVersion {ApiVersion} is not supported (host supports 1..{PluginApiVersion.Current})");
                 if (Entry == null) Err("entry is required for code plugins");
                 else
                 {

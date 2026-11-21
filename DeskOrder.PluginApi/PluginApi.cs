@@ -9,7 +9,7 @@ namespace DeskOrder.PluginApi;
 /// </summary>
 public static class PluginApiVersion
 {
-    public const int Current = 2;
+    public const int Current = 3;
 }
 
 /// <summary>
@@ -34,7 +34,7 @@ public interface IPluginHost
     /// <summary>宿主版本（如 1.0.27）。</summary>
     Version HostVersion { get; }
 
-    /// <summary>宿主支持的 API 版本（当前 = 2）。</summary>
+    /// <summary>宿主支持的 API 版本（当前 = 3）。</summary>
     int ApiVersion { get; }
 
     /// <summary>插件级数据目录（跨实例共享）。</summary>
@@ -46,6 +46,9 @@ public interface IPluginHost
 
     /// <summary>分区坞注册入口（API v2）。</summary>
     IPluginZoneBays ZoneBays { get; }
+
+    /// <summary>工具命令注册入口（API v3）。</summary>
+    IPluginTools Tools { get; }
 
     IPluginLog Log { get; }
 }

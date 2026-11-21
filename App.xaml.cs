@@ -593,6 +593,11 @@ public partial class App : System.Windows.Application
         // Register hotkeys for notes that have them enabled
         RefreshNoteHotkeys();
 
+        // API v3：插件工具命令的全局热键。插件在 PluginService.Initialize 里已加载完
+        // （命令已发布），这里先订阅「命令集合变化」（启用/禁用/重装后自动重注册），再注册一次。
+        PluginToolService.Instance.CommandsChanged += RefreshPluginToolHotkeys;
+        RefreshPluginToolHotkeys();
+
         // ponytail: 启动时恢复可见的小组件窗口（位置 + 显示状态持久化，与分区一致）。
         // 只打开模型 IsVisible=true 的组件；隐藏组件保持隐藏。
         EnsureManagementWindow();
@@ -892,6 +897,8 @@ public partial class App : System.Windows.Application
             if (id == HOTKEY_ID_SHOW_ALL) { TrayShowAll(); handled = true; return IntPtr.Zero; }
             if (id == HOTKEY_ID_MIN_ALL) { TrayHideAll(); handled = true; return IntPtr.Zero; }
             if (id == HOTKEY_ID_HIDE_ALL) { TrayFullHideAll(); handled = true; return IntPtr.Zero; }
+            // API v3：插件工具命令的热键（0x5000 起）。命令执行失败由服务内部 catch。
+            if (TryHandlePluginToolHotkey(id)) { handled = true; return IntPtr.Zero; }
             handled = true;
         }
         // ponytail: WM_SETTINGCHANGE with lParam pointing to a setting name is the
@@ -2073,6 +2080,8 @@ public partial class App : System.Windows.Application
         TryRegisterHotkey(HOTKEY_ID_SHOW_ALL, cfg.ShowAllHotkey.Modifiers, cfg.ShowAllHotkey.Key);
         TryRegisterHotkey(HOTKEY_ID_HIDE_ALL, cfg.HideAllHotkey.Modifiers, cfg.HideAllHotkey.Key);
         TryRegisterHotkey(HOTKEY_ID_MIN_ALL, cfg.MinimizeAllHotkey.Modifiers, cfg.MinimizeAllHotkey.Key);
+        // API v3：设置页改完全局热键后插件工具的一批也要按新配置重注册。
+        RefreshPluginToolHotkeys();
     }
 
     // ponytail 2026-08-27: 设置页改勾后调用 — 开关桌面双击监听。
@@ -2101,6 +2110,10 @@ public partial class App : System.Windows.Application
             NativeMethods.UnregisterHotKey(_mainHwnd, HOTKEY_ID_HIDE_ALL);
             NativeMethods.UnregisterHotKey(_mainHwnd, HOTKEY_ID_MIN_ALL);
         }
+        // 插件工具热键：先退订再注销 —— 下面的 ShutdownAll 会触发 CommandsChanged，
+        // 那时若还挂着订阅就会在退出途中把热键重新注册回来。
+        PluginToolService.Instance.CommandsChanged -= RefreshPluginToolHotkeys;
+        UnregisterPluginToolHotkeys();
         _reminderService?.Dispose();
         AutoOrganizeService.Instance.Dispose();
         FileSyncService.Instance.Dispose();
@@ -2139,6 +2152,8 @@ public partial class App : System.Windows.Application
             NativeMethods.UnregisterHotKey(_mainHwnd, HOTKEY_ID_HIDE_ALL);
             NativeMethods.UnregisterHotKey(_mainHwnd, HOTKEY_ID_MIN_ALL);
         }
+        PluginToolService.Instance.CommandsChanged -= RefreshPluginToolHotkeys;
+        UnregisterPluginToolHotkeys();
         DetachHotkeySource();   // ponytail 2026-11-14: 拆热键 WndProc 钩子
         _reminderService?.Dispose();
         AutoOrganizeService.Instance.Dispose();
