@@ -70,6 +70,15 @@ public class ZoneManager
         // N 个分区 = 首帧之前 N 次整份 config 序列化写盘 + N 次 FileSystemWatcher 全量重建
         // + N 次自动整理扫描,全部压在启动路径上(而本方法末尾本来就还有一次统一保存)。
         _isBatchOperation = true;
+        // Phase 4 P0：**分帧建窗**。每个分区窗口实测创建+首次布局 ~55–300ms（首个窗口
+        // 还要付 WPF 模板/主题预热 ~400ms），13 个可见分区全部同步建完 ≈1.2–1.4s，
+        // 这段全在「启动完成」之前，用户看到的就是开着白屏等 2.6s。
+        // 现在先同步建前 FirstBatch 个（保证一启动就看到内容），其余按 BatchSize 分帧
+        // 用 Loaded 优先级补齐（通常 3–5 帧内完成，肉眼是"分区依次出现"而不是卡住）。
+        // 批量标记 _isBatchOperation 一直保持到最后一批，EndBatch 仍只跑一次。
+        var visibleZones = new List<Zone>();
+        var disp = _dispatcher ??= System.Windows.Application.Current?.Dispatcher
+                             ?? System.Windows.Threading.Dispatcher.CurrentDispatcher;
         try
         {
             foreach (var zone in _config.Zones)
@@ -133,14 +142,74 @@ public class ZoneManager
                 }
                 if (zone.IsVisible)
                 {
-                    ShowZone(zone);
-                    anyShown = true;   // ShowZone 会置 IsVisible=true,批量期间由这里统一落盘
+                    visibleZones.Add(zone);   // Phase 4 P0：先收集，循环结束后分帧建窗
                 }
             }
+
+            // Phase 4 P0：第一批同步建（保证启动即可见内容），其余分帧补齐。
+            const int FirstBatch = 3;
+            const int BatchSize = 2;
+            int shownCount = Math.Min(visibleZones.Count, FirstBatch);
+            for (int i = 0; i < shownCount; i++)
+            {
+                ShowZone(visibleZones[i]);
+                anyShown = true;
+            }
+            int nextIdx = shownCount;
+            bool batchEnded = false;
+            void EndBatchOnce(bool changed)
+            {
+                if (batchEnded) return;
+                batchEnded = true;
+                EndBatch(changed);
+            }
+            if (nextIdx < visibleZones.Count)
+            {
+                void PumpNextBatch()
+                {
+                    try
+                    {
+                        int n = 0;
+                        while (nextIdx < visibleZones.Count && n < BatchSize)
+                        {
+                            var z = visibleZones[nextIdx++];
+                            // 分帧期间用户/其它路径可能已经把它隐藏了（例如启动 1s 内点
+                            // 托盘「全部隐藏」）—— 跳过，别把刚关掉的分区又显示出来。
+                            if (!z.IsVisible) continue;
+                            ShowZone(z);
+                            anyShown = true;
+                            n++;
+                        }
+                        if (nextIdx < visibleZones.Count)
+                            disp.BeginInvoke(new Action(PumpNextBatch),
+                                System.Windows.Threading.DispatcherPriority.Loaded);
+                        else
+                            EndBatchOnce(anyNormalized || anyResolved || anyShown);
+                    }
+                    catch (Exception ex)
+                    {
+                        DzTrace.Always("[ZoneManager] 分帧建窗失败: " + ex);
+                        EndBatchOnce(anyNormalized || anyResolved || anyShown);
+                    }
+                }
+                // 第一批的 EndBatch 不能在这里跑（否则后续 ShowZone 会各自写盘）；改为
+                // 在第一批结束后仍保持批量态，由 PumpNextBatch 的最后一批统一收尾。
+                // 但为了让第一批之后 App 侧能继续启动（10 startup complete 等），
+                // 这里只把剩余批次排进 Loaded 优先级队列 —— 它们会在下一次布局后立即执行。
+                disp.BeginInvoke(new Action(PumpNextBatch),
+                    System.Windows.Threading.DispatcherPriority.Loaded);
+                // 注意：此时不 EndBatch，收尾在 PumpNextBatch 里做
+            }
+            else
+            {
+                EndBatchOnce(anyNormalized || anyResolved || anyShown);
+            }
         }
-        finally
+        catch (Exception ex)
         {
+            DzTrace.Always("[ZoneManager] Initialize 失败: " + ex);
             EndBatch(anyNormalized || anyResolved || anyShown);
+            throw;
         }
 
         // 缺图标的恢复排在首帧之后(见 RecoverMissingIcons)

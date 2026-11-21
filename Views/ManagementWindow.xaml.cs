@@ -2238,26 +2238,63 @@ public partial class ManagementWindow : Window
 
     // ── Page navigation ──
 
+    // Phase 4 P0：管理界面的页面按 section 缓存复用（LRU，最多 4 页）。
+    // 原来每次切页都 new 一个页面（ZonesPage/CalendarPage/PluginsPage…），来回切
+    // 「分区 ↔ 设置」会把整棵页面树连同缩略图/列表重新构建，既慢又反复分配内存。
+    // 缓存的页面退出可视树但仍订阅着服务事件（与原来的"用完即弃"行为一致，不会更差），
+    // 命中时只重新挂到 MainContent 并补一次 ApplyLoc。
+    readonly Dictionary<string, System.Windows.Controls.UserControl> _pageCache = new(StringComparer.Ordinal);
+    readonly List<string> _pageLru = new();
+    const int PageCacheLimit = 4;
+
+    System.Windows.Controls.UserControl CreatePage(string section) => section switch
+    {
+        "zones"    => new ZonesPage(this, _viewModel, _zoneManager),
+        "docks"    => new DocksPage(this, _viewModel, _zoneManager),
+        "zonebays" => new ZoneBaysPage(this),
+        "merged"   => new MergedGroupsPage(this, _viewModel, _zoneManager),
+        "panel"    => new PanelPage(this, _configService, _panelService),
+        "calendar" => new CalendarPage(this, _viewModel, _widgetService),
+        "clock"    => new ClockPage(this, _viewModel, _widgetService),
+        "media"    => new MediaPlayerPage(this, _viewModel, _widgetService),
+        "sticky"   => new StickyNotePage(this, _viewModel, _notesService),
+        "pluginwidgets" => new PluginWidgetsPage(this),
+        "plugintools" => new PluginToolsPage(this, _configService),
+        "plugins"  => new PluginsPage(),
+        "about"    => new AboutPage(),
+        "settings" => BuildSettingsPage(),
+        _          => new ZonesPage(this, _viewModel, _zoneManager)
+    };
+
+    System.Windows.Controls.UserControl GetOrCreatePage(string section)
+    {
+        if (_pageCache.TryGetValue(section, out var cached))
+        {
+            _pageLru.Remove(section);
+            _pageLru.Add(section);   // LRU：最近使用放末尾
+            return cached;
+        }
+        var page = CreatePage(section);
+        _pageCache[section] = page;
+        _pageLru.Add(section);
+        while (_pageLru.Count > PageCacheLimit)
+        {
+            var victim = _pageLru[0];
+            _pageLru.RemoveAt(0);
+            _pageCache.Remove(victim);
+        }
+        return page;
+    }
+
     public void ShowSection(string section)
     {
-        System.Windows.Controls.UserControl? page = section switch
+        System.Windows.Controls.UserControl page;
+        try { page = GetOrCreatePage(section); }
+        catch (Exception ex)
         {
-            "zones"    => new ZonesPage(this, _viewModel, _zoneManager),
-            "docks"    => new DocksPage(this, _viewModel, _zoneManager),
-            "zonebays" => new ZoneBaysPage(this),
-            "merged"   => new MergedGroupsPage(this, _viewModel, _zoneManager),
-            "panel"    => new PanelPage(this, _configService, _panelService),
-            "calendar" => new CalendarPage(this, _viewModel, _widgetService),
-            "clock"    => new ClockPage(this, _viewModel, _widgetService),
-            "media"    => new MediaPlayerPage(this, _viewModel, _widgetService),
-            "sticky"   => new StickyNotePage(this, _viewModel, _notesService),
-            "pluginwidgets" => new PluginWidgetsPage(this),
-            "plugintools" => new PluginToolsPage(this, _configService),
-            "plugins"  => new PluginsPage(),
-            "about"    => new AboutPage(),
-            "settings" => BuildSettingsPage(),
-            _          => new ZonesPage(this, _viewModel, _zoneManager)
-        };
+            DzTrace.Always("[ManagementWindow] 页面创建失败: " + ex);
+            page = CreatePage("zones");
+        }
         try { MainContent.Content = page; ApplyLoc(); } catch { }
         try { UpdateBreadcrumb(section, GetSectionCountLabel(section)); _lastSection = section; _lastCountLabel = GetSectionCountLabel(section); } catch { }
         try { if (SideNav != null) SideNav.ActiveSection = section; } catch { }
