@@ -3619,6 +3619,7 @@ public partial class ZoneWindow : Window
             _hover?.ExpandAnimated(permanent: true);
             _mgr.SaveConfig();
             _mgr.FireZoneVisibilityChanged(_zone.Id, true);
+            if (IsDock) EnsureDockRunPolling();   // Phase 1：最小化后恢复 → 运行状态轮询跟着起回来
         }
     }
 
@@ -7806,13 +7807,17 @@ public partial class ZoneWindow : Window
         }
         if (_dockRunTimer == null)
         {
-            _dockRunTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(700) };
+            // Phase 1：700ms → 1500ms。运行短线是"打开/切前台"的辅助提示，1.5s 完全够用；
+            // 每次 tick 都要在全量 EnumWindows + 逐窗口查进程，砍一半频率直接砍一半开销。
+            _dockRunTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1500) };
             _dockRunTimer.Tick += (_, _) => RefreshDockRunStates();
         }
-        if (!IsVisible)
+        if (!IsVisible || !_zone.IsVisible)
         {
             // ponytail 2026-11-14(P0-1): 隐藏/最小化的快捷栏不轮询（省 EnumWindows + COM）；
             // 重新显示时 IsVisibleChanged 会再调到这里把表起回来。
+            // Phase 1：把「最小化到恢复按钮」也算进来 —— 那条路径窗口不 Hide()、IsVisible
+            // 仍为 true，只有 _zone.IsVisible=false，旧判据漏了它（EnumWindows 继续每 700ms 跑）。
             _dockRunTimer.Stop();
             return;
         }
@@ -7830,7 +7835,12 @@ public partial class ZoneWindow : Window
         if (!IsDock || !_zone.DockRunIndicator) return;
         // ponytail 2026-11-14(P0-1): 窗口不可见时不枚举窗口、不碰 COM。重新显示时
         // IsVisibleChanged / ShowZone 会经 EnsureDockRunPolling 立刻补一次状态。
-        if (!IsVisible) return;
+        // Phase 1：收起成恢复按钮（窗口可见但 _zone.IsVisible=false）同样停表，自愈兜底。
+        if (!IsVisible || !_zone.IsVisible)
+        {
+            _dockRunTimer?.Stop();
+            return;
+        }
         _dockRunLastPoll = DateTime.UtcNow;
         System.Collections.Generic.Dictionary<string, AppActivityService.RunningApp> snap;
         try { snap = AppActivityService.Snapshot(); }

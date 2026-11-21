@@ -17,6 +17,7 @@ public class ReminderService : IDisposable
     private readonly ConfigService _configService;
     private readonly DispatcherTimer _timer;
     private bool _disposed;
+    private bool _calendarsHooked;
 
     public ReminderService(TrayIconService tray, WidgetService widgetService, ConfigService configService)
     {
@@ -25,10 +26,52 @@ public class ReminderService : IDisposable
         _configService = configService;
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
         _timer.Tick += (_, _) => CheckReminders();
+        // Phase 1：日历/提醒增删后重新判定要不要跑 30s 轮询（见 EnsureTimer）。
+        try
+        {
+            _widgetService.CalendarsChanged += OnCalendarsChanged;
+            _calendarsHooked = true;
+        }
+        catch { }
     }
 
-    public void Start() => _timer.Start();
+    /// <summary>Phase 1：只有存在「已启用 + 未触发 + 有时间」的提醒时才启动 30s 轮询。
+    /// 旧实现无条件起表，没有任何提醒的用户每分钟白醒 2 次。</summary>
+    public void Start() => EnsureTimer();
     public void Stop() => _timer.Stop();
+
+    void OnCalendarsChanged() => EnsureTimer();
+
+    void EnsureTimer()
+    {
+        if (_disposed) return;
+        if (HasPendingReminders())
+        {
+            if (!_timer.IsEnabled)
+            {
+                _timer.Start();
+                CheckReminders();   // 起表瞬间补一次，别让 30s 内的到期提醒漏掉
+            }
+        }
+        else
+        {
+            _timer.Stop();
+        }
+    }
+
+    bool HasPendingReminders()
+    {
+        try
+        {
+            foreach (var cal in _widgetService.Calendars)
+                foreach (var list in cal.Notes.Values)
+                    foreach (var note in list)
+                        if (note.ReminderEnabled && !note.ReminderFired && note.ReminderTime != null)
+                            return true;
+        }
+        catch { return true; }   // 读不到配置就保守起见保持轮询
+        return false;
+    }
 
     /// <summary>
     /// Check all calendars for due reminders and fire notifications.
@@ -80,6 +123,9 @@ public class ReminderService : IDisposable
             }
             _configService.Save(config);
         }
+
+        // Phase 1：最后一个提醒已经发完 → 停表，等下一次 CalendarsChanged 再起。
+        if (!HasPendingReminders()) _timer.Stop();
     }
 
     /// <summary>
@@ -95,5 +141,10 @@ public class ReminderService : IDisposable
         if (_disposed) return;
         _disposed = true;
         _timer.Stop();
+        if (_calendarsHooked)
+        {
+            _calendarsHooked = false;
+            try { _widgetService.CalendarsChanged -= OnCalendarsChanged; } catch { }
+        }
     }
 }

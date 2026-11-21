@@ -36,6 +36,21 @@ public static class DockStartButtonHook
     static NativeMethods.LowLevelMouseProc? _proc;      // 必须留引用，否则委托被回收 → 钩子失效
     static readonly List<Entry> _entries = new();
 
+    /// <summary>Phase 1：只在前台是桌面/开始菜单/任务栏时挂钩子。钩子本身只服务
+    /// 「开始菜单打开时，落在快捷栏开始按钮上的点击被它吞掉」这个场景；前台是别的应用时
+    /// 根本点不到快捷栏，钩子却会把每次鼠标移动都投递进 UI 线程。
+    /// 由 App 的 SetWinEventHook(EVENT_SYSTEM_FOREGROUND) 驱动（见 AppDesktopDoubleClick）。</summary>
+    static bool _shellActive;
+
+    /// <summary>前台是否在桌面/开始菜单/任务栏。true 才装钩子，false 立即卸掉。</summary>
+    public static void SetShellForeground(bool active)
+    {
+        if (_shellActive == active) return;
+        _shellActive = active;
+        if (active) EnsureInstalled();
+        else Uninstall();
+    }
+
     static long _lastConsumedTick = Environment.TickCount64 - 1000;
     /// <summary>同一次物理点击最多触发一次（钩子 + WPF 两条路都走这里）。</summary>
     const long DebounceMs = 120;
@@ -46,7 +61,7 @@ public static class DockStartButtonHook
         if (hwnd == IntPtr.Zero) return;
         _entries.RemoveAll(e => e.Hwnd == hwnd);
         _entries.Add(new Entry { Hwnd = hwnd, ScreenRect = screenRect, Toggle = toggle });
-        EnsureInstalled();
+        if (_shellActive) EnsureInstalled();   // Phase 1：前台不是桌面时不装钩子
     }
 
     public static void Unregister(IntPtr hwnd)

@@ -99,8 +99,33 @@ public static class WallpaperSource
     // ── 对外主入口 ──
 
     /// <summary>设置页的「新渲染方案」开关。false 时只认系统注册表里的静态壁纸文件
-    /// (不检测第三方宿主、不抓屏)—— 关掉开关的用户不该被偷偷抓一次屏。</summary>
-    public static bool Enabled { get; set; }
+    /// (不检测第三方宿主、不抓屏)—— 关掉开关的用户不该被偷偷抓一次屏。
+    ///
+    /// Phase 1：关开关时**顺手停掉换壁纸指纹监视**（旧实现只在 App 退出才 Dispose，
+    /// 用户开过一次再关掉，5s 定时器会一直空转）。</summary>
+    public static bool Enabled
+    {
+        get => _enabled;
+        set
+        {
+            if (_enabled == value) return;
+            _enabled = value;
+            if (!value) StopWatch();
+        }
+    }
+
+    static volatile bool _enabled;
+
+    /// <summary>停掉换壁纸指纹监视（关开关 / 退出共用）。</summary>
+    static void StopWatch()
+    {
+        lock (_watchLock)
+        {
+            try { _watch?.Dispose(); } catch { }
+            _watch = null;
+            _watchSig = "";
+        }
+    }
 
     /// <summary>取「铺满虚拟桌面」的壁纸位图(1/Downscale 分辨率,Pbgra32)。
     /// 第一次调用会检测来源并可能抓屏(几十毫秒);之后走缓存。
@@ -224,19 +249,24 @@ public static class WallpaperSource
     /// <summary>ponytail 2026-11-01(第 7 轮 A)：给「换壁纸」装一双眼睛。
     ///
     /// 系统静态壁纸：`SystemEvents.UserPreferenceChanged(Desktop)` 能收到；但
-    /// **Wallpaper Engine 换壁纸不发任何系统通知**，只能靠比对指纹。所以这里每 5 秒比一次
-    /// <see cref="ComputeSignature"/>(实测 4~5ms，纯读注册表/进程表/文件时间，不碰位图)。
+    /// **Wallpaper Engine 换壁纸不发任何系统通知**，只能靠比对指纹。所以这里每 20 秒比一次
+    /// (实测一次 4~5ms，纯读注册表/进程表/文件时间，不碰位图)。
     /// 只在「渲染方案 = 壁纸采样」开着时才有意义 —— DWM 方案下采样根本不用。
     /// 指纹一变就 <see cref="WallpaperBackdrop.Invalidate"/>：缓存作废 + 世代号 +1 +
-    /// 抛 `Changed`，已挂载的图层（分区/时钟/日历/便签/面板/快捷栏）一起自己重取。</summary>
+    /// 抛 `Changed`，已挂载的图层（分区/时钟/日历/便签/面板/快捷栏）一起自己重取。
+    ///
+    /// Phase 1：5s → 20s，且开关关闭时**根本不起表**（旧实现只要调过一次 GetDesktop
+    /// 就一直 5s 空转，哪怕渲染方案是 DWM）。</summary>
     static void EnsureWatch()
     {
+        if (!_enabled) return;
         if (_watch != null) return;
         lock (_watchLock)
         {
-            if (_watch != null) return;
+            if (_watch != null || !_enabled) return;
             _watchSig = ComputeSignature();
-            _watch = new System.Threading.Timer(_ => PollSignature(), null, 5000, 5000);
+            const int intervalMs = 20_000;
+            _watch = new System.Threading.Timer(_ => PollSignature(), null, intervalMs, intervalMs);
         }
     }
 
