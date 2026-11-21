@@ -44,15 +44,26 @@ public partial class App
         item.Check(singleKind.KindValues.Count == 1 && singleKind.KindValues[0] == PluginKind.Integration,
             "manifest: without kinds KindValues falls back to the primary kind");
 
-        var zonebarTool = BuildLabManifest("zonebar", new List<string> { "zonebar", "tool" }, 2,
+        var zonebarTool = BuildLabManifest("zonebar", new List<string> { "zonebar", "tool" }, 3,
             withWidgets: false, withZoneBar: true);
         item.Check(zonebarTool.Validate(PluginInstaller.HostVersion, forLocalImport: true).Count == 0,
-            "manifest: zonebar + tool with apiVersion 2 is accepted");
+            "manifest: zonebar + tool with apiVersion 3 is accepted");
+        var zonebarToolTooOld = BuildLabManifest("zonebar", new List<string> { "zonebar", "tool" }, 2,
+            withWidgets: false, withZoneBar: true);
+        item.Check(HasManifestError(zonebarToolTooOld, "tool plugins require apiVersion 3"),
+            "manifest: zonebar + tool below the tool capability's v3 is rejected");
 
         var integrationTooOld = BuildLabManifest("widget",
             new List<string> { "widget", "integration" }, 3);
         item.Check(HasManifestError(integrationTooOld, "apiVersion 4"),
             "manifest: an integration capability with apiVersion 3 is rejected");
+
+        var toolTooOld = BuildLabManifest("tool", null, 2, withWidgets: false);
+        item.Check(HasManifestError(toolTooOld, "tool plugins require apiVersion 3"),
+            "manifest: a tool plugin below apiVersion 3 is rejected");
+        var toolOk = BuildLabManifest("tool", null, 3, withWidgets: false);
+        item.Check(toolOk.Validate(PluginInstaller.HostVersion, forLocalImport: true).Count == 0,
+            "manifest: a tool plugin with apiVersion 3 is accepted");
 
         var wrongFirst = BuildLabManifest("widget", new List<string> { "tool", "widget" }, 4);
         item.Check(HasManifestError(wrongFirst, "kinds[0]"),

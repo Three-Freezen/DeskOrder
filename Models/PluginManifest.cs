@@ -322,7 +322,7 @@ public sealed class PluginManifest
                     Err("entry.assembly must be a relative path inside the package");
                 if (string.IsNullOrWhiteSpace(Entry.Type)) Err("entry.type is required");
             }
-            // 每种代码能力各自校验：组合包只要含 widget 就必须声明 widgets，含 zonebar/integration
+            // 每种代码能力各自校验：组合包只要含 widget 就必须声明 widgets，含 zonebar/tool/integration
             // 就必须满足它们各自的最低 apiVersion。
             if (kindValues.Contains(PluginKind.Widget))
             {
@@ -345,6 +345,11 @@ public sealed class PluginManifest
                     if (!string.IsNullOrWhiteSpace(ZoneBar.Icon) && !PluginPaths.IsSafeRelativePath(ZoneBar.Icon))
                         Err("zoneBar.icon must be a relative path inside the package");
                 }
+            }
+            if (kindValues.Contains(PluginKind.Tool) && ApiVersion < 3)
+            {
+                // 工具命令是 API v3 才开放的契约：v3 起 IPluginHost.Tools 才存在。
+                Err("tool plugins require apiVersion 3");
             }
             if (kindValues.Contains(PluginKind.Integration) && ApiVersion < 4)
             {
