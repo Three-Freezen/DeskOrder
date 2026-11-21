@@ -86,4 +86,15 @@
     <Resource Include="Resources\Icons\icon-256.png" />
   </ItemGroup>
 
+  <!-- Phase 3（启动收尾）：Release + win-x64 发布时做 ReadyToRun 预编译，把冷启动时
+       的 JIT 开销换成更小的程序集加载开销。只在 publish 时生效，普通 dotnet build
+       完全不受影响；Debug 构建保持原样（保留可调试的 IL）。
+       发布命令：dotnet publish DesktopZones.csproj -c Release -r win-x64（自包含）。 -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release' and '$(RuntimeIdentifier)' == 'win-x64'">
+    <PublishReadyToRun>true</PublishReadyToRun>
+    <!-- 分层 PGO：热点方法走动态优化；与 R2R 叠加时冷启动仍受益。显式写出来避免
+         将来 SDK 默认值变化把这里的行为带走。 -->
+    <TieredPGO>true</TieredPGO>
+  </PropertyGroup>
+
 </Project>
