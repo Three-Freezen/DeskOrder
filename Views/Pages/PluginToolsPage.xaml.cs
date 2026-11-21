@@ -100,7 +100,7 @@ public partial class PluginToolsPage : UserControl
         if (Dispatcher.HasShutdownStarted || AppLifetime.IsShuttingDown) return;
 
         var commands = PluginToolService.Instance.Commands;
-        CountLabel.Text = _loc.Get("PluginTool.Count", commands.Count);
+        CountLabel.Text = _loc.Plural("PluginTool.Count", commands.Count);
 
         _recordButtons.Clear();
         _clearButtons.Clear();

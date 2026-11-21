@@ -272,6 +272,11 @@ public partial class App : System.Windows.Application
         StartActivationListener();
         StartupTrace("05 single-instance acquired");
 
+        // RTL 排版：语言包是 ar/he/fa/ur 时把管理窗口/属性面板/对话框整体镜像。
+        // 必须在创建任何窗口之前注册，桌面层窗口（分区/坞/组件）在 App.Rtl.cs 里排除。
+        InitializeRtlSupport();
+        StartupTrace("05b rtl support initialized");
+
         // Global crash guard — show error instead of crashing silently
         DispatcherUnhandledException += (s, args) =>
         {

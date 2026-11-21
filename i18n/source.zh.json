@@ -1080,5 +1080,18 @@
   "PluginTool.Surface.Panel": "面板",
   "PluginTool.Surface.Zone": "分区",
   "PluginTool.Surface.HotkeyOnly": "仅热键",
-  "PluginTool.Hotkey.Hint": "录制时按 Esc 取消"
+  "PluginTool.Hotkey.Hint": "录制时按 Esc 取消",
+
+  "_plural": {
+    "Manage.Sidebar.Zones": { "other": "{0} 分区" },
+    "Manage.Sidebar.Docks": { "other": "{0} 快捷栏" },
+    "Manage.Sidebar.Clocks": { "other": "{0} 个时钟" },
+    "Manage.Sidebar.Calendars": { "other": "{0} 个日历" },
+    "Manage.Sidebar.MediaPlayers": { "other": "{0} 个播放器" },
+    "Manage.Sidebar.Notes": { "other": "{0} 张便签" },
+    "PluginWidget.Count": { "other": "{0} 项" },
+    "PluginTool.Count": { "other": "{0} 项" },
+    "Plugin.WidgetCount": { "other": "{0} 个桌面组件" },
+    "ZoneBay.Count": { "other": "{0} 个分区坞" }
+  }
 }
