@@ -388,6 +388,11 @@ public partial class ZoneWindow : Window
             }
         };
         ItemsHost.ItemContainerGenerator.StatusChanged += _itemsHostStatusChangedHandler;
+        // 宿主第一次进入可视树（首次布局完成）后补一次画布锚定/尺寸 —— 覆盖
+        // 「ctor 里太早、画布还没实例化」和「零条目、没有容器生成事件」两种情况。
+        ItemsHost.Loaded += OnItemsHostLoaded;
+        // 宿主从折叠变可见（列表→网格、关闭「单图标模式」）→ 再补一次。
+        ItemsHost.IsVisibleChanged += OnItemsHostIsVisibleChanged;
         // 长条展开时用滚轮沿长边滚（条目溢出 / P1）。
         ItemsViewport.PreviewMouseWheel += OnBayStripWheel;
         // 普通分区：条目超出窗口时用滚轮纵向滚动（网格 / 列表都适用）。
@@ -2281,6 +2286,8 @@ public partial class ZoneWindow : Window
         _folderLoadCts = null;
         _vm.Items.CollectionChanged -= _vmItemsChangedHandler;
         ItemsHost.ItemContainerGenerator.StatusChanged -= _itemsHostStatusChangedHandler;
+        ItemsHost.Loaded -= OnItemsHostLoaded;
+        ItemsHost.IsVisibleChanged -= OnItemsHostIsVisibleChanged;
         _zone.HoverExpandSettingsChanged -= OnHoverExpandSettingsChanged;
         if (_tabDragTimer != null)
         {
@@ -5950,6 +5957,21 @@ public partial class ZoneWindow : Window
         _itemCanvas.Height = Math.Max(_zone.Height - 50, maxBottom + 20);
     }
 
+    void OnItemsHostLoaded(object? sender, RoutedEventArgs e)
+    {
+        EnsureItemCanvas();
+        UpdateCanvasSize();
+    }
+
+    /// <summary>网格宿主从折叠变可见时（列表视图切回网格、关掉「单图标模式」等）重新锚定
+    /// 画布：折叠期间画布不会被实例化，之前也拿不到，此时补一次。</summary>
+    void OnItemsHostIsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        if (e.NewValue is not true) return;
+        EnsureItemCanvas();
+        UpdateCanvasSize();
+    }
+
     bool _itemCanvasRetryPending;
 
     /// <summary>拿到「条目画布」的正确实例（ItemsHost 的 ItemsPanel —— x:Name=ItemCanvas）。
@@ -5961,14 +5983,24 @@ public partial class ZoneWindow : Window
     /// 现在只在 ItemsHost 里找；ItemsPanel 还没生成时推迟一帧重试。</summary>
     void EnsureItemCanvas()
     {
-        _itemCanvas = FindVisualChild<Canvas>(ItemsHost);
-        if (_itemCanvas != null || _itemCanvasRetryPending) return;
+        var found = FindVisualChild<Canvas>(ItemsHost);
+        if (found != null) { _itemCanvas = found; return; }
+        // 宿主还没实例化：窗口还没跑过首次布局（ctor 里就调过一次），或者当前是列表
+        // 视图、网格宿主本身是折叠的（折叠的元素不会生成模板/可视子级）。
+        //
+        // 这里**只延后一帧重试一次**，并且重试回调在拿不到画布时直接放弃 —— 绝不能
+        // 让重试回调再回头调 UpdateCanvasSize 触发本方法：那会形成「Loaded 优先级
+        // 永久自我重排」的活锁，调度队列永远排不空 → Win32 消息泵被饿死 → 打开程序后
+        // CPU 单核 100%、窗口不响应，鼠标指针一直转圈（用户反馈，v1.2 合并后出现）。
+        // 后续还有真实事件会再调用本方法：容器生成完成(StatusChanged)、视图切换、
+        // 窗口尺寸变化、宿主 Loaded。
+        if (_itemCanvasRetryPending || !ItemsHost.IsLoaded || !ItemsHost.IsVisible) return;
         _itemCanvasRetryPending = true;
         Dispatcher.BeginInvoke(new Action(() =>
         {
             _itemCanvasRetryPending = false;
             _itemCanvas = FindVisualChild<Canvas>(ItemsHost);
-            UpdateCanvasSize();
+            if (_itemCanvas != null) UpdateCanvasSize();
         }), System.Windows.Threading.DispatcherPriority.Loaded);
     }
 
