@@ -90,6 +90,14 @@
                        Foreground="{DynamicResource Brush.Text.Secondary}"/>
           </StackPanel>
 
+          <!-- 一个包多类型：逐条列出这个包提供的能力（有运行时计数就带上数量）。 -->
+          <StackPanel x:Name="CapabilitiesBlock" Visibility="Collapsed" Margin="0,16,0,0">
+            <TextBlock Text="{loc:Loc Key=Plugin.Contents.Capabilities}" FontSize="11" FontWeight="SemiBold"
+                       Foreground="{DynamicResource Brush.Text.Tertiary}" Margin="0,0,0,6"/>
+            <TextBlock x:Name="CapabilitiesText" FontSize="12" TextWrapping="Wrap" LineHeight="20"
+                       Foreground="{DynamicResource Brush.Text.Secondary}"/>
+          </StackPanel>
+
           <StackPanel x:Name="PermissionsBlock" Visibility="Collapsed" Margin="0,16,0,0">
             <TextBlock Text="{loc:Loc Key=Plugin.Permissions}" FontSize="11" FontWeight="SemiBold"
                        Foreground="{DynamicResource Brush.Text.Tertiary}" Margin="0,0,0,6"/>

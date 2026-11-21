@@ -40,6 +40,12 @@
                        Foreground="{DynamicResource Brush.Text.Secondary}"/>
           </ScrollViewer>
         </Border>
+        <!-- 一个包多类型：新版本比旧版本多了能力时在这里显式提示（不额外增加勾选门槛）。 -->
+        <Border x:Name="KindsBar" Visibility="Collapsed" Margin="0,8,0,0" Padding="10,7"
+                CornerRadius="6" Background="{DynamicResource Brush.Accent.Wash}">
+          <TextBlock x:Name="AddedKindsText" FontSize="11.5" TextWrapping="Wrap" LineHeight="18"
+                     Foreground="{DynamicResource Brush.Accent}"/>
+        </Border>
       </StackPanel>
 
       <StackPanel Grid.Row="3" Margin="0,14,0,0">

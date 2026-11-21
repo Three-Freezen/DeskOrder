@@ -228,6 +228,14 @@ public sealed class PluginCatalogService
                     DzTrace.Always($"[Plugin] registry entry '{entry.Id}' dropped: kind '{entry.Kind}' is unknown");
                     continue;
                 }
+                // 一个包多类型：kinds 与 manifest 同一套规则（合法/去重/1–4/无声明式混装/kinds[0]==kind）。
+                // 不合法就整条丢弃 —— 否则市场卡片会按一组宿主装不上的能力展示。
+                entry.Kinds = entry.Kinds?.Select(k => k?.Trim() ?? "").ToList();
+                if (!PluginKinds.TryResolve(entry.Kind, entry.Kinds, out _, out var kindsError))
+                {
+                    DzTrace.Always($"[Plugin] registry entry '{entry.Id}' dropped: {kindsError}");
+                    continue;
+                }
                 if (!string.IsNullOrEmpty(entry.MinAppVersion)
                     && !PluginManifest.SemVerRe.IsMatch(entry.MinAppVersion))
                 {

@@ -268,6 +268,9 @@ public sealed class PluginService
                 Id = manifest.Id,
                 Version = manifest.Version,
                 Kind = manifest.KindValue.ToId(),
+                Kinds = manifest.KindValues.Count > 1
+                    ? manifest.KindValues.Select(k => k.ToId()).ToList()
+                    : null,
                 Enabled = true,
                 Source = "dev",
                 Signature = "unsigned",

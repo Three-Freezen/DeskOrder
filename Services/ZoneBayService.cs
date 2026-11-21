@@ -113,7 +113,7 @@ public sealed class ZoneBayService
     bool TrySeedDefault()
     {
         var loaded = _plugins?.Loaded.FirstOrDefault(p =>
-            p.Record.KindValue == PluginKind.ZoneBar && p.Record.Enabled && p.BayRegistry.Descriptors.Count > 0);
+            p.Record.KindValues.Contains(PluginKind.ZoneBar) && p.Record.Enabled && p.BayRegistry.Descriptors.Count > 0);
         if (loaded == null) return false;
         var descriptor = loaded.BayRegistry.Descriptors.Values.First();
         var bar = CreateBar(loaded, descriptor);
@@ -185,7 +185,7 @@ public sealed class ZoneBayService
         Bars.Any(b => string.Equals(b.PluginId, pluginId, StringComparison.OrdinalIgnoreCase));
 
     public bool HasAnyZoneBayPlugin =>
-        _plugins?.Loaded.Any(p => p.Record.KindValue == PluginKind.ZoneBar
+        _plugins?.Loaded.Any(p => p.Record.KindValues.Contains(PluginKind.ZoneBar)
                                  && p.Record.Enabled
                                  && p.BayRegistry.Descriptors.Count > 0) == true;
 
@@ -193,7 +193,7 @@ public sealed class ZoneBayService
     public PluginZoneBar? CreateBarForFirstPlugin()
     {
         var loaded = _plugins?.Loaded.FirstOrDefault(p =>
-            p.Record.KindValue == PluginKind.ZoneBar && p.Record.Enabled && p.BayRegistry.Descriptors.Count > 0);
+            p.Record.KindValues.Contains(PluginKind.ZoneBar) && p.Record.Enabled && p.BayRegistry.Descriptors.Count > 0);
         if (loaded == null) return null;
         var descriptor = loaded.BayRegistry.Descriptors.Values.First();
         var bar = CreateBar(loaded, descriptor);
@@ -715,7 +715,7 @@ public sealed class ZoneBayService
     public void OnPluginLoaded(LoadedPlugin plugin)
     {
         if (!IsInitialized) return;
-        if (plugin.Record.KindValue != PluginKind.ZoneBar) return;
+        if (!plugin.Record.KindValues.Contains(PluginKind.ZoneBar)) return;
         foreach (var bar in Bars.Where(b => string.Equals(b.PluginId, plugin.Record.Id, StringComparison.OrdinalIgnoreCase)))
             CreateWindow(bar);
         BarsChanged?.Invoke();

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -50,6 +51,12 @@ public partial class PluginDetailDialog : Window
     /// <summary>自测台只读访问器：可轮播的预览图张数（0..8）。</summary>
     internal int PreviewCountForLab => _previewUrls.Count;
 
+    /// <summary>自测台只读访问器：「内容/能力」区是否显示（只有多类型包才显示）。</summary>
+    internal bool CapabilitiesVisibleForLab => CapabilitiesBlock.Visibility == Visibility.Visible;
+
+    /// <summary>自测台只读访问器：「内容/能力」区的最终文本。</summary>
+    internal string CapabilitiesTextForLab => CapabilitiesText.Text;
+
     /// <summary>自测台只读访问器：左右箭头 / 计数是否显示（>1 张才显示）。</summary>
     internal bool PreviewNavVisibleForLab => PreviewPrevButton.Visibility == Visibility.Visible;
 
@@ -76,7 +83,7 @@ public partial class PluginDetailDialog : Window
         var authorName = string.IsNullOrWhiteSpace(Entry.Author?.Github)
             ? (Entry.Author?.Name ?? "")
             : Loc.Get("Plugin.AuthorBy", Entry.Author!.Github);
-        MetaText.Text = $"{Loc[Entry.KindValue.I18nKey()]} · {authorName} · v{Entry.Version} · {Entry.License}";
+        MetaText.Text = $"{PluginDisplay.DescribeKinds(Entry.KindValues)} · {authorName} · v{Entry.Version} · {Entry.License}";
         SummaryText.Text = Entry.Summary.Get(Loc.CurrentLanguage);
         var description = Entry.Description?.Get(Loc.CurrentLanguage);
         DescriptionText.Text = string.IsNullOrWhiteSpace(description) ? "" : description;
@@ -87,7 +94,7 @@ public partial class PluginDetailDialog : Window
         PermissionsText.Text = string.IsNullOrEmpty(described)
             ? Loc["Plugin.Permissions.None"]
             : described;
-        PermissionsBlock.Visibility = Entry.KindValue.IsCode() ? Visibility.Visible : Visibility.Collapsed;
+        PermissionsBlock.Visibility = Entry.KindValues.Any(kind => kind.IsCode()) ? Visibility.Visible : Visibility.Collapsed;
 
         if (Entry.KindValue == PluginKind.Language && Entry.Language != null)
         {
@@ -121,6 +128,8 @@ public partial class PluginDetailDialog : Window
             AppearanceBlock.Visibility = Visibility.Collapsed;
         }
 
+        ApplyCapabilities();
+
         if (Record == null)
         {
             PrimaryButton.Visibility = Visibility.Visible;
@@ -152,7 +161,7 @@ public partial class PluginDetailDialog : Window
             var source = PluginDisplay.DescribeSource(Record.Source);
             var widgets = PluginService.Instance.CountWidgets(Record.Id);
             var state = $"v{Record.Version} · {source} · {Record.InstalledAtUtc.ToLocalTime():yyyy-MM-dd}";
-            if (Record.KindValue == PluginKind.Widget && widgets > 0)
+            if (Record.KindValues.Contains(PluginKind.Widget) && widgets > 0)
                 state += " · " + Loc.Plural("Plugin.WidgetCount", widgets);
             if (PluginService.Instance.LoadErrors.TryGetValue(Record.Id, out var error))
                 state += "\n" + error;
@@ -204,7 +213,7 @@ public partial class PluginDetailDialog : Window
     /// </summary>
     void UpdateNewWidgetButton()
     {
-        var descriptors = Record is { KindValue: PluginKind.Widget, Enabled: true }
+        var descriptors = Record is { Enabled: true } && Record.KindValues.Contains(PluginKind.Widget)
             ? PluginService.Instance.GetDescriptors(Record.Id)
             : null;
         NewWidgetButton.Visibility = descriptors == null ? Visibility.Collapsed : Visibility.Visible;
@@ -216,6 +225,53 @@ public partial class PluginDetailDialog : Window
             ? Loc["PluginWidget.New"]
             : Loc["PluginWidget.NeedsRestart"];
     }
+
+    /// <summary>
+    /// 一个包多类型：列出这个包提供的每种能力。已安装且已加载时补运行时计数
+    /// （组件类型 / 分区坞 / 工具命令 / 数据源），拿不到计数就只列类型名。
+    /// 单类型包不显示这个区（MetaText 已经写明类型）。
+    /// </summary>
+    void ApplyCapabilities()
+    {
+        var kinds = Entry.KindValues;
+        CapabilitiesBlock.Visibility = kinds.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
+        if (kinds.Count <= 1) return;
+
+        var pluginId = Record?.Id ?? Entry.Id;
+        var lines = new List<string>(kinds.Count);
+        foreach (var kind in kinds)
+        {
+            var label = Loc[kind.I18nKey()];
+            var count = CapabilityCount(kind, pluginId);
+            lines.Add(count > 0 ? $"{label} · {CapabilityCountText(kind, count)}" : label);
+        }
+        CapabilitiesText.Text = string.Join("\n", lines);
+    }
+
+    /// <summary>运行时计数：插件没加载 / 没有注册这类能力时返回 0（只显示类型名）。</summary>
+    static int CapabilityCount(PluginKind kind, string pluginId)
+    {
+        var service = PluginService.Instance;
+        return kind switch
+        {
+            PluginKind.Widget => service.GetDescriptors(pluginId).Count,
+            PluginKind.ZoneBar => service.GetLoaded(pluginId)?.BayRegistry.Descriptors.Count ?? 0,
+            PluginKind.Tool => PluginToolService.Instance.Commands.Count(entry =>
+                string.Equals(entry.PluginId, pluginId, StringComparison.OrdinalIgnoreCase)),
+            PluginKind.Integration => PluginIntegrationService.Instance.MediaSources.Count(entry =>
+                string.Equals(entry.PluginId, pluginId, StringComparison.OrdinalIgnoreCase)),
+            _ => 0
+        };
+    }
+
+    static string CapabilityCountText(PluginKind kind, int count) => kind switch
+    {
+        PluginKind.Widget => Loc.Get("Plugin.Contents.WidgetTypes", count),
+        PluginKind.ZoneBar => Loc.Get("Plugin.Contents.ZoneBars", count),
+        PluginKind.Tool => Loc.Get("Plugin.Contents.ToolCommands", count),
+        PluginKind.Integration => Loc.Get("Plugin.Contents.MediaSources", count),
+        _ => count.ToString()
+    };
 
     string DescribeSignature()
     {

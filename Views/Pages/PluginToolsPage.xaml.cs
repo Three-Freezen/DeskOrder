@@ -118,7 +118,7 @@ public partial class PluginToolsPage : UserControl
     {
         try
         {
-            return PluginService.Instance.Records.Any(r => r.Enabled && r.KindValue == PluginKind.Tool);
+            return PluginService.Instance.Records.Any(r => r.Enabled && r.KindValues.Contains(PluginKind.Tool));
         }
         catch
         {
