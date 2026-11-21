@@ -63,7 +63,7 @@ public partial class App
         // 用例自己构造缓存与禁用名单；禁掉启动后台拉取，避免线上 registry 在用例跑到一半时覆盖它们。
         PluginService.SuppressBackgroundRefreshForLab = true;
         var cases = caseName == "all"
-            ? new[] { "install", "load", "restart", "disable", "enable", "hide", "uninstall", "offline", "bad", "crash", "cache", "signature", "signature-policy", "lang-install", "lang-switch", "lang-bad", "lang-override", "lang-uninstall", "appearance-install", "appearance-toggle", "appearance-render", "appearance-bad", "appearance-uninstall", "update", "blocked", "dialog", "ui", "dev", "widget-panel", "widgets-page", "security", "tool", "tool-ui", "integration" }
+            ? new[] { "install", "load", "restart", "disable", "enable", "hide", "uninstall", "offline", "bad", "crash", "cache", "signature", "signature-policy", "lang-install", "lang-switch", "lang-bad", "lang-override", "lang-uninstall", "lang-rtl", "lang-plural", "appearance-install", "appearance-toggle", "appearance-render", "appearance-bad", "appearance-uninstall", "update", "blocked", "dialog", "ui", "dev", "widget-panel", "widgets-page", "security", "tool", "tool-ui", "integration" }
             : new[] { caseName };
         var results = new List<LabCase>();
         foreach (var name in cases)
@@ -401,6 +401,14 @@ public partial class App
                 item.Check(loc.GetLanguageDisplay("zh") == "中文", "built-in display name is intact");
                 break;
             }
+            case "lang-rtl":
+                // RTL 语言包：安装/切换/FlowDirection/复数/回退，实现见 App.PluginLab.Lang.cs。
+                await RunLangRtlCaseAsync(item, dir);
+                break;
+            case "lang-plural":
+                // PluralRules 分类 + 内置复数 + 语言包 _plural 覆盖，实现见 App.PluginLab.Lang.cs。
+                await RunLangPluralCaseAsync(item, dir);
+                break;
             case "appearance-install":
             {
                 await EnsureAppearancePackAsync(dir);

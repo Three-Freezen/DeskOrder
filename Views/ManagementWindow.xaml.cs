@@ -2277,18 +2277,18 @@ public partial class ManagementWindow : Window
         int mediaPlayers = _widgetService?.MediaPlayers?.Count ?? 0;
         return section switch
         {
-            "zones"    => _loc.Get("Manage.Sidebar.Zones", zones),
-            "docks"    => _loc.Get("Manage.Sidebar.Docks", docks),
-            "zonebays" => _loc.Get("ZoneBay.Count", ZoneBayService.Instance.Bars.Count),
+            "zones"    => _loc.Plural("Manage.Sidebar.Zones", zones),
+            "docks"    => _loc.Plural("Manage.Sidebar.Docks", docks),
+            "zonebays" => _loc.Plural("ZoneBay.Count", ZoneBayService.Instance.Bars.Count),
             "merged"   => _loc.Get("Manage.Sidebar.MergedGroups", merged),
             "panel"    => _loc["Manage.Sidebar.Panel"],
-            "calendar" => _loc.Get("Manage.Sidebar.Calendars", calendars),
-            "clock"    => _loc.Get("Manage.Sidebar.Clocks", clocks),
-            "media"    => _loc.Get("Manage.Sidebar.MediaPlayers", mediaPlayers),
-            "sticky"   => _loc.Get("Manage.Sidebar.Notes", notes),
-            "pluginwidgets" => _loc.Get("PluginWidget.Count", PluginService.Instance.Widgets.Count),
+            "calendar" => _loc.Plural("Manage.Sidebar.Calendars", calendars),
+            "clock"    => _loc.Plural("Manage.Sidebar.Clocks", clocks),
+            "media"    => _loc.Plural("Manage.Sidebar.MediaPlayers", mediaPlayers),
+            "sticky"   => _loc.Plural("Manage.Sidebar.Notes", notes),
+            "pluginwidgets" => _loc.Plural("PluginWidget.Count", PluginService.Instance.Widgets.Count),
             "plugins"  => _loc.Get("Manage.Sidebar.Plugins", PluginService.Instance.Records.Count),
-            "plugintools" => _loc.Get("PluginTool.Count", PluginToolService.Instance.Commands.Count),
+            "plugintools" => _loc.Plural("PluginTool.Count", PluginToolService.Instance.Commands.Count),
             "about"    => _loc["Manage.Sidebar.About"],
             "settings" => _loc["Manage.Sidebar.Settings"],
             _          => ""

@@ -593,7 +593,7 @@ public partial class PluginsPage : UserControl
 
         var widgets = _service.CountWidgets(record.Id);
         var status = record.KindValue == PluginKind.Widget && widgets > 0
-            ? Loc.Get("Plugin.WidgetCount", widgets)
+            ? Loc.Plural("Plugin.WidgetCount", widgets)
             : "";
         var statusIsError = false;
         if (record.KindValue == PluginKind.Language && manifest?.Language != null)

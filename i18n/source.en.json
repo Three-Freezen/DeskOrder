@@ -1080,5 +1080,18 @@
   "PluginTool.Surface.Panel": "Panel",
   "PluginTool.Surface.Zone": "Zone",
   "PluginTool.Surface.HotkeyOnly": "Hotkey only",
-  "PluginTool.Hotkey.Hint": "Press Esc to cancel"
+  "PluginTool.Hotkey.Hint": "Press Esc to cancel",
+
+  "_plural": {
+    "Manage.Sidebar.Zones": { "one": "{0} zone", "other": "{0} zones" },
+    "Manage.Sidebar.Docks": { "one": "{0} dock", "other": "{0} docks" },
+    "Manage.Sidebar.Clocks": { "one": "{0} clock", "other": "{0} clocks" },
+    "Manage.Sidebar.Calendars": { "one": "{0} calendar", "other": "{0} calendars" },
+    "Manage.Sidebar.MediaPlayers": { "one": "{0} player", "other": "{0} players" },
+    "Manage.Sidebar.Notes": { "one": "{0} note", "other": "{0} notes" },
+    "PluginWidget.Count": { "one": "{0} item", "other": "{0} item(s)" },
+    "PluginTool.Count": { "one": "{0} command", "other": "{0} command(s)" },
+    "Plugin.WidgetCount": { "one": "{0} widget", "other": "{0} widget(s)" },
+    "ZoneBay.Count": { "one": "{0} zone bay", "other": "{0} zone bays" }
+  }
 }

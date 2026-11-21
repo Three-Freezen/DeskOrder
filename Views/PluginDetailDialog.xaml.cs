@@ -123,7 +123,7 @@ public partial class PluginDetailDialog : Window
             var widgets = PluginService.Instance.CountWidgets(Record.Id);
             var state = $"v{Record.Version} · {source} · {Record.InstalledAtUtc.ToLocalTime():yyyy-MM-dd}";
             if (Record.KindValue == PluginKind.Widget && widgets > 0)
-                state += " · " + Loc.Get("Plugin.WidgetCount", widgets);
+                state += " · " + Loc.Plural("Plugin.WidgetCount", widgets);
             if (PluginService.Instance.LoadErrors.TryGetValue(Record.Id, out var error))
                 state += "\n" + error;
             StateText.Text = state;

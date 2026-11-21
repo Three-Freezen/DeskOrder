@@ -15,8 +15,15 @@ public sealed class LanguagePackValidation
 {
     public List<string> Errors { get; } = new();
     public Dictionary<string, string> Table { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>payload 的 <c>_plural</c> 段：宿主词条 → 复数类别（小写）→ 文本。</summary>
+    public Dictionary<string, Dictionary<string, string>> Plurals { get; } = new(StringComparer.Ordinal);
+
     public int HostKeyCount { get; set; }
     public string PayloadRelativePath { get; set; } = "";
+
+    /// <summary>该语言是否从右到左（ar/he/fa/ur…）。RTL 包可以安装，界面据此镜像。</summary>
+    public bool IsRtl { get; set; }
 
     public int TranslatedCount => Table.Count;
     public double Coverage => HostKeyCount <= 0 ? 0 : (double)Table.Count / HostKeyCount;
@@ -31,7 +38,8 @@ public sealed class LanguagePackValidation
 /// 重新校验生成，因此手改索引不会生效，卸载/停用后也不会残留。
 ///
 /// 契约见方案 §7.10：扁平 JSON、key 必须存在、占位符集合必须与源词条完全一致、
-/// 允许部分翻译（缺词条走回退链）、不允许 RTL（P1）。
+/// 允许部分翻译（缺词条走回退链）、RTL 语言可以安装（界面按 <see cref="LanguagePackEntry.Rtl"/> 镜像）。
+/// v1.2 起 payload 额外支持 <c>_plural</c> 段：<c>{ 宿主词条: { one/other/...: 文本 } }</c>。
 /// </summary>
 public sealed class LanguagePackService
 {
@@ -53,14 +61,22 @@ public sealed class LanguagePackService
     // {0} / {0:N0} / {0,5} —— 跳过 {{ }} 转义（string.Format 里它们是字面花括号）。
     static readonly Regex PlaceholderRe = new(@"(?<!\{)\{(\d+)(?:[^}]*)?\}(?!\})", RegexOptions.Compiled);
 
-    /// <summary>P1 不支持从右到左排版（WPF 需要整体镜像布局）。</summary>
+    /// <summary>从右到左排版的语言（取 BCP-47 主语言段判断）。</summary>
     static readonly HashSet<string> RtlLanguages = new(StringComparer.OrdinalIgnoreCase)
     {
         "ar", "arc", "ckb", "dv", "fa", "he", "iw", "khw", "ks", "ku", "ps", "sd", "ug", "ur", "yi"
     };
 
+    /// <summary><c>_plural</c> 段允许的复数类别（与 <see cref="Helpers.PluralRules"/> 的输出一致）。</summary>
+    static readonly HashSet<string> PluralCategories = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "zero", "one", "two", "few", "many", "other"
+    };
+
     Dictionary<string, LanguagePackEntry> _entries = new(StringComparer.OrdinalIgnoreCase);
     Dictionary<string, Dictionary<string, string>> _tables = new(StringComparer.OrdinalIgnoreCase);
+    Dictionary<string, Dictionary<string, Dictionary<string, string>>> _pluralTables =
+        new(StringComparer.OrdinalIgnoreCase);
     Dictionary<string, string> _errors = new(StringComparer.OrdinalIgnoreCase);
     Dictionary<string, string> _chosen = new(StringComparer.OrdinalIgnoreCase);
     bool _loaded;
@@ -111,6 +127,8 @@ public sealed class LanguagePackService
         Load();
         var nextEntries = new Dictionary<string, LanguagePackEntry>(StringComparer.OrdinalIgnoreCase);
         var nextTables = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+        var nextPluralTables =
+            new Dictionary<string, Dictionary<string, Dictionary<string, string>>>(StringComparer.OrdinalIgnoreCase);
         var nextErrors = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         if (pluginsEnabled)
@@ -166,15 +184,18 @@ public sealed class LanguagePackService
                     AuthorName = manifest.Author?.Name ?? "",
                     AuthorGithub = manifest.Author?.Github ?? "",
                     Official = IsOfficial(manifest),
+                    Rtl = validation.IsRtl,
                     InstalledAtUtc = record.InstalledAtUtc
                 };
                 nextTables[record.Id] = validation.Table;
+                nextPluralTables[record.Id] = validation.Plurals;
             }
         }
 
         var changed = !SameEntries(_entries, nextEntries) || !SameErrors(_errors, nextErrors);
         _entries = nextEntries;
         _tables = nextTables;
+        _pluralTables = nextPluralTables;
         _errors = nextErrors;
 
         // 被卸载/停用的包不再是「上次选择」。
@@ -200,7 +221,8 @@ public sealed class LanguagePackService
                 || !string.Equals(x.Version, other.Version, StringComparison.OrdinalIgnoreCase)
                 || !string.Equals(x.Path, other.Path, StringComparison.Ordinal)
                 || Math.Abs(x.Coverage - other.Coverage) > 0.0001
-                || x.Official != other.Official)
+                || x.Official != other.Official
+                || x.Rtl != other.Rtl)
                 return false;
         }
         return true;
@@ -267,11 +289,30 @@ public sealed class LanguagePackService
         return table;
     }
 
+    /// <summary>
+    /// 取某语言的复数表（宿主词条 → 类别 → 文本）。没有 <c>_plural</c> 段的包返回空表，
+    /// 语言解析不到返回 null（调用方据此走内置/单数回退）。
+    /// </summary>
+    public Dictionary<string, Dictionary<string, string>>? GetPluralTable(string code)
+    {
+        Load();
+        var entry = Resolve(code);
+        if (entry == null) return null;
+        if (_pluralTables.TryGetValue(entry.PackId, out var cached)) return cached;
+        var table = ReadPluralTable(entry.Path);
+        if (table == null) return null;
+        _pluralTables[entry.PackId] = table;
+        return table;
+    }
+
     Dictionary<string, string>? ReadTable(LanguagePackEntry entry)
+        => ReadTable(entry.Path);
+
+    Dictionary<string, string>? ReadTable(string relativePath)
     {
         try
         {
-            var full = PluginPaths.ResolveInside(PluginPaths.Root, entry.Path);
+            var full = PluginPaths.ResolveInside(PluginPaths.Root, relativePath);
             if (full == null || !File.Exists(full)) return null;
             if (new FileInfo(full).Length > MaxPayloadBytes) return null;
             using var doc = JsonDocument.Parse(ReadText(full));
@@ -284,6 +325,48 @@ public sealed class LanguagePackService
                 var value = prop.Value.GetString() ?? "";
                 if (value.Trim().Length == 0) continue;
                 table[prop.Name] = value;
+            }
+            return table;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 直接读 payload 的 <c>_plural</c> 段（索引缓存丢失时的兜底；正常路径用
+    /// <see cref="Validate"/> 的结果）。非法结构一律返回空表而不是抛异常。
+    /// </summary>
+    Dictionary<string, Dictionary<string, string>>? ReadPluralTable(string relativePath)
+    {
+        try
+        {
+            var full = PluginPaths.ResolveInside(PluginPaths.Root, relativePath);
+            if (full == null || !File.Exists(full)) return null;
+            if (new FileInfo(full).Length > MaxPayloadBytes) return null;
+            using var doc = JsonDocument.Parse(ReadText(full));
+            if (doc.RootElement.ValueKind != JsonValueKind.Object) return null;
+            var table = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
+            foreach (var prop in doc.RootElement.EnumerateObject())
+            {
+                if (prop.Name != "_plural") continue;
+                if (prop.Value.ValueKind != JsonValueKind.Object) return table;
+                foreach (var keyProp in prop.Value.EnumerateObject())
+                {
+                    if (keyProp.Value.ValueKind != JsonValueKind.Object) continue;
+                    var forms = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var formProp in keyProp.Value.EnumerateObject())
+                    {
+                        var category = formProp.Name.Trim().ToLowerInvariant();
+                        if (!PluralCategories.Contains(category)) continue;
+                        if (formProp.Value.ValueKind != JsonValueKind.String) continue;
+                        var text = formProp.Value.GetString() ?? "";
+                        if (text.Trim().Length == 0) continue;
+                        forms[category] = text;
+                    }
+                    if (forms.Count > 0) table[keyProp.Name] = forms;
+                }
             }
             return table;
         }
@@ -323,11 +406,8 @@ public sealed class LanguagePackService
             result.Errors.Add("language block is missing");
             return result;
         }
-        if (IsRtl(language.Code))
-        {
-            result.Errors.Add("RTL languages are not supported yet: " + language.Code);
-            return result;
-        }
+        // RTL 语言不再拒装：镜像由 WPF 的 FlowDirection 负责，包本身和普通包一样只提供文本。
+        result.IsRtl = IsRtlLanguage(language.Code);
 
         var relative = manifest.Payload?.File ?? "";
         if (!PluginPaths.IsSafeRelativePath(relative))
@@ -382,13 +462,32 @@ public sealed class LanguagePackService
                 return result;
             }
 
+            var seenKeys = new HashSet<string>(StringComparer.Ordinal);
+            var pluralSeen = false;
             foreach (var prop in doc.RootElement.EnumerateObject())
             {
                 if (result.Errors.Count >= MaxReportedErrors) break;
 
+                // v1.2：_plural 段，形如 { "宿主词条": { "one": "...", "other": "..." } }。
+                if (string.Equals(prop.Name, "_plural", StringComparison.Ordinal))
+                {
+                    if (pluralSeen)
+                    {
+                        result.Errors.Add("_plural: duplicate section");
+                        continue;
+                    }
+                    pluralSeen = true;
+                    ValidatePluralSection(result, source, prop.Value);
+                    continue;
+                }
                 if (prop.Name.StartsWith("_", StringComparison.Ordinal))
                 {
                     result.Errors.Add("unknown key: " + prop.Name);
+                    continue;
+                }
+                if (!seenKeys.Add(prop.Name))
+                {
+                    result.Errors.Add("duplicate key: " + prop.Name);
                     continue;
                 }
                 if (!source.TryGetValue(prop.Name, out var sourceText))
@@ -426,10 +525,101 @@ public sealed class LanguagePackService
         return result;
     }
 
-    static bool IsRtl(string? code)
+    /// <summary>
+    /// 校验 payload 的 <c>_plural</c> 段。规则与普通词条一致（key 必须在宿主词条里、
+    /// 占位符集合必须与源词条完全一致、长度上限），另加：类别必须是 ICU 的六个类别之一、
+    /// 文本不能为空、不允许重复 key / 重复类别 / 非法结构。
+    /// </summary>
+    void ValidatePluralSection(LanguagePackValidation result,
+        Dictionary<string, string> source, JsonElement section)
+    {
+        if (section.ValueKind != JsonValueKind.Object)
+        {
+            result.Errors.Add("_plural must be an object of hostKey -> { category: text }");
+            return;
+        }
+
+        var seenKeys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var keyProp in section.EnumerateObject())
+        {
+            if (result.Errors.Count >= MaxReportedErrors) return;
+
+            var key = keyProp.Name;
+            if (!seenKeys.Add(key))
+            {
+                result.Errors.Add("_plural: duplicate key: " + key);
+                continue;
+            }
+            if (!source.TryGetValue(key, out var sourceText))
+            {
+                result.Errors.Add("_plural: unknown key: " + key);
+                continue;
+            }
+            if (keyProp.Value.ValueKind != JsonValueKind.Object)
+            {
+                result.Errors.Add($"_plural key '{key}': value must be an object of plural categories");
+                continue;
+            }
+
+            var expected = Placeholders(sourceText);
+            var forms = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var formProp in keyProp.Value.EnumerateObject())
+            {
+                if (result.Errors.Count >= MaxReportedErrors) break;
+
+                var category = formProp.Name.Trim().ToLowerInvariant();
+                if (!PluralCategories.Contains(category))
+                {
+                    result.Errors.Add($"_plural key '{key}': unknown plural category '{formProp.Name}'");
+                    continue;
+                }
+                if (forms.ContainsKey(category))
+                {
+                    result.Errors.Add($"_plural key '{key}': duplicate plural category '{category}'");
+                    continue;
+                }
+                if (formProp.Value.ValueKind != JsonValueKind.String)
+                {
+                    result.Errors.Add($"_plural key '{key}' category '{category}': value must be a string");
+                    continue;
+                }
+                var text = formProp.Value.GetString() ?? "";
+                if (text.Length > MaxValueLength)
+                {
+                    result.Errors.Add(
+                        $"_plural key '{key}' category '{category}': value is longer than {MaxValueLength} characters");
+                    continue;
+                }
+                if (text.Trim().Length == 0)
+                {
+                    result.Errors.Add($"_plural key '{key}' category '{category}': value must not be empty");
+                    continue;
+                }
+                var actual = Placeholders(text);
+                if (!expected.SetEquals(actual))
+                {
+                    result.Errors.Add(
+                        $"_plural key '{key}' category '{category}': expected placeholders " +
+                        $"{FormatPlaceholders(expected)}, got {FormatPlaceholders(actual)}");
+                    continue;
+                }
+                forms[category] = text;
+            }
+
+            if (forms.Count == 0)
+                result.Errors.Add($"_plural key '{key}': no valid plural forms");
+            else
+                result.Plurals[key] = forms;
+        }
+    }
+
+    /// <summary>该语言是否从右到左（按 BCP-47 主语言段判断，大小写不敏感）。</summary>
+    public static bool IsRtlLanguage(string? code)
     {
         if (string.IsNullOrWhiteSpace(code)) return false;
-        var primary = code.Split('-')[0];
+        var trimmed = code.Trim();
+        var cut = trimmed.IndexOfAny(new[] { '-', '_' });
+        var primary = cut >= 0 ? trimmed[..cut] : trimmed;
         return RtlLanguages.Contains(primary);
     }
 

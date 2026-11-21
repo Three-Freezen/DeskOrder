@@ -45,7 +45,7 @@ public partial class ZoneBaysPage : UserControl
     void Refresh()
     {
         TitleText.Text = _loc["ZoneBay.Title"];
-        CountText.Text = _loc.Get("ZoneBay.Count", _service.Bars.Count);
+        CountText.Text = _loc.Plural("ZoneBay.Count", _service.Bars.Count);
         NewBtn.Visibility = _service.HasAnyZoneBayPlugin ? Visibility.Visible : Visibility.Collapsed;
         NewBtn.IsEnabled = _service.HasAnyZoneBayPlugin;
 

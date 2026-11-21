@@ -19,6 +19,9 @@ public sealed class LanguagePackEntry
     /// <summary>缺词条时的回退语言，默认 <c>en</c>。</summary>
     public string Base { get; set; } = "en";
 
+    /// <summary>该语言是否从右到左排版（ar/he/fa/ur…）；界面按此设为 RTL。</summary>
+    public bool Rtl { get; set; }
+
     public string PackId { get; set; } = "";
     public string Version { get; set; } = "";
 
