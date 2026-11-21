@@ -43,8 +43,8 @@ public partial class PropertyWindow : Window
         {
             EasingFunction = (IEasingFunction)FindResource("Motion.StandardSpline")
         };
-        Storyboard.SetTarget(fade, this);
-        Storyboard.SetTargetProperty(fade, new PropertyPath(OpacityProperty));
+        Storyboard.SetTarget(fade, RootBorder);
+        Storyboard.SetTargetProperty(fade, new PropertyPath("Opacity"));
         sb.Children.Add(fade);
 
         var scaleX = new DoubleAnimation(1, 0.95, (Duration)FindResource("Motion.Fast"))
@@ -80,7 +80,7 @@ public partial class PropertyWindow : Window
         DzTrace.Log("[PropWin] OnClosing(外部关闭请求) 调用栈:\n" + Environment.StackTrace);
         e.Cancel = true;
         _isClosing = true;
-        Opacity = 1;
+        RootBorder.Opacity = 1;
         RootScale.ScaleX = 1;
         RootScale.ScaleY = 1;
         _closeSb?.Begin();
@@ -121,7 +121,7 @@ public partial class PropertyWindow : Window
         // IsVisibleChanged 带调用栈:若 Visibility 被(Owner 最小化等)外部翻转,栈里能看到。
         Loaded += (_, _) =>
             DzTrace.Log(
-                $"[PropWin] Loaded: '{Title}' Opacity={Opacity:F2} IsVisible={IsVisible} State={WindowState} at ({Left:F0},{Top:F0})");
+                $"[PropWin] Loaded: '{Title}' Opacity={RootBorder.Opacity:F2} IsVisible={IsVisible} State={WindowState} at ({Left:F0},{Top:F0})");
         IsVisibleChanged += (_, e) =>
             DzTrace.Log(
                 $"[PropWin] IsVisibleChanged: '{Title}' {e.OldValue}→{e.NewValue} State={WindowState}\n{Environment.StackTrace}");

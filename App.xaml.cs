@@ -654,19 +654,28 @@ public partial class App : System.Windows.Application
         StartupTrace("10 startup complete");
 
         // 自测用：--ui-shot=<目录> 逐个显示非分层窗口（管理窗口/属性窗/弹窗）并截图后退出。
+        // --ui-hold=<name> --ui-hold-ms=<ms>：只显示一个窗口并保持，供外部采样内存/CPU。
         // 用于 Phase 3 `AllowsTransparency=True → WindowChrome` 改造前后的视觉对比；
-        // 截图代码见 App.UiShot.cs。只有带该参数时才走这里。
+        // 截图代码见 App.UiShot.cs。只有带这些参数时才走这里。
         var uiShotDir = ParseArgValue(e.Args, "--ui-shot=");
-        if (uiShotDir != null)
+        var uiHoldName = ParseArgValue(e.Args, "--ui-hold=");
+        if (uiShotDir != null || uiHoldName != null)
         {
             var only = ParseArgValue(e.Args, "--ui-shot-only=");
+            var holdMsText = ParseArgValue(e.Args, "--ui-hold-ms=");
+            int holdMs = int.TryParse(holdMsText, out var hm) ? hm : 20000;
             Dispatcher.BeginInvoke(new Action(async () =>
             {
-                try { await RunUiShotsAsync(uiShotDir, only); }
+                try
+                {
+                    if (uiHoldName != null) await RunUiHoldAsync(uiHoldName, holdMs);
+                    if (uiShotDir != null) await RunUiShotsAsync(uiShotDir, only);
+                }
                 catch (Exception ex)
                 {
                     try { System.IO.File.WriteAllText(
-                        System.IO.Path.Combine(uiShotDir, "ui-shot-error.txt"), ex.ToString()); } catch { }
+                        System.IO.Path.Combine(uiShotDir ?? System.IO.Path.GetTempPath(),
+                            "ui-shot-error.txt"), ex.ToString()); } catch { }
                 }
                 Shutdown();
             }), DispatcherPriority.ApplicationIdle);

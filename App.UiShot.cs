@@ -16,18 +16,27 @@ using DesktopZones.Views.Components;
 
 namespace DesktopZones;
 
-// 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
-// 鑷祴鐢細--ui-shot=<鐩綍>
+// -----------------------------------------------------------------------------
+// 自测用：--ui-shot=<目录>
 //
-// 鎶娿€岄潪鍒嗗眰绐楀彛銆嶉€愪釜鏄剧ず銆佹埅鍥惧悗鍏抽棴锛岀劧鍚庨€€鍑恒€傜敤浜?Phase 3 鐨?// AllowsTransparency=True 鈫?WindowChrome 鏀归€狅細鏀归€犲墠/鍚庡悇璺戜竴娆★紝閫愮獥鍙ｅ姣?// 鍦嗚銆丏WM 闃村奖銆佸唴瀹瑰竷灞€鏈夋病鏈夐€€鍖栥€?//
-// 鎴浘鐢?GetDC(NULL)+BitBlt 鐩存帴鎶撳睆骞曪紙鍚?DWM 鍚堟垚鐨勫渾瑙掍笌闃村奖锛岃繖浜涗笉鍦?// WPF 瑙嗚鏍戦噷锛孯enderTargetBitmap 鎶撲笉鍒帮級锛涙姄绐楀彛鐭╁舰澶栨墿 40px 杈硅窛浠ュ寘鍚槾褰便€?//
-// 杩欐槸绾嚜娴嬪紑鍏筹紙鍜屽凡鏈夌殑 --test-dialogs / --render-dock-preview 鍚岀被锛夛紝
-// 涓嶅奖鍝嶆甯稿惎鍔ㄨ矾寰勶細鍙湁甯﹁鍙傛暟鏃舵墠杩涜繖閲屻€?// 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// 把「非分层窗口」逐个显示、截图后关闭，然后退出。用于 Phase 3 的
+// AllowsTransparency=True -> WindowChrome 改造：改造前/后各跑一次，逐窗口对比
+// 圆角、DWM 阴影、内容布局有没有退化。
+//
+// 截图用 GetDC(NULL)+BitBlt 直接抓屏幕（含 DWM 合成的圆角与阴影，这些不在
+// WPF 视觉树里，RenderTargetBitmap 抓不到）；抓窗口矩形外扩 40px 边距以包含阴影。
+//
+// 这是纯自测开关（和已有的 --test-dialogs / --render-dock-preview 同类），
+// 不影响正常启动路径：只有带该参数时才进这里。
+//
+// --ui-hold=<name> --ui-hold-ms=<ms>：只把一个窗口显示出来并保持，方便外部脚本
+// 在这个状态下采样内存/CPU（改造前后对比用），到时后退出。
+// -----------------------------------------------------------------------------
 public partial class App
 {
     const int ShotMargin = 40;
 
-    /// <summary>瑕佹埅鍥剧殑绐楀彛銆傝繑鍥?null 琛ㄧず褰撳墠鐜鏋勯€犱笉浜嗭紙璁板綍鍒?manifest 鍚庤烦杩囷級銆?/summary>
+    /// <summary>要截图的窗口。返回 null 表示当前环境构造不了（记录到 manifest 后跳过）。</summary>
     IEnumerable<(string Name, Func<Window?> Make)> UiShotTargets()
     {
         yield return ("management", () => new ManagementWindow(
@@ -38,11 +47,11 @@ public partial class App
             return zone == null ? null : new PropertyWindow(zone, _configService!);
         });
 
-        // 鈹€鈹€ 浜岀骇寮圭獥锛堢畝鍗曟瀯閫犵殑锛?鈹€鈹€
-        yield return ("rename", () => new RenameDialog("娴嬭瘯鍚嶇О"));
-        yield return ("overwrite", () => new OverwriteConfirmDialog("娴嬭瘯棰勮"));
+        // ---- 二级弹窗（简单构造的） ----
+        yield return ("rename", () => new RenameDialog("测试名称"));
+        yield return ("overwrite", () => new OverwriteConfirmDialog("测试预设"));
         yield return ("save-preset", () => new SavePresetDialog(
-            PresetService.For(PresetKind.Zone), new Zone { Name = "娴嬭瘯鍒嗗尯" }));
+            PresetService.For(PresetKind.Zone), new Zone { Name = "测试分区" }));
         yield return ("load-preset", () => new LoadPresetDialog(
             PresetService.For(PresetKind.Zone), _widgetService));
         yield return ("color-picker", () => new ColorPickerDialog("FF8800"));
@@ -54,7 +63,7 @@ public partial class App
         yield return ("panel-popup-motion", () => new PanelPopupMotionDialog(
             PanelPopupOrigin.TopLeft, HoverExpandAnimationKind.Fade, 1.0));
         yield return ("auto-organize", () => new AutoOrganizePickerWindow(
-            new Zone { Name = "娴嬭瘯鍒嗗尯" }, AutoOrganizePickerKind.Extension));
+            new Zone { Name = "测试分区" }, AutoOrganizePickerKind.Extension));
         yield return ("shell-location", () => new ShellLocationPickerWindow());
         yield return ("image-crop", () =>
         {
@@ -64,7 +73,7 @@ public partial class App
         });
     }
 
-    /// <summary>绐楀彛鎴浘锛堝睆骞曞儚绱狅級銆傜獥鍙ｅ厛鎶埌鏈€涓婂眰锛岄伩鍏嶈鍒嗗尯鍒嗗眰绐楀彛鎸′綇銆?/summary>
+    /// <summary>窗口截图（屏幕像素）。窗口先抬到最上层，避免被分区分层窗口挡住。</summary>
     async Task RunUiShotsAsync(string dir, string? only = null)
     {
         Directory.CreateDirectory(dir);
@@ -89,15 +98,17 @@ public partial class App
                 w.ShowInTaskbar = false;
                 w.Left = 140;
                 w.Top = 120;
-                w.Topmost = true;          // 鍒嗗尯绐楀彛鏄?Topmost锛屽脊绐楀繀椤诲厛鍒版渶涓婇潰鎵嶈兘鎴埌
+                w.Topmost = true;          // 分区窗口是 Topmost，弹窗必须先到最上面才能截到
+                var sw = System.Diagnostics.Stopwatch.StartNew();
                 w.Show();
                 w.Activate();
-                await Task.Delay(700);     // 绛変富棰樿祫婧?/ 鍔ㄧ敾 / 鍐呭鐢熸垚
+                await Task.Delay(700);     // 等主题资源 / 动画 / 内容生成
                 w.UpdateLayout();
                 await Task.Delay(120);
+                sw.Stop();
                 var path = Path.Combine(dir, name + ".png");
                 var rect = CaptureWindow(w, path, ShotMargin);
-                manifest.AppendLine($"{name}: {(rect == null ? "CAPTURE-FAILED" : rect)}");
+                manifest.AppendLine($"{name}: {(rect == null ? "CAPTURE-FAILED" : rect)} openMs={sw.ElapsedMilliseconds}");
             }
             catch (Exception ex)
             {
@@ -112,7 +123,31 @@ public partial class App
         try { File.WriteAllText(Path.Combine(dir, "_manifest.txt"), manifest.ToString()); } catch { }
     }
 
-    // 鈹€鈹€ 灞忓箷鎶撳彇 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+    /// <summary>--ui-hold：只把一个窗口显示出来并保持，供外部采样内存/CPU。</summary>
+    async Task RunUiHoldAsync(string name, int holdMs)
+    {
+        var target = UiShotTargets().FirstOrDefault(t => t.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+        Window? w = null;
+        try
+        {
+            w = target.Make();
+            if (w == null) return;
+            w.WindowStartupLocation = WindowStartupLocation.Manual;
+            w.ShowInTaskbar = false;
+            w.Left = 140;
+            w.Top = 120;
+            w.Show();
+            w.Activate();
+            await Task.Delay(Math.Max(1000, holdMs));
+        }
+        catch (Exception ex)
+        {
+            try { DzTrace.Always("[ui-hold] " + ex); } catch { }
+        }
+        finally { try { w?.Close(); } catch { } }
+    }
+
+    // ---- 屏幕抓取 ---------------------------------------------------------------
 
     static string? CaptureWindow(Window w, string path, int margin)
     {
@@ -125,7 +160,7 @@ public partial class App
         int ch = (r.Bottom - r.Top) + margin * 2;
         if (cw <= 0 || ch <= 0) return null;
 
-        // 闄愬埗鍦ㄨ櫄鎷熸闈㈠唴锛堝灞忔椂铏氭嫙妗岄潰鍘熺偣鍙兘鏄礋鏁帮級
+        // 限制在虚拟桌面内（多屏时虚拟桌面原点可能是负数）
         int vx = GetSystemMetrics(76), vy = GetSystemMetrics(77);
         int vw = GetSystemMetrics(78), vh = GetSystemMetrics(79);
         int sx = Math.Max(x, vx), sy = Math.Max(y, vy);
@@ -174,4 +209,3 @@ public partial class App
     [StructLayout(LayoutKind.Sequential)]
     struct ShotRect { public int Left, Top, Right, Bottom; }
 }
-
