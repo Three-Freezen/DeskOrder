@@ -37,9 +37,19 @@ public sealed class PluginCatalogService
     public const string DefaultRegistryUrl =
         "https://raw.githubusercontent.com/Three-Freezen/DeskOrder-Plugins/main/registry.json";
 
+    /// <summary>图片缓存默认上限 50 MB（方案 §5.7「按 URL SHA-1 缓存，LRU 上限 50 MB」）。</summary>
+    public const long DefaultImageCacheBytes = 50L * 1024 * 1024;
+
     static readonly TimeSpan CacheTtl = TimeSpan.FromHours(6);
     const long MaxRegistryBytes = 2L * 1024 * 1024;
     const long MaxImageBytes = 4L * 1024 * 1024;
+
+    /// <summary>
+    /// 图片缓存上限（字节）。自测台会临时调小来验证 LRU 清理；正常使用就是
+    /// <see cref="DefaultImageCacheBytes"/>。做成实例属性而不是常量，是为了让「清理策略」
+    /// 能在不写满 50 MB 假文件的前提下被真实跑到。
+    /// </summary>
+    public long MaxImageCacheBytes { get; set; } = DefaultImageCacheBytes;
 
     static readonly HttpClient Http = CreateClient();
 
@@ -310,7 +320,13 @@ public sealed class PluginCatalogService
         if (string.IsNullOrEmpty(ext) || ext.Length > 5) ext = ".png";
         var hash = Convert.ToHexString(SHA1.HashData(Encoding.UTF8.GetBytes(url))).ToLowerInvariant();
         var path = Path.Combine(PluginPaths.ImagesDir, hash + ext);
-        if (File.Exists(path) && new FileInfo(path).Length > 0) return path;
+        if (File.Exists(path) && new FileInfo(path).Length > 0)
+        {
+            // 命中即刷新时间戳 —— 这就是本实现的「LRU」：不额外维护访问计数文件，
+            // 缓存目录自身就是唯一状态（崩溃/被清空都不影响正确性）。
+            TouchImageCacheEntry(path);
+            return path;
+        }
 
         try
         {
@@ -324,11 +340,94 @@ public sealed class PluginCatalogService
             var tmp = path + ".tmp";
             await File.WriteAllBytesAsync(tmp, bytes, ct).ConfigureAwait(false);
             File.Move(tmp, path, overwrite: true);
+            // 写入后立即收敛一次：市场页一次刷新会并发下载几十张封面，等「下次启动再清」
+            // 会让缓存无界增长。
+            TrimImageCache();
             return path;
         }
         catch
         {
             return null;
+        }
+    }
+
+    /// <summary>缓存命中时把文件时间改到现在（近似 LRU 的「最近使用」标记）。失败不算错。</summary>
+    static void TouchImageCacheEntry(string path)
+    {
+        try { File.SetLastWriteTimeUtc(path, DateTime.UtcNow); } catch { }
+    }
+
+    /// <summary>
+    /// 把图片缓存压回上限以内：总大小超过 <see cref="MaxImageCacheBytes"/> 时，按
+    /// <c>LastWriteTimeUtc</c> 从旧到新删除，直到 ≤ 上限的 90%（留 10% 余量，避免「刚删完
+    /// 又超限」的抖动 —— 每次只多写一张图时不该触发第二次成批删除）。顺手清掉写入中断
+    /// 残留的 <c>*.tmp</c>（它们不计入统计，但不该永久占空间）。
+    ///
+    /// 所有异常都吞掉：缓存目录不可写 / 文件被杀软占用时，市场页必须照常可用，只是缓存
+    /// 不收敛而已，不影响核心功能。internal：自测台要直接驱动清理。
+    /// </summary>
+    internal void TrimImageCache()
+    {
+        try
+        {
+            var dir = PluginPaths.ImagesDir;
+            if (!Directory.Exists(dir)) return;
+
+            foreach (var tmp in Directory.EnumerateFiles(dir, "*.tmp"))
+            {
+                try { File.Delete(tmp); } catch { }
+            }
+
+            var files = new DirectoryInfo(dir)
+                .EnumerateFiles("*", SearchOption.TopDirectoryOnly)
+                .Where(f => !f.Name.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            long total = files.Sum(f => f.Length);
+            if (total <= MaxImageCacheBytes) return;
+
+            var target = (long)(MaxImageCacheBytes * 0.9);
+            foreach (var file in files.OrderBy(f => f.LastWriteTimeUtc))
+            {
+                if (total <= target) break;
+                try
+                {
+                    var size = file.Length;
+                    file.Delete();
+                    total -= size;
+                }
+                catch
+                {
+                    // 文件正被别的进程占用：跳过，留到下次清理。总大小因此可能仍超限，
+                    // 但下一次 GetImageAsync 写入后会再试一次。
+                }
+            }
+        }
+        catch
+        {
+            // 见上面的注释：缓存清理失败不能影响市场页。
+        }
+    }
+
+    /// <summary>当前图片缓存现状（文件数 / 总字节）。设置页展示与自测台断言共用同一口径。</summary>
+    public (int Files, long Bytes) GetImageCacheStats()
+    {
+        try
+        {
+            var dir = PluginPaths.ImagesDir;
+            if (!Directory.Exists(dir)) return (0, 0);
+            int count = 0;
+            long bytes = 0;
+            foreach (var file in new DirectoryInfo(dir).EnumerateFiles("*", SearchOption.TopDirectoryOnly))
+            {
+                if (file.Name.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase)) continue;
+                count++;
+                bytes += file.Length;
+            }
+            return (count, bytes);
+        }
+        catch
+        {
+            return (0, 0);
         }
     }
 

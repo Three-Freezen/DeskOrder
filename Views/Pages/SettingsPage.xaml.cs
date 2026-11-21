@@ -240,6 +240,14 @@ public partial class SettingsPage : UserControl
             // 以运行中的语言为准（语言包卸载回退后 cfg 可能还是旧 code）。
             SelectComboByTag(LanguageCombo, LocalizationService.Instance.CurrentLanguage);
             PluginsEnabledBox.IsChecked = cfg.PluginsEnabled;
+            LoadPluginsAtStartupBox.IsChecked = cfg.LoadPluginsAtStartup;
+            MirrorUrlBox.Text = cfg.PluginRegistryUrl;
+            MirrorStatusText.Text = "";
+            MirrorStatusText.Visibility = Visibility.Collapsed;
+            ImageCacheStatusText.Text = "";
+            ImageCacheStatusText.Visibility = Visibility.Collapsed;
+            UpdateMirrorHint();
+            UpdateImageCacheUi();
             WallpaperRendererBox.IsChecked = cfg.UseWallpaperRenderer;
             SyncRendererUi();
             SyncThemeRadios(cfg.ThemeMode switch
@@ -258,6 +266,90 @@ public partial class SettingsPage : UserControl
         var cfg = _configService.Load();
         cfg.PluginsEnabled = PluginsEnabledBox.IsChecked == true;
         _configService.Save(cfg);
+    }
+
+    // ── 插件：启动时加载 / 索引镜像 / 图片缓存 ──
+
+    /// <summary>「启动时加载插件」：只写配置，重启后由 PluginService.Initialize 消费。</summary>
+    void LoadPluginsAtStartup_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_suppress) return;
+        var cfg = _configService.Load();
+        cfg.LoadPluginsAtStartup = LoadPluginsAtStartupBox.IsChecked == true;
+        _configService.Save(cfg);
+    }
+
+    /// <summary>
+    /// 索引地址校验（纯函数，自测台直接断言）：它决定去哪里下载 registry.json，
+    /// 而 registry 又决定「装哪个包、校验哪个哈希」，明文 HTTP 等于把这件事交给中间人。
+    /// 所以默认只放行 https；本机回环地址（localhost / 127.0.0.1 / ::1）额外放开 http，
+    /// 否则本地起个静态服务器调试镜像就没法用了。
+    /// </summary>
+    internal static bool IsAcceptableRegistryUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return false;
+        if (!Uri.TryCreate(url.Trim(), UriKind.Absolute, out var uri)) return false;
+        if (uri.Scheme == Uri.UriSchemeHttps) return true;
+        return uri.Scheme == Uri.UriSchemeHttp && uri.IsLoopback;
+    }
+
+    /// <summary>「应用」按钮：空输入 = 恢复内置默认；非法地址只提示、不保存。</summary>
+    void MirrorApply_Click(object sender, RoutedEventArgs e)
+    {
+        var raw = MirrorUrlBox.Text.Trim();
+        if (raw.Length > 0 && !IsAcceptableRegistryUrl(raw))
+        {
+            MirrorStatusText.Text = LocalizationService.Instance["Settings.Plugins.Mirror.Invalid"];
+            MirrorStatusText.Visibility = Visibility.Visible;
+            return;
+        }
+        SaveRegistryUrl(raw);
+    }
+
+    void MirrorReset_Click(object sender, RoutedEventArgs e) => SaveRegistryUrl("");
+
+    /// <summary>
+    /// 保存索引地址并同步到运行态：配置里空串 = 用内置默认（既有语义），但
+    /// <see cref="PluginCatalogService.RegistryUrl"/> 必须拿到真正的绝对地址，
+    /// 否则下一次 <c>LoadAsync</c> 会拿空串去 new HttpRequestMessage 而抛异常。
+    /// </summary>
+    void SaveRegistryUrl(string url)
+    {
+        var cfg = _configService.Load();
+        cfg.PluginRegistryUrl = url;
+        _configService.Save(cfg);
+        PluginService.Instance.Catalog.RegistryUrl = url.Length == 0
+            ? PluginCatalogService.DefaultRegistryUrl
+            : url;
+        MirrorUrlBox.Text = url;
+        MirrorStatusText.Text = LocalizationService.Instance["Settings.Plugins.Mirror.Saved"];
+        MirrorStatusText.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>默认地址提示（含内置 URL）；语言切换后页面会重建，这里读当前语言即可。</summary>
+    void UpdateMirrorHint()
+    {
+        if (MirrorHintText == null) return;
+        MirrorHintText.Text = LocalizationService.Instance.Get(
+            "Settings.Plugins.Mirror.Hint", PluginCatalogService.DefaultRegistryUrl);
+    }
+
+    /// <summary>清除本地封面缓存（只删缓存目录，不影响已安装插件）。</summary>
+    void ClearImageCache_Click(object sender, RoutedEventArgs e)
+    {
+        PluginService.Instance.Catalog.ClearImageCache();
+        UpdateImageCacheUi();
+        ImageCacheStatusText.Text = LocalizationService.Instance["Settings.Plugins.Cache.Cleared"];
+        ImageCacheStatusText.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>刷新「N 张 · X.X MB」；缓存目录不可读时按 0 张显示，不在设置页弹错误。</summary>
+    void UpdateImageCacheUi()
+    {
+        if (CacheSizeText == null) return;
+        var (files, bytes) = PluginService.Instance.Catalog.GetImageCacheStats();
+        CacheSizeText.Text = LocalizationService.Instance.Get(
+            "Settings.Plugins.Cache.Size", files, (bytes / 1024.0 / 1024.0).ToString("0.0"));
     }
 
     // ── 玻璃渲染方案(二期) ──
