@@ -123,7 +123,52 @@ public partial class App
         try { File.WriteAllText(Path.Combine(dir, "_manifest.txt"), manifest.ToString()); } catch { }
     }
 
-    /// <summary>--ui-hold：只把一个窗口显示出来并保持，供外部采样内存/CPU。</summary>
+    /// <summary>--ui-pages=&lt;csv&gt; --ui-pages-rounds=N：打开管理窗口，按固定顺序切页面 N 轮，
+    /// 记录每页耗时（含同步布局）与轮次总耗时/内存 —— 用于验证页面缓存（Phase 4 P0）。</summary>
+    async Task RunUiPagesAsync(int rounds, string outFile)
+    {
+        EnsureManagementWindow();
+        var w = _managementWindow;
+        if (w == null) return;
+        w.WindowStartupLocation = WindowStartupLocation.Manual;
+        w.Left = 100; w.Top = 100;
+        w.Show();
+        w.Activate();
+        await Task.Delay(1200);
+        var sections = new[]
+        {
+            "zones", "docks", "merged", "panel", "calendar", "clock", "media",
+            "sticky", "plugins", "settings", "zones", "settings"
+        };
+        // 预热一轮：让插件列表 / 缩略图等一次性初始化完成，之后的差异才是缓存效果
+        foreach (var s in sections) { try { w.ShowSection(s); w.UpdateLayout(); } catch { } }
+        await Task.Delay(300);
+        var proc = System.Diagnostics.Process.GetCurrentProcess();
+        proc.Refresh();
+        double mem0 = proc.PrivateMemorySize64;
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("round,section,ms");
+        var total = System.Diagnostics.Stopwatch.StartNew();
+        for (int r = 1; r <= rounds; r++)
+        {
+            foreach (var s in sections)
+            {
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                try { w.ShowSection(s); w.UpdateLayout(); } catch { }
+                sw.Stop();
+                sb.AppendLine($"{r},{s},{sw.Elapsed.TotalMilliseconds:0.0}");
+            }
+        }
+        total.Stop();
+        proc.Refresh();
+        double mem1 = proc.PrivateMemorySize64;
+        sb.AppendLine($"TOTAL,{rounds},{total.Elapsed.TotalMilliseconds:0.0}");
+        sb.AppendLine($"MEM0_MB,{mem0 / 1048576.0:0.0}");
+        sb.AppendLine($"MEM1_MB,{mem1 / 1048576.0:0.0}");
+        try { File.WriteAllText(outFile, sb.ToString()); } catch { }
+        try { w.Close(); } catch { }
+    }
+
     async Task RunUiHoldAsync(string name, int holdMs)
     {
         var target = UiShotTargets().FirstOrDefault(t => t.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
