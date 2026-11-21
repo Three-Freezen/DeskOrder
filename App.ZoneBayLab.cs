@@ -45,6 +45,14 @@ public partial class App
             var zones = _zoneManager!;
             var loc = LocalizationService.Instance;
 
+            // Phase 3 起「插件代码加载 + ZoneBayService 初始化」被挪到 ApplicationIdle 的
+            // 启动收尾（OnDeferredStartupWork）；而自测台本身也在 ApplicationIdle 排队，
+            // 可能先于收尾执行 → 这里看到的是未初始化的 ZoneBayService（_plugins 为 null，
+            // HasAnyZoneBayPlugin / CreateBarForFirstPlugin 全 false）。显式补一次初始化
+            // （Initialize 幂等），让自测台不再依赖两个 Idle 回调的排队顺序。
+            if (!bays.IsInitialized && _zoneManager != null && _configService != null)
+                bays.Initialize(PluginService.Instance, _zoneManager, _configService);
+
             var package = Path.Combine(dir, "zone-bay-1.0.0.dopkg");
             if (!File.Exists(package))
             {
