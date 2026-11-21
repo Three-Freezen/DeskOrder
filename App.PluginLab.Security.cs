@@ -95,8 +95,11 @@ public partial class App
         if (File.Exists(exampleRegistry))
         {
             var parsedExample = catalog.ParseRegistry(File.ReadAllBytes(exampleRegistry));
-            item.Check(parsedExample.Error == null && parsedExample.Entries.Count == 4,
-                $"the shipped example registry keeps all 4 entries (kept {parsedExample.Entries.Count})");
+            // 期望条目数从夹具文件算：加示例包（v1.1 的 tool-demo）时不用改断言。
+            var expectedCount = System.Text.Json.JsonDocument.Parse(File.ReadAllText(exampleRegistry))
+                .RootElement.GetProperty("plugins").GetArrayLength();
+            item.Check(parsedExample.Error == null && parsedExample.Entries.Count == expectedCount,
+                $"the shipped example registry keeps all {expectedCount} entries (kept {parsedExample.Entries.Count})");
         }
         else
         {

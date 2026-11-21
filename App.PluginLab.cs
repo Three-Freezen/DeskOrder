@@ -285,7 +285,12 @@ public partial class App
                 var catalog = new PluginCatalogService { RegistryUrl = "http://127.0.0.1:9/registry.json" };
                 var result = await catalog.LoadAsync(force: false);
                 item.Details.Add($"fromCache={result.FromCache} offline={result.Offline} entries={result.Entries.Count} fetched={result.FetchedAtUtc:O} error={result.Error}");
-                item.Check(result.Entries.Count == 4, "cached registry has 4 entries");
+                // 期望条目数从夹具文件算：registry.example 会随示例包增加（v1.1 加了 tool-demo），
+                // 写死 4 会让这条用例在加示例时无谓地红掉。
+                var expectedEntries = System.Text.Json.JsonDocument.Parse(File.ReadAllText(registry))
+                    .RootElement.GetProperty("plugins").GetArrayLength();
+                item.Check(result.Entries.Count == expectedEntries && expectedEntries > 0,
+                    $"cached registry has all {expectedEntries} entries");
                 break;
             }
             case "lang-install":
