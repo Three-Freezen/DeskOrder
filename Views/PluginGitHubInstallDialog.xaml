@@ -1,0 +1,83 @@
+<Window x:Class="DesktopZones.Views.PluginGitHubInstallDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:DesktopZones.Helpers"
+        Width="640" SizeToContent="Height" WindowStyle="None" AllowsTransparency="True"
+        Background="Transparent" ShowInTaskbar="False" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner">
+  <Border Background="{DynamicResource Brush.Bg.Chrome}" CornerRadius="12"
+          BorderBrush="{DynamicResource Brush.Border.Default}" BorderThickness="1">
+    <Grid Margin="22,18,22,18">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto"/>
+        <RowDefinition Height="Auto"/>
+        <RowDefinition Height="Auto"/>
+        <RowDefinition Height="Auto"/>
+        <RowDefinition Height="Auto"/>
+        <RowDefinition Height="Auto"/>
+      </Grid.RowDefinitions>
+
+      <Grid Grid.Row="0" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown" Background="Transparent">
+        <TextBlock Text="{loc:Loc Key=Plugin.GitHub.Title}" FontSize="16" FontWeight="SemiBold"
+                   Foreground="{DynamicResource Brush.Text.Primary}"/>
+      </Grid>
+
+      <!-- 输入：粘贴 owner/repo 或仓库/Release 地址；回车等同「查找」。 -->
+      <Grid Grid.Row="1" Margin="0,16,0,0">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*"/>
+          <ColumnDefinition Width="Auto"/>
+        </Grid.ColumnDefinitions>
+        <Border Height="34" CornerRadius="6" Background="{DynamicResource Brush.Bg.Input}"
+                BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1">
+          <Grid>
+            <TextBox x:Name="RepoBox" BorderThickness="0" Background="Transparent" Padding="10,0"
+                     VerticalContentAlignment="Center" FontSize="12"
+                     Foreground="{DynamicResource Brush.Text.Primary}"
+                     TextChanged="RepoBox_TextChanged" KeyDown="RepoBox_KeyDown"/>
+            <TextBlock x:Name="RepoHint" Text="{loc:Loc Key=Plugin.GitHub.Hint}" Margin="14,0,0,0"
+                       FontSize="12" VerticalAlignment="Center" IsHitTestVisible="False"
+                       Foreground="{DynamicResource Brush.Text.Tertiary}"/>
+          </Grid>
+        </Border>
+        <Button x:Name="FindButton" Grid.Column="1" Content="{loc:Loc Key=Plugin.GitHub.Find}"
+                Width="80" Height="34" Margin="10,0,0,0" Cursor="Hand" FontWeight="SemiBold"
+                Style="{DynamicResource FillBtn}" Click="Find_Click"/>
+      </Grid>
+
+      <!-- 状态：查找/下载/安装进度与可读错误都留在这里，不弹 MessageBox 刷屏。 -->
+      <TextBlock x:Name="StatusText" Grid.Row="2" Margin="0,10,0,0" FontSize="11.5"
+                 TextWrapping="Wrap" Foreground="{DynamicResource Brush.Text.Secondary}"/>
+
+      <!-- 预览：找到 Release 并下载/校验完才有内容。 -->
+      <Border x:Name="PreviewBox" Grid.Row="3" Margin="0,12,0,0" Padding="14,12" CornerRadius="8"
+              Background="{DynamicResource Brush.Bg.Surface}" BorderThickness="1"
+              BorderBrush="{DynamicResource Brush.Border.Subtle}" Visibility="Collapsed">
+        <StackPanel>
+          <TextBlock x:Name="PreviewName" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap"
+                     Foreground="{DynamicResource Brush.Text.Primary}"/>
+          <TextBlock x:Name="PreviewMeta" Margin="0,5,0,0" FontSize="11.5" TextWrapping="Wrap"
+                     Foreground="{DynamicResource Brush.Text.Secondary}"/>
+          <TextBlock x:Name="PreviewRelease" Margin="0,3,0,0" FontSize="11.5" TextWrapping="Wrap"
+                     Foreground="{DynamicResource Brush.Text.Secondary}"/>
+          <TextBlock x:Name="PreviewSignature" Margin="0,3,0,0" FontSize="11.5" TextWrapping="Wrap"
+                     Foreground="{DynamicResource Brush.Text.Secondary}"/>
+          <TextBlock x:Name="PreviewHash" Margin="0,6,0,0" TextWrapping="Wrap"
+                     FontFamily="Cascadia Code, Consolas, monospace" FontSize="10.5"
+                     Foreground="{DynamicResource Brush.Text.Tertiary}"/>
+        </StackPanel>
+      </Border>
+
+      <TextBlock Grid.Row="4" Text="{loc:Loc Key=Plugin.Warning}" Margin="0,12,0,0" FontSize="11"
+                 TextWrapping="Wrap" Foreground="{DynamicResource Brush.Text.Tertiary}"/>
+
+      <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+        <Button Content="{loc:Loc Key=Common.Close}" Width="92" Height="32" Cursor="Hand"
+                Style="{DynamicResource OutlineBtn}" Click="Close_Click"/>
+        <Button x:Name="InstallButton" Content="{loc:Loc Key=Plugin.Install}" Width="92" Height="32"
+                Margin="10,0,0,0" Cursor="Hand" FontWeight="SemiBold" IsEnabled="False" Opacity="0.5"
+                Style="{DynamicResource FillBtn}" Click="Install_Click"/>
+      </StackPanel>
+    </Grid>
+  </Border>
+</Window>

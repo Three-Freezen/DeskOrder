@@ -288,8 +288,10 @@ public sealed class PluginRecord
     public string Kind { get; set; } = "widget";
     public bool Enabled { get; set; }
     public bool Official { get; set; }
-    /// <summary>market / local / dev。</summary>
+    /// <summary>market / local / dev / github。</summary>
     public string Source { get; set; } = "market";
+    /// <summary>从 GitHub 直装时的 <c>owner/repo</c>（其它来源为空）。</summary>
+    public string Repo { get; set; } = "";
     public string Sha256 { get; set; } = "";
     /// <summary>安装时的签名状态：verified / unsigned / invalid。</summary>
     public string Signature { get; set; } = "unsigned";
