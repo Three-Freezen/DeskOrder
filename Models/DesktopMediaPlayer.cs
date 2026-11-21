@@ -117,6 +117,11 @@ public class DesktopMediaPlayer : AppearanceModel
     /// 优先"正在出声的那一方"，否则系统当前会话。见 MediaSessionService.PickSession。</summary>
     public string FollowSession { get; set; } = "";
 
+    /// <summary>插件数据源键（<c>&lt;pluginId&gt;/&lt;sourceId&gt;</c>）。空字符串 = 系统媒体会话；
+    /// 非空 = 用 <c>PluginIntegrationService</c> 里该插件的快照渲染。
+    /// 与 <see cref="FollowSession"/> 互斥：属性面板里选了插件源会清空跟随应用，反之亦然。</summary>
+    public string DataSourceKey { get; set; } = "";
+
     /// <summary>示例配置兼容：旧版本若曾用 QuickBarMode 表示磁贴模式。</summary>
     [JsonExtensionData]
     public Dictionary<string, System.Text.Json.JsonElement>? ExtensionData { get; set; }
@@ -194,6 +199,7 @@ public class DesktopMediaPlayer : AppearanceModel
             FetchCover = FetchCover,
             AccentFromCover = AccentFromCover,
             FollowSession = FollowSession,
+            DataSourceKey = DataSourceKey,
         };
         CloneHelper.CopyBaseProperties<AppearanceModel>(this, copy);
         return copy;

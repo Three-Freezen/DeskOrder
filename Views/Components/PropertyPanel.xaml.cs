@@ -130,6 +130,34 @@ public partial class PropertyPanel : UserControl
     // Cleared to null when Target is null.
     object? _snapshot;
 
+    /// <summary>「数据源」下拉的最近一次构建结果。自测台（DEBUG）靠它断言行存在与项数；
+    /// 切到非播放器目标时在 OnTargetChanged 里清空，避免残留上一棵字段树。</summary>
+    ComboBox? _mediaDataSourceCombo;
+
+    /// <summary>自测台用：当前播放器字段树里「数据源」下拉的项数（0 = 没有这一行）。</summary>
+    internal int DebugMediaDataSourceItemCount() => _mediaDataSourceCombo?.Items.Count ?? 0;
+
+    /// <summary>自测台用：当前字段树里有没有「数据源」行。</summary>
+    internal bool DebugHasMediaDataSourceRow() => _mediaDataSourceCombo != null;
+
+    /// <summary>自测台用：下拉当前选中项的键（空串 = 系统媒体会话）。</summary>
+    internal string DebugMediaDataSourceSelectedKey()
+        => (_mediaDataSourceCombo?.SelectedItem as ComboBoxItem)?.Tag as string ?? "";
+
+    /// <summary>自测台用：把「数据源」行滚进可视区，截图才能证明这一行正常渲染（不是空白/错位）。</summary>
+    internal void DebugBringDataSourceRowIntoView()
+    {
+        if (_mediaDataSourceCombo == null) return;
+        _mediaDataSourceCombo.BringIntoView();
+        UpdateLayout();
+        // BringIntoView 只保证下拉本身完整可见；它下面还有一行提示，再滚一点让整行入镜。
+        if (FieldScroller != null)
+        {
+            FieldScroller.ScrollToVerticalOffset(FieldScroller.VerticalOffset + 44);
+            UpdateLayout();
+        }
+    }
+
     /// <summary>预设卡点击实时预览时抑制 OnTargetChanged 尾部的切换动画 —
     /// 每次点预设卡只重建字段树，不重放淡入+滑动。</summary>
     bool _suppressSwitchAnimation;
@@ -814,6 +842,7 @@ public partial class PropertyPanel : UserControl
         UpdateButtonBarEnabled();
         // 播放器的预设卡分两套（律动条 / 唱片机，各存各的目录），由 BuildCurrentPayload
         // 按当前形态决定走哪一套；这里不再置灰。
+        _mediaDataSourceCombo = null;   // 新字段树还没建，旧下拉引用作废（见 DebugMediaDataSourceItemCount）
 
         switch (Target)
         {
@@ -3143,9 +3172,10 @@ public partial class PropertyPanel : UserControl
         }
         root.Children.Add(bodyContent);
 
-        // 播放与显示（P2）：跟随哪个应用 / 封面取色 —— 两种形态都有
+        // 播放与显示（P2）：跟随哪个应用 / 插件数据源 / 封面取色 —— 两种形态都有
         var playback = MakeSection(_loc["MediaProp.Section.Playback"]);
         playback.Children.Add(MakeFollowSessionRow(media));
+        playback.Children.Add(MakeMediaDataSourceRow(media));
         playback.Children.Add(MakeCheckRow(_loc["MediaProp.AccentFromCover"], media.AccentFromCover,
             v => { media.AccentFromCover = v; Save(media); }));
         playback.Children.Add(new TextBlock
@@ -3320,6 +3350,9 @@ public partial class PropertyPanel : UserControl
             else if (idx - 1 < choices.Count)
             {
                 media.FollowSession = choices[idx - 1].Aumid;
+                // 互斥：跟随具体应用 = 放弃插件数据源。两个源同时生效会让「当前曲目」
+                // 到底来自哪边不可预期（播放器运行时按「跟随优先」兜底，但设置本身不该打架）。
+                media.DataSourceKey = "";
             }
             else
             {
@@ -3337,6 +3370,94 @@ public partial class PropertyPanel : UserControl
         stack.Children.Add(new TextBlock
         {
             Text = _loc["MediaProp.FollowHint"],
+            FontSize = 10,
+            Foreground = (Brush)FindResource("Brush.Text.Tertiary"),
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 4, 0, 0),
+        });
+        return stack;
+    }
+
+    /// <summary>
+    /// 「数据源」下拉：系统媒体会话 / 各已加载插件注册的媒体源（API v4）。
+    /// 第一项 Tag=""（系统会话），插件项 Tag 为 <c>&lt;pluginId&gt;/&lt;sourceId&gt;</c>。
+    /// 与「跟随的应用」互斥：选了插件源就清空跟随应用，反之亦然。
+    /// 列表是打开面板那一刻的快照；插件在面板打开期间被禁用时，下拉重开即少一项，
+    /// 存着的 key 找不到就回到「系统媒体会话」（下次重建面板时生效）。
+    /// </summary>
+    FrameworkElement MakeMediaDataSourceRow(DesktopMediaPlayer media)
+    {
+        var stack = new StackPanel { Margin = new Thickness(0, 2, 0, 2) };
+
+        stack.Children.Add(new TextBlock
+        {
+            Text = _loc["MediaProp.DataSource"],
+            FontSize = 11,
+            Foreground = (Brush)FindResource("Brush.Text.Secondary"),
+            Margin = new Thickness(0, 0, 0, 4),
+        });
+
+        var combo = ComboBoxHelper.Create();
+        combo.HorizontalAlignment = HorizontalAlignment.Stretch;
+        combo.MinWidth = 140;
+        bool suppress = false;   // 程序改 SelectedIndex 时不写模型
+
+        void Rebuild()
+        {
+            var sources = PluginIntegrationService.Instance.MediaSources;
+            string current = media.DataSourceKey ?? "";
+
+            suppress = true;
+            try
+            {
+                combo.Items.Clear();
+                combo.Items.Add(new ComboBoxItem
+                {
+                    Content = _loc["MediaProp.DataSource.System"],
+                    Tag = "",
+                });
+                int selected = 0;
+                foreach (var entry in sources)
+                {
+                    var key = PluginIntegrationService.Instance.KeyOf(entry);
+                    combo.Items.Add(new ComboBoxItem
+                    {
+                        Content = entry.Source.DisplayName + " · " + entry.PluginDisplayName,
+                        Tag = key,
+                    });
+                    if (string.Equals(key, current, StringComparison.Ordinal))
+                        selected = combo.Items.Count - 1;
+                }
+                combo.SelectedIndex = selected;
+            }
+            finally
+            {
+                suppress = false;
+            }
+        }
+
+        combo.DropDownOpened += (_, _) => Rebuild();
+        combo.SelectionChanged += (_, _) =>
+        {
+            if (suppress) return;
+            if (combo.SelectedItem is not ComboBoxItem item) return;
+            var key = item.Tag as string ?? "";
+            media.DataSourceKey = key;
+            // 互斥：选了插件数据源 = 放弃「跟随的应用」；回系统会话时别动跟随设置（用户可能只是想取消插件源）。
+            if (key.Length > 0) media.FollowSession = "";
+            Save(media);
+            // 预览回调之外再保底推一次：改完立刻切源，不用关掉设置界面再打开
+            (Application.Current as App)?.WidgetService?
+                .GetMediaPlayerWindow(media.Id)?.RefreshDataSource();
+        };
+
+        Rebuild();
+        _mediaDataSourceCombo = combo;   // 自测台断言用（见 DebugMediaDataSourceItemCount）
+
+        stack.Children.Add(combo);
+        stack.Children.Add(new TextBlock
+        {
+            Text = _loc["MediaProp.DataSource.Hint"],
             FontSize = 10,
             Foreground = (Brush)FindResource("Brush.Text.Tertiary"),
             TextWrapping = TextWrapping.Wrap,
@@ -4864,6 +4985,7 @@ public partial class PropertyPanel : UserControl
         dst.FetchCover = src.FetchCover;
         dst.AccentFromCover = src.AccentFromCover;
         dst.FollowSession = src.FollowSession;
+        dst.DataSourceKey = src.DataSourceKey;   // 预设 / 取消回滚也要把数据源选择一起带上
         dst.Width = src.Width;
         dst.Height = src.Height;
         dst.BarsModeWidth = src.BarsModeWidth;

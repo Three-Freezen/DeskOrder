@@ -834,6 +834,9 @@
   "MediaProp.FollowPlaying": "playing",
   "MediaProp.FollowMissing": "no session now",
   "MediaProp.FollowHint": "The list is re-read every time you open it. Pick an app and this player follows only that session (the other player can follow a different one); the change takes effect immediately. Automatic keeps using the \"who is audible\" rule.",
+  "MediaProp.DataSource": "Data source",
+  "MediaProp.DataSource.System": "System media session",
+  "MediaProp.DataSource.Hint": "Sources provided by plugins (install and enable one in the plugin market).",
   "MediaProp.AccentFromCover": "Accent from cover",
   "MediaProp.AccentHint": "Picks the dominant colour of the album artwork and uses it for the bar colour, the divider and the vinyl centre label. Falls back to your own colours when the cover has no usable colour.",
 
