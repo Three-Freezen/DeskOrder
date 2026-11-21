@@ -50,6 +50,59 @@
                     Checked="PluginsEnabled_Changed" Unchecked="PluginsEnabled_Changed"/>
           <TextBlock Text="{loc:Loc Key=Settings.Plugins.Hint}" FontSize="11" Margin="24,0,0,8"
                      Foreground="{DynamicResource Brush.Text.Tertiary}" TextWrapping="Wrap"/>
+
+          <!-- 启动时加载插件（只影响代码插件；语言包 / 外观包是纯数据，不受影响） -->
+          <CheckBox x:Name="LoadPluginsAtStartupBox" Content="{loc:Loc Key=Settings.Plugins.LoadAtStartup}"
+                    Margin="24,2,0,2" Foreground="{DynamicResource Brush.Text.Primary}"
+                    Checked="LoadPluginsAtStartup_Changed" Unchecked="LoadPluginsAtStartup_Changed"/>
+          <TextBlock Text="{loc:Loc Key=Settings.Plugins.LoadAtStartup.Hint}" FontSize="11" Margin="48,0,0,10"
+                     Foreground="{DynamicResource Brush.Text.Tertiary}" TextWrapping="Wrap"/>
+
+          <!-- 索引镜像地址：留空 = 内置默认 registry；应用前会校验（https 或本机 http） -->
+          <TextBlock Text="{loc:Loc Key=Settings.Plugins.Mirror}" Margin="24,0,0,6"
+                     Foreground="{DynamicResource Brush.Text.Primary}"/>
+          <Grid Margin="24,0,0,4">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="Auto"/>
+              <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBox x:Name="MirrorUrlBox" Grid.Column="0" FontSize="11" Height="28" Padding="8,0"
+                     VerticalAlignment="Center"/>
+            <Button x:Name="MirrorApplyButton" Grid.Column="1" Content="{loc:Loc Key=Settings.Plugins.Mirror.Apply}"
+                    Margin="8,0,0,0" VerticalAlignment="Center" Click="MirrorApply_Click"
+                    FontSize="11" Padding="12,5" MinWidth="72" Style="{DynamicResource FillBtn}"/>
+            <Button x:Name="MirrorResetButton" Grid.Column="2" Content="{loc:Loc Key=Settings.Plugins.Mirror.Reset}"
+                    Margin="8,0,0,0" VerticalAlignment="Center" Click="MirrorReset_Click"
+                    FontSize="11" Padding="12,5" MinWidth="72" Style="{DynamicResource OutlineBtn}"/>
+          </Grid>
+          <TextBlock x:Name="MirrorStatusText" FontSize="11" Margin="24,2,0,4"
+                     Foreground="{DynamicResource Brush.Text.Tertiary}" TextWrapping="Wrap"
+                     Visibility="Collapsed"/>
+          <!-- 默认地址在代码里带上 PluginCatalogService.DefaultRegistryUrl 填入，避免两处各写一份 -->
+          <TextBlock x:Name="MirrorHintText" FontSize="11" Margin="24,0,0,10"
+                     Foreground="{DynamicResource Brush.Text.Tertiary}" TextWrapping="Wrap"/>
+
+          <!-- 图片缓存：本地封面缩略图（按 URL SHA-1 缓存，LRU 上限 50 MB） -->
+          <Grid Margin="24,0,0,4">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+              <TextBlock Text="{loc:Loc Key=Settings.Plugins.Cache}"
+                         Foreground="{DynamicResource Brush.Text.Primary}"/>
+              <TextBlock x:Name="CacheSizeText" FontSize="11" Margin="0,2,0,0"
+                         Foreground="{DynamicResource Brush.Text.Tertiary}"/>
+            </StackPanel>
+            <Button x:Name="ClearImageCacheButton" Grid.Column="1"
+                    Content="{loc:Loc Key=Settings.Plugins.Cache.Clear}"
+                    Margin="12,0,0,0" VerticalAlignment="Center" Click="ClearImageCache_Click"
+                    FontSize="11" Padding="12,5" Style="{DynamicResource OutlineBtn}"/>
+          </Grid>
+          <TextBlock x:Name="ImageCacheStatusText" FontSize="11" Margin="24,0,0,8"
+                     Foreground="{DynamicResource Brush.Text.Tertiary}" TextWrapping="Wrap"
+                     Visibility="Collapsed"/>
         </StackPanel>
       </Border>
 

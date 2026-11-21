@@ -144,6 +144,16 @@ public class AppConfig
     /// <summary>索引地址覆盖（镜像 / 本地测试）；空串 = 内置默认 registry。</summary>
     public string PluginRegistryUrl { get; set; } = "";
 
+    /// <summary>
+    /// 「启动时加载插件」开关（设置 → 插件）。默认开。
+    ///
+    /// 关掉后重启只跳过<b>代码插件</b>（widget / tool / integration / zoneBar 等，以及开发者模式
+    /// 插件）—— 这些要执行第三方程序集；语言包、外观包是纯声明式数据（只读 JSON / 预设），
+    /// 不受本开关影响，仍按 <see cref="PluginsEnabled"/> 总开关同步（与 <c>--no-plugins</c>
+    /// 和安全模式对声明式包的处理一致：语言包是数据不是代码）。
+    /// </summary>
+    public bool LoadPluginsAtStartup { get; set; } = true;
+
     private List<PluginZoneBar> _pluginZoneBars = new();
     /// <summary>插件分区坞（吸附边 / 外观 / 芯片顺序）。</summary>
     public List<PluginZoneBar> PluginZoneBars
