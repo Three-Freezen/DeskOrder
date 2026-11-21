@@ -310,6 +310,9 @@ public sealed class PluginService
                 Id = manifest.Id,
                 Version = manifest.Version,
                 Kind = manifest.KindValue.ToId(),
+                Kinds = manifest.KindValues.Count > 1
+                    ? manifest.KindValues.Select(k => k.ToId()).ToList()
+                    : null,
                 Enabled = true,
                 Source = "dev",
                 Signature = "unsigned",
@@ -340,6 +343,7 @@ public sealed class PluginService
                 LoadErrors[record.Id] = LocalizationService.Instance.Get("Plugin.Crash.AutoDisabled", record.Id);
             }
             PluginIntegrationService.Instance.RemovePlugin(record.Id);
+            PluginSettingsService.Instance.RemovePlugin(record.Id);
             PersistRecords();
             return;
         }
@@ -350,6 +354,7 @@ public sealed class PluginService
             LoadErrors[record.Id] = "files are missing; reinstall the plugin";
             record.Enabled = false;
             PluginIntegrationService.Instance.RemovePlugin(record.Id);
+            PluginSettingsService.Instance.RemovePlugin(record.Id);
             PersistRecords();
             return;
         }
@@ -360,6 +365,7 @@ public sealed class PluginService
             LoadErrors[record.Id] = manifestError ?? "plugin.json is invalid";
             record.Enabled = false;
             PluginIntegrationService.Instance.RemovePlugin(record.Id);
+            PluginSettingsService.Instance.RemovePlugin(record.Id);
             PersistRecords();
             return;
         }
@@ -368,6 +374,7 @@ public sealed class PluginService
             LoadErrors[record.Id] = "entry is missing";
             record.Enabled = false;
             PluginIntegrationService.Instance.RemovePlugin(record.Id);
+            PluginSettingsService.Instance.RemovePlugin(record.Id);
             PersistRecords();
             return;
         }
@@ -390,24 +397,30 @@ public sealed class PluginService
             var bayRegistry = new PluginZoneBayRegistry();
             var toolRegistry = new PluginToolRegistry();
             var integrationRegistry = new PluginIntegrationRegistry();
+            var settingsRegistry = new PluginSettingsRegistry();
+            // 插件级存储只建一次：插件拿到的 IPluginHost.Storage 与设置页保存用的是同一个实例，
+            // 所以设置窗口保存后插件在本次进程里用 host.Storage.Get("settings.x") 就能读到新值。
+            var pluginStorage = PluginStorage.Create(record.Id);
             var host = new PluginHostContext
             {
                 PluginId = record.Id,
                 HostVersion = PluginInstaller.HostVersion,
-                Storage = new JsonPluginStorage(
-                    Path.Combine(PluginPaths.PluginDataDir(record.Id), "settings.json"), null, null),
+                Storage = pluginStorage,
                 Ui = new PluginUiFacade(Notify),
                 Widgets = registry,
                 ZoneBays = bayRegistry,
                 Tools = toolRegistry,
                 Integrations = integrationRegistry,
+                Settings = settingsRegistry,
                 Log = new PluginLogger(record.Id)
             };
 
             instance.Initialize(host);
-            // 工具命令/数据源不进插件程序集持久化：每次加载重新收集，数量为 0 也发布一次（清掉上一轮残留）。
+            // 工具命令/数据源/设置 schema 不进插件程序集持久化：每次加载重新收集，
+            // 数量为 0 也发布一次（清掉上一轮残留）。
             PluginToolService.Instance.Publish(record, manifest, toolRegistry.Commands);
             PluginIntegrationService.Instance.Publish(record, manifest, integrationRegistry.Sources);
+            PluginSettingsService.Instance.Publish(record, manifest, settingsRegistry.Schema, pluginStorage);
 
             var loaded = new LoadedPlugin
             {
@@ -432,9 +445,10 @@ public sealed class PluginService
         {
             context?.Unload();
             // Initialize 成功之后、LoadRecord 收尾之前还可能失败（例如坞插件建窗）；
-            // 那时工具命令/数据源已经发布了，失败路径必须撤掉，否则菜单/下拉里会留下不可用项。
+            // 那时工具命令/数据源/设置已经发布了，失败路径必须撤掉，否则菜单/下拉/设置窗口里会留下不可用项。
             PluginToolService.Instance.RemovePlugin(record.Id);
             PluginIntegrationService.Instance.RemovePlugin(record.Id);
+            PluginSettingsService.Instance.RemovePlugin(record.Id);
             try { File.Delete(marker); } catch { }
             RecordLoadFailure(record, ex);
         }
@@ -731,9 +745,11 @@ public sealed class PluginService
             _ = descriptor; // 组件实例的清理由 PluginWidgetWindow / DeleteWidget 负责
         }
         loaded.Registry.Clear();
-        // 工具命令/数据源是加载期收集的：卸载/禁用/被封锁时同步从菜单、热键表与数据源下拉里撤掉。
+        // 工具命令/数据源/设置是加载期收集的：卸载/禁用/被封锁时同步从菜单、热键表、
+        // 数据源下拉与设置窗口里撤掉。
         PluginToolService.Instance.RemovePlugin(loaded.Record.Id);
         PluginIntegrationService.Instance.RemovePlugin(loaded.Record.Id);
+        PluginSettingsService.Instance.RemovePlugin(loaded.Record.Id);
         Loaded.Remove(loaded);
         try { loaded.Context.Unload(); } catch { }
         // Phase 3（启动收尾）：collectible ALC 的卸载是异步的。这里原先在 UI 线程上同步跑
@@ -788,9 +804,10 @@ public sealed class PluginService
     public void ShutdownAll()
     {
         foreach (var loaded in Loaded.ToList()) UnloadOne(loaded);
-        // 兜底：任何没走到 UnloadOne 的发布路径（异常中断的加载）也不能把命令/数据源留在界面里。
+        // 兜底：任何没走到 UnloadOne 的发布路径（异常中断的加载）也不能把命令/数据源/设置留在界面里。
         PluginToolService.Instance.Clear();
         PluginIntegrationService.Instance.Clear();
+        PluginSettingsService.Instance.Clear();
         foreach (var window in _windows.Values.ToList())
         {
             try { window.CloseWithoutSaving(); } catch { }

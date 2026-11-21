@@ -25,6 +25,10 @@ public partial class PluginUpdateDialog : Window
 
     public bool Confirmed { get; private set; }
 
+    /// <summary>自测台只读访问器：新增能力提示行的文本（不显示时为 null）。</summary>
+    internal string? AddedKindsTextForLab
+        => KindsBar.Visibility == Visibility.Visible ? AddedKindsText.Text : null;
+
     public PluginUpdateDialog(PluginCatalogEntry entry, PluginRecord record)
     {
         InitializeComponent();
@@ -36,6 +40,16 @@ public partial class PluginUpdateDialog : Window
         var changelog = entry.Changelog?.Get(language);
         if (string.IsNullOrWhiteSpace(changelog)) changelog = Loc["Plugin.Update.NoChangelog"];
         ChangelogText.Text = changelog;
+
+        // 一个包多类型：新版本比旧记录多了能力时显式提示一行（kind 集合差集），
+        // 但不额外增加勾选门槛 —— 权限变化仍按下面的既有逻辑处理。
+        var addedKinds = entry.KindValues.Where(kind => !record.KindValues.Contains(kind)).ToList();
+        if (addedKinds.Count > 0)
+        {
+            AddedKindsText.Text = Loc.Get("Plugin.Update.Kinds.Added",
+                string.Join(" + ", addedKinds.Select(kind => Loc[kind.I18nKey()])));
+            KindsBar.Visibility = Visibility.Visible;
+        }
 
         // 旧权限从「已落盘的 plugin.json」读：记录里不存权限，避免两份真相。
         var installed = PluginPackages.ReadManifest(PluginPaths.VersionDir(record.Id, record.Version), out _);
@@ -66,7 +80,7 @@ public partial class PluginUpdateDialog : Window
             UpdateButton.Opacity = 0.5;
         }
 
-        if (entry.KindValue.IsCode())
+        if (entry.KindValues.Any(kind => kind.IsCode()))
         {
             AddPermissionLine(Loc["Plugin.Update.Restart"], ThemeBrushes.TextTertiaryModern);
         }

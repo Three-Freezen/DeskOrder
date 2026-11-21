@@ -50,6 +50,97 @@ public static class PluginKinds
     public static bool IsCode(this PluginKind kind)
         => kind is PluginKind.Widget or PluginKind.ZoneBar or PluginKind.Tool or PluginKind.Integration;
 
+    /// <summary>一个包最多声明的能力数（<c>kinds</c> 上限）。</summary>
+    public const int MaxKinds = 4;
+
+    /// <summary>
+    /// 宽松解析 <c>kinds</c>（展示用）：非法元素忽略、重复去重，并保证主类型始终在首位。
+    /// 严格校验见 <see cref="TryResolve"/>；这里只服务「已经通过校验的数据该怎么显示」，
+    /// 旧记录 / 手改配置里出现脏值时界面也不能崩。
+    /// </summary>
+    public static List<PluginKind> ResolveKinds(string? primary, IEnumerable<string>? kinds)
+    {
+        var values = new List<PluginKind>();
+        var primaryKind = TryParse(primary, out var parsed) ? parsed : PluginKind.Widget;
+        if (kinds != null)
+        {
+            foreach (var value in kinds)
+            {
+                if (TryParse(value, out var kind) && !values.Contains(kind))
+                    values.Add(kind);
+            }
+        }
+        if (!values.Contains(primaryKind)) values.Insert(0, primaryKind);
+        return values;
+    }
+
+    /// <summary>
+    /// 严格解析并校验 <c>kinds</c>（manifest 与 registry 共用同一套规则）：
+    /// <list type="bullet">
+    /// <item><c>kind</c> 必填且合法；<c>kinds</c> 没设置时视为只有主类型；</item>
+    /// <item><c>kinds</c> 一旦设置：1–4 个、元素都是合法类型、不允许重复、<c>kinds[0]</c> 必须等于 <c>kind</c>；</item>
+    /// <item>代码类（widget / zonebar / tool / integration）之间可以任意组合，但不能与声明式混装；
+    /// 声明式包只允许「不设置 kinds」或「kinds.Count == 1 且等于 kind」。</item>
+    /// </list>
+    /// </summary>
+    public static bool TryResolve(string? primary, IReadOnlyList<string>? kinds,
+        out List<PluginKind> values, out string? error)
+    {
+        values = new List<PluginKind>();
+        error = null;
+        if (!TryParse(primary, out var primaryKind))
+        {
+            error = "kind is invalid";
+            return false;
+        }
+        if (kinds == null)
+        {
+            values.Add(primaryKind);
+            return true;
+        }
+        if (kinds.Count == 0)
+        {
+            error = "kinds must declare at least one kind";
+            return false;
+        }
+        if (kinds.Count > MaxKinds)
+        {
+            error = $"kinds may declare at most {MaxKinds} kinds";
+            return false;
+        }
+        foreach (var raw in kinds)
+        {
+            if (!TryParse(raw, out var kind))
+            {
+                error = $"kinds contains an invalid kind '{raw?.Trim()}'";
+                return false;
+            }
+            if (values.Contains(kind))
+            {
+                error = $"kinds contains the duplicate kind '{kind.ToId()}'";
+                return false;
+            }
+            values.Add(kind);
+        }
+        if (values[0] != primaryKind)
+        {
+            error = $"kinds[0] must equal kind ('{primaryKind.ToId()}')";
+            return false;
+        }
+        var codeCount = values.Count(k => k.IsCode());
+        if (codeCount > 0 && codeCount != values.Count)
+        {
+            error = "kinds cannot mix declarative and code plugin kinds";
+            return false;
+        }
+        if (codeCount == 0 && values.Count > 1)
+        {
+            error = "declarative packages cannot declare multiple kinds";
+            return false;
+        }
+        return true;
+    }
+
     public static string I18nKey(this PluginKind kind) => kind switch
     {
         PluginKind.Widget => "Plugin.Type.Widget",
@@ -162,6 +253,13 @@ public sealed class PluginManifest
     public string License { get; set; } = "";
     public string? Homepage { get; set; }
     public string Kind { get; set; } = "widget";
+
+    /// <summary>
+    /// 一个包的多种能力（可选）。<c>kind</c> 仍是必填的主类型：设置 kinds 时 <c>kinds[0]</c> 必须等于
+    /// <c>kind</c>；不设置 = 只有主类型一种。代码类之间可任意组合，声明式包不允许组合。
+    /// </summary>
+    public List<string>? Kinds { get; set; }
+
     public int ApiVersion { get; set; }
     public string MinAppVersion { get; set; } = "1.0.0";
     public PluginEntry? Entry { get; set; }
@@ -174,6 +272,9 @@ public sealed class PluginManifest
     public List<string>? Previews { get; set; }
 
     [JsonIgnore] public PluginKind KindValue => PluginKinds.TryParse(Kind, out var k) ? k : PluginKind.Widget;
+
+    /// <summary>解析后的全部能力类型（<c>kinds</c> 未设置时只有主类型）。</summary>
+    [JsonIgnore] public IReadOnlyList<PluginKind> KindValues => PluginKinds.ResolveKinds(Kind, Kinds);
 
     // internal：registry（PluginCatalogService）必须用同一套规则校验 id / version，
     // 否则市场卡片能展示一条 manifest 装不上的条目（点安装才发现）。
@@ -202,72 +303,81 @@ public sealed class PluginManifest
         if (string.IsNullOrWhiteSpace(Author?.Github)) Err("author.github is required");
         if (!RepoRe.IsMatch(Repo ?? "")) Err("repo must be owner/name");
         if (string.IsNullOrWhiteSpace(License)) Err("license is required");
-        if (!PluginKinds.TryParse(Kind, out var kind)) Err("kind is invalid");
         if (!SemVerRe.IsMatch(MinAppVersion ?? "")) Err("minAppVersion is not SemVer");
         else if (!PluginVersion.HostSatisfies(MinAppVersion, hostVersion))
             Err($"requires DeskOrder {MinAppVersion} or later");
 
-        if (PluginKinds.TryParse(Kind, out var parsedKind))
+        // kinds（一个包多类型）：仍以 kind 为主类型，kinds 非空时必须 kinds[0]==kind。
+        var kindsValid = PluginKinds.TryResolve(Kind, Kinds, out var kindValues, out var kindsError);
+        if (!kindsValid) Err(kindsError!);
+
+        if (kindsValid && kindValues[0].IsCode())
         {
-            if (parsedKind.IsCode())
-            {
-                if (ApiVersion < 1 || ApiVersion > PluginApiVersion.Current)
-                    Err($"apiVersion {ApiVersion} is not supported (host supports 1..{PluginApiVersion.Current})");
-                if (Entry == null) Err("entry is required for code plugins");
-                else
-                {
-                    if (!PluginPaths.IsSafeRelativePath(Entry.Assembly))
-                        Err("entry.assembly must be a relative path inside the package");
-                    if (string.IsNullOrWhiteSpace(Entry.Type)) Err("entry.type is required");
-                }
-                if (parsedKind == PluginKind.Widget)
-                {
-                    if (Widgets == null || Widgets.Count == 0) Err("widgets must declare at least one widget");
-                    else if (Widgets.Count > 8) Err("widgets may declare at most 8 widgets");
-                    else if (Widgets.Any(w => string.IsNullOrWhiteSpace(w.Id)))
-                        Err("widgets[].id is required");
-                    else if (Widgets.Select(w => w.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() != Widgets.Count)
-                        Err("widgets[].id must be unique");
-                }
-                else if (parsedKind == PluginKind.ZoneBar)
-                {
-                    if (ApiVersion < 2) Err("zonebar plugins require apiVersion 2");
-                    if (ZoneBar == null) Err("zoneBar is required for zonebar plugins");
-                    else
-                    {
-                        if (string.IsNullOrWhiteSpace(ZoneBar.Id)) Err("zoneBar.id is required");
-                        else if (!IdRe.IsMatch(ZoneBar.Id)) Err("zoneBar.id is invalid");
-                        if (!ZoneBar.Name.HasAny) Err("zoneBar.name.zh/en is required");
-                        if (!string.IsNullOrWhiteSpace(ZoneBar.Icon) && !PluginPaths.IsSafeRelativePath(ZoneBar.Icon))
-                            Err("zoneBar.icon must be a relative path inside the package");
-                    }
-                }
-                else if (parsedKind == PluginKind.Integration && ApiVersion < 4)
-                {
-                    // 数据源是 API v4 才开放的契约：v4 起 IPluginHost.Integrations 才存在。
-                    Err("integration plugins require apiVersion 4");
-                }
-            }
+            if (ApiVersion < 1 || ApiVersion > PluginApiVersion.Current)
+                Err($"apiVersion {ApiVersion} is not supported (host supports 1..{PluginApiVersion.Current})");
+            if (Entry == null) Err("entry is required for code plugins");
             else
             {
-                if (ApiVersion != 0) Err("declarative packages must use apiVersion 0");
-                if (parsedKind == PluginKind.Language)
+                if (!PluginPaths.IsSafeRelativePath(Entry.Assembly))
+                    Err("entry.assembly must be a relative path inside the package");
+                if (string.IsNullOrWhiteSpace(Entry.Type)) Err("entry.type is required");
+            }
+            // 每种代码能力各自校验：组合包只要含 widget 就必须声明 widgets，含 zonebar/tool/integration
+            // 就必须满足它们各自的最低 apiVersion。
+            if (kindValues.Contains(PluginKind.Widget))
+            {
+                if (Widgets == null || Widgets.Count == 0) Err("widgets must declare at least one widget");
+                else if (Widgets.Count > 8) Err("widgets may declare at most 8 widgets");
+                else if (Widgets.Any(w => string.IsNullOrWhiteSpace(w.Id)))
+                    Err("widgets[].id is required");
+                else if (Widgets.Select(w => w.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() != Widgets.Count)
+                    Err("widgets[].id must be unique");
+            }
+            if (kindValues.Contains(PluginKind.ZoneBar))
+            {
+                if (ApiVersion < 2) Err("zonebar plugins require apiVersion 2");
+                if (ZoneBar == null) Err("zoneBar is required for zonebar plugins");
+                else
                 {
-                    if (Language == null) Err("language is required for language packs");
-                    else
-                    {
-                        if (!LangRe.IsMatch(Language.Code ?? "")) Err("language.code is not a BCP-47 code");
-                        if (string.IsNullOrWhiteSpace(Language.NativeName)) Err("language.nativeName is required");
-                        if (Language.Coverage < 0 || Language.Coverage > 1) Err("language.coverage must be 0..1");
-                    }
-                    if (string.IsNullOrWhiteSpace(Payload?.File)) Err("payload.file is required for language packs");
-                    else if (!PluginPaths.IsSafeRelativePath(Payload!.File!)) Err("payload.file is not a safe relative path");
+                    if (string.IsNullOrWhiteSpace(ZoneBar.Id)) Err("zoneBar.id is required");
+                    else if (!IdRe.IsMatch(ZoneBar.Id)) Err("zoneBar.id is invalid");
+                    if (!ZoneBar.Name.HasAny) Err("zoneBar.name.zh/en is required");
+                    if (!string.IsNullOrWhiteSpace(ZoneBar.Icon) && !PluginPaths.IsSafeRelativePath(ZoneBar.Icon))
+                        Err("zoneBar.icon must be a relative path inside the package");
                 }
-                else if (parsedKind == PluginKind.Appearance)
+            }
+            if (kindValues.Contains(PluginKind.Tool) && ApiVersion < 3)
+            {
+                // 工具命令是 API v3 才开放的契约：v3 起 IPluginHost.Tools 才存在。
+                Err("tool plugins require apiVersion 3");
+            }
+            if (kindValues.Contains(PluginKind.Integration) && ApiVersion < 4)
+            {
+                // 数据源是 API v4 才开放的契约：v4 起 IPluginHost.Integrations 才存在。
+                Err("integration plugins require apiVersion 4");
+            }
+        }
+        else if (kindsValid)
+        {
+            // 声明式包（language / appearance）：TryResolve 已保证最多一种、且不允许与代码类混装。
+            var parsedKind = kindValues[0];
+            if (ApiVersion != 0) Err("declarative packages must use apiVersion 0");
+            if (parsedKind == PluginKind.Language)
+            {
+                if (Language == null) Err("language is required for language packs");
+                else
                 {
-                    if ((Payload?.Materials?.Count ?? 0) == 0 && (Payload?.Presets?.Count ?? 0) == 0)
-                        Err("payload must contain materials or presets");
+                    if (!LangRe.IsMatch(Language.Code ?? "")) Err("language.code is not a BCP-47 code");
+                    if (string.IsNullOrWhiteSpace(Language.NativeName)) Err("language.nativeName is required");
+                    if (Language.Coverage < 0 || Language.Coverage > 1) Err("language.coverage must be 0..1");
                 }
+                if (string.IsNullOrWhiteSpace(Payload?.File)) Err("payload.file is required for language packs");
+                else if (!PluginPaths.IsSafeRelativePath(Payload!.File!)) Err("payload.file is not a safe relative path");
+            }
+            else if (parsedKind == PluginKind.Appearance)
+            {
+                if ((Payload?.Materials?.Count ?? 0) == 0 && (Payload?.Presets?.Count ?? 0) == 0)
+                    Err("payload must contain materials or presets");
             }
         }
 
@@ -286,10 +396,16 @@ public sealed class PluginRecord
     public string Id { get; set; } = "";
     public string Version { get; set; } = "";
     public string Kind { get; set; } = "widget";
+
+    /// <summary>安装时 manifest 声明的全部能力；旧记录没有这个字段时回退为只有 <see cref="Kind"/>。</summary>
+    public List<string>? Kinds { get; set; }
+
     public bool Enabled { get; set; }
     public bool Official { get; set; }
-    /// <summary>market / local / dev。</summary>
+    /// <summary>market / local / dev / github。</summary>
     public string Source { get; set; } = "market";
+    /// <summary>从 GitHub 直装时的 <c>owner/repo</c>（其它来源为空）。</summary>
+    public string Repo { get; set; } = "";
     public string Sha256 { get; set; } = "";
     /// <summary>安装时的签名状态：verified / unsigned / invalid。</summary>
     public string Signature { get; set; } = "unsigned";
@@ -301,6 +417,9 @@ public sealed class PluginRecord
     public int CrashCount { get; set; }
 
     [JsonIgnore] public PluginKind KindValue => PluginKinds.TryParse(Kind, out var k) ? k : PluginKind.Widget;
+
+    /// <summary>记录的全部能力类型（旧记录没有 <see cref="Kinds"/> 时只有主类型）。</summary>
+    [JsonIgnore] public IReadOnlyList<PluginKind> KindValues => PluginKinds.ResolveKinds(Kind, Kinds);
 }
 
 // ── registry（市场索引） ──
@@ -363,6 +482,10 @@ public sealed class PluginCatalogEntry
 {
     public string Id { get; set; } = "";
     public string Kind { get; set; } = "widget";
+
+    /// <summary>registry 声明的全部能力（可选）；不设置 = 只有 <see cref="Kind"/>。</summary>
+    public List<string>? Kinds { get; set; }
+
     public LocalizedText Name { get; set; } = new();
     public LocalizedText Summary { get; set; } = new();
     public LocalizedText? Description { get; set; }
@@ -393,6 +516,9 @@ public sealed class PluginCatalogEntry
     public string? SignatureUrl { get; set; }
 
     [JsonIgnore] public PluginKind KindValue => PluginKinds.TryParse(Kind, out var k) ? k : PluginKind.Widget;
+
+    /// <summary>条目的全部能力类型（registry 没写 <see cref="Kinds"/> 时只有主类型）。</summary>
+    [JsonIgnore] public IReadOnlyList<PluginKind> KindValues => PluginKinds.ResolveKinds(Kind, Kinds);
 
     /// <summary>官方判定：作者 GitHub 账号 + 仓库归属都必须是 Three-Freezen（离线规则，不请求 API）。</summary>
     [JsonIgnore]

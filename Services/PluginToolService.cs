@@ -22,6 +22,20 @@ public sealed class PluginToolEntry
     /// <summary>manifest.Name 的当前语言写法；为空时退化为插件 id（作者没填时也不能显示空白项）。</summary>
     public required string PluginDisplayName { get; init; }
     public required IPluginLog Log { get; init; }
+
+    /// <summary>
+    /// 命令显示名（按宿主当前语言解析）：API v5 的 <see cref="PluginToolCommand.LocalizedDisplayName"/>
+    /// 优先，为 null / 解析为空时回退 <see cref="PluginToolCommand.DisplayName"/>（旧插件零改动）。
+    /// 菜单、插件工具页、执行失败提示统一用它，语言切换后重新取值即可。
+    /// </summary>
+    public string DisplayName
+    {
+        get
+        {
+            var localized = Command.LocalizedDisplayName?.Get(LocalizationService.Instance.CurrentLanguage);
+            return string.IsNullOrWhiteSpace(localized) ? Command.DisplayName : localized!;
+        }
+    }
 }
 
 /// <summary>
@@ -118,8 +132,7 @@ public sealed class PluginToolService
         JsonPluginStorage? storage = null;
         try
         {
-            var path = Path.Combine(PluginPaths.PluginDataDir(entry.PluginId), "settings.json");
-            storage = new JsonPluginStorage(path, null, null);
+            storage = PluginStorage.Create(entry.PluginId);
             storage.Flush();
             var context = new PluginToolContext
             {
@@ -141,7 +154,7 @@ public sealed class PluginToolService
             try
             {
                 PluginService.Instance.Notify(loc["PluginTool.Menu"],
-                    loc.Get("PluginTool.RunFailed", entry.Command.DisplayName));
+                    loc.Get("PluginTool.RunFailed", entry.DisplayName));
             }
             catch { }
             return false;
@@ -171,7 +184,7 @@ public sealed class PluginToolService
         };
         foreach (var entry in entries)
         {
-            var item = new MenuItem { Header = entry.PluginDisplayName + " · " + entry.Command.DisplayName };
+            var item = new MenuItem { Header = entry.PluginDisplayName + " · " + entry.DisplayName };
             if (!string.IsNullOrWhiteSpace(entry.Command.Description))
                 item.ToolTip = entry.Command.Description;
             var captured = entry;

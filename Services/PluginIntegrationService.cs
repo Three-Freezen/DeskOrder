@@ -19,6 +19,21 @@ public sealed class PluginMediaSourceEntry
     public required string PluginId { get; init; }
     /// <summary>manifest.Name 的当前语言写法；为空时退化为插件 id（作者没填时也不能显示空白项）。</summary>
     public required string PluginDisplayName { get; init; }
+
+    /// <summary>
+    /// 数据源显示名（按宿主当前语言解析）：API v5 的
+    /// <see cref="PluginMediaSourceDescriptor.LocalizedDisplayName"/> 优先，为 null / 解析为空时
+    /// 回退 <see cref="PluginMediaSourceDescriptor.DisplayName"/>（旧插件零改动）。
+    /// 属性面板「数据源」下拉统一用它。
+    /// </summary>
+    public string DisplayName
+    {
+        get
+        {
+            var localized = Source.LocalizedDisplayName?.Get(LocalizationService.Instance.CurrentLanguage);
+            return string.IsNullOrWhiteSpace(localized) ? Source.DisplayName : localized!;
+        }
+    }
 }
 
 /// <summary>

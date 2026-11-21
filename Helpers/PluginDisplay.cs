@@ -16,11 +16,13 @@ public static class PluginDisplay
 {
     static LocalizationService Loc => LocalizationService.Instance;
 
-    /// <summary>market / local / dev → 本地化来源名。</summary>
+    /// <summary>market / local / dev / github → 本地化来源名。</summary>
     public static string DescribeSource(string? source) => source?.Trim().ToLowerInvariant() switch
     {
         "local" => Loc["Plugin.LocalSource"],
         "dev" => Loc["Plugin.Dev.Badge"],
+        // GitHub 直装不在 registry 里：来源要能与市场/本地导入区分开（也不参与「已下架」判定）。
+        "github" => Loc["Plugin.GitHub.Source"],
         _ => Loc["Plugin.MarketSource"]
     };
 
@@ -42,6 +44,18 @@ public static class PluginDisplay
         => permissions == null || !permissions.Any()
             ? ""
             : string.Join(" · ", permissions.Select(DescribePermission));
+
+    /// <summary>
+    /// 插件能力类型 → 多类型文案：1 个 = 类型名；2 个 = 「A + B」；3–4 个 = 「A 等 N 类」。
+    /// 市场卡片、已安装行、详情弹窗共用这一处，一个包多类型时不再只显示主类型。
+    /// </summary>
+    public static string DescribeKinds(IReadOnlyList<PluginKind>? kinds)
+    {
+        IReadOnlyList<PluginKind> values = kinds is { Count: > 0 } ? kinds : new[] { PluginKind.Widget };
+        if (values.Count <= 2)
+            return string.Join(" + ", values.Select(kind => Loc[kind.I18nKey()]));
+        return Loc.Get("Plugin.Type.Many", Loc[values[0].I18nKey()], values.Count);
+    }
 
     /// <summary>
     /// 这个条目能不能在当前宿主上安装 / 更新；能则返回 null，否则返回本地化原因。

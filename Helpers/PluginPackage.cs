@@ -265,6 +265,8 @@ public sealed class PluginInstallInfo
     public string Version { get; set; } = "";
     public string Kind { get; set; } = "widget";
     public string Source { get; set; } = "market";
+    /// <summary>从 GitHub 直装时的 <c>owner/repo</c>（其它来源为空）。</summary>
+    public string Repo { get; set; } = "";
     public bool Official { get; set; }
     public string Sha256 { get; set; } = "";
     public DateTime InstalledAtUtc { get; set; } = DateTime.UtcNow;

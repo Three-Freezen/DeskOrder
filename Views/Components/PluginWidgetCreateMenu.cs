@@ -25,7 +25,7 @@ public static class PluginWidgetCreateMenu
     /// </summary>
     public static bool NeedsRestart
         => !HasAvailable
-           && PluginService.Instance.Records.Any(r => r.Enabled && r.KindValue == PluginKind.Widget);
+           && PluginService.Instance.Records.Any(r => r.Enabled && r.KindValues.Contains(PluginKind.Widget));
 
     /// <summary>
     /// 构建菜单。<paramref name="onCreated"/> 在创建成功后才回调（传创建的实例），

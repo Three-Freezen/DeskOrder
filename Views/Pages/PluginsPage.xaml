@@ -52,6 +52,9 @@
           <Button DockPanel.Dock="Right" Content="{loc:Loc Key=Plugin.ImportLocal}" Margin="8,0,0,0"
                   Height="30" Padding="14,0" Cursor="Hand" FontWeight="SemiBold"
                   Style="{DynamicResource FillBtn}" Click="ImportLocal_Click"/>
+          <Button DockPanel.Dock="Right" Content="{loc:Loc Key=Plugin.GitHub.Button}" Margin="8,0,0,0"
+                  Height="30" Padding="14,0" Cursor="Hand"
+                  Style="{DynamicResource OutlineBtn}" Click="GitHubInstall_Click"/>
           <Button DockPanel.Dock="Right" Content="{loc:Loc Key=Plugin.Refresh}" Margin="8,0,0,0"
                   Height="30" Padding="14,0" Cursor="Hand"
                   Style="{DynamicResource OutlineBtn}" Click="Refresh_Click"/>
