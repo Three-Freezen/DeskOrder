@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using DesktopZones.Helpers;
 using DesktopZones.Models;
@@ -12,6 +14,9 @@ namespace DesktopZones.Views;
 public partial class PluginDetailDialog : Window
 {
     static readonly LocalizationService Loc = LocalizationService.Instance;
+
+    /// <summary>详情页最多轮播几张预览图：再多也没人翻，而且每张都要下载。</summary>
+    const int MaxPreviewImages = 8;
 
     public PluginCatalogEntry Entry { get; }
     public PluginRecord? Record { get; private set; }
@@ -25,6 +30,12 @@ public partial class PluginDetailDialog : Window
     bool _busy;
     readonly bool _delisted;
 
+    // ── 预览图轮播状态 ──
+    readonly List<string> _previewUrls = new();
+    int _previewIndex;
+    bool _previewBusy;
+    bool _closed;
+
     public PluginDetailDialog(PluginCatalogEntry entry, PluginRecord? record, bool delisted = false)
     {
         InitializeComponent();
@@ -32,8 +43,18 @@ public partial class PluginDetailDialog : Window
         Record = record;
         _delisted = delisted;
         Apply();
+        InitPreviewUrls();
         Loaded += async (_, _) => await LoadImagesAsync();
     }
+
+    /// <summary>自测台只读访问器：可轮播的预览图张数（0..8）。</summary>
+    internal int PreviewCountForLab => _previewUrls.Count;
+
+    /// <summary>自测台只读访问器：左右箭头 / 计数是否显示（>1 张才显示）。</summary>
+    internal bool PreviewNavVisibleForLab => PreviewPrevButton.Visibility == Visibility.Visible;
+
+    /// <summary>自测台只读访问器：计数文本（形如 "1 / 3"）。</summary>
+    internal string PreviewCounterForLab => PreviewCountText.Text;
 
     public void SetRecord(PluginRecord? record)
     {
@@ -48,6 +69,10 @@ public partial class PluginDetailDialog : Window
         // author.github/repo，但只有签名验过的才算官方（记录里带 Official）。
         var official = Record?.Official ?? Entry.Official;
         OfficialPill.Visibility = official ? Visibility.Visible : Visibility.Collapsed;
+        // 每次重算先收起提示条：下面「禁用名单 / 已下架 / 不兼容」三类原因各自决定要不要再显示，
+        // 否则切过一次禁用名单后、原因已解除时旧提示会一直挂在那儿。
+        NoticeBar.Visibility = Visibility.Collapsed;
+        var incompatible = PluginDisplay.IncompatibilityReason(Entry);
         var authorName = string.IsNullOrWhiteSpace(Entry.Author?.Github)
             ? (Entry.Author?.Name ?? "")
             : Loc.Get("Plugin.AuthorBy", Entry.Author!.Github);
@@ -105,14 +130,19 @@ public partial class PluginDetailDialog : Window
             StateText.Text = "";
             // 六类插件（含数据源）都能安装；不再有「后续版本」的占位按钮。
             PrimaryButton.Content = Loc["Plugin.Install"];
-            PrimaryButton.IsEnabled = true;
-            PrimaryButton.Opacity = 1.0;
+            // apiVersion / minAppVersion 不满足时提前置灰，别等点下去才在安装流程里报错。
+            PrimaryButton.IsEnabled = incompatible == null;
+            PrimaryButton.Opacity = incompatible == null ? 1.0 : 0.45;
+            PrimaryButton.ToolTip = incompatible;
         }
         else
         {
             var update = IsUpdateAvailable(Record, Entry);
             PrimaryButton.Content = update ? Loc["Plugin.Update"] : Loc["Plugin.Install"];
             PrimaryButton.Visibility = update ? Visibility.Visible : Visibility.Collapsed;
+            PrimaryButton.IsEnabled = update && incompatible == null;
+            PrimaryButton.Opacity = PrimaryButton.IsEnabled ? 1.0 : 0.45;
+            PrimaryButton.ToolTip = incompatible;
             ToggleButton.Content = Record.Enabled ? Loc["Plugin.Disable"] : Loc["Plugin.Enable"];
             ToggleButton.Visibility = Entry.KindValue is PluginKind.Widget or PluginKind.ZoneBar
                 or PluginKind.Tool or PluginKind.Language or PluginKind.Appearance or PluginKind.Integration
@@ -142,6 +172,12 @@ public partial class PluginDetailDialog : Window
                 ShowNotice(Loc["Plugin.Delisted"]);
             }
         }
+
+        // 兼容性门禁：主按钮置灰 + 顶部说明原因。禁用名单 / 已下架的原因更严重也更具体，
+        // 已经显示时不再让「需要更高版本」把它盖掉。
+        if (incompatible != null && PrimaryButton.Visibility == Visibility.Visible
+            && NoticeBar.Visibility != Visibility.Visible)
+            ShowNotice(incompatible);
 
         // 签名状态：官方的必须签名，声明式可选。
         SignatureText.Text = DescribeSignature();
@@ -198,30 +234,121 @@ public partial class PluginDetailDialog : Window
     public static bool IsUpdateAvailable(PluginRecord record, PluginCatalogEntry entry)
         => PluginVersion.IsNewer(record.Version, entry.Version);
 
+    // ── 预览图轮播 ──
+
+    /// <summary>收集可轮播的预览图（过滤空串，最多 <see cref="MaxPreviewImages"/> 张）。</summary>
+    void InitPreviewUrls()
+    {
+        _previewUrls.Clear();
+        if (Entry.PreviewUrls != null)
+        {
+            foreach (var url in Entry.PreviewUrls)
+            {
+                if (string.IsNullOrWhiteSpace(url)) continue;
+                _previewUrls.Add(url.Trim());
+                if (_previewUrls.Count >= MaxPreviewImages) break;
+            }
+        }
+        _previewIndex = 0;
+        SyncPreviewChrome();
+        // 有预览图就先占位：下载失败时保留一块稳定的骨架，弹窗高度不会随加载结果跳动。
+        if (_previewUrls.Count > 0) PreviewHost.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>按张数决定箭头 / 计数显隐，并刷新「当前 / 总数」。</summary>
+    void SyncPreviewChrome()
+    {
+        var count = _previewUrls.Count;
+        var nav = count > 1;
+        PreviewPrevButton.Visibility = nav ? Visibility.Visible : Visibility.Collapsed;
+        PreviewNextButton.Visibility = nav ? Visibility.Visible : Visibility.Collapsed;
+        PreviewCounter.Visibility = nav ? Visibility.Visible : Visibility.Collapsed;
+        PreviewCountText.Text = count > 0 ? $"{_previewIndex + 1} / {count}" : "";
+    }
+
+    /// <summary>关闭 / 退出期不再回写控件：异步续体可能比窗口活得久（详见 PluginsPage 的说明）。</summary>
+    bool IsClosedForWrites() => _closed || !IsLoaded || AppLifetime.IsShuttingDown;
+
+    protected override void OnClosed(EventArgs e)
+    {
+        _closed = true;
+        base.OnClosed(e);
+    }
+
     async System.Threading.Tasks.Task LoadImagesAsync()
     {
         try
         {
-            var iconPath = await PluginService.Instance.Catalog.GetImageAsync(Entry.IconUrl);
-            if (iconPath != null) IconImage.Source = LoadBitmap(iconPath);
-            if (IconImage.Source != null)
-            {
-                IconImage.Visibility = Visibility.Visible;
-                PlaceholderIcon.Visibility = Visibility.Collapsed;
-            }
+            // 先加载预览图再加载小图标：详情页最显眼的是预览图，别让一个 404 的图标拖慢它。
+            if (_previewUrls.Count > 0) await LoadPreviewAtAsync(0);
 
-            var previewUrl = Entry.PreviewUrls is { Count: > 0 } ? Entry.PreviewUrls[0] : null;
-            if (previewUrl != null)
-            {
-                var previewPath = await PluginService.Instance.Catalog.GetImageAsync(previewUrl);
-                if (previewPath != null)
-                {
-                    PreviewImage.Source = LoadBitmap(previewPath);
-                    PreviewHost.Visibility = Visibility.Visible;
-                }
-            }
+            var iconPath = await PluginService.Instance.Catalog.GetImageAsync(Entry.IconUrl);
+            if (iconPath == null || IsClosedForWrites()) return;
+            var icon = TryLoadBitmap(iconPath);
+            if (icon == null) return;
+            IconImage.Source = icon;
+            IconImage.Visibility = Visibility.Visible;
+            PlaceholderIcon.Visibility = Visibility.Collapsed;
         }
         catch { }
+    }
+
+    /// <summary>
+    /// 只走 <see cref="PluginCatalogService.GetImageAsync"/>（自带域名白名单与本地缓存），
+    /// 失败时保留当前已显示的图，不把轮播区清空。
+    /// </summary>
+    async System.Threading.Tasks.Task LoadPreviewAtAsync(int index)
+    {
+        if (index < 0 || index >= _previewUrls.Count) return;
+        _previewBusy = true;
+        try
+        {
+            var path = await PluginService.Instance.Catalog.GetImageAsync(_previewUrls[index]);
+            if (path == null || IsClosedForWrites()) return;
+            var bitmap = TryLoadBitmap(path);
+            if (bitmap == null) return;
+            PreviewImage.Source = bitmap;
+            PreviewHost.Visibility = Visibility.Visible;
+        }
+        finally
+        {
+            _previewBusy = false;
+        }
+    }
+
+    /// <summary>左右翻页；加载失败时计数退回上一张，避免「2 / 3 却还显示第 1 张」。</summary>
+    async System.Threading.Tasks.Task NavigatePreviewAsync(int delta)
+    {
+        if (_previewBusy || _previewUrls.Count < 2) return;
+        var previous = _previewIndex;
+        _previewIndex = (_previewIndex + delta + _previewUrls.Count) % _previewUrls.Count;
+        SyncPreviewChrome();
+        var before = PreviewImage.Source;
+        await LoadPreviewAtAsync(_previewIndex);
+        if (IsClosedForWrites()) return;
+        // 新图没换上（下载/解码失败）：计数回到上一张，界面保持自洽。
+        if (ReferenceEquals(PreviewImage.Source, before))
+        {
+            _previewIndex = previous;
+            SyncPreviewChrome();
+        }
+    }
+
+    void PreviewPrev_Click(object sender, RoutedEventArgs e) => _ = NavigatePreviewAsync(-1);
+
+    void PreviewNext_Click(object sender, RoutedEventArgs e) => _ = NavigatePreviewAsync(1);
+
+    static BitmapImage? TryLoadBitmap(string path)
+    {
+        try
+        {
+            return LoadBitmap(path);
+        }
+        catch
+        {
+            // 缓存里的字节可能不是合法图片（下载被截断 / 服务端返回 HTML），解码失败只影响这一张。
+            return null;
+        }
     }
 
     static BitmapImage LoadBitmap(string path)
