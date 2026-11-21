@@ -98,8 +98,35 @@
           </StackPanel>
 
           <Border x:Name="PreviewHost" Visibility="Collapsed" Margin="0,16,0,0" CornerRadius="8"
-                  ClipToBounds="True" Background="{DynamicResource Brush.Bg.Hover}">
-            <Image x:Name="PreviewImage" Stretch="Uniform" MaxHeight="300"/>
+                  MinHeight="120" ClipToBounds="True" Background="{DynamicResource Brush.Bg.Hover}">
+            <Grid>
+              <Image x:Name="PreviewImage" Stretch="Uniform" MaxHeight="300"/>
+              <!-- 多图轮播：箭头与计数只在预览图 ≥2 张时出现（±在代码里按总数切换）。 -->
+              <Button x:Name="PreviewPrevButton" HorizontalAlignment="Left" VerticalAlignment="Center"
+                      Width="28" Height="28" Margin="8,0,0,0" Padding="0" Cursor="Hand"
+                      Style="{DynamicResource OutlineBtn}" Visibility="Collapsed"
+                      ToolTip="{loc:Loc Key=Plugin.Preview.Prev}" Click="PreviewPrev_Click">
+                <Path Data="{StaticResource Icon.ChevronLeft}" Width="8" Height="8" Stretch="Uniform"
+                      Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                      StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                      StrokeLineJoin="Round"/>
+              </Button>
+              <Button x:Name="PreviewNextButton" HorizontalAlignment="Right" VerticalAlignment="Center"
+                      Width="28" Height="28" Margin="0,0,8,0" Padding="0" Cursor="Hand"
+                      Style="{DynamicResource OutlineBtn}" Visibility="Collapsed"
+                      ToolTip="{loc:Loc Key=Plugin.Preview.Next}" Click="PreviewNext_Click">
+                <Path Data="{StaticResource Icon.ChevronRight}" Width="8" Height="8" Stretch="Uniform"
+                      Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                      StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                      StrokeLineJoin="Round"/>
+              </Button>
+              <Border x:Name="PreviewCounter" HorizontalAlignment="Right" VerticalAlignment="Top"
+                      Margin="0,8,8,0" Padding="8,2" CornerRadius="9" Background="#B31A1D23"
+                      Visibility="Collapsed">
+                <TextBlock x:Name="PreviewCountText" FontSize="10.5" Foreground="#FFF2F4F8"
+                           FontFamily="Cascadia Code, Consolas, monospace"/>
+              </Border>
+            </Grid>
           </Border>
 
           <TextBlock x:Name="RepoText" Margin="0,16,0,4" FontSize="11"

@@ -69,6 +69,11 @@ public partial class PluginsPage : UserControl
         Render();
     }
 
+    // 自测台只读访问器：空态按钮 / 文案的可见性（在没窗口的页面上也能算出来）。
+    internal bool EmptyRetryVisibleForLab => EmptyRetryButton.Visibility == Visibility.Visible;
+    internal bool EmptyImportVisibleForLab => EmptyImportButton.Visibility == Visibility.Visible;
+    internal string EmptyBodyForLab => EmptyBody.Text;
+
     void OnPluginsChanged()
     {
         // 判断必须放在 lambda 里：投递到 Background 队列的这段时间里页面可能已经卸载
@@ -238,6 +243,7 @@ public partial class PluginsPage : UserControl
     {
         if (_catalog == null) yield break;
         var query = SearchBox.Text?.Trim() ?? "";
+        var visible = new List<PluginCatalogEntry>();
         foreach (var entry in _catalog.Entries)
         {
             // 被禁用 / 下架的不进市场列表：官方的处置动作应该立刻从货架上消失。
@@ -246,17 +252,48 @@ public partial class PluginsPage : UserControl
             var record = _service.GetRecord(entry.Id);
             if (_tab == 2 && (record == null || !PluginDetailDialog.IsUpdateAvailable(record, entry))) continue;
             if (query.Length > 0 && !Matches(entry, query)) continue;
-            yield return entry;
+            visible.Add(entry);
         }
+        foreach (var entry in SortCatalogEntries(visible, _service.GetRecord))
+            yield return entry;
     }
 
-    static bool Matches(PluginCatalogEntry entry, string query)
+    /// <summary>
+    /// 市场 / 更新 tab 的排序：有可用更新的条目最前 → 官方优先 → <c>PublishedAt</c> 降序。
+    ///
+    /// 「有更新」比「官方」更该被看见：用户装过的插件出新版，如果沉在几十张卡后面，
+    /// 就等于没提示。更新 tab 沿用同一排序，两个 tab 的顺序保持一致。
+    /// 刻意不改 <see cref="PluginCatalogService"/> 的解析排序：那是 registry 的默认顺序，
+    /// 页面排序属于展示策略，放在 UI 层可以在不影响分发数据的前提下调整。
+    /// </summary>
+    internal static List<PluginCatalogEntry> SortCatalogEntries(
+        IEnumerable<PluginCatalogEntry> entries, Func<string, PluginRecord?> findRecord)
+    {
+        return entries
+            .Select(entry => new
+            {
+                Entry = entry,
+                Update = findRecord(entry.Id) is { } record
+                         && PluginDetailDialog.IsUpdateAvailable(record, entry)
+            })
+            .OrderByDescending(item => item.Update)
+            .ThenByDescending(item => item.Entry.Official)
+            .ThenByDescending(item => item.Entry.PublishedAt ?? DateTime.MinValue)
+            // id 兜底：发布时间相同的条目顺序稳定，自测台断言与用户看到的顺序都可复现。
+            .ThenBy(item => item.Entry.Id, StringComparer.Ordinal)
+            .Select(item => item.Entry)
+            .ToList();
+    }
+
+    internal static bool Matches(PluginCatalogEntry entry, string query)
     {
         bool Has(string? value) =>
             !string.IsNullOrEmpty(value)
             && value.Contains(query, StringComparison.OrdinalIgnoreCase);
         return Has(entry.Id) || Has(entry.Name.Get("zh")) || Has(entry.Name.Get("en"))
                || Has(entry.Summary.Get("zh")) || Has(entry.Summary.Get("en"))
+               || Has(entry.Description?.Get("zh")) || Has(entry.Description?.Get("en"))
+               || Has(entry.Repo)
                || Has(entry.Author?.Name) || Has(entry.Author?.Github)
                || (entry.Tags?.Any(Has) ?? false);
     }
@@ -338,12 +375,11 @@ public partial class PluginsPage : UserControl
         var existing = _service.GetRecord(entry.Id);
         var isUpdate = existing != null && PluginDetailDialog.IsUpdateAvailable(existing, entry);
 
-        // minAppVersion 门禁：宿主太旧就装不了，别让用户下完才发现。
-        // 用宽松解析：预发布串（1.1.0-rc1）解析失败时按「不满足」拒绝，不能静默放行。
-        if (!string.IsNullOrWhiteSpace(entry.MinAppVersion)
-            && !PluginVersion.HostSatisfies(entry.MinAppVersion, PluginInstaller.HostVersion))
+        // minAppVersion / apiVersion 门禁：卡片和详情弹窗已经提前置灰，这里再挡一次，
+        // 防止从别的入口（lab、将来的深链）绕过；文案与卡片 ToolTip 完全同源。
+        if (PluginDisplay.IncompatibilityReason(entry) is { } incompatible)
         {
-            MessageBox.Show(Window.GetWindow(this), Loc.Get("Plugin.Update.Requires", entry.MinAppVersion),
+            MessageBox.Show(Window.GetWindow(this), incompatible,
                 Loc["Plugin.PageTitle"], MessageBoxButton.OK, MessageBoxImage.Information);
             return false;
         }
@@ -459,6 +495,15 @@ public partial class PluginsPage : UserControl
 
     bool Blocked(PluginRecord record) => PluginBlocklist.Find(record.Id, record.Version) != null;
 
+    /// <summary>
+    /// 已安装行是否要显示「更新」按钮：registry 里存在同 id 的新版本，且当前版本没被禁用名单拦截。
+    /// registry 里没有这条（已下架 / 纯本地包）时自然不显示。抽成纯函数供页面与自测台共用。
+    /// </summary>
+    internal static bool ShouldOfferRowUpdate(PluginRecord record, PluginCatalogEntry? entry)
+        => entry != null
+           && PluginBlocklist.Find(record.Id, record.Version) == null
+           && PluginDetailDialog.IsUpdateAvailable(record, entry);
+
     /// <summary>记录来自市场，但当前 registry 里已经没有这条 → 已下架（文件保留、不再更新）。</summary>
     bool IsDelisted(PluginRecord record)
         => string.Equals(record.Source, "market", StringComparison.OrdinalIgnoreCase)
@@ -504,25 +549,40 @@ public partial class PluginsPage : UserControl
         var query = SearchBox.Text?.Trim() ?? "";
         foreach (var record in _service.Records.OrderByDescending(r => r.InstalledAtUtc))
         {
-            if (query.Length > 0 && !MatchesInstalled(record, query)) continue;
+            if (query.Length > 0
+                && !MatchesInstalled(record, ReadManifest(record), FindCatalogEntry(record.Id), query))
+                continue;
             InstalledHost.Children.Add(BuildInstalledRow(record));
         }
     }
 
-    /// <summary>已安装 tab 的搜索：id / 中文名 / 英文名，任一命中即可。</summary>
-    bool MatchesInstalled(PluginRecord record, string query)
+    /// <summary>
+    /// 已安装 tab 的搜索：id / 中英名 / 作者（name、github）/ registry 标签 / 插件类型本地化名，
+    /// 任一命中即可。抽成 static 纯函数是为了让自测台能直接断言搜索命中，不用把页面开起来。
+    /// </summary>
+    internal static bool MatchesInstalled(
+        PluginRecord record, PluginManifest? manifest, PluginCatalogEntry? entry, string query)
     {
         bool Has(string? value) => !string.IsNullOrEmpty(value)
                                    && value.Contains(query, StringComparison.OrdinalIgnoreCase);
         if (Has(record.Id)) return true;
-        var manifest = ReadManifest(record);
-        return manifest == null || Has(manifest.Name.Get("zh")) || Has(manifest.Name.Get("en"));
+        // manifest 读不出来（安装损坏 / 目录被手工改过）时保持旧行为：不因为搜不到就把它藏起来，
+        // 用户还需要在列表里看到它并卸载。id 命中仍然走上面那条。
+        if (manifest == null) return true;
+        if (Has(manifest.Name.Get("zh")) || Has(manifest.Name.Get("en"))) return true;
+        // 作者名与 GitHub 账号：用户经常按「谁做的」找插件。
+        if (Has(manifest.Author?.Name) || Has(manifest.Author?.Github)) return true;
+        // registry 标签（时钟 / 剪贴板 / 示例…）只在市场条目里有，本地包没有标签。
+        if (entry?.Tags != null && entry.Tags.Any(Has)) return true;
+        // 类型名（桌面组件 / 数据源…）：manifest 里的 kind 是英文标识，搜「数据源」得翻成当前语言。
+        return Has(Loc[record.KindValue.I18nKey()]);
     }
 
     FrameworkElement BuildInstalledRow(PluginRecord record)
     {
         var manifest = ReadManifest(record);
-        var entry = FindCatalogEntry(record.Id) ?? BuildSyntheticEntry(record, manifest);
+        var catalogEntry = FindCatalogEntry(record.Id);
+        var entry = catalogEntry ?? BuildSyntheticEntry(record, manifest);
         var name = manifest?.Name.Get(Loc.CurrentLanguage) ?? record.Id;
         if (string.IsNullOrWhiteSpace(name)) name = record.Id;
 
@@ -711,6 +771,59 @@ public partial class PluginsPage : UserControl
                 newWidget.ToolTip = Loc["PluginWidget.NeedsRestart"];
             }
             actions.Children.Add(newWidget);
+        }
+
+        // 「更新到 x.y.z」：registry 里有同 id 的新版本才出现，走和市场卡片相同的
+        // InstallEntryAsync（更新确认 / 权限差异 / 重启提示都在里面）。
+        // 被禁用名单拦截的插件只允许卸载，不给更新入口。
+        if (catalogEntry != null && ShouldOfferRowUpdate(record, catalogEntry))
+        {
+            var updateButton = new Button
+            {
+                Content = Loc["Plugin.Update"],
+                Height = 30,
+                Width = 70,
+                Margin = new Thickness(8, 0, 0, 0),
+                FontSize = 11.5,
+                FontWeight = FontWeights.SemiBold,
+                Cursor = Cursors.Hand,
+                Style = (Style)FindResource("FillBtn"),
+                ToolTip = Loc.Get("Plugin.UpdateAvailable", catalogEntry.Version)
+            };
+            var upgradeBlocked = PluginDisplay.IncompatibilityReason(catalogEntry);
+            if (upgradeBlocked != null)
+            {
+                // 有更新但新版本要求更高宿主：入口保留（否则用户永远不知道有新版），置灰说明原因。
+                updateButton.IsEnabled = false;
+                updateButton.Opacity = 0.45;
+                updateButton.ToolTip = upgradeBlocked;
+            }
+            else
+            {
+                updateButton.Click += async (_, _) =>
+                {
+                    if (_installing.Contains(record.Id)) return;
+                    // 先禁用再 await：否则双击会弹第二个更新确认框。
+                    updateButton.IsEnabled = false;
+                    updateButton.Content = Loc["Plugin.Installing"];
+                    try
+                    {
+                        await InstallEntryAsync(catalogEntry);
+                    }
+                    catch (Exception ex)
+                    {
+                        // async void 处理器漏出去的异常会进 DispatcherUnhandledException 弹
+                        // 「DeskOrder 错误」；更新失败应该留在页面上说。
+                        ShowStatus(Loc.Get("Plugin.InstallFailed", ex.Message));
+                        DzTrace.Always($"[Plugin] update from the installed list failed: {ex}");
+                    }
+                    finally
+                    {
+                        Render();
+                    }
+                };
+            }
+            actions.Children.Add(updateButton);
         }
 
         var open = new Button
@@ -991,6 +1104,9 @@ public partial class PluginsPage : UserControl
 
     void Refresh_Click(object sender, RoutedEventArgs e) => _ = RefreshAsync(force: true);
 
+    /// <summary>空态「重试」：强制刷新（绕过 6 小时缓存 TTL），离线时也能立刻再试一次。</summary>
+    void EmptyRetry_Click(object sender, RoutedEventArgs e) => _ = RefreshAsync(force: true);
+
     int CountUpdates()
     {
         if (_catalog == null) return 0;
@@ -1007,6 +1123,10 @@ public partial class PluginsPage : UserControl
     {
         var empty = _tab == 1 ? InstalledHost.Children.Count == 0 : CardsHost.Children.Count == 0;
         EmptyHint.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
+        // 操作按钮可见性：市场空/离线 → 重试 + 本地导入；已安装空 → 只导入；
+        // 更新空（「没有可用更新」是正常结果）→ 只重试，导入对新版本没有意义。
+        EmptyRetryButton.Visibility = _tab == 1 ? Visibility.Collapsed : Visibility.Visible;
+        EmptyImportButton.Visibility = _tab == 2 ? Visibility.Collapsed : Visibility.Visible;
         if (!empty) return;
 
         switch (_tab)
@@ -1020,11 +1140,33 @@ public partial class PluginsPage : UserControl
                 EmptyBody.Text = "";
                 break;
             default:
-                EmptyTitle.Text = _catalog?.Offline == true
-                    ? Loc.Get("Plugin.Offline", "—")
-                    : Loc["Plugin.Empty.Market"];
-                EmptyBody.Text = "";
+                if (_catalog?.Offline == true)
+                {
+                    var when = _catalog.FetchedAtUtc?.ToLocalTime().ToString("MM-dd HH:mm") ?? "—";
+                    EmptyTitle.Text = Loc.Get("Plugin.Offline", when);
+                    // 原始 message 是 .NET 的英文异常文本，翻成「超时 / DNS / 证书」这类可读原因。
+                    EmptyBody.Text = Loc.Get("Plugin.Empty.Offline.Body",
+                        DescribeOfflineReason(_catalog.Error));
+                }
+                else
+                {
+                    EmptyTitle.Text = Loc["Plugin.Empty.Market"];
+                    EmptyBody.Text = Loc["Plugin.Empty.Market.Body"];
+                }
                 break;
         }
+    }
+
+    /// <summary>把拉取 registry 的异常归成几类可读原因；识别不了就报「网络请求失败」。</summary>
+    static string DescribeOfflineReason(string? error)
+    {
+        if (string.IsNullOrWhiteSpace(error)) return Loc["Plugin.Offline.Network"];
+        bool Has(params string[] words)
+            => words.Any(word => error.Contains(word, StringComparison.OrdinalIgnoreCase));
+        if (Has("timed out", "timeout", "TaskCanceled", "超时")) return Loc["Plugin.Offline.Timeout"];
+        if (Has("resolve", "No such host", "Name or service", "DNS", "名称解析"))
+            return Loc["Plugin.Offline.Dns"];
+        if (Has("SSL", "TLS", "certificate", "证书")) return Loc["Plugin.Offline.Tls"];
+        return Loc["Plugin.Offline.Network"];
     }
 }

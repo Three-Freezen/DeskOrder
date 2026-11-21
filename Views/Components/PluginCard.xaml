@@ -52,8 +52,18 @@
                    TextTrimming="CharacterEllipsis" MaxHeight="52" VerticalAlignment="Top"/>
 
         <Grid Grid.Row="3" Margin="0,6,0,0">
-          <TextBlock x:Name="DownloadsText" FontSize="10.5" VerticalAlignment="Center"
-                     Foreground="{DynamicResource Brush.Text.Tertiary}"/>
+          <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center">
+            <TextBlock x:Name="DownloadsText" FontSize="10.5" VerticalAlignment="Center"
+                       Foreground="{DynamicResource Brush.Text.Tertiary}"/>
+            <!-- 权限角标：只给代码类插件显示。低调的描边小 pill，不抢「官方」标记的视觉权重。 -->
+            <Border x:Name="PermissionsPill" Visibility="Collapsed" Margin="8,0,0,0" Height="18"
+                    Padding="6,0" CornerRadius="9" VerticalAlignment="Center"
+                    Background="{DynamicResource Brush.Bg.Hover}"
+                    BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1">
+              <TextBlock x:Name="PermissionsPillText" FontSize="9.5" VerticalAlignment="Center"
+                         Foreground="{DynamicResource Brush.Text.Tertiary}"/>
+            </Border>
+          </StackPanel>
           <Button x:Name="ActionButton" HorizontalAlignment="Right" Width="92" Height="30"
                   FontSize="11.5" FontWeight="SemiBold" Cursor="Hand"
                   Style="{DynamicResource FillBtn}" Click="ActionButton_Click"/>
