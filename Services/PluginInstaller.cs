@@ -228,9 +228,11 @@ public sealed class PluginInstaller
                 error = string.Join("; ", errors);
                 return null;
             }
-            if (manifest.KindValue is not (PluginKind.Widget or PluginKind.ZoneBar or PluginKind.Tool or PluginKind.Language or PluginKind.Appearance))
+            if (manifest.KindValue is not (PluginKind.Widget or PluginKind.ZoneBar or PluginKind.Tool
+                or PluginKind.Language or PluginKind.Appearance or PluginKind.Integration))
             {
-                error = "this build supports widgets, zone bays, tools, language packs and appearance packs; data sources arrive in the next release";
+                error = "this build supports all six plugin kinds: widgets, zone bays, tools, "
+                        + "language packs, appearance packs and data sources";
                 return null;
             }
 
@@ -360,10 +362,12 @@ public sealed class PluginInstaller
                 };
 
             var kind = manifest.KindValue;
-            if (kind is not (PluginKind.Widget or PluginKind.ZoneBar or PluginKind.Tool or PluginKind.Language or PluginKind.Appearance))
+            if (kind is not (PluginKind.Widget or PluginKind.ZoneBar or PluginKind.Tool
+                or PluginKind.Language or PluginKind.Appearance or PluginKind.Integration))
                 return new PluginInstallResult
                 {
-                    Error = "this build supports widgets, zone bays, tools, language packs and appearance packs; data sources arrive in the next release"
+                    Error = "this build supports all six plugin kinds: widgets, zone bays, tools, "
+                            + "language packs, appearance packs and data sources"
                 };
 
             // 禁用名单以「插件 id + 版本」为准，本地导入也拦：被下架的版本不该从任何路径装上。

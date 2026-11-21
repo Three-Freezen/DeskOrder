@@ -28,11 +28,22 @@ public sealed class LocalizationService : INotifyPropertyChanged
     readonly Dictionary<string, Dictionary<string, string>> _builtin =
         new(StringComparer.OrdinalIgnoreCase);
 
+    // 内置 source.*.json 的 _plural 段：语言 → 宿主词条 → 复数类别 → 文本。
+    readonly Dictionary<string, Dictionary<string, Dictionary<string, string>>> _builtinPlural =
+        new(StringComparer.OrdinalIgnoreCase);
+
     // 语言包（code → 词条表 / 解析出的包）。同 code 多包时由 LanguagePackService.Resolve 决定。
     readonly Dictionary<string, Dictionary<string, string>> _packTables =
         new(StringComparer.OrdinalIgnoreCase);
     readonly Dictionary<string, LanguagePackEntry> _packEntries =
         new(StringComparer.OrdinalIgnoreCase);
+
+    // 语言包（code → 复数表）。没有 _plural 段的包放空表。
+    readonly Dictionary<string, Dictionary<string, Dictionary<string, string>>> _packPluralTables =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    static readonly Dictionary<string, Dictionary<string, string>> EmptyPluralTable =
+        new(StringComparer.Ordinal);
 
     List<string> _available = new() { "zh", "en" };
     readonly Dictionary<string, string> _nativeNames = new(StringComparer.OrdinalIgnoreCase)
@@ -42,6 +53,9 @@ public sealed class LocalizationService : INotifyPropertyChanged
 
     Dictionary<string, string> _override = new(StringComparer.Ordinal);
     List<Dictionary<string, string>> _chain = new();
+
+    /// <summary>与 <see cref="_chain"/> 一一对应的复数表；非语言包的链位置放空表。</summary>
+    List<Dictionary<string, Dictionary<string, string>>> _pluralChain = new();
 
     private string _currentLang = "zh";
     private bool _initialized;
@@ -72,6 +86,8 @@ public sealed class LocalizationService : INotifyPropertyChanged
             var i18nDir = GetI18nDir();
             _builtin["zh"] = LoadFromDisk(Path.Combine(i18nDir, "source.zh.json"));
             _builtin["en"] = LoadFromDisk(Path.Combine(i18nDir, "source.en.json"));
+            _builtinPlural["zh"] = LoadPluralFromDisk(Path.Combine(i18nDir, "source.zh.json"));
+            _builtinPlural["en"] = LoadPluralFromDisk(Path.Combine(i18nDir, "source.en.json"));
             _override = LoadAppDataOverrides();
             LanguagePackService.Instance.Load();
             ApplyPacks();
@@ -100,6 +116,60 @@ public sealed class LocalizationService : INotifyPropertyChanged
     }
 
     public string Get(string key, params object[] args) => string.Format(this[key], args);
+
+    /// <summary>当前语言是否从右到左（ar/he/fa/ur…）。WPF 窗口据此设置 FlowDirection。</summary>
+    public bool IsRightToLeft => LanguagePackService.IsRtlLanguage(_currentLang);
+
+    /// <summary>
+    /// 按当前语言的复数规则取文案。优先级：
+    /// 语言包链的 <c>_plural</c>（类别 → other）→ 内置当前语言的 <c>_plural</c>（类别 → other）
+    /// → 回退普通词条 <see cref="Get"/>（模板 <c>{0}</c> = count，<paramref name="extra"/> 从 <c>{1}</c> 起）。
+    /// </summary>
+    public string Plural(string key, int count, params object[] extra)
+    {
+        EnsureLoaded();
+        var category = PluralRules.Category(_currentLang, count);
+
+        // 1) 语言包链：与普通词条同一顺序，先查精确类别再退回 other。
+        string formatted;
+        foreach (var table in _pluralChain)
+        {
+            if (TryFormatPlural(table, key, category, count, extra, out formatted)) return formatted;
+        }
+
+        // 2) 内置当前语言（zh/en 的 source.*.json）。
+        if (_builtinPlural.TryGetValue(_currentLang, out var builtin)
+            && TryFormatPlural(builtin, key, category, count, extra, out formatted))
+            return formatted;
+
+        // 3) 没有复数数据：退回普通模板（如日语包只翻了一条计数文案）。
+        var args = new object[extra.Length + 1];
+        args[0] = count;
+        Array.Copy(extra, 0, args, 1, extra.Length);
+        return Get(key, args);
+    }
+
+    static bool TryFormatPlural(Dictionary<string, Dictionary<string, string>> table, string key,
+        string category, int count, object[] extra, out string formatted)
+    {
+        formatted = "";
+        if (!table.TryGetValue(key, out var forms) || forms.Count == 0) return false;
+        if (!forms.TryGetValue(category, out var template) && !forms.TryGetValue("other", out template))
+            return false;
+        if (string.IsNullOrEmpty(template)) return false;
+        try
+        {
+            var args = new object[extra.Length + 1];
+            args[0] = count;
+            Array.Copy(extra, 0, args, 1, extra.Length);
+            formatted = string.Format(template, args);
+            return true;
+        }
+        catch (FormatException)
+        {
+            return false; // 模板被手改坏时不要崩，继续往下一层找
+        }
+    }
 
     [Obsolete("Use SetLanguage instead")]
     public void ToggleLanguage() => SetLanguage(_currentLang == "zh" ? "en" : "zh");
@@ -194,6 +264,7 @@ public sealed class LocalizationService : INotifyPropertyChanged
     {
         _packTables.Clear();
         _packEntries.Clear();
+        _packPluralTables.Clear();
         var service = LanguagePackService.Instance;
         foreach (var entry in service.Entries)
         {
@@ -204,6 +275,7 @@ public sealed class LocalizationService : INotifyPropertyChanged
             if (table == null) continue;
             _packEntries[entry.Code] = resolved;
             _packTables[entry.Code] = table;
+            _packPluralTables[entry.Code] = service.GetPluralTable(entry.Code) ?? EmptyPluralTable;
         }
 
         var list = new List<string> { "zh", "en" };
@@ -234,15 +306,21 @@ public sealed class LocalizationService : INotifyPropertyChanged
     void RebuildChain()
     {
         var chain = new List<Dictionary<string, string>>();
-        void Add(Dictionary<string, string>? table)
+        var pluralChain = new List<Dictionary<string, Dictionary<string, string>>>();
+        void Add(Dictionary<string, string>? table,
+            Dictionary<string, Dictionary<string, string>>? pluralTable = null)
         {
             if (table == null || table.Count == 0) return;
             if (chain.Any(t => ReferenceEquals(t, table))) return;
             chain.Add(table);
+            pluralChain.Add(pluralTable ?? EmptyPluralTable);
         }
 
+        // 语言包链按顺序排；复数表与 _chain 一一对应，只有语言包位置带内容，
+        // 内置 zh/en 的复数由 Plural() 单独查（避免内置复数被当成「包」重复命中）。
         _packTables.TryGetValue(_currentLang, out var pack);
-        Add(pack);
+        _packPluralTables.TryGetValue(_currentLang, out var packPlurals);
+        Add(pack, packPlurals);
         _builtin.TryGetValue(_currentLang, out var builtin);
         Add(builtin);
 
@@ -251,7 +329,8 @@ public sealed class LocalizationService : INotifyPropertyChanged
             && !string.Equals(baseCode, _currentLang, StringComparison.OrdinalIgnoreCase))
         {
             _packTables.TryGetValue(baseCode, out var basePack);
-            Add(basePack);
+            _packPluralTables.TryGetValue(baseCode, out var basePlurals);
+            Add(basePack, basePlurals);
             _builtin.TryGetValue(baseCode, out var baseBuiltin);
             Add(baseBuiltin);
         }
@@ -261,6 +340,7 @@ public sealed class LocalizationService : INotifyPropertyChanged
         _builtin.TryGetValue("zh", out var chinese);
         Add(chinese);
         _chain = chain;
+        _pluralChain = pluralChain;
     }
 
     // ── 其它 ──
@@ -269,9 +349,12 @@ public sealed class LocalizationService : INotifyPropertyChanged
     {
         _initialized = false;
         _builtin.Clear();
+        _builtinPlural.Clear();
         _packTables.Clear();
         _packEntries.Clear();
+        _packPluralTables.Clear();
         _chain.Clear();
+        _pluralChain.Clear();
         _override.Clear();
         EnsureLoaded();
         OnPropertyChanged("Item[]");
@@ -329,6 +412,41 @@ public sealed class LocalizationService : INotifyPropertyChanged
             {
                 if (prop.Name.StartsWith("_")) continue;
                 dict[prop.Name] = prop.Value.GetString() ?? "";
+            }
+        }
+        catch (JsonException) { /* skip corrupt file */ }
+        return dict;
+    }
+
+    /// <summary>
+    /// 读内置 <c>source.*.json</c> 的 <c>_plural</c> 段：宿主词条 → 复数类别（小写）→ 文本。
+    /// 结构不合法时按空表处理（内置文件由仓库维护，不做语言包那套严格校验）。
+    /// </summary>
+    internal static Dictionary<string, Dictionary<string, string>> LoadPluralFromDisk(string path)
+    {
+        var dict = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
+        if (!File.Exists(path)) return dict;
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(path));
+            if (doc.RootElement.ValueKind != JsonValueKind.Object) return dict;
+            foreach (var prop in doc.RootElement.EnumerateObject())
+            {
+                if (!string.Equals(prop.Name, "_plural", StringComparison.Ordinal)) continue;
+                if (prop.Value.ValueKind != JsonValueKind.Object) return dict;
+                foreach (var keyProp in prop.Value.EnumerateObject())
+                {
+                    if (keyProp.Value.ValueKind != JsonValueKind.Object) continue;
+                    var forms = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var formProp in keyProp.Value.EnumerateObject())
+                    {
+                        if (formProp.Value.ValueKind != JsonValueKind.String) continue;
+                        var text = formProp.Value.GetString() ?? "";
+                        if (text.Length == 0) continue;
+                        forms[formProp.Name.Trim().ToLowerInvariant()] = text;
+                    }
+                    if (forms.Count > 0) dict[keyProp.Name] = forms;
+                }
             }
         }
         catch (JsonException) { /* skip corrupt file */ }

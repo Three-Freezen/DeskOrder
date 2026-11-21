@@ -242,6 +242,11 @@ public sealed class PluginManifest
                             Err("zoneBar.icon must be a relative path inside the package");
                     }
                 }
+                else if (parsedKind == PluginKind.Integration && ApiVersion < 4)
+                {
+                    // 数据源是 API v4 才开放的契约：v4 起 IPluginHost.Integrations 才存在。
+                    Err("integration plugins require apiVersion 4");
+                }
             }
             else
             {

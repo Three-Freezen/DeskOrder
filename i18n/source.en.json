@@ -834,6 +834,9 @@
   "MediaProp.FollowPlaying": "playing",
   "MediaProp.FollowMissing": "no session now",
   "MediaProp.FollowHint": "The list is re-read every time you open it. Pick an app and this player follows only that session (the other player can follow a different one); the change takes effect immediately. Automatic keeps using the \"who is audible\" rule.",
+  "MediaProp.DataSource": "Data source",
+  "MediaProp.DataSource.System": "System media session",
+  "MediaProp.DataSource.Hint": "Sources provided by plugins (install and enable one in the plugin market).",
   "MediaProp.AccentFromCover": "Accent from cover",
   "MediaProp.AccentHint": "Picks the dominant colour of the album artwork and uses it for the bar colour, the divider and the vinyl centre label. Falls back to your own colours when the cover has no usable colour.",
 
@@ -1077,5 +1080,18 @@
   "PluginTool.Surface.Panel": "Panel",
   "PluginTool.Surface.Zone": "Zone",
   "PluginTool.Surface.HotkeyOnly": "Hotkey only",
-  "PluginTool.Hotkey.Hint": "Press Esc to cancel"
+  "PluginTool.Hotkey.Hint": "Press Esc to cancel",
+
+  "_plural": {
+    "Manage.Sidebar.Zones": { "one": "{0} zone", "other": "{0} zones" },
+    "Manage.Sidebar.Docks": { "one": "{0} dock", "other": "{0} docks" },
+    "Manage.Sidebar.Clocks": { "one": "{0} clock", "other": "{0} clocks" },
+    "Manage.Sidebar.Calendars": { "one": "{0} calendar", "other": "{0} calendars" },
+    "Manage.Sidebar.MediaPlayers": { "one": "{0} player", "other": "{0} players" },
+    "Manage.Sidebar.Notes": { "one": "{0} note", "other": "{0} notes" },
+    "PluginWidget.Count": { "one": "{0} item", "other": "{0} item(s)" },
+    "PluginTool.Count": { "one": "{0} command", "other": "{0} command(s)" },
+    "Plugin.WidgetCount": { "one": "{0} widget", "other": "{0} widget(s)" },
+    "ZoneBay.Count": { "one": "{0} zone bay", "other": "{0} zone bays" }
+  }
 }

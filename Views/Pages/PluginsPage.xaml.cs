@@ -593,7 +593,7 @@ public partial class PluginsPage : UserControl
 
         var widgets = _service.CountWidgets(record.Id);
         var status = record.KindValue == PluginKind.Widget && widgets > 0
-            ? Loc.Get("Plugin.WidgetCount", widgets)
+            ? Loc.Plural("Plugin.WidgetCount", widgets)
             : "";
         var statusIsError = false;
         if (record.KindValue == PluginKind.Language && manifest?.Language != null)
@@ -653,7 +653,8 @@ public partial class PluginsPage : UserControl
             Orientation = Orientation.Horizontal,
             VerticalAlignment = VerticalAlignment.Center
         };
-        if (record.KindValue is PluginKind.Widget or PluginKind.ZoneBar or PluginKind.Tool or PluginKind.Language or PluginKind.Appearance)
+        if (record.KindValue is PluginKind.Widget or PluginKind.ZoneBar or PluginKind.Tool
+            or PluginKind.Language or PluginKind.Appearance or PluginKind.Integration)
         {
             var toggle = new Button
             {

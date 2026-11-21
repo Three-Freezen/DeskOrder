@@ -126,12 +126,13 @@ Combine zones into a group and restyle them together.
 
 The sidebar has its own **Plugins** group. Plugins are community-made; the official project only maintains the index and does **not** review code.
 
-- **Six kinds**: desktop widgets (`widget`), zone plugins (`zonebar`), language packs and appearance packs, all available now; tool plugins are available since v1.1; integrations arrive in a later release
+- **Six kinds**: desktop widgets (`widget`), zone plugins (`zonebar`), language packs, appearance packs, tool plugins (since v1.1) and integrations (since v1.2) — all six are available now
 - **Desktop widgets**: a plugin draws arbitrary WPF content; the host owns the window, dragging, snapping, locking, the three-state toggle and per-instance settings. Uninstalling a plugin leaves placeholder widgets; reinstalling restores them
 - **Creating widgets**: once a `widget` plugin is installed and enabled, create desktop widgets from the sidebar's **Widgets → Plugin widgets** page, or with the **New widget** button on its row under **Plugin marketplace → Installed**
 - **Zone plugins**: extend what zones can do — the host owns the dock window, edge snapping, auto-hide, expand/collapse, drag-in absorption and zone safety, while the plugin only draws content. The current form is an edge-docked zone bay that collects minimized zone restore buttons and expands them on click/hover
 - **Tool plugins**: add commands under the **Plugin tools** submenu of the tray menu, the panel context menu and the zone context menu. The plugin only registers commands; users assign or clear global hotkeys for commands on the sidebar's **Plugins → Plugin tools** page, and assignments survive restarts. A failing command only shows a tray notification — it never crashes the host
-- **Language packs**: add a new UI language (Japanese, Traditional Chinese…) or override Chinese/English. Partial translations are fine; missing entries fall back `base → en → zh`. Installed packs appear under `Settings → Language`, switching is instant, and removing the active pack falls back to Chinese with a notification. The **official full Japanese pack** is already listed (967 / 967 strings, 100% coverage, no English fallback)
+- **Integrations**: a plugin supplies data to the host. Since v1.2 the first contract is the **media source** — in a media player's property panel under **Playback & display → Data source** you can pick the system media session or any source registered by an enabled plugin (shown as "source name · plugin name"). The player then renders title, artist, album and artwork from the plugin; it is mutually exclusive with **Follow app**, falls back to the system session when the source disappears or has nothing to show, and is **read-only**: play/pause/previous/next still control the system media session
+- **Language packs**: add a new UI language (Japanese, Traditional Chinese…) or override Chinese/English. Partial translations are fine; missing entries fall back `base → en → zh`. Installed packs appear under `Settings → Language`, switching is instant, and removing the active pack falls back to Chinese with a notification. Since v1.2 packs may also be **RTL** languages (Arabic, Hebrew…: management window, property panel and dialogs mirror, desktop-layer windows stay LTR) and may provide **plural rules** (an optional `_plural` section with zero/one/two/few/many/other forms). The **official full Japanese pack** is already listed (967 / 967 strings, 100% coverage, no English fallback)
 - **Appearance packs**: community materials (backdrop/blur/grain/tint) plus presets for zones, panels, notes, clocks and more. Installed materials appear under `Appearance → Material`, presets under `Load preset`; disabling/removing the pack reverts both, and existing objects are never changed automatically (materials need the wallpaper-sampling renderer, like the built-in ones)
 - **Code vs data**: widgets/zone plugins/tools/integrations run code and need a restart; appearance/language packs are pure data and don't execute code
 - **Official badge**: shown only when both the author's GitHub account and the repository owner are `Three-Freezen`; locally imported packages are never official
@@ -141,7 +142,7 @@ The sidebar has its own **Plugins** group. Plugins are community-made; the offic
 - **Reporting**: the "Report" button opens a GitHub issue form with the plugin id and version pre-filled
 - **Local import**: `Plugin marketplace → Import from file…`, with kind, author, version, size, SHA-256 and permissions shown before install
 - **Widget appearance**: a plugin widget's window chrome (size, fill, border, corners, material, tile mode, lock) is edited in the host's property panel — the same one used by built-in notes and clocks; the plugin only draws content
-- **Safety net**: zip-slip, hash mismatch, references to the host assembly, oversized packages, language packs with broken placeholders and appearance packs with out-of-range materials or mismatched preset kinds are rejected; two failed launches auto-disable a plugin; `--safe-mode` skips code plugins for one run (declarative packs still apply)
+- **Safety net**: zip-slip, hash mismatch, references to the host assembly, oversized packages, language packs with broken placeholders or `_plural` forms and appearance packs with out-of-range materials or mismatched preset kinds are rejected; two failed launches auto-disable a plugin; `--safe-mode` skips code plugins for one run (declarative packs still apply)
 - **Plugin development**: `--plugin-dev=<dir>` mounts source output folders directly (Debug builds only) — no repackaging, and nothing is written to your config
 
 > ⚠ Plugins are community-made and not reviewed by us. Installing one gives it the same permissions as your user account — please judge the risk yourself.
@@ -150,7 +151,7 @@ The sidebar has its own **Plugins** group. Plugins are community-made; the offic
 
 - Zones live on the desktop layer: above the wallpaper, below normal app windows
 - System tray, start with Windows
-- English / Chinese UI plus community language packs (the official full Japanese pack is already in the marketplace), applies instantly
+- English / Chinese UI plus community language packs (the official full Japanese pack is already in the marketplace; since v1.2 packs support RTL languages and plural rules), applies instantly
 - Light / dark theme
 - In-app updates
 

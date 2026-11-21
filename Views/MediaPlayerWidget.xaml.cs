@@ -57,6 +57,10 @@ public partial class MediaPlayerWidget : Window
     /// <summary>当前生效的跟随会话（AUMID，空 = 自动跟随系统会话）。</summary>
     private string _follow = "";
 
+    /// <summary>当前生效的插件数据源键（<c>&lt;pluginId&gt;/&lt;sourceId&gt;</c>，空 = 系统媒体会话）。
+    /// 与 <see cref="_follow"/> 互斥（属性面板保证），运行时按跟随优先处理。</summary>
+    private string _dataSourceKey = "";
+
     // 跟随指定应用时，这个组件的"当前曲目"由它自己的 1s 轮询维护，
     // 不碰 MediaSessionService.Now（那个是自动兜底判定的结果，多个播放器共用一份）。
     private MediaNowPlaying _pinnedNow = MediaNowPlaying.Empty;
@@ -617,12 +621,29 @@ public partial class MediaPlayerWidget : Window
         AudioSpectrumCapture.Release();
     }
 
-    // ── P2：当前数据源（自动 / 跟随指定应用）──
+    // ── 当前数据源（自动 / 跟随指定应用 / 插件数据源）──
 
-    /// <summary>自动模式读服务单例；跟随模式读本组件自己的会话快照。</summary>
-    MediaNowPlaying CurrentNow() => _follow.Length > 0 ? _pinnedNow : _media.Now;
+    /// <summary>统一「固定源」概念：跟随某个应用或选了插件数据源时，都用心跳 + 本地快照；
+    /// 两个都空 = 自动跟随系统媒体会话（服务单例的 1s 轮询 + Changed）。</summary>
+    bool HasPinnedSource => _follow.Length > 0 || _dataSourceKey.Length > 0;
 
-    System.Windows.Media.Imaging.BitmapSource? CurrentArt() => _follow.Length > 0 ? _pinnedArt : _media.Artwork;
+    /// <summary>
+    /// 当前曲目的优先级：跟随的应用 &gt; 插件数据源（且该源此刻有内容）&gt; 系统媒体会话。
+    /// 插件源找不到（插件被禁用/卸载）或这一轮没内容时自然回退系统源。
+    /// </summary>
+    MediaNowPlaying CurrentNow()
+    {
+        if (_follow.Length > 0) return _pinnedNow;
+        if (_dataSourceKey.Length > 0 && _pinnedNow.HasSession) return _pinnedNow;
+        return _media.Now;
+    }
+
+    System.Windows.Media.Imaging.BitmapSource? CurrentArt()
+    {
+        if (_follow.Length > 0) return _pinnedArt;
+        if (_dataSourceKey.Length > 0 && _pinnedNow.HasSession) return _pinnedArt;
+        return _media.Artwork;
+    }
 
     /// <summary>
     /// 「跟随的应用」的当前值。**从 WidgetService 的集合里读**，而不是只读缓存的
@@ -639,30 +660,54 @@ public partial class MediaPlayerWidget : Window
     /// <summary>把「跟随的应用」落到运行时：变了就重建本地快照 + 起停心跳。</summary>
     void ApplyFollow()
     {
-        var want = CurrentFollowSetting();
-        if (!string.Equals(want, _follow, StringComparison.OrdinalIgnoreCase))
+        bool changed = false;
+        var wantFollow = CurrentFollowSetting();
+        if (!string.Equals(wantFollow, _follow, StringComparison.OrdinalIgnoreCase))
         {
-            _follow = want;
+            _follow = wantFollow;
+            changed = true;
+        }
+        var wantSource = CurrentDataSourceSetting();
+        if (!string.Equals(wantSource, _dataSourceKey, StringComparison.Ordinal))
+        {
+            _dataSourceKey = wantSource;
+            changed = true;
+        }
+        if (changed)
+        {
             _pinnedNow = MediaNowPlaying.Empty;
             _pinnedArt = null;
-            if (_follow.Length > 0) _ = RefreshPinnedAsync();
+            if (HasPinnedSource) _ = RefreshPinnedAsync();
         }
         EnsureTick();
         RefreshMediaState();
     }
 
+    /// <summary>「数据源」下拉的当前值（<c>&lt;pluginId&gt;/&lt;sourceId&gt;</c>，空 = 系统媒体会话）。
+    /// 与 <see cref="CurrentFollowSetting"/> 同一写法：必须读集合里的活实例。</summary>
+    string CurrentDataSourceSetting()
+    {
+        var live = _widgetService.MediaPlayers.FirstOrDefault(p => p.Id == _player.Id);
+        return (live ?? _player).DataSourceKey ?? "";
+    }
+
     /// <summary>属性面板改完「跟随的应用」后直接叫一下：不等预览回调、也不等下一次心跳。</summary>
-    public void RefreshFollow()
+    public void RefreshFollow() => RefreshFromPlayerSettings();
+
+    /// <summary>属性面板改完「数据源」后直接叫一下：立即切源，并让被互斥清掉的跟随设置一起落下。</summary>
+    public void RefreshDataSource() => RefreshFromPlayerSettings();
+
+    void RefreshFromPlayerSettings()
     {
         var live = _widgetService.MediaPlayers.FirstOrDefault(p => p.Id == _player.Id);
         if (live != null) _player = live;
         ApplyFollow();
     }
 
-    /// <summary>只有"跟了某个应用"时才需要每秒心跳。</summary>
+    /// <summary>只有"跟了某个应用 / 选了插件数据源"时才需要每秒心跳。</summary>
     void EnsureTick()
     {
-        if (_follow.Length > 0)
+        if (HasPinnedSource)
         {
             if (_tick != null) return;
             _tick = new DispatcherTimer(DispatcherPriority.Background)
@@ -681,29 +726,44 @@ public partial class MediaPlayerWidget : Window
 
     void OnTick(object? sender, EventArgs e)
     {
-        if (_ticking || _follow.Length == 0) return;
+        if (_ticking || !HasPinnedSource) return;
         _ = RefreshPinnedAsync();
     }
 
-    /// <summary>跟随模式下每秒读一次指定会话（曲目 / 封面）。</summary>
+    /// <summary>固定源模式下每秒读一次数据（跟随指定会话 / 插件数据源）。</summary>
     async Task RefreshPinnedAsync()
     {
-        if (_follow.Length == 0 || _ticking) return;
+        if (!HasPinnedSource || _ticking) return;
         _ticking = true;
         try
         {
-            var snap = await _media.ReadSessionAsync(_follow);
-            if (!string.Equals(_follow, CurrentFollowSetting(), StringComparison.OrdinalIgnoreCase))
-                return;                                  // 期间用户改了跟随对象 → 丢弃
-            if (snap == null)
+            if (_follow.Length > 0)
             {
-                _pinnedNow = MediaNowPlaying.Empty;
-                _pinnedArt = null;
+                var snap = await _media.ReadSessionAsync(_follow);
+                if (!string.Equals(_follow, CurrentFollowSetting(), StringComparison.OrdinalIgnoreCase))
+                    return;                                  // 期间用户改了跟随对象 → 丢弃
+                _pinnedNow = snap?.Now ?? MediaNowPlaying.Empty;
+                _pinnedArt = snap?.Artwork;
             }
             else
             {
-                _pinnedNow = snap.Now;
-                _pinnedArt = snap.Artwork;
+                var key = _dataSourceKey;
+                var entry = PluginIntegrationService.Instance.Find(key);
+                if (entry == null)
+                {
+                    // 插件被禁用/卸载 → 快照清空；CurrentNow 自然回退系统媒体会话，不卡住渲染。
+                    _pinnedNow = MediaNowPlaying.Empty;
+                    _pinnedArt = null;
+                }
+                else
+                {
+                    var snap = await PluginIntegrationService.Instance.ReadAsync(entry);
+                    if (!string.Equals(key, CurrentDataSourceSetting(), StringComparison.Ordinal))
+                        return;                              // 期间用户换了数据源 / 清空 → 丢弃
+                    if (_follow.Length > 0) return;          // 期间用户改回跟随某个应用 → 本轮到此为止
+                    _pinnedNow = snap?.Now ?? MediaNowPlaying.Empty;
+                    _pinnedArt = snap?.Artwork;
+                }
             }
             RefreshMediaState();
         }
@@ -712,6 +772,9 @@ public partial class MediaPlayerWidget : Window
             _ticking = false;
         }
     }
+
+    /// <summary>自测台用：当前真正用于渲染的曲目（自动 / 跟随 / 插件源已按优先级解析）。</summary>
+    internal MediaNowPlaying DebugCurrentNow() => CurrentNow();
 
     // ── P2：封面主色 ──
 
