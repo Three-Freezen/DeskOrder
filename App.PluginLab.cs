@@ -7,6 +7,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using DeskOrder.PluginApi;
@@ -62,7 +63,7 @@ public partial class App
         // 用例自己构造缓存与禁用名单；禁掉启动后台拉取，避免线上 registry 在用例跑到一半时覆盖它们。
         PluginService.SuppressBackgroundRefreshForLab = true;
         var cases = caseName == "all"
-            ? new[] { "install", "load", "restart", "disable", "enable", "hide", "uninstall", "offline", "bad", "crash", "cache", "signature", "signature-policy", "lang-install", "lang-switch", "lang-bad", "lang-override", "lang-uninstall", "appearance-install", "appearance-toggle", "appearance-render", "appearance-bad", "appearance-uninstall", "update", "blocked", "dialog", "ui", "dev", "widget-panel", "widgets-page", "security" }
+            ? new[] { "install", "load", "restart", "disable", "enable", "hide", "uninstall", "offline", "bad", "crash", "cache", "signature", "signature-policy", "lang-install", "lang-switch", "lang-bad", "lang-override", "lang-uninstall", "appearance-install", "appearance-toggle", "appearance-render", "appearance-bad", "appearance-uninstall", "update", "blocked", "dialog", "ui", "dev", "widget-panel", "widgets-page", "security", "tool" }
             : new[] { caseName };
         var results = new List<LabCase>();
         foreach (var name in cases)
@@ -1110,6 +1111,196 @@ public partial class App
                 // 安装/索引安全加固用例，实现见 App.PluginLab.Security.cs（并行开发时只改那个文件）。
                 await RunSecurityLabCaseAsync(item, name, dir);
                 break;
+            case "tool":
+            {
+                // 工具插件内核（API v3）：命令全部合成，不依赖真实 dopkg / 真实插件程序集。
+                var tools = PluginToolService.Instance;
+                tools.Clear();
+
+                item.Check(PluginApiVersion.Current == 3, "plugin API version is 3");
+
+                PluginManifest MakeToolManifest(int apiVersion) => new()
+                {
+                    SchemaVersion = 1,
+                    Id = "lab.tool",
+                    Name = new LocalizedText { Zh = "自测工具", En = "Lab tool" },
+                    Summary = new LocalizedText { Zh = "自测工具", En = "lab tool" },
+                    Version = "1.0.0",
+                    Author = new PluginAuthor { Name = "Three-Freezen", Github = "Three-Freezen" },
+                    Repo = "Three-Freezen/DeskOrder-Plugin-Lab",
+                    License = "Apache-2.0",
+                    Kind = "tool",
+                    ApiVersion = apiVersion,
+                    MinAppVersion = "1.0.0",
+                    Entry = new PluginEntry { Assembly = "lib/Lab.Tool.dll", Type = "Lab.Tool.Plugin" },
+                    Icon = "icon.png"
+                };
+                var manifest = MakeToolManifest(3);
+                item.Check(manifest.Validate(PluginInstaller.HostVersion, forLocalImport: true).Count == 0,
+                    "manifest validation accepts a tool plugin with apiVersion 3");
+                item.Check(MakeToolManifest(4).Validate(PluginInstaller.HostVersion, forLocalImport: true)
+                        .Any(e => e.Contains("not supported", StringComparison.Ordinal)),
+                    "apiVersion 4 is rejected with a clear reason");
+
+                // 注册表装配期校验：非法 id / 重复 id / 超过 16 条都抛异常。
+                bool Throws(Action action)
+                {
+                    try { action(); return false; } catch { return true; }
+                }
+                var registry = new PluginToolRegistry();
+                item.Check(Throws(() => registry.Register(new PluginToolCommand
+                    { Id = "BAD ID", DisplayName = "bad", Execute = _ => Task.CompletedTask })),
+                    "an invalid tool command id is rejected");
+                registry.Register(new PluginToolCommand
+                    { Id = "dup", DisplayName = "dup", Execute = _ => Task.CompletedTask });
+                item.Check(Throws(() => registry.Register(new PluginToolCommand
+                    { Id = "dup", DisplayName = "dup again", Execute = _ => Task.CompletedTask })),
+                    "a duplicate tool command id is rejected");
+                for (int i = 0; i < PluginToolRegistry.MaxCommands - 1; i++)
+                    registry.Register(new PluginToolCommand
+                        { Id = $"cap{i}", DisplayName = "cap", Execute = _ => Task.CompletedTask });
+                item.Check(Throws(() => registry.Register(new PluginToolCommand
+                    { Id = "overflow", DisplayName = "overflow", Execute = _ => Task.CompletedTask })),
+                    "registering more than 16 commands is rejected");
+
+                var record = new PluginRecord
+                {
+                    Id = "lab.tool",
+                    Version = "1.0.0",
+                    Kind = "tool",
+                    Enabled = true,
+                    Source = "lab",
+                    Signature = "unsigned"
+                };
+                int commandRuns = 0;
+                var runCommand = new PluginToolCommand
+                {
+                    Id = "lab.run",
+                    DisplayName = "Lab run",
+                    Description = "lab command",
+                    Menus = PluginToolSurface.Tray | PluginToolSurface.Panel | PluginToolSurface.Zone,
+                    Execute = ctx =>
+                    {
+                        commandRuns++;
+                        ctx.Settings.Set("lab.key", "lab.value");
+                        return Task.CompletedTask;
+                    }
+                };
+                tools.Publish(record, manifest, new[] { runCommand });
+                item.Check(tools.Commands.Count == 1, "publishing one command lists exactly one command");
+                var entry = tools.Find("lab.tool", "lab.run");
+                item.Check(entry != null, "the published command is found by plugin id + command id");
+                item.Check(tools.Find("lab.tool", "missing") == null, "an unknown command id is not found");
+                item.Check(tools.HasCommands(PluginToolSurface.Tray)
+                           && tools.HasCommands(PluginToolSurface.Panel)
+                           && tools.HasCommands(PluginToolSurface.Zone),
+                    "all three menu surfaces report the command");
+
+                var trayMenu = tools.BuildMenu(PluginToolSurface.Tray);
+                var panelMenu = tools.BuildMenu(PluginToolSurface.Panel);
+                var zoneMenu = tools.BuildMenu(PluginToolSurface.Zone);
+                item.Check(trayMenu != null && trayMenu.Items.Count == 1, "tray menu carries exactly one command");
+                item.Check(panelMenu != null && panelMenu.Items.Count == 1, "panel menu carries exactly one command");
+                item.Check(zoneMenu != null && zoneMenu.Items.Count == 1, "zone menu carries exactly one command");
+                item.Check((trayMenu?.Tag as string) == PluginToolService.MenuTag
+                           && (trayMenu?.Header as string) == LocalizationService.Instance["PluginTool.Menu"],
+                    "the submenu is tagged and uses the localized title");
+
+                var hostMenu = new ContextMenu();
+                tools.Attach(hostMenu, PluginToolSurface.Tray);
+                var itemsAfterFirstAttach = hostMenu.Items.Count;
+                tools.Attach(hostMenu, PluginToolSurface.Tray);
+                item.Check(itemsAfterFirstAttach == 2 && hostMenu.Items.Count == 2,
+                    "attaching adds one separator and one submenu");
+                item.Check(hostMenu.Items.OfType<MenuItem>()
+                        .Count(m => (m.Tag as string) == PluginToolService.MenuTag) == 1,
+                    "attaching twice does not stack a second plugin tool submenu");
+
+                // 插入位置：分区菜单里插件工具要排在「删除」之前（insertIndex 是调用方看到的当前下标）。
+                var orderedMenu = new ContextMenu();
+                var anchorA = new MenuItem { Header = "a" };
+                var anchorB = new MenuItem { Header = "b" };
+                var anchorDelete = new MenuItem { Header = "delete" };
+                orderedMenu.Items.Add(anchorA);
+                orderedMenu.Items.Add(anchorB);
+                orderedMenu.Items.Add(anchorDelete);
+                var deleteIndex = orderedMenu.Items.IndexOf(anchorDelete);
+                tools.Attach(orderedMenu, PluginToolSurface.Zone, deleteIndex);
+                // 第二次按「重新打开菜单」的真实路径：下标在当前（已含插件工具项的）菜单上重新取。
+                tools.Attach(orderedMenu, PluginToolSurface.Zone, orderedMenu.Items.IndexOf(anchorDelete));
+                item.Check(orderedMenu.Items.Count == 5
+                           && orderedMenu.Items[2] is Separator
+                           && ((orderedMenu.Items[3] as MenuItem)?.Tag as string) == PluginToolService.MenuTag
+                           && ReferenceEquals(orderedMenu.Items[4], anchorDelete),
+                    "the submenu lands right before the delete item and survives re-opening");
+
+                var invoked = await tools.InvokeAsync(entry!, PluginToolSurface.Tray);
+                item.Check(invoked, "invoking the command succeeds");
+                item.Check(commandRuns == 1, "the command body ran once");
+                var storage = new JsonPluginStorage(
+                    Path.Combine(PluginPaths.PluginDataDir("lab.tool"), "settings.json"), null, null);
+                item.Check(storage.Get("lab.key") == "lab.value",
+                    "settings written inside the command are flushed to the plugin data dir");
+
+                var failing = new PluginToolCommand
+                {
+                    Id = "lab.fail",
+                    DisplayName = "Lab fail",
+                    Menus = PluginToolSurface.Hotkey,
+                    Execute = _ => throw new InvalidOperationException("lab tool failure")
+                };
+                tools.Publish(record, manifest, new[] { runCommand, failing });
+                item.Check(tools.Commands.Count == 2, "republishing replaces the plugin's earlier commands");
+                item.Check(tools.HasCommands(PluginToolSurface.Hotkey),
+                    "the failing command opts into the hotkey surface");
+                var failingEntry = tools.Find("lab.tool", "lab.fail");
+                var failed = failingEntry != null && !await tools.InvokeAsync(failingEntry, PluginToolSurface.Hotkey);
+                item.Check(failed, "a throwing command returns false instead of throwing");
+                item.Check(commandRuns == 1, "the failing command never ran the successful body");
+
+                // 全局热键：配置 → 注册 → WM_HOTKEY 分发 → 清配置注销。
+                var config = _configService!.Load();
+                var hotkeyBackup = config.PluginToolHotkeys;
+                config.PluginToolHotkeys = new List<PluginToolHotkey>
+                {
+                    // Ctrl+Alt+Shift+F9（MOD_ALT|MOD_CONTROL|MOD_SHIFT = 0x0007，VK_F9 = 0x78）。
+                    new() { PluginId = "lab.tool", CommandId = "lab.run", Modifiers = 0x0007, Key = 0x78, Enabled = true }
+                };
+                _configService.Save(config);
+                RefreshPluginToolHotkeys();
+                item.Check(PluginToolHotkeyMapForLab.Count >= 1, "a configured plugin tool hotkey is registered");
+                var hotkeyId = PluginToolHotkeyMapForLab.Keys.FirstOrDefault();
+                var runsBeforeHotkey = commandRuns;
+                item.Check(hotkeyId >= PLUGIN_TOOL_HOTKEY_BASE && TryHandlePluginToolHotkey(hotkeyId),
+                    "the hotkey id is dispatched to the command");
+                await Task.Delay(150);
+                item.Check(commandRuns == runsBeforeHotkey + 1, "the command ran through the hotkey path");
+
+                config = _configService.Load();
+                config.PluginToolHotkeys = new List<PluginToolHotkey>();
+                _configService.Save(config);
+                RefreshPluginToolHotkeys();
+                item.Check(PluginToolHotkeyMapForLab.Count == 0, "clearing the list unregisters the hotkey");
+
+                tools.RemovePlugin("lab.tool");
+                item.Check(tools.Commands.Count == 0, "removing the plugin drops its commands");
+                item.Check(tools.BuildMenu(PluginToolSurface.Tray) == null,
+                    "no plugin tool menu is built after removal");
+                item.Check(!tools.HasCommands(PluginToolSurface.Tray)
+                           && !tools.HasCommands(PluginToolSurface.Panel)
+                           && !tools.HasCommands(PluginToolSurface.Zone),
+                    "no surface reports the removed commands");
+                tools.Attach(hostMenu, PluginToolSurface.Tray);
+                item.Check(hostMenu.Items.Count == 0,
+                    "a menu that already carried the submenu drops it once the commands are gone");
+
+                // 先备份后还原：别把自测热键留在（隔离的）用户配置里。
+                config = _configService.Load();
+                config.PluginToolHotkeys = hotkeyBackup;
+                _configService.Save(config);
+                RefreshPluginToolHotkeys();
+                break;
+            }
             default:
                 item.Check(false, "unknown case: " + name);
                 break;

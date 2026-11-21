@@ -103,9 +103,9 @@ public partial class PluginDetailDialog : Window
             UninstallButton.Visibility = Visibility.Collapsed;
             NewWidgetButton.Visibility = Visibility.Collapsed;
             StateText.Text = "";
-            // 工具/数据源插件当前版本还不提供安装：市场卡片已经禁用，详情弹窗也别给一个
-            // 「点下去、下载完才报错」的安装按钮。
-            if (Entry.KindValue is PluginKind.Tool or PluginKind.Integration)
+            // 数据源插件当前版本还不提供安装：市场卡片已经禁用，详情弹窗也别给一个
+            // 「点下去、下载完才报错」的安装按钮。工具插件（API v3）已经能装，不再拦。
+            if (Entry.KindValue == PluginKind.Integration)
             {
                 PrimaryButton.Content = Loc["Plugin.NotAvailable"];
                 PrimaryButton.IsEnabled = false;
@@ -124,7 +124,7 @@ public partial class PluginDetailDialog : Window
             PrimaryButton.Content = update ? Loc["Plugin.Update"] : Loc["Plugin.Install"];
             PrimaryButton.Visibility = update ? Visibility.Visible : Visibility.Collapsed;
             ToggleButton.Content = Record.Enabled ? Loc["Plugin.Disable"] : Loc["Plugin.Enable"];
-            ToggleButton.Visibility = Entry.KindValue is PluginKind.Widget or PluginKind.ZoneBar or PluginKind.Language or PluginKind.Appearance
+            ToggleButton.Visibility = Entry.KindValue is PluginKind.Widget or PluginKind.ZoneBar or PluginKind.Tool or PluginKind.Language or PluginKind.Appearance
             ? Visibility.Visible : Visibility.Collapsed;
             UninstallButton.Visibility = Visibility.Visible;
             UpdateNewWidgetButton();

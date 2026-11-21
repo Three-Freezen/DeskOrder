@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Media;
 using DeskOrder.PluginApi;
@@ -20,10 +21,12 @@ public sealed class PluginHostContext : IPluginHost
     public required IPluginUi Ui { get; init; }
     public required IPluginWidgets Widgets { get; init; }
     public required IPluginZoneBays ZoneBays { get; init; }
+    public required IPluginTools Tools { get; init; }
     public required IPluginLog Log { get; init; }
 
     public PluginWidgetRegistry Registry => (PluginWidgetRegistry)Widgets;
     public PluginZoneBayRegistry BayRegistry => (PluginZoneBayRegistry)ZoneBays;
+    public PluginToolRegistry ToolRegistry => (PluginToolRegistry)Tools;
 }
 
 /// <summary>收集 <see cref="PluginZoneBayDescriptor"/>，拒绝重复/非法 id。</summary>
@@ -74,6 +77,36 @@ public sealed class PluginWidgetRegistry : IPluginWidgets
     }
 
     internal void Clear() => _descriptors.Clear();
+}
+
+/// <summary>收集 <see cref="PluginToolCommand"/>（API v3），拒绝重复/非法 id 与超量注册。</summary>
+public sealed class PluginToolRegistry : IPluginTools
+{
+    public const int MaxCommands = 16;
+    /// <summary>命令 id 会进配置（热键分配）与菜单，只允许稳定的小写片段。</summary>
+    static readonly Regex IdPattern = new("^[a-z0-9._-]{1,64}$", RegexOptions.Compiled);
+
+    readonly List<PluginToolCommand> _commands = new();
+
+    public IReadOnlyList<PluginToolCommand> Commands => _commands;
+
+    public void Register(PluginToolCommand command)
+    {
+        if (command == null) throw new ArgumentNullException(nameof(command));
+        if (string.IsNullOrEmpty(command.Id) || !IdPattern.IsMatch(command.Id))
+            throw new ArgumentException("tool command id must be 1..64 chars of [a-z0-9._-]");
+        if (string.IsNullOrWhiteSpace(command.DisplayName))
+            throw new ArgumentException("tool command display name is required");
+        if (command.Execute == null)
+            throw new ArgumentException("tool command Execute is required");
+        if (_commands.Count >= MaxCommands)
+            throw new InvalidOperationException($"a plugin may register at most {MaxCommands} tool commands");
+        if (_commands.Any(c => string.Equals(c.Id, command.Id, StringComparison.Ordinal)))
+            throw new InvalidOperationException($"duplicate tool command id: {command.Id}");
+        _commands.Add(command);
+    }
+
+    internal void Clear() => _commands.Clear();
 }
 
 /// <summary>JSON 键值存储：插件级落盘 / 组件级写回 SettingsJson。</summary>

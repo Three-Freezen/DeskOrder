@@ -155,6 +155,12 @@ public class AppConfig
     /// <summary>首次启用分区坞插件时自动建过一条；用户删掉后不再自动重建。</summary>
     public bool ZoneBaySeeded { get; set; }
 
+    /// <summary>
+    /// 插件工具命令的全局热键分配（API v3）。命令在插件 Initialize 里注册，这里只记
+    /// 「哪条命令 → 哪组键」；命令不存在时注册会被跳过，插件重装后自动恢复。
+    /// </summary>
+    public List<PluginToolHotkey> PluginToolHotkeys { get; set; } = new();
+
     // ── Property window (per-instance design system, spec §7.1 #6) ──
     public double PropertyWindowX { get; set; } = double.NaN;
     public double PropertyWindowY { get; set; } = double.NaN;

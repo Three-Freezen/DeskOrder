@@ -12,6 +12,7 @@ using System.Windows.Media;
 using System.Windows.Interop;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
+using DeskOrder.PluginApi;
 using DesktopZones.Helpers;
 using DesktopZones.Models;
 using DesktopZones.Services;
@@ -1673,6 +1674,10 @@ public partial class PanelWindow : Window
         var hideItem = new MenuItem { Header = _loc["Panel.Hide"] };
         hideItem.Click += (_, _) => HideButton_Click(null!, null!);
         contextMenu.Items.Add(hideItem);
+
+        // API v3：插件工具子菜单。每次右键都是新菜单对象，Opened 里挂一次即可；
+        // 失败已在 PluginToolService 内部兜住，不会把异常抛回 UI 线程。
+        contextMenu.Opened += (_, _) => PluginToolService.Instance.Attach(contextMenu, PluginToolSurface.Panel);
 
         ContextMenu = contextMenu;
         contextMenu.IsOpen = true;

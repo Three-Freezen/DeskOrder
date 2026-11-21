@@ -1060,5 +1060,7 @@
   "Plugin.Update.RestartDone": "Updated \"{0}\" to v{1}; restart to apply",
   "Plugin.Local.OfficialSigned": "Signed by the official key",
   "Plugin.NotAvailable": "Coming later",
-  "Plugin.UninstallDeleteDataPrompt": "Also delete this plugin's data (settings and cache)? Choose No to keep it."
+  "Plugin.UninstallDeleteDataPrompt": "Also delete this plugin's data (settings and cache)? Choose No to keep it.",
+  "PluginTool.Menu": "Plugin tools",
+  "PluginTool.RunFailed": "“{0}” failed to run"
 }

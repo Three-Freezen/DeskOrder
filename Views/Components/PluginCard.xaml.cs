@@ -58,13 +58,13 @@ public partial class PluginCard : UserControl
         }
         if (record == null)
         {
-            if (entry.KindValue is PluginKind.Widget or PluginKind.ZoneBar or PluginKind.Language or PluginKind.Appearance)
+            if (entry.KindValue is PluginKind.Widget or PluginKind.ZoneBar or PluginKind.Tool or PluginKind.Language or PluginKind.Appearance)
             {
                 ActionButton.Content = Loc["Plugin.Install"];
             }
             else
             {
-                // 工具/数据源还没开放：不要给用户看内部代号 "P1"。
+                // 数据源（integration）还没开放：不要给用户看内部代号 "P1"。
                 ActionButton.Content = Loc["Plugin.NotAvailable"];
                 ActionButton.IsEnabled = false;
                 ActionButton.ToolTip = Loc["Plugin.Type.Hint"];

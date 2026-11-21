@@ -1060,5 +1060,7 @@
   "Plugin.Update.RestartDone": "已更新「{0}」到 v{1}，重启后生效",
   "Plugin.Local.OfficialSigned": "签名由官方公钥签发",
   "Plugin.NotAvailable": "后续版本",
-  "Plugin.UninstallDeleteDataPrompt": "同时删除这个插件的数据（设置、缓存）？选「否」会保留。"
+  "Plugin.UninstallDeleteDataPrompt": "同时删除这个插件的数据（设置、缓存）？选「否」会保留。",
+  "PluginTool.Menu": "插件工具",
+  "PluginTool.RunFailed": "「{0}」执行失败"
 }

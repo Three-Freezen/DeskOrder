@@ -3,6 +3,7 @@ using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
+using DeskOrder.PluginApi;
 
 namespace DesktopZones.Services;
 
@@ -306,6 +307,15 @@ public class TrayIconService : IDisposable
             langMenu.Items.Add(item);
         }
         menu.Items.Add(langMenu);
+
+        // API v3：已启用插件注册的工具命令（每次右键重建，菜单内容跟随插件加载状态）。
+        // 没有命令时连分割线都不加，托盘菜单保持原来的 3 项。
+        var toolsMenu = PluginToolService.Instance.BuildMenu(PluginToolSurface.Tray);
+        if (toolsMenu != null)
+        {
+            menu.Items.Add(new Separator());
+            menu.Items.Add(toolsMenu);
+        }
 
         var exit = new MenuItem { Header = loc["Tray.Exit"] };
         exit.Click += (_, _) => Exit?.Invoke();
