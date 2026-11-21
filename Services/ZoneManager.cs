@@ -348,7 +348,11 @@ public class ZoneManager
 
         // 导入时就按原始路径 + 文件类型解析并缓存图标（渲染端 ZoneItemViewModel 直接命中
         // 共享缓存，避免懒解析在文件尚未写完时把 null 图标缓存成永久空白）。
-        ShellIconService.Instance.GetIcon(item.TargetPath, item.Type, item.IconPath);
+        // 预热尺寸必须和渲染端一致：ZoneViewModel 用 SnapDecodeSize(GridSize, DpiScale) 算，
+        // 这里拿不到分区窗口的真实 DPI，用系统 DPI 近似 —— 对不上时只是一次缓存未命中，
+        // 不影响正确性。
+        ShellIconService.Instance.GetIcon(item.TargetPath, item.Type, item.IconPath,
+            ShellIconService.SnapDecodeSize(zone.GridSize, ShellIconService.SystemDpiScale));
 
         double itemW = zone.GridSize;
         if (zone.DockMode)

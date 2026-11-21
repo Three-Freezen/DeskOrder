@@ -220,6 +220,14 @@ public static class AudioSpectrumCapture
             }
             _available = true;
 
+            // Phase 1：静音检测。环回流在"没有应用出声"时仍然持续投递 SILENT 包，
+            // 旧实现照单全收：48kHz 下逐样本下混 + 每 21ms 一次 4096 点 FFT 一直空转。
+            // 连续静音 ≥500ms 后清空频段、跳过 FFT，等真有声音再恢复（条子这时候本来就贴地）。
+            long silentFramesToDrop = Math.Max(1, fmt.nSamplesPerSec / 2);
+            long silentFrames = 0;
+            int idleTicks = 0;
+            bool silenceNotified = false;
+
             while (_running && token == _runToken && _bandCount == bandCountAtStart)
             {
                 bool got = false;
@@ -231,7 +239,17 @@ public static class AudioSpectrumCapture
                     try
                     {
                         got = true;
-                        analyser.Feed(data, frames, (flags & 0x2) != 0 /*AUDCLNT_BUFFERFLAGS_SILENT*/);
+                        bool silent = (flags & 0x2) != 0;   // AUDCLNT_BUFFERFLAGS_SILENT
+                        if (silent)
+                        {
+                            silentFrames += frames;
+                        }
+                        else
+                        {
+                            silentFrames = 0;
+                            silenceNotified = false;
+                            analyser.Feed(data, frames, false);
+                        }
                     }
                     finally
                     {
@@ -239,8 +257,35 @@ public static class AudioSpectrumCapture
                     }
                 }
 
-                if (!got) Thread.Sleep(8);
-                if (analyser.TryProcess(out var snapshot)) _bands = snapshot;
+                bool silentNow = silentFrames >= silentFramesToDrop;
+                if (silentNow)
+                {
+                    if (!silenceNotified)
+                    {
+                        silenceNotified = true;
+                        analyser.Silence();
+                        if (analyser.TryProcess(out var zeros)) _bands = zeros;
+                    }
+                }
+                else if (analyser.TryProcess(out var snapshot))
+                {
+                    _bands = snapshot;
+                }
+
+                if (!got)
+                {
+                    idleTicks++;
+                    Thread.Sleep(idleTicks > 20 ? 40 : 8);   // 长时间没包：降频空转
+                }
+                else if (silentNow)
+                {
+                    idleTicks = 0;
+                    Thread.Sleep(20);                        // 静音期间别再高频空转
+                }
+                else
+                {
+                    idleTicks = 0;
+                }
             }
 
             // 条数变了 → 退出本流，外层会按新段数重建
@@ -353,6 +398,17 @@ public static class AudioSpectrumCapture
         }
 
         private bool _pendingFft;
+
+        /// <summary>进入静音：清空环形缓冲与平滑值，并让下一次 <see cref="TryProcess"/> 输出一次全零。
+        /// 之后调用方在静音期间会跳过 Feed / FFT，直到重新有非静音包。</summary>
+        public void Silence()
+        {
+            Array.Clear(_ring, 0, _ring.Length);
+            Array.Clear(_smoothed, 0, _smoothed.Length);
+            _write = 0;
+            _sinceFft = 0;
+            _pendingFft = true;
+        }
 
         /// <summary>攒够一个 hop 就算一次；返回 true 时 <paramref name="snapshot"/> 是新的频段数组。</summary>
         public bool TryProcess(out float[] snapshot)

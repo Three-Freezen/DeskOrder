@@ -526,9 +526,11 @@ public static class ThemeService
         // 2026-08-28 perf pass: 原先每秒轮询注册表一次(常驻 UI 线程唤醒)；改为
         // 隐藏消息窗口直接收 WM_SETTINGCHANGE("ImmersiveColorSet") 和
         // WM_DWMCOLORIZATIONCOLORCHANGED。保留 15s 兜底轮询 — 万一广播被吞掉，
-        // 行为退化只是把延迟从 1s 拉长到 15s，不会丢功能。
+        // 行为退化只是把延迟从 1s 拉长到 60s，不会丢功能。
+        // Phase 1：15s → 60s。主通道是 WM_SETTINGCHANGE / WM_DWMCOLORIZATIONCOLORCHANGED 广播
+        // + 切回 System 时的立即补一次；这个轮询只在广播被吞时兜底，没必要每 15s 唤醒 UI 线程。
         EnsureAccentMessageWindow();
-        _accentSafetyPoll = new DispatcherTimer { Interval = TimeSpan.FromSeconds(15) };
+        _accentSafetyPoll = new DispatcherTimer { Interval = TimeSpan.FromSeconds(60) };
         _accentSafetyPoll.Tick += OnAccentSafetyPollTick;
         _accentSafetyPoll.Start();
     }

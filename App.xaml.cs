@@ -600,8 +600,9 @@ public partial class App : System.Windows.Application
 
         // ponytail: 启动时恢复可见的小组件窗口（位置 + 显示状态持久化，与分区一致）。
         // 只打开模型 IsVisible=true 的组件；隐藏组件保持隐藏。
-        EnsureManagementWindow();
-        _managementWindow?.RestoreVisibleWidgets();
+        // Phase 2：不再为了"借用管理窗口的 RestoreVisibleWidgets"而 new ManagementWindow ——
+        // 启动只恢复挂件窗口（WidgetWindows），管理窗口改为首次点托盘/双击桌面时懒建。
+        RestoreVisibleWidgetsAtStartup();
 
         // Register panel hotkey
         if (config.PanelHotkey.PanelHotkeyEnabled && _mainHwnd != IntPtr.Zero)
@@ -622,14 +623,20 @@ public partial class App : System.Windows.Application
 
         // ponytail 2026-08-27: 启动 LowLevel 双击桌面监听(若开启)。
         // 当前若有任意 zone/widget/note 处于隐藏态 → 全部显示;否则 → 全部隐藏(完全隐藏)。
+        // Phase 1：钩子改为「前台是桌面/开始菜单时」按需挂载（见 AppDesktopDoubleClick）；
+        // 回调里只排队，显示/隐藏全部挂件会动很多窗口，别让它在 LL 钩子回调里跑
+        // （超过 LowLevelHooksTimeout 会被系统静默摘掉钩子，表现就是"连点几下失效"）。
         AppDesktopDoubleClick.Install(config.DoubleClickToggleShowHide, () =>
         {
-            bool anyHidden = AnyWidgetHidden();
-            Dispatcher.Invoke(() =>
+            Dispatcher.BeginInvoke(new Action(() =>
             {
-                if (anyHidden) TrayShowAll(staggered: false);
-                else TrayFullHideAll();
-            });
+                try
+                {
+                    if (AnyWidgetHidden()) TrayShowAll(staggered: false);
+                    else TrayFullHideAll();
+                }
+                catch { }
+            }), DispatcherPriority.Normal);
         });
 
         // Initialize reminder service
@@ -1990,13 +1997,53 @@ public partial class App : System.Windows.Application
     /// Needed because the property editor (PropertyWindowService) routes through the
     /// ManagementWindow, and with StartMinimized=true the window is never constructed at
     /// startup — so opening a SubFolder/zone settings panel before first opening the
-    /// management UI would otherwise silently no-op.</summary>
+    /// management UI would otherwise silently no-op.
+    ///
+    /// Phase 2：启动不再调用本方法（启动只恢复挂件，见 <see cref="RestoreVisibleWidgetsAtStartup"/>），
+    /// 只有真正需要管理界面（托盘菜单/双击桌面/属性窗口路由）时才建。</summary>
     public void EnsureManagementWindow()
     {
         if (_managementWindow != null) return;
         _managementWindow = new ManagementWindow(_zoneManager!, _configService!, _notesService, _widgetService, _panelService);
         _managementWindow.Closed += (_, _) => _managementWindow = null;
         _managementWindow.Icon = AppIcon;
+    }
+
+    /// <summary>Phase 2：启动恢复可见挂件 —— 不依赖 ManagementWindow。
+    ///
+    /// 便签窗口一直由 App 自己管理（NotesService.Windows）；时钟/日历/播放器交给
+    /// <see cref="WidgetWindows"/>（它写 WidgetService 的进程级窗口字典），插件挂件沿用
+    /// PluginService.RestoreWidgets。窗口记录都在进程级字典里，所以之后懒建的管理窗口
+    /// 能直接"认领"这些已开着的窗口，不会重复建窗。</summary>
+    void RestoreVisibleWidgetsAtStartup()
+    {
+        if (_notesService != null)
+        {
+            foreach (var note in new System.Collections.Generic.List<Models.StickyNote>(_notesService.Notes))
+            {
+                if (!note.IsVisible) continue;
+                try { OpenNoteWindow(note); }
+                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[RestoreWidgets] note {note.Id} failed: {ex}"); }
+            }
+        }
+        try { WidgetWindows.RestoreVisible(_widgetService); }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[RestoreWidgets] widgets failed: {ex}"); }
+
+        // 诊断（Phase 2）：启动恢复完成后记一行"内存画像" —— 图标缓存字节 / 窗口数 /
+        // 管理窗口是否已建。用户反馈"内存高"时，这一行足以区分是图标缓存、窗口数量，
+        // 还是管理界面被提前创建；正常使用无副作用（只在 ApplicationIdle 跑一次）。
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            try
+            {
+                using var proc = Process.GetCurrentProcess();
+                double privMb = proc.PrivateMemorySize64 / 1024.0 / 1024.0;
+                DzTrace.Always(
+                    $"[Perf] 启动后 private≈{privMb:0.0}MB icons={ShellIconService.Instance.CachedBytes / 1024}KB " +
+                    $"windows={Application.Current.Windows.Count} mgmt={_managementWindow != null}");
+            }
+            catch { }
+        }), DispatcherPriority.ApplicationIdle);
     }
 
     private static Icon CreateAppIcon()
@@ -2243,28 +2290,142 @@ static class AppDesktopDoubleClick
     static NativeMethods.POINT _lastDownPoint;
     static Action? _onDesktopDoubleClick;
 
+    // Phase 1：钩子只在「前台是桌面/开始菜单/任务栏」时挂着。
+    // WH_MOUSE_LL 会把**每一次**鼠标移动都投递到 UI 线程空转一遍；桌面美化软件常驻一个
+    // 这样的钩子，日常用鼠标就是持续唤醒。改成用 SetWinEventHook(EVENT_SYSTEM_FOREGROUND)
+    // 监听前台变化，按需装/卸（事件驱动、零轮询）。
+    static IntPtr _winEvent;
+    static DesktopHook.WinEventProc? _winEventProc;   // 必须保活，否则委托被 GC → 事件静默断掉
+    static bool _enabled;                             // 前台监听是否在工作（Uninstall 后排队事件忽略）
+    static bool _doubleClickOn;                       // 「双击桌面切换显示/隐藏」功能是否开启
+
     public static void Install(bool enabled, Action onDesktopDoubleClick)
     {
         Uninstall();
-        if (!enabled) return;
         _onDesktopDoubleClick = onDesktopDoubleClick;
-        _proc = HookProc;
-        // ponytail: LL hook hMod=IntPtr.Zero 表示用调用线程所在模块(本进程 EXE/DLL),
-        // 适用于 .NET 托管进程,无需 GetModuleHandle。
-        _hook = DesktopHook.SetWindowsHookEx(DesktopHook.WH_MOUSE_LL, _proc, IntPtr.Zero, 0);
-        if (_hook == IntPtr.Zero)
-            System.Diagnostics.Debug.WriteLine("[DeskOrder] Desktop double-click hook install failed");
+        _doubleClickOn = enabled;
+        // 前台监听本身与「双击功能是否开启」无关：快捷栏开始按钮的兜底钩子也要靠它门控
+        // （见 DockStartButtonHook.SetShellForeground）。所以这里无论如何都装监听。
+        _enabled = true;
+        _winEventProc = OnForegroundChanged;
+        try
+        {
+            _winEvent = DesktopHook.SetWinEventHook(DesktopHook.EVENT_SYSTEM_FOREGROUND,
+                DesktopHook.EVENT_SYSTEM_FOREGROUND, IntPtr.Zero, _winEventProc, 0, 0,
+                DesktopHook.WINEVENT_OUTOFCONTEXT);
+        }
+        catch { _winEvent = IntPtr.Zero; }
+
+        if (_winEvent == IntPtr.Zero)
+        {
+            // 拿不到前台事件就退回旧行为（钩子常驻）——功能不能因为优化静默消失。
+            System.Diagnostics.Debug.WriteLine("[DeskOrder] SetWinEventHook failed, keep resident mouse hook");
+            if (_doubleClickOn) EnsureMouseHook();
+            DockStartButtonHook.SetShellForeground(true);
+            return;
+        }
+        SyncMouseHook();   // 启动时前台可能已经是桌面，先同步一次
     }
 
     public static void Uninstall()
     {
-        if (_hook != IntPtr.Zero)
+        _enabled = false;
+        _doubleClickOn = false;
+        var we = _winEvent;
+        _winEvent = IntPtr.Zero;
+        if (we != IntPtr.Zero)
         {
-            DesktopHook.UnhookWindowsHookEx(_hook);
-            _hook = IntPtr.Zero;
+            try { DesktopHook.UnhookWinEvent(we); } catch { }
         }
-        _proc = null;
+        _winEventProc = null;
+        ReleaseMouseHook();
+        DockStartButtonHook.SetShellForeground(false);
         _onDesktopDoubleClick = null;
+    }
+
+    // ── Phase 1：前台变化 → 按需装/卸 WH_MOUSE_LL ──
+
+    static void OnForegroundChanged(IntPtr hook, uint ev, IntPtr hwnd, int idObject, int idChild,
+        uint threadId, uint time)
+    {
+        try { if (_enabled && idObject == 0) SyncMouseHook(); } catch { }
+    }
+
+    /// <summary>永远按「当前前台」决策（而不是跟着事件序列），事件排队/错位也能自愈。</summary>
+    static void SyncMouseHook()
+    {
+        if (!_enabled) return;
+        bool shell = IsShellForeground();
+        // 双击桌面功能没开就不装自己的钩子；但快捷栏开始按钮的兜底钩子仍要按前台门控。
+        if (shell && _doubleClickOn) EnsureMouseHook();
+        else ReleaseMouseHook();
+        DockStartButtonHook.SetShellForeground(shell);
+    }
+
+    static bool IsShellForeground()
+    {
+        var fg = NativeMethods.GetForegroundWindow();
+        if (fg == IntPtr.Zero) return false;
+        _clsBuf.Clear();
+        if (DesktopHook.GetClassName(fg, _clsBuf, _clsBuf.Capacity) <= 0) return false;
+        switch (_clsBuf.ToString())
+        {
+            // 桌面（Progman/WorkerW）与任务栏（含副屏）
+            case "Progman":
+            case "WorkerW":
+            case "SHELLDLL_DefView":
+            case "SysListView32":
+            case "Shell_TrayWnd":
+            case "Shell_SecondaryTrayWnd":
+                return true;
+            // 开始菜单 / 搜索宿主：类名是 UWP 的 CoreWindow，必须再按进程名确认，
+            // 否则任何 UWP 应用在前台都会被误判成「开始菜单」。
+            case "Windows.UI.Core.CoreWindow":
+            case "Windows.UI.Input.InputSite.WindowClass":
+                return AppActivityService.IsStartMenuOpen();
+            default:
+                return false;
+        }
+    }
+    static readonly StringBuilder _clsBuf = new(64);
+
+    static void EnsureMouseHook()
+    {
+        if (_hook != IntPtr.Zero) return;   // _hook 本身就是状态，天然幂等
+        _proc = HookProc;
+        try
+        {
+            // ponytail: LL hook hMod=IntPtr.Zero 表示用调用线程所在模块(本进程 EXE/DLL),
+            // 适用于 .NET 托管进程,无需 GetModuleHandle。
+            _hook = DesktopHook.SetWindowsHookEx(DesktopHook.WH_MOUSE_LL, _proc, IntPtr.Zero, 0);
+        }
+        catch { _hook = IntPtr.Zero; }
+        if (_hook == IntPtr.Zero)
+        {
+            _proc = null;
+            System.Diagnostics.Debug.WriteLine("[DeskOrder] Desktop double-click hook install failed");
+            return;
+        }
+        _lastDownUtc = DateTime.MinValue;
+        // 补记「装钩子之前没看见的那一下」：WinEvent 到达时左键通常还按着，
+        // 说明这次前台切换就是由点击桌面造成的。不补记的话，从别的应用切到桌面后
+        // 第一记双击会只选中桌面、不触发显示/隐藏切换。
+        if ((DesktopHook.GetAsyncKeyState(DesktopHook.VK_LBUTTON) & 0x8000) != 0
+            && NativeMethods.GetCursorPos(out var pt))
+        {
+            _lastDownUtc = DateTime.UtcNow;
+            _lastDownPoint = pt;
+        }
+    }
+
+    static void ReleaseMouseHook()
+    {
+        var h = _hook;
+        _hook = IntPtr.Zero;
+        _proc = null;
+        _lastDownUtc = DateTime.MinValue;
+        if (h == IntPtr.Zero) return;
+        try { DesktopHook.UnhookWindowsHookEx(h); } catch { }
     }
 
     static IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam)

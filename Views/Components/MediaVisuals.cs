@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using DesktopZones.Helpers;
 
 namespace DesktopZones.Views.Components;
 
@@ -27,7 +28,8 @@ internal static class FrameClock
 /// P1 接 WASAPI 环回 + FFT 后只需把 <see cref="FeedLevels"/> 喂进来，
 /// 渲染代码不用改。
 ///
-/// 性能约定：整个条区一遍 <see cref="OnRender"/> 画完，不建控件；
+/// 性能约定：整个条区**画进一张 WriteableBitmap**（一次 DrawImage 贴图），
+/// 不建控件、不做逐条矢量重绘；帧回调按 30fps 限流，连续静音时降到 4fps，
 /// 只在「播放中且未被暂停」时挂 <see cref="CompositionTarget.Rendering"/>，
 /// 其余状态直接停帧并清空。
 /// </summary>
@@ -90,8 +92,27 @@ public sealed class SpectrumBars : FrameworkElement
     private double _fadeDuration = 1.2;
     private double _lastAutoShift;
 
-    private readonly List<SolidColorBrush> _brushes = new();
-    private string _brushKey = "";
+    // ── 位图渲染 + 帧率门控（Phase 1）──
+    // 旧实现每帧在 OnRender 里用矢量画 32–100 根圆角条 + 倒影 DrawingGroup +
+    // PushOpacityMask：分层窗口的软件渲染器每帧都要重新栅格化这些几何/遮罩，
+    // 实测 60fps 下吃掉 44–50% 单核。改成「自己往一张 Pbgra32 位图里写像素 +
+    // 一次 DrawImage 贴图」之后，WPF 每帧只需要做一次位图拷贝合成。
+    private WriteableBitmap? _bitmap;
+    private int[] _pixels = Array.Empty<int>();
+    private int _pxW, _pxH;
+    private double _dpiX = 1, _dpiY = 1;
+    private Color[] _colors = Array.Empty<Color>();
+    private bool _colorsDirty = true;
+    private double _colorHue = double.NaN;
+
+    /// <summary>当前目标帧率：有真实音频能量 30fps；连续静音 4fps。</summary>
+    private int _targetFps = 30;
+
+    /// <summary>上一次真正出帧的时间（FrameClock 秒）。</summary>
+    private double _lastPaint = double.MinValue;
+
+    /// <summary>第一次判定为静音的时间；-1 = 当前有声音（或没有可用的采集源）。</summary>
+    private double _silentSince = -1;
 
     public SpectrumBars()
     {
@@ -123,7 +144,7 @@ public sealed class SpectrumBars : FrameworkElement
             _hueBase = _hueTarget;
             _fadeElapsed = double.MaxValue;
         }
-        _brushKey = "";
+        _colorsDirty = true;
         SyncHook();
         InvalidateVisual();
     }
@@ -147,7 +168,6 @@ public sealed class SpectrumBars : FrameworkElement
             _levels[i] = (float)Math.Clamp(0.14 + 0.86 * bell * wobble, 0, 1);
             _targets[i] = _levels[i];
         }
-        _brushKey = "";
         if (_transients.Length == n) Array.Clear(_transients, 0, n);
         InvalidateVisual();
     }
@@ -170,7 +190,7 @@ public sealed class SpectrumBars : FrameworkElement
         if (Color1 == c1 && Color2 == c2) return;
         Color1 = c1;
         Color2 = c2;
-        _brushKey = "";        // 颜色缓存必然失配，显式清一下省一次字符串比较
+        _colorsDirty = true;    // 颜色缓存必然失配
         InvalidateVisual();
     }
 
@@ -183,6 +203,9 @@ public sealed class SpectrumBars : FrameworkElement
         if (shouldRun)
         {
             _lastTick = -1;
+            _lastPaint = double.MinValue;
+            _silentSince = -1;
+            _targetFps = 30;
             CompositionTarget.Rendering += OnFrame;
             _hooked = true;
         }
@@ -199,13 +222,57 @@ public sealed class SpectrumBars : FrameworkElement
         _hooked = false;
     }
 
+    /// <summary>目标帧率：真实音频有能量 → 30fps；连续静音 1.5s 以上 → 4fps（条子贴地，几乎不动）；
+    /// 采集不可用 / 模拟律动 → 保持 30fps，别把动画本身卡成幻灯片。</summary>
+    private int ResolveTargetFps(double now)
+    {
+        bool signal;
+        try { signal = HasAudioSignal(); }
+        catch { signal = true; }
+        if (signal)
+        {
+            _silentSince = -1;
+            _targetFps = 30;
+            return _targetFps;
+        }
+        if (_silentSince < 0) _silentSince = now;
+        _targetFps = now - _silentSince >= 1.5 ? 4 : 30;
+        return _targetFps;
+    }
+
+    /// <summary>当前有没有值得逐帧刷新的音频能量。
+    /// 注意「采集不可用」和「静音」是两回事：没有设备/独占时频谱全零，条子本来就贴地，
+    /// 可以降到 4fps；模拟律动则始终在动，必须保持 30fps。</summary>
+    private bool HasAudioSignal()
+    {
+        if (Source != "Spectrum") return true;            // 模拟律动：动画本身在跑
+        var bandProvider = BandProvider;
+        if (bandProvider == null) return true;
+        var bands = bandProvider();
+        if (bands == null) return true;
+        for (int i = 0; i < bands.Length; i++)
+            if (bands[i] > 0.004f) return true;
+        var energy = EnergyProvider;
+        if (energy != null)
+        {
+            try { if (energy() > 0.002f) return true; } catch { }
+        }
+        return false;
+    }
+
     private void OnFrame(object? sender, EventArgs e)
     {
         if (!IsPlaying || Frozen || !IsVisible) { SyncHook(); return; }
         double now = FrameClock.Now;
-        if (_lastTick < 0) { _lastTick = now; return; }
-        double dt = Math.Clamp(now - _lastTick, 0, 0.1);
+        if (_lastTick < 0) { _lastTick = now; _lastPaint = now; return; }
+
+        // 帧率门控：CompositionTarget.Rendering 跟随显示器刷新率（60–144Hz），
+        // 这里按目标帧率放行；被跳过的帧不做模拟也不重绘（每帧整窗提交是主要成本）。
+        if (now - _lastPaint < 1.0 / ResolveTargetFps(now)) return;
+
+        double dt = Math.Clamp(now - _lastTick, 0.001, 0.1);
         _lastTick = now;
+        _lastPaint = now;
         _elapsed += dt;
 
         AdvanceSimulation(dt);
@@ -278,7 +345,7 @@ public sealed class SpectrumBars : FrameworkElement
             double p = Math.Clamp(_fadeElapsed / _fadeDuration, 0, 1);
             p = 1 - Math.Pow(1 - p, 3);   // ease-out：起步快、收尾柔和
             _hueBase = LerpHue(_hueFrom, _hueTarget, p);
-            _brushKey = "";               // 色相变了一个步进，颜色缓存要重建
+            _colorsDirty = true;          // 色相变了一个步进，颜色缓存要重建
         }
     }
 
@@ -407,7 +474,12 @@ public sealed class SpectrumBars : FrameworkElement
         return (((from + d * t) % 1) + 1) % 1;
     }
 
-    // ── 绘制 ──
+    // ── 绘制（写 Pbgra32 位图 + 一次 DrawImage 贴图）──
+    //
+    // 为什么不再用 DrawingContext 画几何：分层窗口（AllowsTransparency=True）强制 WPF
+    // 走软件渲染，每帧都要把矢量几何 + 倒影的 DrawingGroup + PushOpacityMask 重新栅格化
+    // 一遍——实测 60fps 下这一条占 44–50% 单核。改成自己往位图里写像素后，WPF 每帧
+    // 只剩「一次 DrawImage 合成」，同样的观感，成本降到原来的零头。
 
     protected override void OnRender(DrawingContext dc)
     {
@@ -416,92 +488,172 @@ public sealed class SpectrumBars : FrameworkElement
         if (n == 0 || w <= 0 || h <= 0) return;
         if (!IsPlaying || Frozen) return;
 
-        double baseline = Reflection ? h * 0.80 : h;
-        double maxBar = baseline * 0.96;
-        double slot = w / n;
-        double barW = Math.Clamp(BarWidth, 1, 12);
-        barW = Math.Min(barW, slot * 0.86);          // 条太多时自动收窄，不裁切
-        double gap = slot - barW;
-        double radius = Rounded ? Math.Min(barW / 2, 5) : 0;
+        EnsureBitmap(w, h);
+        RenderBarsToBitmap(w, h);
+        if (_bitmap != null) dc.DrawImage(_bitmap, new Rect(0, 0, w, h));
+    }
 
-        EnsureBrushes(n);
+    /// <summary>按当前 DPI / 元素尺寸准备位图与像素缓冲；尺寸或 DPI 变了就重建。</summary>
+    private void EnsureBitmap(double w, double h)
+    {
+        var dpi = VisualTreeHelper.GetDpi(this);
+        double dx = dpi.DpiScaleX > 0 ? dpi.DpiScaleX : 1;
+        double dy = dpi.DpiScaleY > 0 ? dpi.DpiScaleY : 1;
+        if (Math.Abs(dx - _dpiX) > 1e-6 || Math.Abs(dy - _dpiY) > 1e-6)
+        {
+            _dpiX = dx;
+            _dpiY = dy;
+            _bitmap = null;
+        }
+        int pw = Math.Max(1, (int)Math.Ceiling(w * _dpiX));
+        int ph = Math.Max(1, (int)Math.Ceiling(h * _dpiY));
+        if (_bitmap != null && _pxW == pw && _pxH == ph) return;
+        _pxW = pw;
+        _pxH = ph;
+        _pixels = new int[pw * ph];
+        _bitmap = new WriteableBitmap(pw, ph, 96 * _dpiX, 96 * _dpiY, PixelFormats.Pbgra32, null);
+    }
+
+    private void RenderBarsToBitmap(double w, double h)
+    {
+        var bitmap = _bitmap;
+        int n = _levels.Length;
+        int pw = _pxW, ph = _pxH;
+        if (bitmap == null || n == 0 || pw <= 0 || ph <= 0) return;
+
+        var pixels = _pixels;
+        Array.Clear(pixels, 0, pixels.Length);
+
+        double sx = pw / w;
+        double sy = ph / h;
+        double hDip = h;
+        double baselineDip = Reflection ? hDip * 0.80 : hDip;
+        double baseline = baselineDip * sy;
+        double maxBar = baselineDip * 0.96 * sy;
+        double slot = w / n;                                  // DIP
+        double barW = Math.Clamp(BarWidth, 1, 12);
+        barW = Math.Min(barW, slot * 0.86);                   // 条太多时自动收窄，不裁切
+        double barWpx = barW * sx;
+        double gap = slot - barW;
+        double radius = (Rounded ? Math.Min(barW / 2, 5) : 0) * sx;
+        float pulse = (float)Amplitude;
+
+        // 倒影：旧实现是「DrawingGroup + PushOpacityMask（0x60 → 0 的竖向渐变）」。
+        // 现在直接把同样的渐变乘进每行像素的 alpha，省掉整层遮罩的离屏合成。
+        double reflectSpace = Reflection ? (hDip - baselineDip - 2) * sy : 0;
+        double reflectH = Reflection && reflectSpace > 4 ? Math.Min(maxBar * 0.38, reflectSpace) : 0;
+
+        EnsureColors(n);
 
         for (int i = 0; i < n; i++)
         {
-            double level = Math.Clamp(_levels[i] * Amplitude, 0, 1);
-            double bh = Math.Max(2, level * maxBar);
-            double x = i * slot + gap / 2;
+            var color = _colors[Math.Min(i, _colors.Length - 1)];
+            double level = Math.Clamp(_levels[i] * pulse, 0f, 1f);
+            double bh = Math.Max(2 * sy, level * maxBar);
+            double x = (i * slot + gap / 2) * sx;
             double y = baseline - bh;
-            var brush = _brushes[Math.Min(i, _brushes.Count - 1)];
-            double rr = Math.Min(radius, Math.Min(barW, bh) / 2);
-            if (rr > 0.5)
-                dc.DrawRoundedRectangle(brush, null, new Rect(x, y, barW, bh), rr, rr);
-            else
-                dc.DrawRectangle(brush, null, new Rect(x, y, barW, bh));
-        }
+            double rr = Math.Min(radius, Math.Min(barWpx, bh) / 2);
+            FillRoundedRect(pixels, pw, ph, x, y, barWpx, bh, rr,
+                color.R, color.G, color.B, color.A, 0, 0, 1f);
 
-        if (Reflection)
-        {
-            double reflectSpace = h - baseline - 2;
-            if (reflectSpace > 4)
+            if (reflectH > 4)
             {
-                var group = new DrawingGroup();
-                using (var g = group.Open())
-                {
-                    double rh = Math.Min(maxBar * 0.38, reflectSpace);
-                    for (int i = 0; i < n; i++)
-                    {
-                        double level = Math.Clamp(_levels[i] * Amplitude, 0, 1);
-                        double bh = Math.Max(2, level * maxBar);
-                        double x = i * slot + gap / 2;
-                        double rr2 = Math.Min(bh * 0.38, rh);
-                        var brush = _brushes[Math.Min(i, _brushes.Count - 1)];
-                        double rr3 = Math.Min(radius, Math.Min(barW, rr2) / 2);
-                        if (rr3 > 0.5)
-                            g.DrawRoundedRectangle(brush, null, new Rect(x, baseline + 2, barW, rr2), rr3, rr3);
-                        else
-                            g.DrawRectangle(brush, null, new Rect(x, baseline + 2, barW, rr2));
-                    }
-                }
-                group.Freeze();
-
-                var mask = new LinearGradientBrush(
-                    new GradientStopCollection
-                    {
-                        new GradientStop(Color.FromArgb(0x60, 0xFF, 0xFF, 0xFF), 0),
-                        new GradientStop(Color.FromArgb(0x00, 0xFF, 0xFF, 0xFF), 1),
-                    })
-                {
-                    MappingMode = BrushMappingMode.Absolute,
-                    StartPoint = new Point(0, baseline + 2),
-                    EndPoint = new Point(0, baseline + 2 + Math.Min(maxBar * 0.38, reflectSpace)),
-                };
-                mask.Freeze();
-                dc.PushOpacityMask(mask);
-                dc.DrawDrawing(group);
-                dc.Pop();
+                double rh = Math.Min(bh * 0.38, reflectH);
+                double ry = baseline + 2 * sy;
+                double rr2 = Math.Min(radius, Math.Min(barWpx, rh) / 2);
+                FillRoundedRect(pixels, pw, ph, x, ry, barWpx, rh, rr2,
+                    color.R, color.G, color.B, color.A, ry, reflectH, 0x60 / 255f);
             }
         }
+
+        bitmap.WritePixels(new Int32Rect(0, 0, pw, ph), pixels, pw * 4, 0);
     }
 
-    private void EnsureBrushes(int n)
+    /// <summary>每根条的颜色（颜色模式改 / 自动换色渐变 / 条数变时才重算）。</summary>
+    private void EnsureColors(int n)
     {
-        string key = $"{ColorMode}|{Color1}|{Color2}|{n}|{_hueBase:F3}";
-        if (key == _brushKey && _brushes.Count == n) return;
-        _brushKey = key;
-        _brushes.Clear();
+        bool autoMoving = ColorMode == "Auto" && Math.Abs(_hueBase - _colorHue) > 0.0005;
+        if (!_colorsDirty && !autoMoving && _colors.Length == n) return;
+        _colorsDirty = false;
+        _colorHue = _hueBase;
+        if (_colors.Length != n) _colors = new Color[n];
         for (int i = 0; i < n; i++)
         {
             double t = n <= 1 ? 0 : (double)i / (n - 1);
-            Color c = ColorMode switch
+            _colors[i] = ColorMode switch
             {
                 "Single" => Color1,
                 "Auto" => AutoColorAt(t),
                 _ => Lerp(Color1, Color2, t),
             };
-            var brush = new SolidColorBrush(c);
-            brush.Freeze();
-            _brushes.Add(brush);
+        }
+    }
+
+    /// <summary>把一根圆角矩形的像素写进 Pbgra32 缓冲（几何单位 = 设备像素）。
+    ///
+    /// 覆盖率用「到圆角矩形的有符号距离」算（SDF）：边界 1px 内做线性抗锯齿，
+    /// 和旧版矢量绘制的边缘观感一致；内部整像素直接按覆盖率 1 写。
+    ///
+    /// <paramref name="fadeOriginY"/> / <paramref name="fadeHeight"/> 非 0 时按行做
+    /// 「<paramref name="fadeAlpha"/> → 0」线性淡出（倒影用），等价于旧版的竖向透明度遮罩。
+    /// 条与条之间不重叠，所以直接写像素（不混合），省一次读改写。</summary>
+    private static void FillRoundedRect(
+        int[] pixels, int pw, int ph,
+        double x0, double y0, double w, double h, double r,
+        byte cr, byte cg, byte cb, byte ca,
+        double fadeOriginY, double fadeHeight, float fadeAlpha)
+    {
+        if (w < 0.4 || h < 0.4) return;
+        double x1 = x0 + w, y1 = y0 + h;
+        int px0 = Math.Max(0, (int)Math.Floor(x0 - 1));
+        int py0 = Math.Max(0, (int)Math.Floor(y0 - 1));
+        int px1 = Math.Min(pw - 1, (int)Math.Ceiling(x1 + 1));
+        int py1 = Math.Min(ph - 1, (int)Math.Ceiling(y1 + 1));
+        if (px1 < px0 || py1 < py0) return;
+
+        double halfW = w * 0.5, halfH = h * 0.5;
+        double cx = x0 + halfW, cy = y0 + halfH;
+        bool fading = fadeHeight > 0.01;
+
+        for (int py = py0; py <= py1; py++)
+        {
+            double pyc = py + 0.5;
+            double dy = pyc - cy;
+            double qy = (dy < 0 ? -dy : dy) - halfH + r;
+            double rowScale = 1.0;
+            if (fading)
+            {
+                double t = (pyc - fadeOriginY) / fadeHeight;
+                if (t >= 1) continue;
+                if (t < 0) t = 0;
+                rowScale = fadeAlpha * (1 - t);
+                if (rowScale <= 0.002) continue;
+            }
+
+            int row = py * pw;
+            for (int px = px0; px <= px1; px++)
+            {
+                double pxc = px + 0.5;
+                double dx = pxc - cx;
+                double qx = (dx < 0 ? -dx : dx) - halfW + r;
+                double ax = qx > 0 ? qx : 0;
+                double ay = qy > 0 ? qy : 0;
+                double sd;
+                if (ax > 0 && ay > 0)
+                    sd = Math.Sqrt(ax * ax + ay * ay) + Math.Min(Math.Max(qx, qy), 0) - r;
+                else
+                    sd = Math.Max(qx, qy) - r;
+                double cov = 0.5 - sd;
+                if (cov <= 0) continue;
+                if (cov > 1) cov = 1;
+
+                int a = (int)(ca * cov * rowScale);
+                if (a <= 0) continue;
+                pixels[row + px] = (a << 24)
+                    | ((cr * a / 255) << 16)
+                    | ((cg * a / 255) << 8)
+                    | (cb * a / 255);
+            }
         }
     }
 
@@ -554,6 +706,7 @@ public sealed class VinylPlayerVisual : FrameworkElement
     private double _spinSeconds = 6;
     private double _angle;
     private double _lastTick = -1;   // <0 = 还没跑过帧
+    private double _lastPaint = double.MinValue;   // Phase 1：30fps 限流
     private bool _hooked;
 
     private DrawingGroup? _ringsCache;
@@ -613,6 +766,7 @@ public sealed class VinylPlayerVisual : FrameworkElement
         {
             _playing = running;
             _lastTick = -1;
+            _lastPaint = double.MinValue;
             SyncHook();
         }
         InvalidateVisual();
@@ -632,6 +786,8 @@ public sealed class VinylPlayerVisual : FrameworkElement
         if (shouldRun == _hooked) return;
         if (shouldRun)
         {
+            _lastTick = -1;
+            _lastPaint = double.MinValue;
             CompositionTarget.Rendering += OnFrame;
             _hooked = true;
         }
@@ -652,9 +808,12 @@ public sealed class VinylPlayerVisual : FrameworkElement
     {
         if (!_playing || !IsVisible) { SyncHook(); return; }
         double now = FrameClock.Now;
-        if (_lastTick < 0) { _lastTick = now; return; }
-        double dt = Math.Clamp(now - _lastTick, 0, 0.1);
+        if (_lastTick < 0) { _lastTick = now; _lastPaint = now; return; }
+        // Phase 1：盘面旋转限流到 30fps —— 慢速自转看不出差别，分层窗口的每帧成本减半。
+        if (now - _lastPaint < 1.0 / 30.0) return;
+        double dt = Math.Clamp(now - _lastTick, 0.001, 0.1);
         _lastTick = now;
+        _lastPaint = now;
 
         _angle = (_angle + 360.0 / Math.Max(1.5, _spinSeconds) * dt) % 360;
         InvalidateVisual();

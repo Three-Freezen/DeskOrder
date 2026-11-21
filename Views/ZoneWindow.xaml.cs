@@ -272,6 +272,11 @@ public partial class ZoneWindow : Window
         // 宿主窗口）→ 改成命名方法，关闭时退订。
         SubfolderFlyoutView.PreviewKeyDown += SubfolderFlyoutView_PreviewKeyDown;
         _vm = new ZoneViewModel(zone, mgr, icons);
+        // Phase 2：图标按显示尺寸解码 —— 分区窗口的 DPI 由这里传给 VM，
+        // VM 用 `GridSize × DpiScale` 算出解码尺寸（96/128 档），不再一律 256px。
+        // 构造期窗口还没进可视树，GetDpi 可能返回 1.0；OnSourceInitialized 里会再同步一次
+        // （ZoneViewModel.DpiScale 的 setter 会把新值推给已建条目并重取图标）。
+        try { _vm.DpiScale = VisualTreeHelper.GetDpi(this).DpiScaleX; } catch { }
         // 视图模式跟随分区模型（标题栏 ▦/≡ 会写回 Zone.IsGridView 并落盘）。
         _isGridView = zone.IsGridView;
         _vm.IsLocked = zone.IsLocked;
@@ -2179,6 +2184,21 @@ public partial class ZoneWindow : Window
         if (TryHandleFlyoutKeys(e)) e.Handled = true;
     }
 
+    /// <summary>Phase 2：窗口拿到 HWND 后 DPI 才可靠 —— 把真实缩放同步给 VM
+    /// （图标按 `GridSize × DpiScale` 选解码档位；VM 的 setter 会刷新已建条目的图标）。</summary>
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        try { _vm.DpiScale = VisualTreeHelper.GetDpi(this).DpiScaleX; } catch { }
+    }
+
+    /// <summary>Phase 2：窗口被拖到另一块不同缩放的显示器 → 解码档位跟着变。</summary>
+    protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
+    {
+        base.OnDpiChanged(oldDpi, newDpi);
+        try { _vm.DpiScale = newDpi.DpiScaleX; } catch { }
+    }
+
     protected override void OnClosed(EventArgs e)
     {
         // ponytail 2026-11-14(审计修订 P1-4 / P0-1 跨文件): 先置 _closed，之后所有排队到
@@ -3630,6 +3650,7 @@ public partial class ZoneWindow : Window
             _hover?.ExpandAnimated(permanent: true);
             _mgr.SaveConfig();
             _mgr.FireZoneVisibilityChanged(_zone.Id, true);
+            if (IsDock) EnsureDockRunPolling();   // Phase 1：最小化后恢复 → 运行状态轮询跟着起回来
         }
     }
 
@@ -7614,14 +7635,20 @@ public partial class ZoneWindow : Window
     }
 
     // 图标位图「真正有像素」的上下边界（0–1），按 ImageSource 缓存。
-    static readonly Dictionary<System.Windows.Media.ImageSource, (double Top, double Bottom)> _glyphBounds = new();
+    //
+    // Phase 2：原来用 Dictionary<ImageSource, ...> **强引用**当键 —— 图标缓存淘汰后这里
+    // 仍然钉住最多 512 张位图（256px 时最坏约 128MB）。ConditionalWeakTable 的键是弱引用，
+    // 位图不再被界面/图标缓存持有时，边界缓存跟着一起回收。
+    sealed class GlyphBoundsEntry { public double Top; public double Bottom; }
+    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<
+        System.Windows.Media.ImageSource, GlyphBoundsEntry> _glyphBounds = new();
 
     /// <summary>取图标位图的 alpha 上下边界（归一化 0–1）。取不到就按整张图算。
     /// 阈值 96（＜阈值算空白）：Shell 图标底部那一圈很淡的投影要忽略掉，否则镜像
     /// 会从投影下沿开始、看起来离图标本体还差一截（用户反馈"文件夹的倒影有点远"）。</summary>
     static (double Top, double Bottom) GlyphBoundsOf(System.Windows.Media.ImageSource src)
     {
-        if (_glyphBounds.TryGetValue(src, out var cached)) return cached;
+        if (_glyphBounds.TryGetValue(src, out var cached)) return (cached.Top, cached.Bottom);
         var result = (Top: 0.0, Bottom: 1.0);
         try
         {
@@ -7651,8 +7678,9 @@ public partial class ZoneWindow : Window
             }
         }
         catch { }
-        if (_glyphBounds.Count > 512) _glyphBounds.Clear();   // 尺寸/图标变形会造新 key，别无限长
-        _glyphBounds[src] = result;
+        // 同一个 key 重复 Add 会抛：先 Remove 再 Add（CWT 没有索引器；键弱引用，无需条数上限）。
+        _glyphBounds.Remove(src);
+        _glyphBounds.Add(src, new GlyphBoundsEntry { Top = result.Top, Bottom = result.Bottom });
         return result;
     }
 
@@ -7817,13 +7845,17 @@ public partial class ZoneWindow : Window
         }
         if (_dockRunTimer == null)
         {
-            _dockRunTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(700) };
+            // Phase 1：700ms → 1500ms。运行短线是"打开/切前台"的辅助提示，1.5s 完全够用；
+            // 每次 tick 都要在全量 EnumWindows + 逐窗口查进程，砍一半频率直接砍一半开销。
+            _dockRunTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1500) };
             _dockRunTimer.Tick += (_, _) => RefreshDockRunStates();
         }
-        if (!IsVisible)
+        if (!IsVisible || !_zone.IsVisible)
         {
             // ponytail 2026-11-14(P0-1): 隐藏/最小化的快捷栏不轮询（省 EnumWindows + COM）；
             // 重新显示时 IsVisibleChanged 会再调到这里把表起回来。
+            // Phase 1：把「最小化到恢复按钮」也算进来 —— 那条路径窗口不 Hide()、IsVisible
+            // 仍为 true，只有 _zone.IsVisible=false，旧判据漏了它（EnumWindows 继续每 700ms 跑）。
             _dockRunTimer.Stop();
             return;
         }
@@ -7841,7 +7873,12 @@ public partial class ZoneWindow : Window
         if (!IsDock || !_zone.DockRunIndicator) return;
         // ponytail 2026-11-14(P0-1): 窗口不可见时不枚举窗口、不碰 COM。重新显示时
         // IsVisibleChanged / ShowZone 会经 EnsureDockRunPolling 立刻补一次状态。
-        if (!IsVisible) return;
+        // Phase 1：收起成恢复按钮（窗口可见但 _zone.IsVisible=false）同样停表，自愈兜底。
+        if (!IsVisible || !_zone.IsVisible)
+        {
+            _dockRunTimer?.Stop();
+            return;
+        }
         _dockRunLastPoll = DateTime.UtcNow;
         System.Collections.Generic.Dictionary<string, AppActivityService.RunningApp> snap;
         try { snap = AppActivityService.Snapshot(); }

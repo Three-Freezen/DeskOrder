@@ -162,6 +162,14 @@ public partial class PropertyPanel : UserControl
             // 与 AcquireMediaConsumer 成对(否则 1s 轮询会在面板关掉后继续跑)。
             ReleaseMediaConsumer();
             UnsubscribeModelEvents();
+            // Phase 2（DPD 泄漏）：字段树里的色板/滑块是用 DependencyPropertyDescriptor
+            // AddValueChanged 订阅的 —— 描述符表是**静态的**、组件是**强键**，不显式退订就
+            // 会把面板 + 宿主窗口（连同已丢弃的整棵字段树）永久 root 住，每次开关属性窗口
+            // 泄漏 0.3~2MB。Unloaded = 面板离开可视树，必须在这里把订阅记账退干净。
+            // 退订后若面板被重新挂载（浮动窗口 ↔ 管理窗口停靠），Loaded 里的
+            // FlushPendingRebuild 会重建字段树、重新注册订阅（见下）。
+            if (Target != null) _rebuildPending = true;
+            ReleaseDpHooks();
         };
         // 面板在管理窗口里可能被收起(Visibility.Collapsed),主题/语言切换时先把重建
         // 挂起,等它再次可见时补一次(审计修复 P2-13)。
@@ -4464,6 +4472,21 @@ public partial class PropertyPanel : UserControl
     void SetFieldRoot(FrameworkElement root)
     {
         FieldScroller.Content = root;
+    }
+
+    /// <summary>Phase 2：宿主窗口隐藏/最小化（管理窗口"关闭"其实是 Hide()）时释放字段树。
+    ///
+    /// 字段树里每个色板/滑块都通过 <see cref="HookDpChange"/> 在静态 DPD 表里注册了强引用，
+    /// 只要面板还挂着 Target，整棵树（可能上千个元素）就一直常驻。这里把树和订阅一起丢掉，
+    /// 再次可见时由 <see cref="IsVisibleChanged"/> → <see cref="FlushPendingRebuild"/> →
+    /// <see cref="OnTargetChanged"/> 重建（用户看不出区别，快照/取消逻辑仍按原目标工作）。
+    /// 不改变 Target，所以不会丢"当前在编辑谁"。</summary>
+    public void TrimFieldTree()
+    {
+        if (Target == null) return;
+        _rebuildPending = true;
+        ReleaseDpHooks();
+        if (FieldScroller != null) FieldScroller.Content = null;
     }
 
     Grid MakeSliderRow(string label, double min, double max, double tick, double value, Action<double> onChange,

@@ -92,6 +92,20 @@ public partial class ManagementWindow : Window
         _viewModel = new ManagementViewModel(zoneManager, configService, notesService, widgetService, panelService);
         DataContext = this;
 
+        // Phase 2：管理窗口改为懒建（启动只恢复挂件、不建它），建的时候挂件窗口可能已经
+        // 由 WidgetWindows 打开了 —— 把进程级真相（WidgetService 的三个窗口字典）收进本窗口
+        // 的镜像字典，并补一个 Closed 清理，避免"管理界面里点开/关掉已存在的窗口"时状态错位。
+        // 之后的 Open*/Closed 会同时维护两份（镜像只是给本窗口的页面/开关用）。
+        AdoptOpenWidgetWindows();
+
+        // Phase 2：管理窗口的"关闭"其实是 Hide()（见 OnClosing）——窗口隐藏后没人看停靠
+        // 属性面板，但它的字段树 + DP 订阅（DockedPanel）仍常驻。隐藏时释放，下次显示由
+        // 面板自己的 IsVisibleChanged → FlushPendingRebuild 重建（用户无感）。
+        IsVisibleChanged += (_, e) =>
+        {
+            if (e.NewValue is false) { try { DockedPanel?.TrimFieldTree(); } catch { } }
+        };
+
         Helpers.PropertyWindowService.Init(this);
 
         // Re-translate dynamic UI text on language switch. ThemeLabel, breadcrumb,
@@ -1311,6 +1325,52 @@ public partial class ManagementWindow : Window
         finally { _isBatchWidgetOperation = false; }
     }
 
+    /// <summary>把 WidgetWindows（启动恢复路径）已经打开的挂件收进本窗口的镜像字典。
+    ///
+    /// 这些窗口的 Closed 处理器是启动路径挂的（只清 WidgetService 的进程级字典、不刷新管理
+    /// 页面），所以这里补一个 Closed：清镜像字典 + 通知当前页面刷新列表，否则「启动时恢复的
+    /// 时钟被关掉后，管理页里的运行状态要等切页才更新」。</summary>
+    void AdoptOpenWidgetWindows()
+    {
+        if (_widgetService == null) return;
+        foreach (var kv in _widgetService.ClockWindows)
+        {
+            _openClockWindows[kv.Key] = kv.Value;
+            kv.Value.Closed += (_, _) =>
+            {
+                _openClockWindows.Remove(kv.Key);
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (MainContent.Content is ClockPage cp) cp.RefreshList();
+                }), System.Windows.Threading.DispatcherPriority.Loaded);
+            };
+        }
+        foreach (var kv in _widgetService.CalendarWindows)
+        {
+            _openCalendarWindows[kv.Key] = kv.Value;
+            kv.Value.Closed += (_, _) =>
+            {
+                _openCalendarWindows.Remove(kv.Key);
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (MainContent.Content is CalendarPage cp) cp.RefreshList();
+                }), System.Windows.Threading.DispatcherPriority.Loaded);
+            };
+        }
+        foreach (var kv in _widgetService.MediaWindows)
+        {
+            _openMediaWindows[kv.Key] = kv.Value;
+            kv.Value.Closed += (_, _) =>
+            {
+                _openMediaWindows.Remove(kv.Key);
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (MainContent.Content is MediaPlayerPage mp) mp.RefreshList();
+                }), System.Windows.Threading.DispatcherPriority.Loaded);
+            };
+        }
+    }
+
     public void OpenNoteWindow(StickyNote note)
     {
         var app = (App)System.Windows.Application.Current;
@@ -1320,64 +1380,53 @@ public partial class ManagementWindow : Window
     public void OpenClockWindow(DesktopClock clock)
     {
         if (_openClockWindows.ContainsKey(clock.Id)) return;
-        var window = new ClockWidget(clock, _widgetService!);
-        window.Closed += (_, _) =>
-        {
-            _openClockWindows.Remove(clock.Id);
-            _widgetService!.ClockWindows.Remove(clock.Id);
+        var window = Services.WidgetWindows.OpenClock(clock, _widgetService!, () =>
             Dispatcher.BeginInvoke(new Action(() =>
             {
                 if (MainContent.Content is ClockPage cp) cp.RefreshList();
-            }), System.Windows.Threading.DispatcherPriority.Loaded);
-        };
-        _openClockWindows[clock.Id] = window;
-        _widgetService!.ClockWindows[clock.Id] = window;
-        window.Show();
+            }), System.Windows.Threading.DispatcherPriority.Loaded));
+        if (window != null)
+        {
+            _openClockWindows[clock.Id] = window;
+            window.Closed += (_, _) => _openClockWindows.Remove(clock.Id);
+        }
     }
 
     public void OpenCalendarWindow(DesktopCalendar cal)
     {
         if (_openCalendarWindows.ContainsKey(cal.Id)) return;
-        var window = new CalendarWidget(cal, _widgetService!);
-        window.Closed += (_, _) =>
-        {
-            _openCalendarWindows.Remove(cal.Id);
-            _widgetService!.CalendarWindows.Remove(cal.Id);
+        var window = Services.WidgetWindows.OpenCalendar(cal, _widgetService!, () =>
             Dispatcher.BeginInvoke(new Action(() =>
             {
                 if (MainContent.Content is CalendarPage cp) cp.RefreshList();
-            }), System.Windows.Threading.DispatcherPriority.Loaded);
-        };
-        _openCalendarWindows[cal.Id] = window;
-        _widgetService!.CalendarWindows[cal.Id] = window;
-        window.Show();
-        window.Activate();
+            }), System.Windows.Threading.DispatcherPriority.Loaded));
+        if (window != null)
+        {
+            _openCalendarWindows[cal.Id] = window;
+            window.Closed += (_, _) => _openCalendarWindows.Remove(cal.Id);
+        }
     }
 
     public void OpenMediaPlayerWindow(DesktopMediaPlayer player)
     {
         if (_openMediaWindows.ContainsKey(player.Id)) return;
-        var window = new MediaPlayerWidget(player, _widgetService!);
-        // Release 也记：重启后"播放器不见了"时，这行和 WidgetService 的载入行一起
-        // 能区分"配置里没有"还是"窗口没恢复"。
-        DesktopZones.Helpers.DzTrace.Always(
-            $"[Widgets] 打开播放器窗口 {player.Id} mode={player.Mode} pos=({player.X:0},{player.Y:0}) visible={player.IsVisible}");
-        window.Closed += (_, _) =>
-        {
-            _openMediaWindows.Remove(player.Id);
-            _widgetService!.MediaWindows.Remove(player.Id);
+        var window = Services.WidgetWindows.OpenMediaPlayer(player, _widgetService!, () =>
             Dispatcher.BeginInvoke(new Action(() =>
             {
                 if (MainContent.Content is MediaPlayerPage mp) mp.RefreshList();
-            }), System.Windows.Threading.DispatcherPriority.Loaded);
-        };
-        _openMediaWindows[player.Id] = window;
-        _widgetService!.MediaWindows[player.Id] = window;
-        window.Show();
+            }), System.Windows.Threading.DispatcherPriority.Loaded));
+        if (window != null)
+        {
+            _openMediaWindows[player.Id] = window;
+            window.Closed += (_, _) => _openMediaWindows.Remove(player.Id);
+        }
     }
 
     /// <summary>启动时恢复可见的小组件窗口（位置 + 显示状态持久化，与分区一致）。
-    /// 只打开模型里 IsVisible=true 且尚未开窗的组件；隐藏组件保持隐藏。</summary>
+    /// 只打开模型里 IsVisible=true 且尚未开窗的组件；隐藏组件保持隐藏。
+    ///
+    /// Phase 2：App 启动路径已改成直接用 <see cref="Services.WidgetWindows.RestoreVisible"/>
+    /// （不需要管理窗口），这里保留为兼容入口（自测台/其它调用方可能用），实现委托同一套逻辑。</summary>
     public void RestoreVisibleWidgets()
     {
         var app = (App)System.Windows.Application.Current;
@@ -1397,29 +1446,17 @@ public partial class ManagementWindow : Window
         {
             foreach (var clock in _widgetService.Clocks.Where(c => c.IsVisible).ToList())
             {
-                try
-                {
-                    if (!_openClockWindows.ContainsKey(clock.Id))
-                        OpenClockWindow(clock);
-                }
+                try { OpenClockWindow(clock); }
                 catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[RestoreVisibleWidgets] clock {clock.Id} failed: {ex}"); }
             }
             foreach (var cal in _widgetService.Calendars.Where(c => c.IsVisible).ToList())
             {
-                try
-                {
-                    if (!_openCalendarWindows.ContainsKey(cal.Id))
-                        OpenCalendarWindow(cal);
-                }
+                try { OpenCalendarWindow(cal); }
                 catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[RestoreVisibleWidgets] calendar {cal.Id} failed: {ex}"); }
             }
             foreach (var media in _widgetService.MediaPlayers.Where(c => c.IsVisible).ToList())
             {
-                try
-                {
-                    if (!_openMediaWindows.ContainsKey(media.Id))
-                        OpenMediaPlayerWindow(media);
-                }
+                try { OpenMediaPlayerWindow(media); }
                 catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[RestoreVisibleWidgets] media {media.Id} failed: {ex}"); }
             }
         }

@@ -27,6 +27,28 @@ public class ZoneViewModel : INotifyPropertyChanged
 
     public ObservableCollection<ZoneItemViewModel> Items { get; } = new();
 
+    /// <summary>宿主分区窗口的 DPI 缩放（由 ZoneWindow 按窗口实际 DPI 赋值，默认 100%）。
+    /// 图标按「显示 DIP × 这个缩放」解码（见 <see cref="ShellIconService.SnapDecodeSize"/>）：
+    /// 不知道窗口 DPI 时用 1.0，与系统 DPI 兜底口径一致。
+    /// 注意 ZoneWindow 是「先 new VM、再赋 DPI」，所以 setter 里要把已建条目同步过去并让它们
+    /// 重新取图标 —— 否则首屏那批 VM 会停在构造时的 1.0 档（高 DPI 下解码偏小、图标略糊）。</summary>
+    private double _dpiScale = 1.0;
+    public double DpiScale
+    {
+        get => _dpiScale;
+        set
+        {
+            if (_dpiScale == value || double.IsNaN(value)) return;
+            _dpiScale = value;
+            foreach (var vm in Items)
+            {
+                if (vm.IconDpiScale == value) continue;
+                vm.IconDpiScale = value;
+                vm.RefreshIcon(); // 只是清掉已解析的图标，重新走一次（还没解析时是空操作）
+            }
+        }
+    }
+
     private bool _isEditing;
     public bool IsEditing
     {
@@ -172,6 +194,7 @@ public class ZoneViewModel : INotifyPropertyChanged
             if (vm.IconSize != isize) vm.IconSize = isize;
             if (vm.ItemSize != _zone.GridSize) vm.ItemSize = _zone.GridSize;
             if (vm.ItemHeight != _zone.GridSize) vm.ItemHeight = _zone.GridSize;
+            if (vm.IconDpiScale != DpiScale) vm.IconDpiScale = DpiScale;
             if (vm.SourceZoneId != sourceZoneId) vm.SourceZoneId = sourceZoneId;
 
             // 旧实现重建 VM = 选中态清零 + 图标缓存失效；复用路径显式补上这两点。
@@ -219,7 +242,7 @@ public class ZoneViewModel : INotifyPropertyChanged
         }
 
         _zone.Items.Add(item);
-        var vm = new ZoneItemViewModel(item, _iconService) { IconSize = CurrentIconSize(), ItemSize = _zone.GridSize, ItemHeight = _zone.GridSize, SourceZoneId = _zone.Id };
+        var vm = new ZoneItemViewModel(item, _iconService) { IconSize = CurrentIconSize(), ItemSize = _zone.GridSize, ItemHeight = _zone.GridSize, IconDpiScale = DpiScale, SourceZoneId = _zone.Id };
         Items.Add(vm);
         _zoneManager.SaveConfig();
         _zoneManager.NotifyChanged();
@@ -416,6 +439,10 @@ public class ZoneItemViewModel : INotifyPropertyChanged
         set { _itemHeight = value; OnPropertyChanged(); }
     }
 
+    /// <summary>图标解码用的 DPI 缩放（容器 <see cref="ZoneViewModel.DpiScale"/> 在创建/同步条目时带过来）。
+    /// ItemSize 是 DIP，解码边长 = ItemSize × 这个缩放，再取 <see cref="ShellIconService.SnapDecodeSize"/> 的档位。</summary>
+    public double IconDpiScale { get; set; } = 1.0;
+
     private ImageSource? _icon;
     private DispatcherTimer? _iconRetryTimer;
     private int _iconRetryCount;
@@ -428,12 +455,15 @@ public class ZoneItemViewModel : INotifyPropertyChanged
         {
             if (_icon == null && _iconRetryTimer == null)
             {
+                // 按实际显示尺寸解码：ItemSize（= 分区网格边长）× DPI 向上取到 48/64/96/128/192/256 档。
+                // 不再一律解 256px —— 一个 65px 的格子存一张 256 的图纯属浪费（内存 ~7 倍、解码也慢）。
+                int decodeSize = ShellIconService.SnapDecodeSize(ItemSize, IconDpiScale);
                 // 分区图片预览：图片文件显示内容缩略图而非默认文件图标。
                 if (ShellIconService.IsImageFile(TargetPath) && ShellIconService.ImagePreviewEnabled)
                 {
-                    _icon = _iconService.GetImageThumbnail(TargetPath);
+                    _icon = _iconService.GetImageThumbnail(TargetPath, decodeSize);
                 }
-                _icon ??= _iconService.GetIcon(TargetPath, Type, IconPath);
+                _icon ??= _iconService.GetIcon(TargetPath, Type, IconPath, decodeSize);
                 // 文件刚创建仍在写入/被占用时 shell 解析失败：定时重试直到成功
                 //（监听导入时文件尚未写完 → 图标空白的修复）。重试进行中不再重复解析，
                 // 由定时器统一重试。
@@ -472,7 +502,8 @@ public class ZoneItemViewModel : INotifyPropertyChanged
             _iconRetryTimer.Stop();
             _iconRetryTimer = null;
             _iconRetryCount++;
-            var src = _iconService.GetIcon(TargetPath, Type, IconPath);
+            int decodeSize = ShellIconService.SnapDecodeSize(ItemSize, IconDpiScale);
+            var src = _iconService.GetIcon(TargetPath, Type, IconPath, decodeSize);
             if (src != null)
             {
                 _icon = src;

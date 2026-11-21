@@ -82,6 +82,11 @@ public sealed class MediaSessionService
     private int _consumers;
     private int _idleTicks;
     private const int IdleTicksBeforeSlowPoll = 15;
+
+    /// <summary>Phase 1：暂停态每 N 个 tick 才做一次全量 CoreAudio 会话扫描
+    /// （恢复播放时 SMTC 事件会立刻把轮询拉回 1s，扫描只是用来兜住"别的应用开始出声"）。</summary>
+    private const int ProbeEveryNthTickWhenPaused = 3;
+    private int _probeSkipCount;
     private static readonly TimeSpan FastPollInterval = TimeSpan.FromSeconds(1);
     // 空闲降频上限 3s（不再更低）：无 SMTC 的播放器（网易云等）只能靠轮询发现"开始播放"，
     // 5s 会让识别延迟明显；3s 在功耗与响应之间折中。
@@ -180,8 +185,9 @@ public sealed class MediaSessionService
     {
         if (_initStarted)
         {
-            // 消费者归零时轮询被 ReleaseConsumer 停过；再次有组件时恢复。
+            // 消费者归零时轮询/事件被 ReleaseConsumer 停过；再次有组件时恢复。
             if (_poll is { IsEnabled: false }) _poll.Start();
+            AttachManagerEvents();
             return;
         }
         _initStarted = true;
@@ -195,14 +201,41 @@ public sealed class MediaSessionService
         EnsureStarted();
     }
 
-    /// <summary>播放器组件释放；最后一个消费者离开时停掉 1s 轮询（SMTC 管理器/事件保留，
-    /// 下次有组件时 EnsureStarted 会恢复轮询）。</summary>
+    /// <summary>播放器组件释放；最后一个消费者离开时停掉 1s 轮询，并退订 SMTC 管理器事件
+    /// （Phase 1：旧实现只有进程退出才退订，关掉播放器后系统里任何媒体变化仍会触发整轮刷新）。</summary>
     public void ReleaseConsumer()
     {
         if (Interlocked.Decrement(ref _consumers) > 0) return;
         Interlocked.Exchange(ref _consumers, 0);
         _poll?.Stop();
-        DzTrace.Log("[MediaSession] 无消费者，暂停 1s 轮询");
+        DetachManagerEvents();
+        DzTrace.Log("[MediaSession] 无消费者，暂停轮询并退订 SMTC 事件");
+    }
+
+    /// <summary>SMTC 管理器事件是否已挂上（消费者归零时退订，回来时重挂）。</summary>
+    private bool _managerEventsAttached;
+
+    private void AttachManagerEvents()
+    {
+        if (_manager == null || _managerEventsAttached) return;
+        try
+        {
+            _manager.CurrentSessionChanged += OnManagerSessionChanged;
+            _manager.SessionsChanged += OnManagerSessionChanged;
+            _managerEventsAttached = true;
+        }
+        catch (Exception ex)
+        {
+            DzTrace.Log($"[MediaSession] 挂会话事件失败: {ex.GetType().Name} {ex.Message}");
+        }
+    }
+
+    private void DetachManagerEvents()
+    {
+        if (_manager == null || !_managerEventsAttached) return;
+        try { _manager.CurrentSessionChanged -= OnManagerSessionChanged; } catch { }
+        try { _manager.SessionsChanged -= OnManagerSessionChanged; } catch { }
+        _managerEventsAttached = false;
     }
 
     private async Task InitAsync()
@@ -212,8 +245,7 @@ public sealed class MediaSessionService
         try
         {
             _manager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
-            _manager.CurrentSessionChanged += OnManagerSessionChanged;
-            _manager.SessionsChanged += OnManagerSessionChanged;
+            AttachManagerEvents();
         }
         catch (Exception ex)
         {
@@ -241,11 +273,14 @@ public sealed class MediaSessionService
     }
 
     /// <summary>ponytail 2026-11-14(性能 P1-2 修法 3): 连续无媒体时把轮询退到 3s，减少常驻轮询开销；
-    /// 一旦有会话/SMTC 事件就回到 1s。</summary>
+    /// 一旦有会话/SMTC 事件就回到 1s。
+    ///
+    /// Phase 1：**暂停也算空闲**。旧实现只把 <see cref="MediaPlaybackState.None"/> 当空闲，
+    /// 用户暂停音乐后 1s 轮询永不退避 —— 这是"空闲时 CPU 下不去"的常驻唤醒源之一。</summary>
     private void MaybeDowngradePoll()
     {
         if (_poll == null) return;
-        bool idle = Now.State == MediaPlaybackState.None;
+        bool idle = Now.State != MediaPlaybackState.Playing;
         _idleTicks = idle ? _idleTicks + 1 : 0;
         var target = _idleTicks >= IdleTicksBeforeSlowPoll ? SlowPollInterval : FastPollInterval;
         if (_poll.Interval != target) _poll.Interval = target;
@@ -432,7 +467,10 @@ public sealed class MediaSessionService
         return null;
     }
 
-    // 跟随指定应用时的封面缓存（同一首歌每秒都会被读到，别重复解码）
+    // 跟随指定应用时的封面缓存（同一首歌每秒都会被读到，别重复解码）。
+    // Phase 2 第 6 项：上限 8 → 4。每张降为 256 宽后约 256KB，4 张 ≈ 1MB（旧 8 张 × 512 ≈ 8MB）。
+    // 超限仍是整块 Clear（保持最简单的现有语义：跟随单个应用时通常只有 1~2 首歌会来回切，
+    // 真到 5 条说明在频繁切歌，清掉重解一次比维护 LRU 更省事）。
     private readonly System.Collections.Generic.Dictionary<string, BitmapSource> _pinnedArt = new();
 
     private async Task<BitmapSource?> GetPinnedArtAsync(
@@ -441,7 +479,8 @@ public sealed class MediaSessionService
     {
         var key = $"{aumid}|{title}|{artist}|{album}";
         if (_pinnedArt.TryGetValue(key, out var cached)) return cached;
-        if (_pinnedArt.Count > 8) _pinnedArt.Clear();
+        // Phase 2 第 6 项：上限从 8 收紧到 4（见字段注释），超限整块清空。
+        if (_pinnedArt.Count > 4) _pinnedArt.Clear();
 
         var (bytes, _) = await ReadArtBytesAsync(props.Thumbnail!);
         if (bytes == null) return null;
@@ -500,6 +539,23 @@ public sealed class MediaSessionService
 
             var state = session == null ? MediaPlaybackState.None : MapState(session);
             bool smtcPlaying = session != null && state == MediaPlaybackState.Playing;
+
+            // Phase 1：暂停态不必每个 tick 都做一次全量 CoreAudio 会话枚举。
+            // SMTC 有会话但没在播时，每隔 ProbeEveryNthTickWhenPaused 个 tick 才扫一次；
+            // 用户点恢复播放会由 PlaybackInfoChanged 事件立即把轮询拉回 1s，不会漏。
+            if (session != null && !smtcPlaying)
+            {
+                _probeSkipCount++;
+                if (_probeSkipCount % ProbeEveryNthTickWhenPaused != 0)
+                {
+                    await ReadSmtcAsync(session, state, force);
+                    return;
+                }
+            }
+            else
+            {
+                _probeSkipCount = 0;
+            }
 
             // 先看一眼"到底谁真的在出声"：有些应用会留下 PlaybackStatus=Playing 但根本没声音的
             // 僵尸会话（比如关掉网页后浏览器没清会话），只信 SMTC 的话就会一直显示错的那个，
@@ -668,7 +724,7 @@ public sealed class MediaSessionService
                     }
                     else
                     {
-                        // ponytail 2026-11-14(性能 P1-3): 512px 同步解码从 UI 线程挪到线程池；
+                        // ponytail 2026-11-14(性能 P1-3): 封面解码从 UI 线程挪到线程池；
                         // DecodeArt 内部已 Freeze()，可以跨线程交回 UI。
                         var art = await Task.Run(() => DecodeArt(bytes));
                         if (art != null)
@@ -1092,7 +1148,13 @@ public sealed class MediaSessionService
         }
     }
 
-    /// <summary>字节 → 冻结的 BitmapSource（可跨线程共享）。</summary>
+    /// <summary>字节 → 冻结的 BitmapSource（可跨线程共享）。
+    ///
+    /// Phase 2 第 6 项：解码宽度 512 → 256。唱片机（MediaPlayerWidget 的 Disc）封面显示
+    /// 最大约 260 DIP：512 宽在 100% DPI 下已是 2 倍冗余；256 在 100~150% DPI 下 1:1 够用，
+    /// 200% DPI 下会被放大一点点（封面是艺术图，观感差异可接受）。
+    /// 内存：512×512×4 ≈ 1MB/张 → 256×256×4 ≈ 256KB/张，配合 _pinnedArt 上限 4 条，
+    /// 常驻从最多约 8MB 降到 1MB 以内。</summary>
     private static BitmapSource? DecodeArt(byte[] bytes)
     {
         try
@@ -1101,7 +1163,7 @@ public sealed class MediaSessionService
             var bmp = new BitmapImage();
             bmp.BeginInit();
             bmp.CacheOption = BitmapCacheOption.OnLoad;
-            bmp.DecodePixelWidth = 512;
+            bmp.DecodePixelWidth = 256;
             bmp.StreamSource = ms;
             bmp.EndInit();
             bmp.Freeze();
@@ -1151,11 +1213,7 @@ public sealed class MediaSessionService
         _initStarted = false;
         _poll?.Stop();
         _poll = null;
-        if (_manager != null)
-        {
-            try { _manager.CurrentSessionChanged -= OnManagerSessionChanged; } catch { }
-            try { _manager.SessionsChanged -= OnManagerSessionChanged; } catch { }
-        }
+        DetachManagerEvents();
         AttachSession(null);
         _manager = null;
     }

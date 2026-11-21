@@ -699,7 +699,7 @@ public partial class PanelWindow : Window
             {
                 Name = "ItemIcon",   // 次级分区浮层的锚点（见 FlyoutAnchorOf）
                 Width = 40, Height = 40, Stretch = Stretch.Uniform,
-                Source = ResolveItemIcon(item),
+                Source = ResolveItemIcon(item, 40),
                 HorizontalAlignment = HorizontalAlignment.Center,
                 Margin = new Thickness(0, 0, 0, 4)
             };
@@ -730,7 +730,7 @@ public partial class PanelWindow : Window
             {
                 Name = "ItemIcon",   // 次级分区浮层的锚点（见 FlyoutAnchorOf）
                 Width = 20, Height = 20, Stretch = Stretch.Uniform,
-                Source = ResolveItemIcon(item),
+                Source = ResolveItemIcon(item, 20),
                 Margin = new Thickness(0, 0, 8, 0),
                 VerticalAlignment = VerticalAlignment.Center
             };
@@ -834,13 +834,17 @@ public partial class PanelWindow : Window
         return card;
     }
 
-    /// <summary>分区图片预览:图片文件显示内容缩略图(与分区 ZoneItemViewModel.Icon 同逻辑)。</summary>
-    ImageSource? ResolveItemIcon(ZoneItem item)
+    /// <summary>分区图片预览:图片文件显示内容缩略图(与分区 ZoneItemViewModel.Icon 同逻辑)。
+    /// <paramref name="displayDip"/> 是图标在卡片里的实际显示边长（网格视图 40 / 列表视图 20），
+    /// 乘 DPI 后取解码档位。面板建卡片时窗口还没进可视树、拿不到窗口 DPI，先用系统 DPI 近似
+    /// （高 DPI 下最多差一档，视觉上无感；真正的 per-monitor 精确值在分区窗口路径上）。</summary>
+    ImageSource? ResolveItemIcon(ZoneItem item, double displayDip)
     {
+        int decodeSize = ShellIconService.SnapDecodeSize(displayDip, ShellIconService.SystemDpiScale);
         if (ShellIconService.IsImageFile(item.TargetPath) && ShellIconService.ImagePreviewEnabled)
-            return _iconService.GetImageThumbnail(item.TargetPath)
-                ?? _iconService.GetIcon(item.TargetPath, item.Type, item.IconPath);
-        return _iconService.GetIcon(item.TargetPath, item.Type, item.IconPath);
+            return _iconService.GetImageThumbnail(item.TargetPath, decodeSize)
+                ?? _iconService.GetIcon(item.TargetPath, item.Type, item.IconPath, decodeSize);
+        return _iconService.GetIcon(item.TargetPath, item.Type, item.IconPath, decodeSize);
     }
 
     /// <summary>给卡片包一层 Grid 并叠加选中高亮框(与分区 SelBox 同款视觉)。</summary>
