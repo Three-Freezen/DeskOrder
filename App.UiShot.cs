@@ -147,6 +147,71 @@ public partial class App
         finally { try { w?.Close(); } catch { } }
     }
 
+    /// <summary>--ui-cost=&lt;name&gt; --ui-cost-out=&lt;csv&gt;：同一进程内「开窗/关窗」反复采样私有内存，
+    /// 用 (开窗 - 关窗) 的差值当这个窗口的实际内存成本 —— 避开跨进程/环境噪声。
+    /// 同时记录构造+Show 的耗时与 idle CPU（两次采样之间的进程 CPU 增量）。</summary>
+    async Task RunUiCostAsync(string name, int cycles, string outFile)
+    {
+        var target = UiShotTargets().FirstOrDefault(t => t.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+        var proc = System.Diagnostics.Process.GetCurrentProcess();
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("cycle,windowMB,openMs,cpuMs");
+        for (int i = 1; i <= cycles; i++)
+        {
+            Window? w = null;
+            try
+            {
+                FullGc();
+                await Task.Delay(300);
+                proc.Refresh();
+                double before = proc.PrivateMemorySize64;
+
+                w = target.Make();
+                if (w == null) { sb.AppendLine($"{i},null,0,0"); continue; }
+                w.WindowStartupLocation = WindowStartupLocation.Manual;
+                w.ShowInTaskbar = false;
+                w.Left = 140;
+                w.Top = 120;
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                w.Show();
+                w.Activate();
+                await Task.Delay(700);
+                w.UpdateLayout();
+                await Task.Delay(200);
+                sw.Stop();
+
+                FullGc();
+                await Task.Delay(300);
+                proc.Refresh();
+                double open = proc.PrivateMemorySize64;
+                double cpu0 = proc.TotalProcessorTime.TotalMilliseconds;
+                await Task.Delay(1500);   // idle 采样
+                proc.Refresh();
+                double cpuMs = proc.TotalProcessorTime.TotalMilliseconds - cpu0;
+
+                sb.AppendLine($"{i},{Math.Round((open - before) / 1048576.0, 1)},{sw.ElapsedMilliseconds},{Math.Round(cpuMs)}");
+            }
+            catch (Exception ex)
+            {
+                sb.AppendLine($"{i},error:{ex.GetType().Name},0,0");
+            }
+            finally
+            {
+                try { w?.Close(); } catch { }
+                await Task.Delay(400);
+                try { FullGc(); } catch { }
+            }
+        }
+        try { File.WriteAllText(outFile, sb.ToString()); } catch { }
+    }
+
+    static void FullGc()
+    {
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+    }
+
     // ---- 屏幕抓取 ---------------------------------------------------------------
 
     static string? CaptureWindow(Window w, string path, int margin)
