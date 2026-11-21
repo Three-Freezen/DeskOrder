@@ -31,6 +31,9 @@ public partial class PluginCard : UserControl
     /// <summary>自测台只读访问器：权限角标是否显示（仅代码类 + 有权限）。</summary>
     internal bool PermissionBadgeVisibleForLab => PermissionsPill.Visibility == Visibility.Visible;
 
+    /// <summary>自测台只读访问器：卡片元信息行（含类型标签）的最终文本。</summary>
+    internal string MetaTextForLab => MetaText.Text;
+
     // 点开详情：按下点 + 拖动阈值 + 重入闩（见 CardRoot_MouseLeftButtonUp 的注释）。
     const double DragThreshold = 4.0;
     Point? _pressPoint;
@@ -51,7 +54,7 @@ public partial class PluginCard : UserControl
         OfficialPill.Visibility = entry.Official ? Visibility.Visible : Visibility.Collapsed;
         OfficialPill.ToolTip = Loc["Plugin.Official.Tip"];
 
-        var kind = Loc[entry.KindValue.I18nKey()];
+        var kind = PluginDisplay.DescribeKinds(entry.KindValues);
         var author = !string.IsNullOrWhiteSpace(entry.Author.Github)
             ? Loc.Get("Plugin.AuthorBy", entry.Author.Github)
             : (entry.Author.Name ?? "");
@@ -105,7 +108,7 @@ public partial class PluginCard : UserControl
     void ApplyPermissionBadge(PluginCatalogEntry entry)
     {
         var permissions = entry.Permissions?.Where(p => !string.IsNullOrWhiteSpace(p)).ToList();
-        var show = entry.KindValue.IsCode() && permissions is { Count: > 0 };
+        var show = entry.KindValues.Any(kind => kind.IsCode()) && permissions is { Count: > 0 };
         PermissionsPill.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
         if (!show)
         {

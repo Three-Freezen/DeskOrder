@@ -248,7 +248,7 @@ public partial class PluginsPage : UserControl
         {
             // 被禁用 / 下架的不进市场列表：官方的处置动作应该立刻从货架上消失。
             if (PluginBlocklist.Find(entry.Id, entry.Version) != null) continue;
-            if (_filter != null && entry.KindValue != _filter) continue;
+            if (!MatchesFilter(entry, _filter)) continue;
             var record = _service.GetRecord(entry.Id);
             if (_tab == 2 && (record == null || !PluginDetailDialog.IsUpdateAvailable(record, entry))) continue;
             if (query.Length > 0 && !Matches(entry, query)) continue;
@@ -284,6 +284,13 @@ public partial class PluginsPage : UserControl
             .Select(item => item.Entry)
             .ToList();
     }
+
+    /// <summary>
+    /// 市场 / 更新 tab 的类型筛选：一个包多类型时命中「任一能力」即显示（主类型不决定筛选结果）。
+    /// 抽成 static 纯函数，自测台直接断言筛选语义，不用把页面开起来点筛选芯片。
+    /// </summary>
+    internal static bool MatchesFilter(PluginCatalogEntry entry, PluginKind? filter)
+        => filter == null || entry.KindValues.Contains(filter.Value);
 
     internal static bool Matches(PluginCatalogEntry entry, string query)
     {
@@ -443,7 +450,7 @@ public partial class PluginsPage : UserControl
 
     PluginInstallPrompt BuildPrompt(PluginCatalogEntry entry)
     {
-        var kind = Loc[entry.KindValue.I18nKey()];
+        var kind = PluginDisplay.DescribeKinds(entry.KindValues);
         var described = PluginDisplay.DescribePermissions(entry.Permissions);
         var permissions = string.IsNullOrEmpty(described) ? Loc["Plugin.Permissions.None"] : described;
         return new PluginInstallPrompt
@@ -574,8 +581,9 @@ public partial class PluginsPage : UserControl
         if (Has(manifest.Author?.Name) || Has(manifest.Author?.Github)) return true;
         // registry 标签（时钟 / 剪贴板 / 示例…）只在市场条目里有，本地包没有标签。
         if (entry?.Tags != null && entry.Tags.Any(Has)) return true;
-        // 类型名（桌面组件 / 数据源…）：manifest 里的 kind 是英文标识，搜「数据源」得翻成当前语言。
-        return Has(Loc[record.KindValue.I18nKey()]);
+        // 类型名（桌面组件 / 数据源…）：manifest 里的 kind 是英文标识，搜「数据源」得翻成当前语言；
+        // 一个包多类型时任一能力命中即可。
+        return record.KindValues.Any(kind => Has(Loc[kind.I18nKey()]));
     }
 
     FrameworkElement BuildInstalledRow(PluginRecord record)
@@ -638,7 +646,7 @@ public partial class PluginsPage : UserControl
         }
         info.Children.Add(titleRow);
 
-        var kind = Loc[record.KindValue.I18nKey()];
+        var kind = PluginDisplay.DescribeKinds(record.KindValues);
         var source = PluginDisplay.DescribeSource(record.Source);
         info.Children.Add(new TextBlock
         {
@@ -652,7 +660,7 @@ public partial class PluginsPage : UserControl
         });
 
         var widgets = _service.CountWidgets(record.Id);
-        var status = record.KindValue == PluginKind.Widget && widgets > 0
+        var status = record.KindValues.Contains(PluginKind.Widget) && widgets > 0
             ? Loc.Plural("Plugin.WidgetCount", widgets)
             : "";
         var statusIsError = false;
@@ -744,7 +752,7 @@ public partial class PluginsPage : UserControl
         // 已启用但描述符还没加载（装了没重启/加载失败）时禁用并提示重启。
         // 行上已有 4 个按钮，这里只放一个「＋」图标按钮（文字入口在插件组件页与详情弹窗里），
         // 否则 84px 的文字按钮会把左侧信息列挤到换行。
-        if (record.KindValue == PluginKind.Widget && record.Enabled)
+        if (record.KindValues.Contains(PluginKind.Widget) && record.Enabled)
         {
             var newWidget = new Button
             {
@@ -917,6 +925,7 @@ public partial class PluginsPage : UserControl
         {
             Id = record.Id,
             Kind = record.Kind,
+            Kinds = record.Kinds,
             Name = manifest?.Name ?? new LocalizedText { Zh = record.Id, En = record.Id },
             Summary = manifest?.Summary ?? new LocalizedText(),
             Description = manifest?.Description,

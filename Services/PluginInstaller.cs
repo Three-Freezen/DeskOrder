@@ -181,7 +181,7 @@ public sealed class PluginInstaller
                 var trust = PluginTrust.Check(partPath, signatureText);
                 return InstallPackageCore(partPath, "market", entry.Official,
                     entry.Sha256, entry.Id, entry.Version, trust, entry.Permissions, existingEnabled,
-                    entry.KindValue);
+                    entry.KindValue, entry.KindValues);
             }, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
@@ -313,14 +313,15 @@ public sealed class PluginInstaller
     }
 
     /// <remarks>
-    /// <paramref name="expectedKind"/> 是市场条目声明的类型（本地导入传 null）。确认弹窗按
-    /// registry 的类型渲染（「声明式，不执行代码」等文案全来自它），真正执行的是包内 manifest；
-    /// 两者不一致时必须拒装，否则作者能把代码插件伪装成不执行代码的类型展示给用户。
+    /// <paramref name="expectedKind"/> 是市场条目声明的主类型（本地导入传 null）；
+    /// <paramref name="expectedKinds"/> 是完整的 kind 集合（一个包多类型）。两者都传时以集合为准。
+    /// 确认弹窗按 registry 的类型渲染（「声明式，不执行代码」等文案全来自它），真正执行的是包内
+    /// manifest；集合不一致时必须拒装，否则作者能把代码插件伪装成不执行代码的类型展示给用户。
     /// </remarks>
     internal PluginInstallResult InstallPackageCore(string packagePath, string source, bool official,
         string? expectedSha, string? expectedId, string? expectedVersion, TrustVerdict? trust = null,
         IReadOnlyList<string>? declaredPermissions = null, bool? enabledOverride = null,
-        PluginKind? expectedKind = null)
+        PluginKind? expectedKind = null, IReadOnlyCollection<PluginKind>? expectedKinds = null)
     {
         trust ??= TrustVerdict.Unsigned;
         var stage = Path.Combine(PluginPaths.CacheDir, "stage-" + Guid.NewGuid().ToString("N"));
@@ -354,12 +355,22 @@ public sealed class PluginInstaller
             if (expectedVersion != null
                 && !string.Equals(expectedVersion, manifest.Version, StringComparison.OrdinalIgnoreCase))
                 return new PluginInstallResult { Error = "plugin version does not match the registry entry" };
-            if (expectedKind is { } declaredKind && manifest.KindValue != declaredKind)
-                return new PluginInstallResult
-                {
-                    Error = "plugin kind does not match the registry entry "
-                            + $"(registry: {declaredKind.ToId()}, package: {manifest.KindValue.ToId()})"
-                };
+            // kind 集合一致性（一个包多类型）：registry 声明的能力集合必须与包内 manifest 完全相等，
+            // 顺序无关。不一致就拒装 —— 市场卡片按 registry 的集合渲染，装上的却是另一组能力，
+            // 等于把「代码能力」的宣传页签换掉了。
+            var declaredKinds = expectedKinds?.Distinct().ToList()
+                                ?? (expectedKind is { } singleKind ? new List<PluginKind> { singleKind } : null);
+            if (declaredKinds != null)
+            {
+                var actualKinds = manifest.KindValues;
+                if (!new HashSet<PluginKind>(declaredKinds).SetEquals(actualKinds))
+                    return new PluginInstallResult
+                    {
+                        Error = "plugin kinds do not match the registry entry "
+                                + $"(registry: {string.Join(", ", declaredKinds.Select(k => k.ToId()))}; "
+                                + $"package: {string.Join(", ", actualKinds.Select(k => k.ToId()))})"
+                    };
+            }
 
             var kind = manifest.KindValue;
             if (kind is not (PluginKind.Widget or PluginKind.ZoneBar or PluginKind.Tool
@@ -481,6 +492,10 @@ public sealed class PluginInstaller
                 Id = manifest.Id,
                 Version = manifest.Version,
                 Kind = kind.ToId(),
+                // 一个包多类型：记录里保留完整能力集合（单类型不写，老记录读不到时回退 Kind）。
+                Kinds = manifest.KindValues.Count > 1
+                    ? manifest.KindValues.Select(k => k.ToId()).ToList()
+                    : null,
                 // 声明式包安装即生效（语言包进语言列表，但不自动切换）；代码类需显式启用。
                 // 更新时继承旧记录的启停状态：否则「已启用的代码插件」一更新就被静默停用，
                 // 用户看到的是「更新成功、版本没变、组件全变占位」。
