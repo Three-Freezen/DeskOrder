@@ -48,6 +48,8 @@ public sealed class PluginInstaller
 
     public static readonly Version HostVersion = ParseHostVersion();
 
+    static LocalizationService Loc => LocalizationService.Instance;
+
     const long MaxSignatureBytes = 16 * 1024;
 
     // 图标 / 截图也要限：manifest 只保证路径在包内，不保证文件真的是图片。
@@ -201,6 +203,258 @@ public sealed class PluginInstaller
     public Task<PluginInstallResult> InstallFromFileAsync(string path)
         => Task.Run(() => InstallFromFileCore(path));
 
+    /// <summary>
+    /// 「从 GitHub 仓库直接安装」的确认前预览。
+    ///
+    /// 已经下载到 <see cref="PackagePath"/> 的临时文件、算好的 SHA-256、manifest 与签名状态都在这里；
+    /// UI 用它渲染确认区，用户点安装后调用 <see cref="InstallPreparedAsync"/> 直接落盘，不重复下载。
+    /// 失败时 <see cref="Error"/> 是可读文案（不抛异常；用户取消会抛 <see cref="OperationCanceledException"/>）。
+    /// 持有临时文件，必须 <see cref="Dispose"/>。
+    /// </summary>
+    public sealed class GitHubInstallPreview : IDisposable
+    {
+        public PluginManifest? Manifest { get; init; }
+        public string Owner { get; init; } = "";
+        /// <summary><c>owner/repo</c>（写进插件记录，用来区分「从哪个仓库装的」）。</summary>
+        public string Repo { get; init; } = "";
+        public string? Tag { get; init; }
+        public long Size { get; init; }
+        public string Sha256 { get; init; } = "";
+        public bool HasSignature { get; init; }
+        public TrustVerdict Trust { get; init; } = TrustVerdict.Unsigned;
+        public bool Official { get; init; }
+        /// <summary>声明式包的「包含内容」文案；代码包为空。</summary>
+        public string Contents { get; init; } = "";
+        public string? Error { get; init; }
+
+        internal string? PackagePath { get; init; }
+        internal string? SignaturePath { get; init; }
+        /// <summary>签名文件原文（验证与落盘都基于它；不重新读盘，避免两步之间换文件）。</summary>
+        internal string? SignatureText { get; init; }
+
+        public void Dispose()
+        {
+            try { if (!string.IsNullOrEmpty(PackagePath) && File.Exists(PackagePath)) File.Delete(PackagePath); }
+            catch { }
+            try { if (!string.IsNullOrEmpty(SignaturePath) && File.Exists(SignaturePath)) File.Delete(SignaturePath); }
+            catch { }
+        }
+    }
+
+    /// <summary>
+    /// 从 GitHub Release 直接安装：查找 → 下载 → SHA-256 → 现有安全校验/签名 → 原子落盘。
+    /// 成功后记录 <c>Source=github</c>、<c>Repo=owner/repo</c>；失败返回 <see cref="PluginInstallResult.Error"/>，
+    /// 不抛异常（用户取消返回 <c>cancelled</c>）。调用方负责安装后 <see cref="PluginService.RefreshRecords"/>。
+    /// </summary>
+    public async Task<PluginInstallResult> InstallFromGitHubAsync(string owner, string repo, string? tag,
+        IProgress<string>? progress = null, CancellationToken ct = default)
+    {
+        GitHubInstallPreview? prepared = null;
+        try
+        {
+            prepared = await PrepareFromGitHubAsync(owner, repo, tag, progress, ct).ConfigureAwait(false);
+            if (prepared.Error != null)
+                return new PluginInstallResult { Error = prepared.Error };
+            return await InstallPreparedAsync(prepared, progress, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return new PluginInstallResult { Error = "cancelled" };
+        }
+        catch (Exception ex)
+        {
+            return new PluginInstallResult { Error = ex.Message };
+        }
+        finally
+        {
+            prepared?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// 查找并下载 GitHub Release 的 .dopkg，读 manifest / 算 SHA-256 / 验签，产出确认前预览。
+    /// 官方仓库（owner 是 Three-Freezen）必须验签通过，非官方仓库「有签名就必须验过」。
+    /// </summary>
+    public async Task<GitHubInstallPreview> PrepareFromGitHubAsync(string owner, string repo, string? tag,
+        IProgress<string>? progress = null, CancellationToken ct = default)
+    {
+        PluginPaths.EnsureCreated();
+        // 临时文件名只用随机串：owner/repo 来自用户输入，不能直接拼进路径。
+        var packagePath = Path.Combine(PluginPaths.CacheDir, "gh-" + Guid.NewGuid().ToString("N") + ".dopkg");
+        var signaturePath = packagePath + ".minisig";
+        var keepFiles = false;
+        using var client = CreateGitHubClient();
+        try
+        {
+            progress?.Report(Loc["Plugin.GitHub.Status.Finding"]);
+            var lookup = await client.ResolvePackageAsync(owner, repo, tag, ct).ConfigureAwait(false);
+            if (!lookup.Success)
+                return new GitHubInstallPreview { Owner = owner, Repo = $"{owner}/{repo}", Tag = lookup.Tag, Error = lookup.Error };
+
+            var asset = lookup.Assets!.Package!;
+            if (asset.Size > PluginPackages.MaxPackageBytes)
+                return new GitHubInstallPreview { Owner = owner, Repo = $"{owner}/{repo}", Tag = lookup.Tag, Error = Loc["Plugin.GitHub.Error.TooLarge"] };
+
+            progress?.Report(Loc.Get("Plugin.GitHub.Status.Downloading", asset.Name));
+            var download = await client.DownloadAsync(asset, packagePath, PluginPackages.MaxPackageBytes, ct)
+                .ConfigureAwait(false);
+            if (!download.Success)
+                return new GitHubInstallPreview { Owner = owner, Repo = $"{owner}/{repo}", Tag = lookup.Tag, Error = download.Error };
+
+            string? signatureText = null;
+            if (lookup.Assets.Signature is { } signatureAsset)
+            {
+                var signatureDownload = await client.DownloadAsync(signatureAsset, signaturePath, MaxSignatureBytes, ct)
+                    .ConfigureAwait(false);
+                // 签名文件取不到 / 超限 / 非法：等同于「签名验不过」，不能当成「没签名」放过。
+                if (!signatureDownload.Success)
+                    return new GitHubInstallPreview
+                    {
+                        Owner = owner, Repo = $"{owner}/{repo}", Tag = lookup.Tag,
+                        Error = Loc["Plugin.Signature.Invalid"]
+                    };
+                signatureText = ReadSignatureText(signaturePath);
+                if (signatureText == null)
+                    return new GitHubInstallPreview
+                    {
+                        Owner = owner, Repo = $"{owner}/{repo}", Tag = lookup.Tag,
+                        Error = Loc["Plugin.Signature.Invalid"]
+                    };
+            }
+
+            // SHA-256 由我们自己对下载到的字节算：GitHub API 没有可信的哈希字段，
+            // 记录里的值必须来自本地计算（安装前还会再算一次比对，防两步之间被换文件）。
+            var sha256 = PluginPackages.Sha256OfFile(packagePath);
+            var official = GitHubReleaseClient.IsOfficialOwner(owner);
+            var trust = signatureText == null ? TrustVerdict.Unsigned : PluginTrust.Check(packagePath, signatureText);
+            if (trust.Level == TrustLevel.Invalid)
+                return new GitHubInstallPreview
+                {
+                    Owner = owner, Repo = $"{owner}/{repo}", Tag = lookup.Tag,
+                    Sha256 = sha256, Trust = trust, Official = official,
+                    Error = Loc["Plugin.Signature.Invalid"]
+                };
+            // 官方仓库的包（不论类型）必须验签通过：GitHub 直装没有 registry 声明，
+            // 仓库归属就是唯一的官方依据，签名对不上/没有签名一律拒装。
+            if (official && trust.Level != TrustLevel.Verified)
+                return new GitHubInstallPreview
+                {
+                    Owner = owner, Repo = $"{owner}/{repo}", Tag = lookup.Tag,
+                    Sha256 = sha256, Trust = trust, Official = true,
+                    Error = Loc["Plugin.GitHub.Error.OfficialUnsigned"]
+                };
+
+            // 复用本地导入的 manifest/包安全校验（路径、扩展名、压缩比、图标、语言/外观载荷…）。
+            var preview = PreviewPackage(packagePath, out var previewError);
+            if (preview == null)
+                return new GitHubInstallPreview
+                {
+                    Owner = owner, Repo = $"{owner}/{repo}", Tag = lookup.Tag,
+                    Sha256 = sha256, Trust = trust, Official = official,
+                    Error = previewError ?? "cannot read package"
+                };
+
+            keepFiles = true;
+            return new GitHubInstallPreview
+            {
+                Manifest = preview.Manifest,
+                Owner = owner,
+                Repo = $"{owner}/{repo}",
+                Tag = lookup.Tag,
+                Size = download.Bytes,
+                Sha256 = sha256,
+                HasSignature = signatureText != null,
+                Trust = trust,
+                Official = official,
+                Contents = preview.Contents,
+                PackagePath = packagePath,
+                SignaturePath = signatureText == null ? null : signaturePath,
+                SignatureText = signatureText
+            };
+        }
+        finally
+        {
+            if (!keepFiles)
+            {
+                try { if (File.Exists(packagePath)) File.Delete(packagePath); } catch { }
+                try { if (File.Exists(signaturePath)) File.Delete(signaturePath); } catch { }
+            }
+        }
+    }
+
+    /// <summary>把 <see cref="PrepareFromGitHubAsync"/> 的预览落盘安装（不再下载）。</summary>
+    public Task<PluginInstallResult> InstallPreparedAsync(GitHubInstallPreview preview,
+        IProgress<string>? progress = null, CancellationToken ct = default)
+    {
+        if (preview == null) return Task.FromResult(new PluginInstallResult { Error = "no prepared package" });
+        if (preview.Error != null) return Task.FromResult(new PluginInstallResult { Error = preview.Error });
+        if (preview.Manifest == null || string.IsNullOrEmpty(preview.PackagePath))
+            return Task.FromResult(new PluginInstallResult { Error = "no prepared package" });
+
+        return Task.Run(() =>
+        {
+            // 两步之间临时文件可能被替换（磁盘损坏 / 其它进程）：落盘前重算哈希与验签。
+            string actual;
+            try { actual = PluginPackages.Sha256OfFile(preview.PackagePath!); }
+            catch (Exception ex) { return new PluginInstallResult { Error = ex.Message }; }
+            if (!string.Equals(actual, preview.Sha256, StringComparison.OrdinalIgnoreCase))
+                return new PluginInstallResult { Error = Loc["Plugin.GitHub.Error.HashMismatch"] };
+            if (preview.Trust.Level == TrustLevel.Invalid)
+                return new PluginInstallResult { Error = Loc["Plugin.Signature.Invalid"] };
+            if (preview.Official && preview.Trust.Level != TrustLevel.Verified)
+                return new PluginInstallResult { Error = Loc["Plugin.GitHub.Error.OfficialUnsigned"] };
+
+            progress?.Report(Loc["Plugin.GitHub.Status.Installing"]);
+            return InstallLocalPackageFile(preview.PackagePath!, "github", preview.Sha256,
+                preview.SignatureText, preview.Repo, preview.Official);
+        }, ct);
+    }
+
+    /// <summary>
+    /// 本地包与 GitHub 直装共用的安装主体：验签 → 现有 manifest/包校验 → 解压 → 原子落盘 → 写记录。
+    /// <paramref name="officialOverride"/> 为 null 时沿用本地导入的规则（验签通过即官方）。
+    /// </summary>
+    PluginInstallResult InstallLocalPackageFile(string packagePath, string source, string sha256,
+        string? signatureText, string? repo = null, bool? officialOverride = null)
+    {
+        var trust = signatureText == null ? TrustVerdict.Unsigned : PluginTrust.Check(packagePath, signatureText);
+        if (trust.Level == TrustLevel.Invalid)
+            return new PluginInstallResult { Error = trust.Error ?? "signature check failed" };
+        var official = officialOverride ?? trust.Level == TrustLevel.Verified;
+        var result = InstallPackageCore(packagePath, source, official, sha256, null, null, trust, repo: repo);
+        result.Sha256 = sha256;
+        return result;
+    }
+
+    /// <summary>自测台注入：把 API 基址指向本地假 GitHub 服务（安装链路走同一套真实代码）。</summary>
+#if DEBUG
+    internal Action<GitHubReleaseClient>? ConfigureGitHubClientForLab { get; set; }
+#endif
+
+    GitHubReleaseClient CreateGitHubClient()
+    {
+        var client = new GitHubReleaseClient();
+#if DEBUG
+        ConfigureGitHubClientForLab?.Invoke(client);
+#endif
+        return client;
+    }
+
+    static string? ReadSignatureText(string path)
+    {
+        try
+        {
+            if (!File.Exists(path)) return null;
+            if (new FileInfo(path).Length > MaxSignatureBytes) return null;
+            var text = File.ReadAllText(path);
+            return text.Length <= MaxSignatureBytes ? text : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     /// <summary>本地导入前预览：解到临时目录读 manifest，不落安装目录。</summary>
     public PluginPackagePreview? PreviewPackage(string path, out string? error)
     {
@@ -304,12 +558,7 @@ public sealed class PluginInstaller
         // 本地导入默认不当官方；但如果旁边有官方签名的 .minisig 且验得过，
         // 就说明这份字节确实出自官方发布，可以认官方标记。
         var signatureText = ReadSidecarSignature(path);
-        var trust = signatureText == null ? TrustVerdict.Unsigned : PluginTrust.Check(path, signatureText);
-        if (trust.Level == TrustLevel.Invalid)
-            return new PluginInstallResult { Error = trust.Error ?? "signature check failed" };
-        var result = InstallPackageCore(path, "local", trust.Level == TrustLevel.Verified, sha, null, null, trust);
-        result.Sha256 = sha;
-        return result;
+        return InstallLocalPackageFile(path, "local", sha, signatureText);
     }
 
     /// <remarks>
@@ -321,7 +570,8 @@ public sealed class PluginInstaller
     internal PluginInstallResult InstallPackageCore(string packagePath, string source, bool official,
         string? expectedSha, string? expectedId, string? expectedVersion, TrustVerdict? trust = null,
         IReadOnlyList<string>? declaredPermissions = null, bool? enabledOverride = null,
-        PluginKind? expectedKind = null, IReadOnlyCollection<PluginKind>? expectedKinds = null)
+        PluginKind? expectedKind = null, IReadOnlyCollection<PluginKind>? expectedKinds = null,
+        string? repo = null)
     {
         trust ??= TrustVerdict.Unsigned;
         var stage = Path.Combine(PluginPaths.CacheDir, "stage-" + Guid.NewGuid().ToString("N"));
@@ -345,7 +595,9 @@ public sealed class PluginInstaller
             var manifest = PluginPackages.ReadManifest(stage, out var manifestError);
             if (manifest == null) return new PluginInstallResult { Error = manifestError };
 
-            var errors = manifest.Validate(HostVersion, forLocalImport: source == "local");
+            var errors = manifest.Validate(HostVersion,
+                // GitHub 直装与本地导入同属「没有 registry 条目」的安装：按本地导入的规则校验。
+                forLocalImport: source is "local" or "github");
             if (errors.Count > 0)
                 return new PluginInstallResult { Error = string.Join("; ", errors) };
 
@@ -481,6 +733,7 @@ public sealed class PluginInstaller
                 Version = manifest.Version,
                 Kind = kind.ToId(),
                 Source = source,
+                Repo = repo ?? "",
                 Official = official,
                 Sha256 = sha,
                 InstalledAtUtc = DateTime.UtcNow
@@ -502,6 +755,7 @@ public sealed class PluginInstaller
                 Enabled = enabledOverride ?? !kind.IsCode(),
                 Official = official,
                 Source = source,
+                Repo = repo ?? "",
                 Sha256 = sha,
                 Signature = PluginTrust.ToRecordValue(trust),
                 SignedBy = trust.KeyId,
@@ -513,7 +767,7 @@ public sealed class PluginInstaller
             RemoveObsoleteVersions(manifest.Id, manifest.Version);
 
             DzTrace.Always($"[Plugin] installed {manifest.Id} {manifest.Version} ({kind}) source={source} " +
-                           $"trust={PluginTrust.ToRecordValue(trust)}");
+                           $"repo={repo ?? ""} trust={PluginTrust.ToRecordValue(trust)}");
 
             return new PluginInstallResult
             {

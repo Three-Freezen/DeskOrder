@@ -63,7 +63,7 @@ public partial class App
         // 用例自己构造缓存与禁用名单；禁掉启动后台拉取，避免线上 registry 在用例跑到一半时覆盖它们。
         PluginService.SuppressBackgroundRefreshForLab = true;
         var cases = caseName == "all"
-            ? new[] { "install", "load", "restart", "disable", "enable", "hide", "uninstall", "offline", "bad", "crash", "cache", "signature", "signature-policy", "lang-install", "lang-switch", "lang-bad", "lang-override", "lang-uninstall", "lang-rtl", "lang-plural", "appearance-install", "appearance-toggle", "appearance-render", "appearance-bad", "appearance-uninstall", "update", "blocked", "dialog", "ui", "dev", "widget-panel", "widgets-page", "security", "tool", "tool-ui", "integration", "marketux", "settings", "multikind" }
+            ? new[] { "install", "load", "restart", "disable", "enable", "hide", "uninstall", "offline", "bad", "crash", "cache", "signature", "signature-policy", "lang-install", "lang-switch", "lang-bad", "lang-override", "lang-uninstall", "lang-rtl", "lang-plural", "appearance-install", "appearance-toggle", "appearance-render", "appearance-bad", "appearance-uninstall", "update", "blocked", "dialog", "ui", "dev", "widget-panel", "widgets-page", "security", "tool", "tool-ui", "integration", "marketux", "settings", "multikind", "gh-install" }
             : new[] { caseName };
         var results = new List<LabCase>();
         foreach (var name in cases)
@@ -1956,6 +1956,11 @@ public partial class App
                 break;
             case "multikind":
                 await RunMultiKindLabCaseAsync(item, dir);
+                break;
+            case "gh-install":
+                // 「从 GitHub 仓库直接安装」，实现见 App.PluginLab.GitHubInstall.cs。
+                await RunGitHubInstallLabCaseAsync(item, dir);
+                break;
                 break;
             default:
                 item.Check(false, "unknown case: " + name);

@@ -1024,6 +1024,21 @@ public partial class PluginsPage : UserControl
 
     // ── 本地导入 ──
 
+    /// <summary>
+    /// 从 GitHub 仓库直接安装：粘贴 owner/repo（或 Release 地址）→ 找最新 Release 的 .dopkg →
+    /// 走与本地导入相同的安全校验/落盘。装完记录来源是 github，不进 registry，也不参与更新检查。
+    /// </summary>
+    void GitHubInstall_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new PluginGitHubInstallDialog { Owner = Window.GetWindow(this) };
+        dialog.ShowDialog();
+        if (!dialog.Installed) return;
+        _service.RefreshRecords();
+        // 同版本覆盖时已安装列表要读到新 manifest，详情页的缓存也要失效。
+        _manifestCache.Clear();
+        Render();
+    }
+
     async void ImportLocal_Click(object sender, RoutedEventArgs e)
     {
         var open = new OpenFileDialog

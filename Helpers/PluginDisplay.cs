@@ -16,11 +16,13 @@ public static class PluginDisplay
 {
     static LocalizationService Loc => LocalizationService.Instance;
 
-    /// <summary>market / local / dev → 本地化来源名。</summary>
+    /// <summary>market / local / dev / github → 本地化来源名。</summary>
     public static string DescribeSource(string? source) => source?.Trim().ToLowerInvariant() switch
     {
         "local" => Loc["Plugin.LocalSource"],
         "dev" => Loc["Plugin.Dev.Badge"],
+        // GitHub 直装不在 registry 里：来源要能与市场/本地导入区分开（也不参与「已下架」判定）。
+        "github" => Loc["Plugin.GitHub.Source"],
         _ => Loc["Plugin.MarketSource"]
     };
 
