@@ -89,6 +89,18 @@ public sealed class PluginService
     /// <summary>自测台专用：模拟设置里关/开总开关后的进程内状态（不写配置、不重启）。</summary>
     internal void SetPluginsEnabledForLab(bool enabled) => PluginsEnabled = enabled;
 
+    /// <summary>
+    /// 启动时是否真的去加载代码插件（纯函数，自测台直接验真值表）。
+    ///
+    /// 三个条件缺一不可：插件总开关打开、用户没关「启动时加载插件」、本次进程没被
+    /// <c>--no-plugins</c> / <c>--safe-mode</c> 压制。抽成纯函数是为了让这条语义能被
+    /// 单独断言 —— Initialize 里的真实加载路径太贵，不适合在自测台里反复跑。
+    /// 注意：语言/外观等声明式包不走这里（它们只受总开关约束）。
+    /// </summary>
+    internal static bool ShouldLoadCodePlugins(
+        bool pluginsEnabled, bool loadPluginsAtStartup, bool suppressLoading)
+        => pluginsEnabled && loadPluginsAtStartup && !suppressLoading;
+
     public event Action? PluginsChanged;
     public event Action<PluginWidget>? WidgetsChanged;
 
@@ -136,7 +148,8 @@ public sealed class PluginService
 
         // 开发者模式先进（它只是往 Records 里塞临时记录），再让禁用名单统一裁决：
         // 否则开发中的插件会绕过 blocked[]，而它恰恰是最该被拦住的那类未发布代码。
-        LoadDevPlugins(suppressLoading);
+        // 「启动时加载插件」关闭时开发者目录也跳过：它同样是执行中的第三方代码。
+        if (config.LoadPluginsAtStartup) LoadDevPlugins(suppressLoading);
         // 紧急禁用名单要在「加载 / 同步声明式包」之前生效，否则被禁用的插件仍会跑一轮。
         ApplyBlocklist();
 
@@ -145,14 +158,21 @@ public sealed class PluginService
         // 外观包同理：材质表按记录重建，预设文件在安装时已导入。
         SyncAppearancePacks(config.PluginsEnabled);
 
-        if (!config.PluginsEnabled)
+        // 三个条件都满足才加载代码插件：总开关开、用户没关「启动时加载」、本次进程没被
+        // --no-plugins / --safe-mode 压制。声明式包在上面已经同步完，不受这三个条件影响
+        // （只受总开关约束）—— 语言包是纯数据，不应该被「本轮不加载代码」连带关掉。
+        var loadCodePlugins = ShouldLoadCodePlugins(
+            config.PluginsEnabled, config.LoadPluginsAtStartup, suppressLoading);
+        if (!loadCodePlugins)
         {
-            DzTrace.Always("[Plugin] system disabled in config; skipping load");
-            return;
-        }
-        if (suppressLoading)
-        {
-            DzTrace.Always("[Plugin] safe mode; skipping load");
+            if (!config.PluginsEnabled)
+                DzTrace.Always("[Plugin] system disabled in config; skipping load");
+            else if (!config.LoadPluginsAtStartup)
+                DzTrace.Always("[Plugin] startup load disabled in config; skipping code plugins");
+            else
+                DzTrace.Always("[Plugin] safe mode; skipping load");
+            // 同时跳过后台禁用名单刷新：本次没有任何代码插件在跑，等真正加载的那次启动
+            // 再联网核对（禁用状态已由上面的 ApplyBlocklist 用本地副本执行过）。
             return;
         }
 
