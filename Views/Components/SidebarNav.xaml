@@ -244,6 +244,17 @@
               <TextBlock Text="{loc:Loc Key=Plugin.Nav}" VerticalAlignment="Center"/>
             </StackPanel>
           </Button>
+          <!-- 插件工具：工具插件注册的命令 + 全局热键分配（v1.1 API v3）。入口常驻，
+               命令为空时页面自己显示空态/「重启后生效」提示。 -->
+          <Button x:Name="NavPluginTools" Style="{StaticResource NavItem}" Tag="plugintools" Click="NavItem_Click">
+            <StackPanel Orientation="Horizontal">
+              <Path Width="16" Height="16" Margin="0,0,12,0" Stretch="Uniform"
+                    Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                    StrokeThickness="1.5" StrokeLineJoin="Round"
+                    Data="{StaticResource Icon.Plugin}"/>
+              <TextBlock Text="{loc:Loc Key=PluginTool.Nav}" VerticalAlignment="Center"/>
+            </StackPanel>
+          </Button>
 
           <!-- Separator above global actions -->
           <Border Height="1" Margin="8,12" Background="{DynamicResource Brush.Border.Subtle}"/>

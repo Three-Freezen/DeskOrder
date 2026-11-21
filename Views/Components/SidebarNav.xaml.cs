@@ -46,6 +46,7 @@ public partial class SidebarNav : UserControl
         _sectionKeys[NavSticky]   = "sticky";
         _sectionKeys[NavPluginWidgets] = "pluginwidgets";
         _sectionKeys[NavPlugins]  = "plugins";
+        _sectionKeys[NavPluginTools] = "plugintools";
         _sectionKeys[NavSettings] = "settings";
         _sectionKeys[NavAbout]    = "about";
         Loaded += (_, _) => HighlightActive();
@@ -66,6 +67,7 @@ public partial class SidebarNav : UserControl
             "sticky"   => NavSticky,
             "pluginwidgets" => NavPluginWidgets,
             "plugins"  => NavPlugins,
+            "plugintools" => NavPluginTools,
             "about"    => NavAbout,
             "settings" => NavSettings,
             _          => NavZones,
