@@ -95,8 +95,9 @@ public partial class App
         if (File.Exists(exampleRegistry))
         {
             var parsedExample = catalog.ParseRegistry(File.ReadAllBytes(exampleRegistry));
-            item.Check(parsedExample.Error == null && parsedExample.Entries.Count == 4,
-                $"the shipped example registry keeps all 4 entries (kept {parsedExample.Entries.Count})");
+            // registry.example 现在有 5 条样例（hello / tool-demo / ja / aurora / zone-bay）。
+            item.Check(parsedExample.Error == null && parsedExample.Entries.Count == 5,
+                $"the shipped example registry keeps all 5 entries (kept {parsedExample.Entries.Count})");
         }
         else
         {
