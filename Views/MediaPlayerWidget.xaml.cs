@@ -40,8 +40,12 @@ public partial class MediaPlayerWidget : Window
 
     // ponytail 2026-11-14(审查 P0-1): 媒体/音频服务的持有标记 —— 组件关闭时释放，
     // 让最后关闭的播放器把采样线程、WASAPI 环回、1s 轮询全部停掉。
+    // Phase 1 追加：不再只在 OnClosed 释放 —— 窗口隐藏 / 暂停 / 切到唱片机形态 2s 后
+    // 也释放（音频采集线程是常驻唤醒源），恢复可见且播放时再拿回来。
     private bool _audioServiceAcquired;
     private bool _mediaConsumerAcquired;
+    private DispatcherTimer? _audioReleaseTimer;
+    private bool _audioReleasePending;
 
     private bool _restoreDragging;
     private Point _restoreDown;
@@ -134,6 +138,7 @@ public partial class MediaPlayerWidget : Window
         ApplyLockState();
         UpdateLocalizedText();
         if (!_player.IsVisible) ApplyHidden();
+        UpdateAudioGate();
     }
 
     void OnSizeChanged(object s, SizeChangedEventArgs e)
@@ -169,12 +174,11 @@ public partial class MediaPlayerWidget : Window
             _mediaConsumerAcquired = false;
             _media.ReleaseConsumer();
         }
-        if (_audioServiceAcquired)
-        {
-            _audioServiceAcquired = false;
-            AudioLevelMeter.Release();
-            AudioSpectrumCapture.Release();
-        }
+        // Phase 1：收起/暂停时音频采集已在 2s 计时器里释放；这里停表并兜底释放一次。
+        _audioReleaseTimer?.Stop();
+        _audioReleaseTimer = null;
+        _audioReleasePending = false;
+        ReleaseAudioServices();
         base.OnClosed(e);
     }
 
@@ -199,6 +203,7 @@ public partial class MediaPlayerWidget : Window
             Height = Math.Max(MinHeight, _player.BarsModeHeight ?? DesktopMediaPlayer.DefaultBarsHeight);
         }
         UpdateResponsiveLayout();
+        UpdateAudioGate();
     }
 
     void UpdateResponsiveLayout()
@@ -369,22 +374,14 @@ public partial class MediaPlayerWidget : Window
         // 真实响度：让条子跟着音乐本身的强弱走（不再只是合成正弦）
         // ponytail 2026-11-14(审查 P0-1): 音频采样线程改为「组件持有」——首次 Apply 时 Acquire，
         // OnClosed 时 Release；旧实现只有 App 退出才停，组件关掉后线程/WASAPI 环回还永久跑。
-        if (!_audioServiceAcquired)
-        {
-            _audioServiceAcquired = true;
-            AudioLevelMeter.Acquire();
-            AudioSpectrumCapture.Acquire();
-        }
-        else
-        {
-            AudioLevelMeter.EnsureStarted();   // 幂等：线程被外部停过时拉起来
-        }
+        // Phase 1：持有条件收紧为「窗口可见 && 正在播放 && 律动条形态」——
+        // 暂停 / 收起 / 切唱片机 2s 后释放（见 UpdateAudioGate），不再常驻。
         Bars.EnergyProvider = static () => AudioLevelMeter.Level;
 
         // 律动数据源：真频谱（默认）/ 模拟。真频谱走 WASAPI 环回 + FFT，采不到会自动退回模拟。
         Bars.Source = string.IsNullOrEmpty(_player.BarsSource) ? "Spectrum" : _player.BarsSource;
         Bars.BandProvider = static () => AudioSpectrumCapture.Bands;
-        AudioSpectrumCapture.EnsureStarted(Math.Max(1, n));
+        if (_audioServiceAcquired) AudioSpectrumCapture.EnsureStarted(Math.Max(1, n));  // 条数变了要重建频段
         Bars.Reflection = _player.BarsReflection;
         Bars.ColorMode = _player.BarsColorMode;
         Bars.Color1 = ParseColor(_player.BarsColor, Color.FromRgb(0x7C, 0xF5, 0xFF));
@@ -392,6 +389,7 @@ public partial class MediaPlayerWidget : Window
         Bars.AutoColorIntervalSec = Math.Max(1, _player.BarsAutoIntervalSec);
         Bars.Apply();
         UpdateResponsiveLayout();
+        UpdateAudioGate();
     }
 
     void ApplyVinylSettings()
@@ -480,6 +478,7 @@ public partial class MediaPlayerWidget : Window
     {
         NativeMethods.SetRoundedCorners(this, _player.CornerRadius);
         ApplyAcrylic();
+        UpdateAudioGate();
     }
 
     void OnHoverCollapsed()
@@ -487,6 +486,7 @@ public partial class MediaPlayerWidget : Window
         AcrylicHelper.DisableBlur(this);
         NativeMethods.DisableRoundedCorners(this);
         NativeMethods.DisableDwmFrameShadow(this);
+        UpdateAudioGate();       // 收起成恢复按钮后条区不再显示 → 采集可以停
     }
 
     void OnHoverExpandSettingsChanged() => _hover?.SetEnabled(_player.EnableRestoreButton);
@@ -546,6 +546,75 @@ public partial class MediaPlayerWidget : Window
 
         UpdatePlayIcons(now.IsPlaying);
         UpdateAccent();
+        UpdateAudioGate();
+    }
+
+    // ── 音频采集的按需持有（Phase 1）──
+
+    /// <summary>现在该不该跑音频采集：窗口真的可见 + 律动条形态 + 媒体在播（且用户没勾暂停）。
+    /// 唱片机形态只需要旋转/封面，用不到 WASAPI 环回，也一并排除。</summary>
+    private bool ShouldRunAudio()
+    {
+        if (!_player.IsVisible || !IsVisible) return false;
+        if (WindowState == WindowState.Minimized) return false;
+        if (_player.Mode != MediaDisplayMode.Bars) return false;
+        if (MainContent.Visibility != Visibility.Visible) return false;
+        // 「最小化到恢复按钮」收起状态：条区根本没显示，不需要采集
+        if (_player.EnableRestoreButton && _hover is { IsExpanded: false }) return false;
+        var now = CurrentNow();
+        return now.IsPlaying && !_player.Paused;
+    }
+
+    /// <summary>状态变化时调用：需要就立即拿回来；不需要就 2s 后释放
+    /// （暂停/恢复、切歌、拖动窗口这类瞬时状态不来回起停采集线程）。</summary>
+    private void UpdateAudioGate()
+    {
+        if (ShouldRunAudio())
+        {
+            CancelAudioRelease();
+            if (_audioServiceAcquired) return;
+            _audioServiceAcquired = true;
+            AudioLevelMeter.Acquire();
+            AudioSpectrumCapture.Acquire();
+            AudioSpectrumCapture.EnsureStarted(Math.Max(1, Math.Clamp(_player.BarsCount, 0, 100)));
+            return;
+        }
+
+        if (!_audioServiceAcquired || _audioReleasePending) return;
+        _audioReleasePending = true;
+        _audioReleaseTimer ??= CreateAudioReleaseTimer();
+        _audioReleaseTimer.Stop();
+        _audioReleaseTimer.Start();
+    }
+
+    private DispatcherTimer CreateAudioReleaseTimer()
+    {
+        var timer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromSeconds(2),
+        };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            _audioReleasePending = false;
+            if (ShouldRunAudio()) return;
+            ReleaseAudioServices();
+        };
+        return timer;
+    }
+
+    private void CancelAudioRelease()
+    {
+        _audioReleasePending = false;
+        _audioReleaseTimer?.Stop();
+    }
+
+    private void ReleaseAudioServices()
+    {
+        if (!_audioServiceAcquired) return;
+        _audioServiceAcquired = false;
+        AudioLevelMeter.Release();
+        AudioSpectrumCapture.Release();
     }
 
     // ── P2：当前数据源（自动 / 跟随指定应用）──
@@ -959,6 +1028,7 @@ public partial class MediaPlayerWidget : Window
         }
         _player.IsVisible = false;
         _widgetService.UpdateMediaPlayer(_player);
+        UpdateAudioGate();
     }
 
     void ApplyHidden()
@@ -989,6 +1059,7 @@ public partial class MediaPlayerWidget : Window
             }
             _hover?.SnapToCollapsed();
         }
+        UpdateAudioGate();
     }
 
     // ── 恢复按钮 ──

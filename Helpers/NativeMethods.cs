@@ -648,6 +648,23 @@ public static class DesktopHook
     [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
     public static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
 
+    // ── Phase 1：按需挂鼠标钩子用的「前台窗口变化」事件钩子 ──
+    // SetWinEventHook 是事件驱动、零轮询；WINEVENT_OUTOFCONTEXT 会把回调投递到
+    // 装钩子的线程（本进程 = UI 线程），不需要 Dispatcher / 加锁。
+    public const uint EVENT_SYSTEM_FOREGROUND = 0x0003;
+    public const uint WINEVENT_OUTOFCONTEXT = 0x0000;
+    public const int VK_LBUTTON = 0x01;
+
+    public delegate void WinEventProc(IntPtr hWinEventHook, uint eventType, IntPtr hwnd,
+        int idObject, int idChild, uint dwEventThread, uint dwmsEventTime);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern IntPtr SetWinEventHook(uint eventMin, uint eventMax, IntPtr hmodWinEventProc,
+        WinEventProc lpfnWinEventProc, uint idProcess, uint idThread, uint dwFlags);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool UnhookWinEvent(IntPtr hWinEventHook);
+
     [DllImport("user32.dll")]
     public static extern IntPtr GetDesktopWindow();
 

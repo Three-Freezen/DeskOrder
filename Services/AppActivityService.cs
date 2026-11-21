@@ -130,13 +130,29 @@ public static class AppActivityService
         return true;
     }
 
-    /// <summary>pid → 小写 exe 名（不含扩展名）。取不到就返回空串。</summary>
+    /// <summary>pid → 小写 exe 名（不含扩展名）。取不到就返回空串。
+    ///
+    /// Phase 1：5 秒缓存。快捷栏以前每个轮询 tick（700ms）对**每个可见窗口**都做一次
+    /// <see cref="Process.GetProcessById"/>（开进程句柄 + 读模块信息），典型桌面 20–40 次/tick，
+    /// 是这条轮询在 UI 线程上的主要成本。同一个 pid 的进程名 5 秒内不会变，缓存安全。
+    /// （配方与 <see cref="AudioNowPlayingProbe"/> 的 pid→进程名缓存一致。）</summary>
+    static readonly System.Collections.Concurrent.ConcurrentDictionary<uint, (string Name, long At)> _pidNameCache = new();
+    const int PidNameCacheMs = 5_000;
+
     static string ExeNameOf(uint pid)
     {
+        if (pid == 0) return "";
+        long now = Environment.TickCount64;
+        if (_pidNameCache.TryGetValue(pid, out var hit) && now - hit.At < PidNameCacheMs)
+            return hit.Name;
         try
         {
-            using var p = Process.GetProcessById((int)pid);
-            return p.ProcessName.ToLowerInvariant();
+            string name;
+            using (var p = Process.GetProcessById((int)pid))
+                name = p.ProcessName.ToLowerInvariant();
+            if (_pidNameCache.Count > 512) _pidNameCache.Clear();   // 防 pid 无限增长
+            _pidNameCache[pid] = (name, now);
+            return name;
         }
         catch { return ""; }
     }
