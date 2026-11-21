@@ -653,7 +653,8 @@ public partial class PluginsPage : UserControl
             Orientation = Orientation.Horizontal,
             VerticalAlignment = VerticalAlignment.Center
         };
-        if (record.KindValue is PluginKind.Widget or PluginKind.ZoneBar or PluginKind.Tool or PluginKind.Language or PluginKind.Appearance)
+        if (record.KindValue is PluginKind.Widget or PluginKind.ZoneBar or PluginKind.Tool
+            or PluginKind.Language or PluginKind.Appearance or PluginKind.Integration)
         {
             var toggle = new Button
             {

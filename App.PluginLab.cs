@@ -63,7 +63,7 @@ public partial class App
         // 用例自己构造缓存与禁用名单；禁掉启动后台拉取，避免线上 registry 在用例跑到一半时覆盖它们。
         PluginService.SuppressBackgroundRefreshForLab = true;
         var cases = caseName == "all"
-            ? new[] { "install", "load", "restart", "disable", "enable", "hide", "uninstall", "offline", "bad", "crash", "cache", "signature", "signature-policy", "lang-install", "lang-switch", "lang-bad", "lang-override", "lang-uninstall", "appearance-install", "appearance-toggle", "appearance-render", "appearance-bad", "appearance-uninstall", "update", "blocked", "dialog", "ui", "dev", "widget-panel", "widgets-page", "security", "tool", "tool-ui" }
+            ? new[] { "install", "load", "restart", "disable", "enable", "hide", "uninstall", "offline", "bad", "crash", "cache", "signature", "signature-policy", "lang-install", "lang-switch", "lang-bad", "lang-override", "lang-uninstall", "appearance-install", "appearance-toggle", "appearance-render", "appearance-bad", "appearance-uninstall", "update", "blocked", "dialog", "ui", "dev", "widget-panel", "widgets-page", "security", "tool", "tool-ui", "integration" }
             : new[] { caseName };
         var results = new List<LabCase>();
         foreach (var name in cases)
@@ -1122,7 +1122,8 @@ public partial class App
                 var tools = PluginToolService.Instance;
                 tools.Clear();
 
-                item.Check(PluginApiVersion.Current == 3, "plugin API version is 3");
+                // API v4 是「integration 数据源」的契约版本；工具插件本身仍从 v3 起可用。
+                item.Check(PluginApiVersion.Current == 4, "plugin API version is 4");
 
                 PluginManifest MakeToolManifest(int apiVersion) => new()
                 {
@@ -1143,9 +1144,11 @@ public partial class App
                 var manifest = MakeToolManifest(3);
                 item.Check(manifest.Validate(PluginInstaller.HostVersion, forLocalImport: true).Count == 0,
                     "manifest validation accepts a tool plugin with apiVersion 3");
-                item.Check(MakeToolManifest(4).Validate(PluginInstaller.HostVersion, forLocalImport: true)
+                item.Check(MakeToolManifest(4).Validate(PluginInstaller.HostVersion, forLocalImport: true).Count == 0,
+                    "a tool plugin may also declare the host API version 4");
+                item.Check(MakeToolManifest(5).Validate(PluginInstaller.HostVersion, forLocalImport: true)
                         .Any(e => e.Contains("not supported", StringComparison.Ordinal)),
-                    "apiVersion 4 is rejected with a clear reason");
+                    "an apiVersion above the host API is rejected with a clear reason");
 
                 // 注册表装配期校验：非法 id / 重复 id / 超过 16 条都抛异常。
                 bool Throws(Action action)
@@ -1527,6 +1530,249 @@ public partial class App
                 {
                     item.Check(false, "the plugin tools page survives cleanup for the empty state check");
                 }
+                break;
+            }
+            case "integration":
+            {
+                // 数据源插件内核（API v4）：媒体源注册/查找/读取/异常与超时兜底、
+                // 清单校验、安装放行、播放器与属性面板接线。数据源全部合成，不依赖真实 dopkg。
+                var integrations = PluginIntegrationService.Instance;
+                integrations.Clear();
+
+                item.Check(PluginApiVersion.Current == 4, "plugin API version is 4");
+
+                PluginManifest MakeIntegrationManifest(int apiVersion) => new()
+                {
+                    SchemaVersion = 1,
+                    Id = "lab.integration",
+                    Name = new LocalizedText { Zh = "自测数据源", En = "Lab integration" },
+                    Summary = new LocalizedText { Zh = "自测数据源", En = "lab data source" },
+                    Version = "1.0.0",
+                    Author = new PluginAuthor { Name = "Three-Freezen", Github = "Three-Freezen" },
+                    Repo = "Three-Freezen/DeskOrder-Plugin-Lab",
+                    License = "Apache-2.0",
+                    Kind = "integration",
+                    ApiVersion = apiVersion,
+                    MinAppVersion = "1.0.0",
+                    Entry = new PluginEntry { Assembly = "lib/Lab.Integration.dll", Type = "Lab.Integration.Plugin" },
+                    Icon = "icon.png"
+                };
+                var manifest = MakeIntegrationManifest(4);
+                item.Check(manifest.Validate(PluginInstaller.HostVersion, forLocalImport: true).Count == 0,
+                    "manifest validation accepts an integration plugin with apiVersion 4");
+                item.Check(MakeIntegrationManifest(3).Validate(PluginInstaller.HostVersion, forLocalImport: true)
+                        .Any(e => e.Contains("apiVersion 4", StringComparison.Ordinal)),
+                    "an integration plugin with apiVersion 3 is rejected and asks for apiVersion 4");
+                item.Check(MakeIntegrationManifest(5).Validate(PluginInstaller.HostVersion, forLocalImport: true)
+                        .Any(e => e.Contains("not supported", StringComparison.Ordinal)),
+                    "an apiVersion above the host API is rejected with a clear reason");
+
+                // 注册表装配期校验：非法 id / 空显示名 / 空 Poll / 重复 id / 超过 4 个都抛异常。
+                bool Throws(Action action)
+                {
+                    try { action(); return false; } catch { return true; }
+                }
+                PluginMediaSourceDescriptor MakeSource(
+                    string id, string display, Func<PluginMediaSnapshot?> poll) => new()
+                {
+                    Id = id,
+                    DisplayName = display,
+                    Poll = poll
+                };
+                var registry = new PluginIntegrationRegistry();
+                item.Check(Throws(() => registry.RegisterMediaSource(
+                        MakeSource("BAD ID", "bad", () => null))),
+                    "an invalid media source id is rejected");
+                item.Check(Throws(() => registry.RegisterMediaSource(
+                        MakeSource("ok", "", () => null))),
+                    "an empty media source display name is rejected");
+                item.Check(Throws(() => registry.RegisterMediaSource(new PluginMediaSourceDescriptor
+                        { Id = "ok", DisplayName = "ok", Poll = null! })),
+                    "a missing media source poll delegate is rejected");
+                registry.RegisterMediaSource(MakeSource("dup", "dup", () => null));
+                item.Check(Throws(() => registry.RegisterMediaSource(
+                        MakeSource("dup", "dup again", () => null))),
+                    "a duplicate media source id is rejected");
+                for (int i = 0; i < PluginIntegrationRegistry.MaxSources - 1; i++)
+                    registry.RegisterMediaSource(MakeSource($"cap{i}", "cap", () => null));
+                item.Check(Throws(() => registry.RegisterMediaSource(
+                        MakeSource("overflow", "overflow", () => null))),
+                    "registering more than 4 media sources is rejected");
+
+                // ── 发布 / 查找 / 读取 ──
+                var record = new PluginRecord
+                {
+                    Id = "lab.integration",
+                    Version = "1.0.0",
+                    Kind = "integration",
+                    Enabled = true,
+                    Source = "lab",
+                    Signature = "unsigned"
+                };
+                var sourceA = MakeSource("lab-source", "Lab source", () => new PluginMediaSnapshot
+                {
+                    Title = "Lab Track",
+                    Artist = "Lab Artist",
+                    Album = "Lab Album",
+                    SourceApp = "Lab App",
+                    IsPlaying = true,
+                    Position = TimeSpan.FromSeconds(12),
+                    Duration = TimeSpan.FromSeconds(180),
+                    Artwork = null
+                });
+                integrations.Publish(record, manifest, new[] { sourceA });
+                item.Check(integrations.MediaSources.Count == 1,
+                    "publishing one media source lists exactly one source");
+                var entry = integrations.MediaSources[0];
+                var sourceKey = integrations.KeyOf(entry);
+                item.Check(sourceKey == "lab.integration/lab-source",
+                    "the media source key is <pluginId>/<sourceId>");
+                item.Check(ReferenceEquals(integrations.Find(sourceKey), entry),
+                    "the published media source is found by its key");
+                item.Check(integrations.Find("lab.integration/missing") == null,
+                    "an unknown media source key is not found");
+
+                var reading = await integrations.ReadAsync(entry);
+                item.Check(reading != null, "reading the media source returns a snapshot");
+                item.Check(reading?.Now.Title == "Lab Track", "the snapshot carries the title");
+                item.Check(reading?.Now.Artist == "Lab Artist", "the snapshot carries the artist");
+                item.Check(reading?.Now.Album == "Lab Album", "the snapshot carries the album");
+                item.Check(reading?.Now.IsPlaying == true, "the snapshot reports playing");
+                item.Check(reading?.Now.State == MediaPlaybackState.Playing,
+                    "playing maps to the host Playing state");
+                item.Check(reading?.Artwork == null, "a null artwork yields no cover");
+
+                // ── 异常 / 超时 / 空快照兜底 ──
+                var throwing = MakeSource("throwing", "Throwing",
+                    () => throw new InvalidOperationException("lab media poll failure"));
+                var timeout = MakeSource("timeout", "Timeout", () =>
+                {
+                    Thread.Sleep(2500);
+                    return new PluginMediaSnapshot { Title = "too late" };
+                });
+                var silent = MakeSource("silent", "Silent", () => null);
+                integrations.Publish(record, manifest, new[] { throwing, timeout, silent });
+                item.Check(integrations.MediaSources.Count == 3,
+                    "republishing replaces the plugin's earlier media sources");
+                var throwingEntry = integrations.Find("lab.integration/throwing");
+                item.Check(throwingEntry != null && await integrations.ReadAsync(throwingEntry) == null,
+                    "a throwing poll is treated as no media instead of throwing");
+                var timeoutEntry = integrations.Find("lab.integration/timeout");
+                var timeoutWatch = System.Diagnostics.Stopwatch.StartNew();
+                var timedOut = timeoutEntry == null ? null : await integrations.ReadAsync(timeoutEntry);
+                timeoutWatch.Stop();
+                item.Check(timedOut == null, "a slow poll times out instead of blocking the host");
+                item.Check(timeoutWatch.Elapsed < TimeSpan.FromSeconds(5),
+                    "the poll timeout caps one read at roughly two seconds");
+                var silentEntry = integrations.Find("lab.integration/silent");
+                item.Check(silentEntry != null && await integrations.ReadAsync(silentEntry) == null,
+                    "a null poll result means there is no media right now");
+
+                integrations.RemovePlugin("lab.integration");
+                item.Check(integrations.MediaSources.Count == 0,
+                    "removing the plugin drops all of its media sources");
+
+                // ── 安装放行：把 hello-widget 示例包改写成 integration 包再装一次 ──
+                var samplePackage = FindSamplePackage(dir);
+                item.Check(samplePackage != null, "the sample package is present for the install check");
+                if (samplePackage != null)
+                {
+                    var rewriteDir = Path.Combine(dir, "integration-rewrite");
+                    if (Directory.Exists(rewriteDir)) Directory.Delete(rewriteDir, recursive: true);
+                    ZipFile.ExtractToDirectory(samplePackage, rewriteDir);
+                    var manifestPath = Path.Combine(rewriteDir, "plugin.json");
+                    var json = System.Text.Json.Nodes.JsonNode
+                        .Parse(File.ReadAllText(manifestPath))!.AsObject();
+                    json["kind"] = "integration";
+                    json["apiVersion"] = 4;
+                    File.WriteAllText(manifestPath, json.ToJsonString(
+                        new JsonSerializerOptions { WriteIndented = true }));
+                    var rewritten = Path.Combine(dir, "integration-sample.dopkg");
+                    if (File.Exists(rewritten)) File.Delete(rewritten);
+                    ZipFile.CreateFromDirectory(rewriteDir, rewritten);
+
+                    var install = await service.Installer!.InstallFromFileAsync(rewritten);
+                    item.Check(install.Success,
+                        "installing a data-source plugin succeeds"
+                        + (install.Error == null ? "" : " (" + install.Error + ")"));
+                    item.Check(install.Manifest?.KindValue == PluginKind.Integration,
+                        "the installed manifest is an integration plugin");
+                    if (install.Success)
+                    {
+                        service.RefreshRecords();
+                        item.Check(service.GetRecord(SamplePluginId)?.KindValue == PluginKind.Integration,
+                            "the installed record is listed as an integration plugin");
+                        service.Uninstall(SamplePluginId, deleteData: false, out _);
+                        service.RefreshRecords();
+                        item.Check(service.GetRecord(SamplePluginId) == null,
+                            "the integration test plugin is uninstalled again");
+                    }
+                }
+
+                // ── 播放器接入：合成源 → 组件渲染 → 属性面板「数据源」行 ──
+                integrations.Publish(record, manifest, new[] { sourceA });
+                var player = _widgetService!.CreateMediaPlayer(MediaDisplayMode.Bars);
+                MediaPlayerWidget? playerWindow = null;
+                try
+                {
+                    player.DataSourceKey = sourceKey;
+                    _widgetService.UpdateMediaPlayer(player);
+                    EnsureManagementWindow();
+                    ManagementWindow!.OpenMediaPlayerWindow(player);
+                    await Task.Delay(400);
+                    playerWindow = _widgetService.GetMediaPlayerWindow(player.Id);
+                    item.Check(playerWindow != null, "the media player window is created");
+                    playerWindow!.RefreshDataSource();
+                    await Task.Delay(1500);   // 等一次心跳读到插件源
+                    item.Check(playerWindow.DebugCurrentNow().Title == "Lab Track",
+                        "the player renders the track from the plugin data source");
+                    item.Check(playerWindow.DebugCurrentNow().IsPlaying,
+                        "the player renders the playing state from the plugin data source");
+
+                    DesktopZones.Helpers.PropertyWindowService.OpenOrFocus(player);
+                    await Task.Delay(900);
+                    var floating = DesktopZones.Views.Components.PropertyWindowManager.Instance
+                        .GetFloating(player);
+                    item.Check(floating != null, "the media player property panel opens");
+                    if (floating != null)
+                    {
+                        item.Check(floating.Body.DebugHasMediaDataSourceRow(),
+                            "the property panel has a data source row");
+                        item.Check(floating.Body.DebugMediaDataSourceItemCount() >= 2,
+                            "the data source dropdown lists the system session and the plugin source");
+                        item.Check(floating.Body.DebugMediaDataSourceSelectedKey() == sourceKey,
+                            "the data source dropdown selects the current plugin source");
+                        // 面板默认停在顶部（显示/开关区/基本），数据源行在「播放与显示」里 ——
+                        // 先把它滚进可视区再截图，否则截图只能证明面板打开，证明不了这一行。
+                        floating.Body.DebugBringDataSourceRowIntoView();
+                        await Task.Delay(500);
+                        SaveScreenshot(floating, Path.Combine(dir, "shot-media-data-source.png"));
+                        item.Check(File.Exists(Path.Combine(dir, "shot-media-data-source.png")),
+                            "media data source screenshot written");
+                        DesktopZones.Views.Components.PropertyWindowManager.Instance
+                            .CloseWindow(player);
+                    }
+
+                    // 插件源消失（禁用/卸载）→ 播放器回退系统源，不能卡在上一首。
+                    integrations.RemovePlugin("lab.integration");
+                    await Task.Delay(1400);
+                    item.Check(playerWindow.DebugCurrentNow().Title != "Lab Track",
+                        "the player falls back once the plugin data source disappears");
+                }
+                finally
+                {
+                    integrations.Clear();
+                    if (playerWindow != null)
+                    {
+                        try { playerWindow.Close(); } catch { }
+                    }
+                    _widgetService.DeleteMediaPlayer(player.Id);
+                }
+                await Task.Delay(300);
+                item.Check(_widgetService.GetMediaPlayerWindow(player.Id) == null,
+                    "the media player is removed after the check");
+                item.Check(integrations.MediaSources.Count == 0,
+                    "clearing the integration service leaves no media source");
                 break;
             }
             default:

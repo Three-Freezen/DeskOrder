@@ -22,11 +22,13 @@ public sealed class PluginHostContext : IPluginHost
     public required IPluginWidgets Widgets { get; init; }
     public required IPluginZoneBays ZoneBays { get; init; }
     public required IPluginTools Tools { get; init; }
+    public required IPluginIntegrations Integrations { get; init; }
     public required IPluginLog Log { get; init; }
 
     public PluginWidgetRegistry Registry => (PluginWidgetRegistry)Widgets;
     public PluginZoneBayRegistry BayRegistry => (PluginZoneBayRegistry)ZoneBays;
     public PluginToolRegistry ToolRegistry => (PluginToolRegistry)Tools;
+    public PluginIntegrationRegistry IntegrationRegistry => (PluginIntegrationRegistry)Integrations;
 }
 
 /// <summary>收集 <see cref="PluginZoneBayDescriptor"/>，拒绝重复/非法 id。</summary>
@@ -107,6 +109,36 @@ public sealed class PluginToolRegistry : IPluginTools
     }
 
     internal void Clear() => _commands.Clear();
+}
+
+/// <summary>收集 <see cref="PluginMediaSourceDescriptor"/>（API v4），拒绝重复/非法 id 与超量注册。</summary>
+public sealed class PluginIntegrationRegistry : IPluginIntegrations
+{
+    public const int MaxSources = 4;
+    /// <summary>数据源 id 会进配置（播放器的 DataSourceKey），只允许稳定的小写片段。</summary>
+    static readonly Regex IdPattern = new("^[a-z0-9._-]{1,64}$", RegexOptions.Compiled);
+
+    readonly List<PluginMediaSourceDescriptor> _sources = new();
+
+    public IReadOnlyList<PluginMediaSourceDescriptor> Sources => _sources;
+
+    public void RegisterMediaSource(PluginMediaSourceDescriptor descriptor)
+    {
+        if (descriptor == null) throw new ArgumentNullException(nameof(descriptor));
+        if (string.IsNullOrEmpty(descriptor.Id) || !IdPattern.IsMatch(descriptor.Id))
+            throw new ArgumentException("media source id must be 1..64 chars of [a-z0-9._-]");
+        if (string.IsNullOrWhiteSpace(descriptor.DisplayName))
+            throw new ArgumentException("media source display name is required");
+        if (descriptor.Poll == null)
+            throw new ArgumentException("media source Poll is required");
+        if (_sources.Count >= MaxSources)
+            throw new InvalidOperationException($"a plugin may register at most {MaxSources} media sources");
+        if (_sources.Any(s => string.Equals(s.Id, descriptor.Id, StringComparison.Ordinal)))
+            throw new InvalidOperationException($"duplicate media source id: {descriptor.Id}");
+        _sources.Add(descriptor);
+    }
+
+    internal void Clear() => _sources.Clear();
 }
 
 /// <summary>JSON 键值存储：插件级落盘 / 组件级写回 SettingsJson。</summary>
