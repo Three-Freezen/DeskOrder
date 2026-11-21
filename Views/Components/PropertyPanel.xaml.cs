@@ -3430,7 +3430,7 @@ public partial class PropertyPanel : UserControl
                     var key = PluginIntegrationService.Instance.KeyOf(entry);
                     combo.Items.Add(new ComboBoxItem
                     {
-                        Content = entry.Source.DisplayName + " · " + entry.PluginDisplayName,
+                        Content = entry.DisplayName + " · " + entry.PluginDisplayName,
                         Tag = key,
                     });
                     if (string.Equals(key, current, StringComparison.Ordinal))

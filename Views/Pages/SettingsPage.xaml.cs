@@ -28,6 +28,8 @@ public partial class SettingsPage : UserControl
     readonly Action<string> _onLangChanged;
     // 语言列表是动态的（语言包安装/卸载后重建下拉框）。
     readonly Action _onLanguagesChanged;
+    // 插件注册/撤下设置 schema 时刷新「插件设置…」按钮（API v5）。
+    readonly Action _onPluginSettingsChanged;
 
     // 当前值 TextBlock + 取值委托，改键后/注入 getter 后增量刷新，避免一直停留在「未设置」。
     readonly System.Collections.Generic.List<(TextBlock Value, Func<string> Getter)> _hotkeyValueBindings = new();
@@ -54,12 +56,16 @@ public partial class SettingsPage : UserControl
         _suppress = true;
         try { SelectExpandCorner(_configService.Load().SubfolderExpandCorner); }
         finally { _suppress = prevSuppress; }
-        _onLangChanged = _ => { RebuildHotkeys(); UpdateLanguageHint(); };
+        _onLangChanged = _ => { RebuildHotkeys(); UpdateLanguageHint(); UpdatePluginSettingsUi(); };
         LocalizationService.Instance.LanguageChanged += _onLangChanged;
         _onLanguagesChanged = () => { RebuildLanguageCombo(); UpdateLanguageHint(); };
         LocalizationService.Instance.LanguagesChanged += _onLanguagesChanged;
+        _onPluginSettingsChanged = () => Dispatcher.BeginInvoke(
+            new Action(UpdatePluginSettingsUi), System.Windows.Threading.DispatcherPriority.Background);
+        PluginSettingsService.Instance.SchemasChanged += _onPluginSettingsChanged;
         RebuildLanguageCombo();
         UpdateLanguageHint();
+        UpdatePluginSettingsUi();
         // ponytail: two-way bind to ThemeService so the title-bar cycle button
         // (ManagementWindow.ThemeBtn_Click) and any other runtime theme flip
         // (System accent change, UserPreferenceChanged → Apply(System)) keeps
@@ -70,6 +76,7 @@ public partial class SettingsPage : UserControl
         Loaded += (_, _) =>
         {
             SyncFromConfig();
+            UpdatePluginSettingsUi();
             // 更新卡片初挂载：订阅服务状态（防御性 _updateSubscribed 防重复订阅），
             // 并按服务当前状态渲染（后台检查可能已在启动时跑过）。
             if (_updates != null && !_updateSubscribed)
@@ -89,6 +96,7 @@ public partial class SettingsPage : UserControl
             ThemeService.Changed -= SyncThemeRadios;
             LocalizationService.Instance.LanguageChanged -= _onLangChanged;
             LocalizationService.Instance.LanguagesChanged -= _onLanguagesChanged;
+            PluginSettingsService.Instance.SchemasChanged -= _onPluginSettingsChanged;
             if (_updates != null && _updateSubscribed)
             {
                 _updates.StateChanged -= OnUpdateStateChanged;
@@ -350,6 +358,35 @@ public partial class SettingsPage : UserControl
         var (files, bytes) = PluginService.Instance.Catalog.GetImageCacheStats();
         CacheSizeText.Text = LocalizationService.Instance.Get(
             "Settings.Plugins.Cache.Size", files, (bytes / 1024.0 / 1024.0).ToString("0.0"));
+    }
+
+    // ── 插件设置（API v5）──
+
+    /// <summary>
+    /// 「插件设置…」按钮：没有任何已启用插件注册 schema 时禁用（点了也没有内容可配）。
+    /// 插件加载 / 卸载会触发 <see cref="PluginSettingsService.SchemasChanged"/>，这里跟着刷新。
+    /// </summary>
+    void UpdatePluginSettingsUi()
+    {
+        if (PluginSettingsButton == null) return;
+        var loc = LocalizationService.Instance;
+        var count = PluginSettingsService.Instance.Schemas.Count;
+        PluginSettingsButton.IsEnabled = count > 0;
+        PluginSettingsHint.Text = count > 0
+            ? loc.Get("Settings.Plugins.Settings.Hint", count)
+            : loc["Settings.Plugins.Settings.EmptyHint"];
+    }
+
+    /// <summary>打开宿主渲染的插件设置窗口（值由各插件自己声明、宿主负责校验 + 落盘）。</summary>
+    void OpenPluginSettings_Click(object sender, RoutedEventArgs e)
+    {
+        if (!PluginSettingsService.Instance.HasAny)
+        {
+            UpdatePluginSettingsUi();
+            return;
+        }
+        var dialog = new PluginSettingsDialog { Owner = Window.GetWindow(this) };
+        dialog.ShowDialog();
     }
 
     // ── 玻璃渲染方案(二期) ──

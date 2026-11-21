@@ -9,7 +9,12 @@ namespace DeskOrder.PluginApi;
 /// </summary>
 public static class PluginApiVersion
 {
-    public const int Current = 4;
+    /// <summary>
+    /// 当前 API 版本。v5 只增不改：v1–v4 的全部成员保持原样，新增
+    /// <see cref="IPluginHost.Settings"/>、<see cref="IPluginSettings"/> 与
+    /// 工具命令 / 数据源的本地化显示名（<see cref="PluginLocalizedText"/>）。
+    /// </summary>
+    public const int Current = 5;
 }
 
 /// <summary>
@@ -34,7 +39,7 @@ public interface IPluginHost
     /// <summary>宿主版本（如 1.0.27）。</summary>
     Version HostVersion { get; }
 
-    /// <summary>宿主支持的 API 版本（当前 = 4）。</summary>
+    /// <summary>宿主支持的 API 版本（当前 = 5）。</summary>
     int ApiVersion { get; }
 
     /// <summary>插件级数据目录（跨实例共享）。</summary>
@@ -52,6 +57,9 @@ public interface IPluginHost
 
     /// <summary>数据源注册入口（API v4）。</summary>
     IPluginIntegrations Integrations { get; }
+
+    /// <summary>插件设置入口（API v5）：注册后由宿主渲染设置页。</summary>
+    IPluginSettings Settings { get; }
 
     IPluginLog Log { get; }
 }

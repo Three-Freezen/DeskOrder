@@ -103,6 +103,24 @@
           <TextBlock x:Name="ImageCacheStatusText" FontSize="11" Margin="24,0,0,8"
                      Foreground="{DynamicResource Brush.Text.Tertiary}" TextWrapping="Wrap"
                      Visibility="Collapsed"/>
+
+          <!-- API v5：已启用插件通过 host.Settings.Register 声明的设置项，由宿主统一渲染 -->
+          <Grid Margin="24,0,0,8">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+              <TextBlock Text="{loc:Loc Key=Settings.Plugins.Settings}"
+                         Foreground="{DynamicResource Brush.Text.Primary}"/>
+              <TextBlock x:Name="PluginSettingsHint" FontSize="11" Margin="0,2,0,0"
+                         Foreground="{DynamicResource Brush.Text.Tertiary}" TextWrapping="Wrap"/>
+            </StackPanel>
+            <Button x:Name="PluginSettingsButton" Grid.Column="1"
+                    Content="{loc:Loc Key=Settings.Plugins.Settings.Open}"
+                    Margin="12,0,0,0" VerticalAlignment="Center" Click="OpenPluginSettings_Click"
+                    FontSize="11" Padding="12,5" Style="{DynamicResource OutlineBtn}"/>
+          </Grid>
         </StackPanel>
       </Border>
 

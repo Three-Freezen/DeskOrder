@@ -26,8 +26,17 @@ public sealed class PluginMediaSourceDescriptor
     /// <summary>插件内唯一，1..64 个字符，只允许 <c>[a-z0-9._-]</c>。最终键是 <c>&lt;pluginId&gt;/&lt;id&gt;</c>。</summary>
     public required string Id { get; init; }
 
-    /// <summary>属性面板「数据源」下拉里显示的名字（宿主原样显示，不做翻译；请按语言自己挑字符串）。</summary>
+    /// <summary>
+    /// 属性面板「数据源」下拉里显示的名字（旧插件 / 未提供 <see cref="LocalizedDisplayName"/>
+    /// 时的回退值，宿主原样显示、不翻译）。
+    /// </summary>
     public required string DisplayName { get; init; }
+
+    /// <summary>
+    /// 可选本地化显示名（API v5）：「数据源」下拉按宿主当前语言解析；
+    /// 为 null（默认）时回退 <see cref="DisplayName"/>，旧插件零改动。
+    /// </summary>
+    public PluginLocalizedText? LocalizedDisplayName { get; init; }
 
     /// <summary>可选说明（暂未展示，留给后续版本）。</summary>
     public string? Description { get; init; }

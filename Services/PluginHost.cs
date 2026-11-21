@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -23,12 +24,15 @@ public sealed class PluginHostContext : IPluginHost
     public required IPluginZoneBays ZoneBays { get; init; }
     public required IPluginTools Tools { get; init; }
     public required IPluginIntegrations Integrations { get; init; }
+    /// <summary>插件设置注册入口（API v5）。</summary>
+    public required IPluginSettings Settings { get; init; }
     public required IPluginLog Log { get; init; }
 
     public PluginWidgetRegistry Registry => (PluginWidgetRegistry)Widgets;
     public PluginZoneBayRegistry BayRegistry => (PluginZoneBayRegistry)ZoneBays;
     public PluginToolRegistry ToolRegistry => (PluginToolRegistry)Tools;
     public PluginIntegrationRegistry IntegrationRegistry => (PluginIntegrationRegistry)Integrations;
+    public PluginSettingsRegistry SettingsRegistry => (PluginSettingsRegistry)Settings;
 }
 
 /// <summary>收集 <see cref="PluginZoneBayDescriptor"/>，拒绝重复/非法 id。</summary>
@@ -99,6 +103,8 @@ public sealed class PluginToolRegistry : IPluginTools
             throw new ArgumentException("tool command id must be 1..64 chars of [a-z0-9._-]");
         if (string.IsNullOrWhiteSpace(command.DisplayName))
             throw new ArgumentException("tool command display name is required");
+        if (command.LocalizedDisplayName != null && !command.LocalizedDisplayName.HasAny)
+            throw new ArgumentException("tool command localized display name has no text (zh / en)");
         if (command.Execute == null)
             throw new ArgumentException("tool command Execute is required");
         if (_commands.Count >= MaxCommands)
@@ -129,6 +135,8 @@ public sealed class PluginIntegrationRegistry : IPluginIntegrations
             throw new ArgumentException("media source id must be 1..64 chars of [a-z0-9._-]");
         if (string.IsNullOrWhiteSpace(descriptor.DisplayName))
             throw new ArgumentException("media source display name is required");
+        if (descriptor.LocalizedDisplayName != null && !descriptor.LocalizedDisplayName.HasAny)
+            throw new ArgumentException("media source localized display name has no text (zh / en)");
         if (descriptor.Poll == null)
             throw new ArgumentException("media source Poll is required");
         if (_sources.Count >= MaxSources)
@@ -139,6 +147,106 @@ public sealed class PluginIntegrationRegistry : IPluginIntegrations
     }
 
     internal void Clear() => _sources.Clear();
+}
+
+/// <summary>收集 <see cref="PluginSettingsSchema"/>（API v5），校验字段定义并拒绝重复注册。</summary>
+public sealed class PluginSettingsRegistry : IPluginSettings
+{
+    /// <summary>一个插件最多能声明的设置字段数。</summary>
+    public const int MaxFields = 20;
+
+    /// <summary>字段键会进插件级存储（<c>settings.&lt;key&gt;</c>）与设置窗口，只允许稳定的小写片段。</summary>
+    static readonly Regex KeyPattern = new("^[a-z0-9][a-z0-9._-]{0,63}$", RegexOptions.Compiled);
+
+    /// <summary>已注册的 schema；null = 这个插件没注册设置。</summary>
+    public PluginSettingsSchema? Schema { get; private set; }
+
+    public void Register(PluginSettingsSchema schema)
+    {
+        if (schema == null) throw new ArgumentNullException(nameof(schema));
+        if (Schema != null)
+            throw new InvalidOperationException("a plugin may register at most one settings schema");
+        if (schema.Title == null || !schema.Title.HasAny)
+            throw new ArgumentException("settings schema title is required");
+        if (schema.Fields.Count > MaxFields)
+            throw new InvalidOperationException($"a plugin may register at most {MaxFields} settings fields");
+
+        var keys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var field in schema.Fields)
+        {
+            if (field == null) throw new ArgumentException("settings field is required");
+            if (string.IsNullOrEmpty(field.Key) || !KeyPattern.IsMatch(field.Key))
+                throw new ArgumentException("settings field key must be 1..64 chars of [a-z0-9._-] starting with a letter or digit");
+            if (!keys.Add(field.Key))
+                throw new InvalidOperationException($"duplicate settings field key: {field.Key}");
+            if (field.Label == null || !field.Label.HasAny)
+                throw new ArgumentException($"settings field '{field.Key}' label is required");
+
+            switch (field.Kind)
+            {
+                case PluginSettingKind.Toggle:
+                    if (field.DefaultValue is not ("true" or "false"))
+                        throw new ArgumentException(
+                            $"settings field '{field.Key}' is a toggle: DefaultValue must be \"true\" or \"false\"");
+                    break;
+
+                case PluginSettingKind.Text:
+                    break;
+
+                case PluginSettingKind.Int:
+                {
+                    if (field.Min.HasValue && field.Max.HasValue && field.Min.Value > field.Max.Value)
+                        throw new InvalidOperationException(
+                            $"settings field '{field.Key}' has Min greater than Max");
+                    if (!string.IsNullOrEmpty(field.DefaultValue))
+                    {
+                        if (!int.TryParse(field.DefaultValue, NumberStyles.Integer,
+                                CultureInfo.InvariantCulture, out var defaultValue))
+                            throw new ArgumentException(
+                                $"settings field '{field.Key}' DefaultValue must be an integer");
+                        if (field.Min.HasValue && defaultValue < field.Min.Value)
+                            throw new InvalidOperationException(
+                                $"settings field '{field.Key}' DefaultValue is below Min");
+                        if (field.Max.HasValue && defaultValue > field.Max.Value)
+                            throw new InvalidOperationException(
+                                $"settings field '{field.Key}' DefaultValue is above Max");
+                    }
+                    break;
+                }
+
+                case PluginSettingKind.Choice:
+                {
+                    if (field.Choices == null || field.Choices.Count == 0)
+                        throw new ArgumentException(
+                            $"settings field '{field.Key}' is a choice: Choices must not be empty");
+                    var values = new HashSet<string>(StringComparer.Ordinal);
+                    foreach (var choice in field.Choices)
+                    {
+                        if (choice == null || string.IsNullOrEmpty(choice.Value))
+                            throw new ArgumentException(
+                                $"settings field '{field.Key}' has a choice without a value");
+                        if (!values.Add(choice.Value))
+                            throw new InvalidOperationException(
+                                $"settings field '{field.Key}' has a duplicate choice value: {choice.Value}");
+                        if (choice.Label == null || !choice.Label.HasAny)
+                            throw new ArgumentException(
+                                $"settings field '{field.Key}' choice '{choice.Value}' label is required");
+                    }
+                    if (!string.IsNullOrEmpty(field.DefaultValue) && !values.Contains(field.DefaultValue))
+                        throw new InvalidOperationException(
+                            $"settings field '{field.Key}' DefaultValue is not one of its choices");
+                    break;
+                }
+
+                default:
+                    throw new ArgumentException($"settings field '{field.Key}' has an unknown kind");
+            }
+        }
+
+        Schema = schema;
+    }
+
+    internal void Clear() => Schema = null;
 }
 
 /// <summary>JSON 键值存储：插件级落盘 / 组件级写回 SettingsJson。</summary>

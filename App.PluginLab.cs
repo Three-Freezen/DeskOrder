@@ -63,7 +63,7 @@ public partial class App
         // 用例自己构造缓存与禁用名单；禁掉启动后台拉取，避免线上 registry 在用例跑到一半时覆盖它们。
         PluginService.SuppressBackgroundRefreshForLab = true;
         var cases = caseName == "all"
-            ? new[] { "install", "load", "restart", "disable", "enable", "hide", "uninstall", "offline", "bad", "crash", "cache", "signature", "signature-policy", "lang-install", "lang-switch", "lang-bad", "lang-override", "lang-uninstall", "lang-rtl", "lang-plural", "appearance-install", "appearance-toggle", "appearance-render", "appearance-bad", "appearance-uninstall", "update", "blocked", "dialog", "ui", "dev", "widget-panel", "widgets-page", "security", "tool", "tool-ui", "integration", "marketux", "settings", "multikind", "gh-install" }
+            ? new[] { "install", "load", "restart", "disable", "enable", "hide", "uninstall", "offline", "bad", "crash", "cache", "signature", "signature-policy", "lang-install", "lang-switch", "lang-bad", "lang-override", "lang-uninstall", "lang-rtl", "lang-plural", "appearance-install", "appearance-toggle", "appearance-render", "appearance-bad", "appearance-uninstall", "update", "blocked", "dialog", "ui", "dev", "widget-panel", "widgets-page", "security", "tool", "tool-ui", "integration", "marketux", "settings", "multikind", "gh-install", "plugin-settings" }
             : new[] { caseName };
         var results = new List<LabCase>();
         foreach (var name in cases)
@@ -1130,8 +1130,8 @@ public partial class App
                 var tools = PluginToolService.Instance;
                 tools.Clear();
 
-                // API v4 是「integration 数据源」的契约版本；工具插件本身仍从 v3 起可用。
-                item.Check(PluginApiVersion.Current == 4, "plugin API version is 4");
+                // API v5 是「插件设置 + 本地化显示名」的契约版本；工具插件本身仍从 v3 起可用。
+                item.Check(PluginApiVersion.Current == 5, "plugin API version is 5");
 
                 PluginManifest MakeToolManifest(int apiVersion) => new()
                 {
@@ -1154,7 +1154,9 @@ public partial class App
                     "manifest validation accepts a tool plugin with apiVersion 3");
                 item.Check(MakeToolManifest(4).Validate(PluginInstaller.HostVersion, forLocalImport: true).Count == 0,
                     "a tool plugin may also declare the host API version 4");
-                item.Check(MakeToolManifest(5).Validate(PluginInstaller.HostVersion, forLocalImport: true)
+                item.Check(MakeToolManifest(5).Validate(PluginInstaller.HostVersion, forLocalImport: true).Count == 0,
+                    "a v5 tool plugin is accepted (localized names / plugin settings)");
+                item.Check(MakeToolManifest(6).Validate(PluginInstaller.HostVersion, forLocalImport: true)
                         .Any(e => e.Contains("not supported", StringComparison.Ordinal)),
                     "an apiVersion above the host API is rejected with a clear reason");
 
@@ -1542,12 +1544,11 @@ public partial class App
             }
             case "integration":
             {
-                // 数据源插件内核（API v4）：媒体源注册/查找/读取/异常与超时兜底、
-                // 清单校验、安装放行、播放器与属性面板接线。数据源全部合成，不依赖真实 dopkg。
+                // 数据源插件内核（API v4）；v5 新增本地化显示名与设置页，v4 写法保持兼容。
                 var integrations = PluginIntegrationService.Instance;
                 integrations.Clear();
 
-                item.Check(PluginApiVersion.Current == 4, "plugin API version is 4");
+                item.Check(PluginApiVersion.Current == 5, "plugin API version is 5");
 
                 PluginManifest MakeIntegrationManifest(int apiVersion) => new()
                 {
@@ -1571,7 +1572,9 @@ public partial class App
                 item.Check(MakeIntegrationManifest(3).Validate(PluginInstaller.HostVersion, forLocalImport: true)
                         .Any(e => e.Contains("apiVersion 4", StringComparison.Ordinal)),
                     "an integration plugin with apiVersion 3 is rejected and asks for apiVersion 4");
-                item.Check(MakeIntegrationManifest(5).Validate(PluginInstaller.HostVersion, forLocalImport: true)
+                item.Check(MakeIntegrationManifest(5).Validate(PluginInstaller.HostVersion, forLocalImport: true).Count == 0,
+                    "an integration plugin may declare API version 5 (localized names / settings)");
+                item.Check(MakeIntegrationManifest(6).Validate(PluginInstaller.HostVersion, forLocalImport: true)
                         .Any(e => e.Contains("not supported", StringComparison.Ordinal)),
                     "an apiVersion above the host API is rejected with a clear reason");
 
@@ -1947,6 +1950,10 @@ public partial class App
                     "the integration-demo plugin is uninstalled again");
                 break;
             }
+            case "plugin-settings":
+                // API v5：本地化显示名 + 宿主渲染的插件设置页，实现见 App.PluginLab.PluginUi.cs。
+                await RunPluginSettingsLabCaseAsync(item, name, dir);
+                break;
             case "marketux":
                 await RunMarketUxLabCaseAsync(item, dir);
                 break;
@@ -1960,7 +1967,6 @@ public partial class App
             case "gh-install":
                 // 「从 GitHub 仓库直接安装」，实现见 App.PluginLab.GitHubInstall.cs。
                 await RunGitHubInstallLabCaseAsync(item, dir);
-                break;
                 break;
             default:
                 item.Check(false, "unknown case: " + name);

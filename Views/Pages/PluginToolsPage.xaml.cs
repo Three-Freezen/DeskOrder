@@ -31,6 +31,8 @@ public partial class PluginToolsPage : UserControl
     // 录制期间要禁用其它行的按钮；行是自绘的，刷新列表时整体重建。
     readonly List<Button> _recordButtons = new();
     readonly List<Button> _clearButtons = new();
+    // 自测台用：本页当前渲染出的命令标题（= 按当前语言解析后的显示名）。
+    readonly List<string> _rowTitles = new();
 
     // HotkeyRecorder 是进程级单例键盘钩子：同一时刻只能录一条命令。
     bool _recording;
@@ -104,6 +106,7 @@ public partial class PluginToolsPage : UserControl
 
         _recordButtons.Clear();
         _clearButtons.Clear();
+        _rowTitles.Clear();
         ListHost.Children.Clear();
         foreach (var entry in commands) ListHost.Children.Add(BuildRow(entry));
 
@@ -155,12 +158,14 @@ public partial class PluginToolsPage : UserControl
         var info = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
         var title = new TextBlock
         {
-            Text = entry.Command.DisplayName,
+            // API v5：命令名优先用 LocalizedDisplayName 的当前语言解析结果（旧插件回退 DisplayName）。
+            Text = entry.DisplayName,
             FontSize = 14,
             FontWeight = FontWeights.SemiBold,
             Foreground = ThemeBrushes.TextPrimaryModern,
             TextTrimming = TextTrimming.CharacterEllipsis
         };
+        _rowTitles.Add(title.Text);
         // 命令说明本来就只是菜单 ToolTip；这里顺手复用，不额外占一行高度。
         if (!string.IsNullOrWhiteSpace(entry.Command.Description)) title.ToolTip = entry.Command.Description;
         info.Children.Add(title);
@@ -408,4 +413,7 @@ public partial class PluginToolsPage : UserControl
 
     /// <summary>「重启后生效」提示是否可见（自测台/将来的诊断用）。</summary>
     internal Visibility RestartHintVisibility => RestartHint.Visibility;
+
+    /// <summary>当前列表行的命令标题（按当前语言解析后的显示名，自测台断言本地化用）。</summary>
+    internal IReadOnlyList<string> RowTitlesForLab => _rowTitles;
 }
