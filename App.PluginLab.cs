@@ -1304,6 +1304,79 @@ public partial class App
                 config.PluginToolHotkeys = hotkeyBackup;
                 _configService.Save(config);
                 RefreshPluginToolHotkeys();
+
+                // ── 端到端：安装真实的 tool-demo 示例包，命令必须来自插件 DLL（而不是上面的合成命令） ──
+                // 包由 plugin-community\tools\build-labs.ps1 生成到 dist\，自测台启动时由 runner 复制进来。
+                const string toolDemoId = "three-freezen.tool-demo";
+                var toolPackage = Path.Combine(dir, "tool-demo-1.0.0.dopkg");
+                item.Check(File.Exists(toolPackage), "the tool-demo package is present in the lab dir");
+                if (!File.Exists(toolPackage))
+                {
+                    item.Check(false, "the tool-demo package is missing; run plugin-community\\tools\\build-labs.ps1");
+                    break;
+                }
+                var toolInstall = await service.Installer!.InstallFromFileAsync(toolPackage);
+                item.Check(toolInstall.Success, "installing the tool-demo package succeeds");
+                if (!toolInstall.Success)
+                {
+                    item.Check(false, "tool-demo install error: " + toolInstall.Error);
+                    break;
+                }
+                service.RefreshRecords();
+                item.Check(service.GetRecord(toolDemoId) != null,
+                    "the installed tool plugin is listed in the records");
+                item.Check(service.SetEnabled(toolDemoId, true), "enabling the tool plugin succeeds");
+                service.ReloadForLab();
+                item.Check(service.GetLoaded(toolDemoId) != null,
+                    "the tool plugin is loaded after reload");
+
+                var stampEntry = tools.Find(toolDemoId, "stamp");
+                var counterEntry = tools.Find(toolDemoId, "counter");
+                item.Check(stampEntry != null, "the real plugin DLL registers the stamp command");
+                item.Check(counterEntry != null, "the real plugin DLL registers the counter command");
+                item.Check(stampEntry != null
+                           && stampEntry.Command.DisplayName == "复制时间戳"
+                           && stampEntry.Command.Description == "把当前时间写到剪贴板",
+                    "the stamp command carries its display name and description");
+                item.Check(counterEntry != null
+                           && counterEntry.Command.DisplayName == "记录一次执行"
+                           && counterEntry.Command.Description == "演示/自测：把执行次数写进插件数据",
+                    "the counter command carries its display name and description");
+                item.Check(tools.HasCommands(PluginToolSurface.Tray)
+                           && tools.HasCommands(PluginToolSurface.Panel)
+                           && tools.HasCommands(PluginToolSurface.Zone),
+                    "the tool-demo commands opt into all three menu surfaces");
+
+                // counter 不碰 UI：调两次后 runs 必须 >= 2，并且已经落盘到插件数据目录。
+                item.Check(counterEntry != null && await tools.InvokeAsync(counterEntry, PluginToolSurface.Tray),
+                    "invoking counter through the tray surface succeeds");
+                item.Check(counterEntry != null && await tools.InvokeAsync(counterEntry, PluginToolSurface.Hotkey),
+                    "invoking counter through the hotkey source succeeds");
+                var demoSettingsPath = Path.Combine(PluginPaths.PluginDataDir(toolDemoId), "settings.json");
+                var demoStorage = new JsonPluginStorage(demoSettingsPath, null, null);
+                item.Check(int.TryParse(demoStorage.Get("runs"), out var demoRuns) && demoRuns >= 2,
+                    "counter writes at least two runs to the plugin data file");
+                item.Check(demoStorage.Get("last_run").Length > 0,
+                    "counter writes a last_run timestamp to the plugin data file");
+
+                // stamp 会在命令里写剪贴板：宿主在 UI 线程调用，返回成功即说明 Clipboard 没抛异常。
+                item.Check(stampEntry != null && await tools.InvokeAsync(stampEntry, PluginToolSurface.Tray),
+                    "the stamp command runs on the UI thread (clipboard write included)");
+                item.Check(new JsonPluginStorage(demoSettingsPath, null, null).Get("last_stamp").Length > 0,
+                    "stamp persists the copied timestamp to the plugin data file");
+
+                // 禁用后：插件卸载，命令从命令中心与三处菜单里一起消失。
+                service.SetEnabled(toolDemoId, false);
+                service.ReloadForLab();
+                item.Check(service.GetLoaded(toolDemoId) == null, "disabling the tool plugin unloads it");
+                item.Check(tools.Find(toolDemoId, "stamp") == null && tools.Find(toolDemoId, "counter") == null,
+                    "disabling the tool plugin removes its commands");
+                item.Check(!tools.HasCommands(PluginToolSurface.Tray)
+                           && !tools.HasCommands(PluginToolSurface.Panel)
+                           && !tools.HasCommands(PluginToolSurface.Zone),
+                    "no menu surface keeps the disabled tool plugin's commands");
+                item.Check(tools.BuildMenu(PluginToolSurface.Tray) == null,
+                    "no plugin tool submenu is built after the tool plugin is disabled");
                 break;
             }
             case "tool-ui":
