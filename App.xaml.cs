@@ -653,11 +653,9 @@ public partial class App : System.Windows.Application
         }
         StartupTrace("10 startup complete");
 
-        // 自测用：--ui-shot=<目录> 逐个显示非分层窗口（管理窗口/属性窗/弹窗）并截图后退出。
-        // --ui-hold=<name> --ui-hold-ms=<ms>：只显示一个窗口并保持，供外部采样内存/CPU。
-        // --ui-cost=<name> --ui-cost-out=<csv>：同进程内开/关窗口反复采样，算单窗口内存成本。
-        // 用于 Phase 3 `AllowsTransparency=True → WindowChrome` 改造前后的视觉对比；
-        // 截图代码见 App.UiShot.cs。只有带这些参数时才走这里。
+        // 自测用：--ui-shot / --ui-hold / --ui-cost（只在 Debug 构建里编译：
+        // 依赖的 ParseArgValue 本身也在 #if DEBUG 区域内，Release 里没有这些自测开关）。
+#if DEBUG
         var uiShotDir = ParseArgValue(e.Args, "--ui-shot=");
         var uiHoldName = ParseArgValue(e.Args, "--ui-hold=");
         var uiCostName = ParseArgValue(e.Args, "--ui-cost=");
@@ -688,6 +686,7 @@ public partial class App : System.Windows.Application
             }), DispatcherPriority.ApplicationIdle);
             return;
         }
+#endif
 
         // 以受限（低完整性 / 沙箱）方式启动时：托盘图标、%APPDATA% 写入、CoreAudio 枚举
         // 都会失败，但表面上只是"图标不见了 / 设置在重启后丢了"。直接说清楚，别让人去猜 BUG。
