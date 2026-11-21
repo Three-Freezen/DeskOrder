@@ -653,6 +653,26 @@ public partial class App : System.Windows.Application
         }
         StartupTrace("10 startup complete");
 
+        // 自测用：--ui-shot=<目录> 逐个显示非分层窗口（管理窗口/属性窗/弹窗）并截图后退出。
+        // 用于 Phase 3 `AllowsTransparency=True → WindowChrome` 改造前后的视觉对比；
+        // 截图代码见 App.UiShot.cs。只有带该参数时才走这里。
+        var uiShotDir = ParseArgValue(e.Args, "--ui-shot=");
+        if (uiShotDir != null)
+        {
+            var only = ParseArgValue(e.Args, "--ui-shot-only=");
+            Dispatcher.BeginInvoke(new Action(async () =>
+            {
+                try { await RunUiShotsAsync(uiShotDir, only); }
+                catch (Exception ex)
+                {
+                    try { System.IO.File.WriteAllText(
+                        System.IO.Path.Combine(uiShotDir, "ui-shot-error.txt"), ex.ToString()); } catch { }
+                }
+                Shutdown();
+            }), DispatcherPriority.ApplicationIdle);
+            return;
+        }
+
         // 以受限（低完整性 / 沙箱）方式启动时：托盘图标、%APPDATA% 写入、CoreAudio 枚举
         // 都会失败，但表面上只是"图标不见了 / 设置在重启后丢了"。直接说清楚，别让人去猜 BUG。
         if (Helpers.ProcessIntegrity.IsRestricted)
