@@ -595,8 +595,9 @@ public partial class App : System.Windows.Application
 
         // ponytail: 启动时恢复可见的小组件窗口（位置 + 显示状态持久化，与分区一致）。
         // 只打开模型 IsVisible=true 的组件；隐藏组件保持隐藏。
-        EnsureManagementWindow();
-        _managementWindow?.RestoreVisibleWidgets();
+        // Phase 2：不再为了"借用管理窗口的 RestoreVisibleWidgets"而 new ManagementWindow ——
+        // 启动只恢复挂件窗口（WidgetWindows），管理窗口改为首次点托盘/双击桌面时懒建。
+        RestoreVisibleWidgetsAtStartup();
 
         // Register panel hotkey
         if (config.PanelHotkey.PanelHotkeyEnabled && _mainHwnd != IntPtr.Zero)
@@ -1989,13 +1990,53 @@ public partial class App : System.Windows.Application
     /// Needed because the property editor (PropertyWindowService) routes through the
     /// ManagementWindow, and with StartMinimized=true the window is never constructed at
     /// startup — so opening a SubFolder/zone settings panel before first opening the
-    /// management UI would otherwise silently no-op.</summary>
+    /// management UI would otherwise silently no-op.
+    ///
+    /// Phase 2：启动不再调用本方法（启动只恢复挂件，见 <see cref="RestoreVisibleWidgetsAtStartup"/>），
+    /// 只有真正需要管理界面（托盘菜单/双击桌面/属性窗口路由）时才建。</summary>
     public void EnsureManagementWindow()
     {
         if (_managementWindow != null) return;
         _managementWindow = new ManagementWindow(_zoneManager!, _configService!, _notesService, _widgetService, _panelService);
         _managementWindow.Closed += (_, _) => _managementWindow = null;
         _managementWindow.Icon = AppIcon;
+    }
+
+    /// <summary>Phase 2：启动恢复可见挂件 —— 不依赖 ManagementWindow。
+    ///
+    /// 便签窗口一直由 App 自己管理（NotesService.Windows）；时钟/日历/播放器交给
+    /// <see cref="WidgetWindows"/>（它写 WidgetService 的进程级窗口字典），插件挂件沿用
+    /// PluginService.RestoreWidgets。窗口记录都在进程级字典里，所以之后懒建的管理窗口
+    /// 能直接"认领"这些已开着的窗口，不会重复建窗。</summary>
+    void RestoreVisibleWidgetsAtStartup()
+    {
+        if (_notesService != null)
+        {
+            foreach (var note in new System.Collections.Generic.List<Models.StickyNote>(_notesService.Notes))
+            {
+                if (!note.IsVisible) continue;
+                try { OpenNoteWindow(note); }
+                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[RestoreWidgets] note {note.Id} failed: {ex}"); }
+            }
+        }
+        try { WidgetWindows.RestoreVisible(_widgetService); }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[RestoreWidgets] widgets failed: {ex}"); }
+
+        // 诊断（Phase 2）：启动恢复完成后记一行"内存画像" —— 图标缓存字节 / 窗口数 /
+        // 管理窗口是否已建。用户反馈"内存高"时，这一行足以区分是图标缓存、窗口数量，
+        // 还是管理界面被提前创建；正常使用无副作用（只在 ApplicationIdle 跑一次）。
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            try
+            {
+                using var proc = Process.GetCurrentProcess();
+                double privMb = proc.PrivateMemorySize64 / 1024.0 / 1024.0;
+                DzTrace.Always(
+                    $"[Perf] 启动后 private≈{privMb:0.0}MB icons={ShellIconService.Instance.CachedBytes / 1024}KB " +
+                    $"windows={Application.Current.Windows.Count} mgmt={_managementWindow != null}");
+            }
+            catch { }
+        }), DispatcherPriority.ApplicationIdle);
     }
 
     private static Icon CreateAppIcon()

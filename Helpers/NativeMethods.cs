@@ -123,6 +123,13 @@ public static class NativeMethods
     [DllImport("gdi32.dll")]
     public static extern int GetDeviceCaps(IntPtr hdc, int nIndex);
 
+    /// <summary>系统 DPI（当前进程 DPI awareness 下）。Win10 1607+ 才有 ——
+    /// 旧系统调用会抛 EntryPointNotFoundException，调用方必须兜住（见
+    /// ShellIconService.SystemDpiScale）。不知道具体窗口 DPI 的调用方用它近似：
+    /// per-monitor 窗口的真实缩放由窗口侧自己取并覆盖。</summary>
+    [DllImport("user32.dll")]
+    public static extern uint GetDpiForSystem();
+
     [DllImport("shell32.dll")]
     public static extern IntPtr SHGetFileInfo(string pszPath, uint dwFileAttributes,
         ref SHFILEINFO psfi, uint cbSizeFileInfo, uint uFlags);

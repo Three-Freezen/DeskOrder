@@ -36,15 +36,25 @@ public static class WallpaperBackdrop
     /// <summary>预模糊半径小于该值时不做模糊(避免无意义的 RTB 开销)。</summary>
     const double MinBlurPx = 0.4;
 
-    /// <summary>预模糊缓存档位上限。全分辨率(1:1)下每档约 = 虚拟桌面像素 × 4 字节
-    /// (本机 3968×1280 → 约 19 MB,4480×1600 → 约 29 MB),所以从 12 降到 6:再高就是
-    /// 几百 MB 的位图常驻。关掉渲染方案 / 重新采样时会整块清空。
+    /// <summary>预模糊缓存的**字节预算**(估算值,Pbgra32 = 4 字节/像素)。
+    ///
+    /// ponytail 2026-11-21(Phase 2 第 4 项): 上限从「条数」(原来 6 档)改成字节预算。
+    /// 旧方案只按条数限,而一档的大小随分辨率差很多(1:1 下 1080p ≈ 8.3MB、4480×1600 ≈ 28.7MB
+    /// → 6 档分别约 50MB / 172MB,是常驻内存的大头)。现在所有档位至少 1/2 采样
+    /// (见 <see cref="BlurScale"/>),单档降到 1/4:1080p ≈ 2.1MB、2560×1440 ≈ 3.7MB、
+    /// 4480×1600 ≈ 7.2MB。48MB 在 4480×1600 下约等于 6~7 档(43~50MB);1080p 下字节预算碰不到,
+    /// 由下面的条数兜底先卡住(8 档 ≈ 16.6MB)。峰值/常驻都被压在几十 MB。
+    /// 关掉渲染方案 / 重新采样 / 显示器变化时整块清空。</summary>
+    const long BlurCacheBudgetBytes = 48L * 1024 * 1024;
+
+    /// <summary>条数兜底。分辨率很小时 48MB 能塞几十张位图,而每张位图对象在 WPF 侧还有
+    /// 额外开销,所以再压一个条数上限。预模糊档位总共 20 个(0..8 逐像素 + 9 以上按 5 归档),
+    /// 8 档足够覆盖常用材质预设的半径,又不会让缓存字典无限长。
     ///
     /// ponytail 2026-09-26(审计修订): 淘汰策略从"满了就 Clear()"改成 **LRU 淘汰一条**。
     /// 实测每次未命中要重算一次全桌面预模糊(半径 35 ≈ 690ms、60 ≈ 1136ms),Clear() 会让
-    /// **所有**窗口在下次刷新时同时重算(5 个窗口 ≈ 3 秒顿卡);LRU 只牺牲最久没用过的那一档。
-    /// 同时修掉 `Count > Max` 的差一错误(原来实际能留 7 档)。</summary>
-    const int MaxBlurCacheEntries = 6;
+    /// **所有**窗口在下次刷新时同时重算(5 个窗口 ≈ 3 秒顿卡);LRU 只牺牲最久没用过的那一档。</summary>
+    const int MaxBlurCacheEntries = 8;
 
     /// <summary>半径量化步长 —— 只在 <see cref="QuantizeBelow"/> 之上生效。
     /// ponytail 2026-09-26(审计修订): 每遇到一个没缓存过的半径就要重算整块桌面的预模糊
@@ -57,10 +67,6 @@ public static class WallpaperBackdrop
     /// 出来),所以 0..8 逐像素精确,9 以上才按 <see cref="RadiusStep"/> 归档。</summary>
     const int QuantizeBelow = 8;
 
-    /// <summary>**大于等于**此档位改用「半分辨率预模糊」。实测(4960×1600,对比 1:1 逐像素差):
-    /// r=3 时最大差 22/255(看得出),r≥5 起最大差 ≤6/255(看不出)—— 所以 0..4 保持 1:1。</summary>
-    const int HalfScaleFrom = 5;
-
     /// <summary>**大于等于**此档位的半径改用「四分之一分辨率预模糊」。
     ///
     /// ponytail 2026-09-26(用户反馈"拖模糊滑块会卡一下" + 实测):
@@ -70,21 +76,28 @@ public static class WallpaperBackdrop
     ///   1:1 → 363~1193ms;1/2 → 80~172ms;**1/4 → 20~47ms**
     /// 保真度(同一窗口区域逐像素差,对比 1:1):1/2 平均 0.22~0.31/255、最大 ≤6/255(r≥5);
     /// 1/4 在 r=10~15 最大差 19~31/255(**高对比边缘看得出来**),r≥20 才降到 ≤10/255。
-    /// 所以:0..4 用 1:1(接近清晰,必须精确),5..19 用 1/2,≥20 用 1/4。
-    /// 四分之一档每张位图只有约 1.9MB(1:1 是 30.3MB),拖一次滑块落在这一档时每步几十毫秒。</summary>
+    /// 所以:0..19 用 1/2,≥20 用 1/4。
+    ///
+    /// Phase 2 第 4 项: 0..4 档从「1:1」也改成 1/2。旧注释记的实测是 r=3 时 1/2 与 1:1
+    /// 最大差 22/255(高对比边缘看得出),但高斯核尺度无关 —— 在 1/2 画布上 blur=半径/2、
+    /// 再放大回显示尺寸,模糊半径本身没变,观感只是略软一点点;而背板上面还叠着着色/噪点。
+    /// 换来的是内存大头消失:小半径档单张从 8.3MB 降到 2.1MB(@1080p),见 <see cref="BlurScale"/>。</summary>
     const int QuarterScaleFrom = 20;
 
-    /// <summary>位图相对虚拟桌面的采样倍率:1(1:1)/ 2(半)/ 4(四分之一)。
+    /// <summary>位图相对虚拟桌面的采样倍率:2(半分辨率)或 4(四分之一)。
     ///
     /// 高斯核尺度无关:在 1/N 的画布上用 radius/N 模糊、再放大回原尺寸,与全分辨率模糊
     /// 等价(只差一次重采样)。而这块背板本来就是糊的 —— 半径越大越没细节可丢,
-    /// 所以倍率可以随半径放大,阈值由上面的实测差值定。</summary>
+    /// 所以倍率可以随半径放大,阈值由上面的实测差值定。
+    ///
+    /// Phase 2 第 4 项: **最小倍率从 1 改到 2**。1:1 档只服务 0..4 这几个小半径,却是缓存里
+    /// 最占内存的一组(单张是半分辨率档的 4 倍)。取舍:放大回显示尺寸时多一次线性重采样,
+    /// 极小半径(1~2px)在 200% 缩放的屏幕上看会比 1:1 略软一点点 —— 但背板不是正文,
+    /// 换来峰值/常驻降 3/4(1080p 六档 50MB → 12MB,4480×1600 172MB → 43MB)。</summary>
     static int BlurScale(int quantizedRadius)
-        => quantizedRadius < HalfScaleFrom ? Downscale
-         : quantizedRadius < QuarterScaleFrom ? 2
-         : 4;
+        => quantizedRadius < QuarterScaleFrom ? 2 : 4;
 
-    /// <summary>位图相对虚拟桌面的采样倍率(1 或 2)—— **从位图自身推导**,不依赖全局常量。
+    /// <summary>位图相对虚拟桌面的采样倍率(1/2/4)—— **从位图自身推导**,不依赖全局常量。
     /// ponytail 2026-09-26(审计修订 B): 这是"两处必须一致"那个隐患的根治办法 ——
     /// 裁剪 Viewbox 直接用拿到的这张图算缩放,而不是去问一个可能已经变了的常量。</summary>
     public static double ScaleOf(BitmapSource desk)
@@ -110,9 +123,16 @@ public static class WallpaperBackdrop
     /// <summary>虚拟桌面在物理像素下的原点/尺寸(与壁纸图的像素空间配套)。</summary>
     static (int vx, int vy, int vw, int vh) Layout() => WallpaperSource.LayoutRect;
 
-    // ── 预模糊缓存(按屏幕半径 → LRU) ──
+    // ── 预模糊缓存(按屏幕半径 → LRU,按字节预算淘汰) ──
 
-    static readonly Dictionary<int, (BitmapSource Bitmap, long Used)> _blurCache = new();    static readonly object _lock = new();
+    /// <summary>档位 → (位图, 估算字节, 最近使用时间)。字节数在插入时算一次,淘汰时直接减,
+    /// 不用每次遍历位图问大小。</summary>
+    static readonly Dictionary<int, (BitmapSource Bitmap, long Bytes, long Used)> _blurCache = new();
+    static readonly object _lock = new();
+
+    /// <summary>当前缓存里位图的估算总字节(受 <see cref="_lock"/> 保护)。</summary>
+    static long _blurCacheBytes;
+
     static long _useTick;
     static int _generation;
 
@@ -133,6 +153,14 @@ public static class WallpaperBackdrop
     /// 用户换了壁纸点「重新采样」时 —— 半径没变 → 图层继续用旧 ImageBrush → 屏幕上毫无
     /// 反应(用户实测反馈的 bug)。图层现在比对这个号,号变了就重取。</summary>
     public static int Generation => _generation;
+
+    /// <summary>当前预模糊缓存占用的估算字节数(PixelWidth*PixelHeight*4,不含 WPF 内部开销)。
+    /// ponytail 2026-11-21(Phase 2 第 4 项): 缓存上限从"条数"改成"字节预算"后,靠这个读数
+    /// 验证收口是否生效(调试/内存自检用,不参与渲染决策)。</summary>
+    public static long BlurCacheBytes
+    {
+        get { lock (_lock) return _blurCacheBytes; }
+    }
 
     /// <summary>壁纸当前是否可用(**不渲染、不模糊、不占缓存档位**)。
     /// ponytail 2026-09-26(审计修订): `WallpaperBackdropLayer.TryCreate` 原来用
@@ -161,7 +189,7 @@ public static class WallpaperBackdrop
     /// <summary>取得「壁纸铺满虚拟桌面 + 已按半径预模糊」的位图。
     /// screenRadiusPx = 期望的屏幕模糊半径(物理像素);返回 null = 壁纸不可用。
     /// 半径先过 <see cref="QuantizeRadius"/> 归档再缓存;采样倍率由 <see cref="BlurScale"/>
-    /// 决定(小半径 1:1,大半径半分辨率),**调用方必须用 <see cref="ScaleOf"/> 反推缩放**,
+    /// 决定(0..19 半分辨率,≥20 四分之一),**调用方必须用 <see cref="ScaleOf"/> 反推缩放**,
     /// 不要假设这张图一定是 1:1。
     /// ponytail 2026-09-26(二期): 来源图已由 <see cref="WallpaperSource"/> 统一铺满虚拟桌面
     /// (并已降采样),这里不再自己算适配,直接 1:1 画进模糊画布。</summary>
@@ -193,7 +221,7 @@ public static class WallpaperBackdrop
         {
             if (_blurCache.TryGetValue(key, out var hit))
             {
-                _blurCache[key] = (hit.Bitmap, ++_useTick);   // 命中 → 刷新 LRU 时间戳
+                _blurCache[key] = (hit.Bitmap, hit.Bytes, ++_useTick);   // 命中 → 只刷新 LRU 时间戳,字节数不变
                 return hit.Bitmap;
             }
         }
@@ -204,23 +232,26 @@ public static class WallpaperBackdrop
         // 算完由 TierReady 回填。作者实测同步渲染的代价:1:1 档 363~1193ms / 1:2 档 80~172ms。
         bool coldStart;
         lock (_lock) coldStart = _blurCache.Count == 0;
-        if (coldStart) return ComputeBlurred(key, vw, vh, img);
+        if (coldStart) return ComputeBlurred(key, vw, vh, img, _generation);
 
         ScheduleTierCompute(key, vw, vh, img, _generation);
         return null;
     }
 
     /// <summary>真正的渲染+模糊。调用线程 = 执行线程（同步路径是 UI 线程，后台路径是线程池）。
-    /// `img` 必须是已 Freeze 的位图（WallpaperSource/CaptureDesktop 都 Freeze 过）。</summary>
-    static BitmapSource ComputeBlurred(int key, int vw, int vh, BitmapSource img)
+    /// `img` 必须是已 Freeze 的位图（WallpaperSource/CaptureDesktop 都 Freeze 过）。
+    /// <paramref name="generationAtRequest"/> = 发起这次计算时的世代号:渲染期间若被
+    /// <see cref="Invalidate"/> 作废(换壁纸/显示器变化/关方案),结果**仍返回给调用方**但不再入缓存。</summary>
+    static BitmapSource ComputeBlurred(int key, int vw, int vh, BitmapSource img, int generationAtRequest)
     {
         int scale = BlurScale(key);
         int dw = Math.Max(8, vw / scale);
         int dh = Math.Max(8, vh / scale);
 
         var visual = new DrawingVisual();
-        // 降采样用高质量滤波:实测与默认线性同价(38 vs 41 ms@1/4),但消掉 1/4 降采样的锯齿
-        if (scale > Downscale) RenderOptions.SetBitmapScalingMode(visual, BitmapScalingMode.HighQuality);
+        // 降采样用高质量滤波:实测与默认线性同价(38 vs 41 ms@1/4),但消掉降采样的锯齿。
+        // Phase 2 第 4 项: 现在所有档位都至少 1/2 采样(scale ≥ 2),所以无条件开高质量。
+        RenderOptions.SetBitmapScalingMode(visual, BitmapScalingMode.HighQuality);
         using (var dc = visual.RenderOpen())
         {
             dc.DrawRectangle(Brushes.Black, null, new Rect(0, 0, dw, dh));
@@ -237,10 +268,22 @@ public static class WallpaperBackdrop
         var rtb = new RenderTargetBitmap(dw, dh, 96, 96, PixelFormats.Pbgra32);
         rtb.Render(visual);
         rtb.Freeze();
+        // Pbgra32 = 4 字节/像素。这个估算不含 WPF 内部的额外开销(对 48MB 级预算来说可忽略)。
+        long bytes = (long)rtb.PixelWidth * rtb.PixelHeight * 4;
         lock (_lock)
         {
-            if (_blurCache.Count >= MaxBlurCacheEntries) EvictLeastRecentlyUsed();
-            _blurCache[key] = (rtb, ++_useTick);
+            // ponytail 2026-11-21(Phase 2 第 4 项): 渲染这段时间里缓存可能已被 Invalidate 过
+            // (关方案/换壁纸/显示器变化)。旧实现只在任务**开始**时查世代号,算出结果的最后一步
+            // 仍会把旧世代的位图塞回刚清空的缓存 —— 关掉方案后还以为"缓存已经空了",其实又常驻
+            // 了一档(最多 7MB)。世代号不一致 → 结果照常返回给当前调用方,但**不入缓存**。
+            if (generationAtRequest != _generation) return rtb;
+            // Phase 2 第 4 项: 插入前先按**字节预算**淘汰(新条目本身也计入),再按条数兜底。
+            // 旧实现只在"条数满了"时淘汰一条,分辨率一高 6 档就是上百 MB。
+            // 这里把两条上限都收敛到"插入后仍满足",所以循环式淘汰。
+            while (_blurCacheBytes + bytes > BlurCacheBudgetBytes && EvictLeastRecentlyUsed()) { }
+            while (_blurCache.Count >= MaxBlurCacheEntries && EvictLeastRecentlyUsed()) { }
+            _blurCache[key] = (rtb, bytes, ++_useTick);
+            _blurCacheBytes += bytes;
         }
         return rtb;
     }
@@ -261,7 +304,7 @@ public static class WallpaperBackdrop
                 // 期间换了壁纸 / 显示器拓扑变化 → 结果作废（世代号变了）
                 if (generationAtRequest != _generation) return;
                 if (vw <= 0 || vh <= 0) return;
-                ComputeBlurred(key, vw, vh, img);
+                ComputeBlurred(key, vw, vh, img, generationAtRequest);
                 ok = true;
             }
             catch (Exception ex)
@@ -278,14 +321,19 @@ public static class WallpaperBackdrop
     }
 
     /// <summary>淘汰最久未使用的一档(调用方必须持有 <see cref="_lock"/>)。
-    /// 档位最多 6 个,线性找最小即可,不值得上 OrderedDictionary。</summary>
-    static void EvictLeastRecentlyUsed()
+    /// 档位最多 8 个,线性找最小即可,不值得上 OrderedDictionary。
+    /// 返回 true = 真的淘汰了一条(顺带从 <see cref="_blurCacheBytes"/> 里扣掉它的估算字节);
+    /// 返回 false = 缓存已空,调用方的预算/条数循环应当停下。</summary>
+    static bool EvictLeastRecentlyUsed()
     {
         int victim = -1;
         long oldest = long.MaxValue;
         foreach (var kv in _blurCache)
             if (kv.Value.Used < oldest) { oldest = kv.Value.Used; victim = kv.Key; }
-        if (victim >= 0) _blurCache.Remove(victim);
+        if (victim < 0) return false;
+        _blurCacheBytes -= _blurCache[victim].Bytes;
+        _blurCache.Remove(victim);
+        return true;
     }
 
     /// <summary>清缓存(壁纸变更/显示器拓扑变化/手动重采时调用)。
@@ -298,6 +346,7 @@ public static class WallpaperBackdrop
         lock (_lock)
         {
             _blurCache.Clear();
+            _blurCacheBytes = 0;     // Phase 2 第 4 项: 字节计数必须跟着清,否则预算会永久虚占
             _pendingTiers.Clear();   // ponytail 2026-11-14: 旧世代的在算任务作废（结果按世代号丢弃）
             _generation++;
         }
@@ -476,6 +525,12 @@ public sealed class WallpaperBackdropLayer
         {
             dispatcher.BeginInvoke(new Action(() =>
             {
+                // ponytail 2026-11-21(Phase 2 第 4 项): 自绘方案已切回 DWM 时**不要再重采样**。
+                // 关开关时窗口只是 SetVisible(false) 把图层藏起来、仍然订阅着 Changed;不挡的话
+                // 刚被 Enabled=false 清掉的采集/模糊缓存会被这些"看不见的图层"立刻重新填满
+                // (整块桌面图 + 一档模糊图,几十 MB),关开关等于没关。重新打开方案时窗口会自己
+                // ApplyStyle → SetAppearance 主动取图,不需要这里保活。
+                if (!WallpaperSource.Enabled) return;
                 if (_host == null || _bound == null || _attachedRadius < 0) return;
                 SetAppearance(_bound, _attachedRadius, _attachedTint, Math.Max(0, _attachedNoise));
             }));
@@ -493,6 +548,7 @@ public sealed class WallpaperBackdropLayer
         {
             dispatcher.BeginInvoke(new Action(() =>
             {
+                if (!WallpaperSource.Enabled) return;   // 同 OnWallpaperChanged:关掉方案后不再回填缓存
                 if (_host == null || _bound == null || _wantedRadius < 0) return;
                 SetAppearance(_bound, _wantedRadius, _attachedTint, Math.Max(0, _attachedNoise));
             }));

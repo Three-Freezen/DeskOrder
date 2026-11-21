@@ -45,8 +45,9 @@ public static class WallpaperSource
     /// 有一半是它造成的(用户实测反馈)。改 1 之后裁剪与屏幕 1:1。
     ///
     /// 代价(实测本机 4480×1600 双屏):每档半径的预模糊位图约 29 MB(原 7 MB)、
-    /// 预模糊耗时约 4×(GPU 上是几毫秒级)。缓存档位上限已相应从 12 降到 6
-    /// (见 <see cref="WallpaperBackdrop"/>),并且关掉开关时会整块丢掉。
+    /// 预模糊耗时约 4×(GPU 上是几毫秒级)。Phase 2 第 4 项后所有模糊档位至少 1/2 采样
+    /// (单档约 7.2MB),缓存上限也从"6 档"改成 48MB 字节预算(见 <see cref="WallpaperBackdrop"/>),
+    /// 并且关掉开关时会整块丢掉。
     /// **改动这个值必须同步改 WallpaperBackdrop.Downscale** —— 后者现在直接引用本值。</summary>
     public const int Downscale = 1;
 
@@ -110,7 +111,17 @@ public static class WallpaperSource
         {
             if (_enabled == value) return;
             _enabled = value;
-            if (!value) StopWatch();
+            if (!value)
+            {
+                StopWatch();
+                // ponytail 2026-11-21(Phase 2 第 4 项): 关掉自绘方案时**立刻**丢掉常驻位图 ——
+                // 拼好的整块虚拟桌面图(<see cref="_cache"/>,4K 双屏约十几 MB)+ 预模糊档位缓存
+                // (几十 MB)。旧实现只在"重新采样 / 显示器变化"时清,用户切回 DWM 后这些位图
+                // 一直钉着内存。Invalidate() 同时清 _cache 与 WallpaperBackdrop._blurCache、
+                // 自增世代号并通知已挂载图层;关开关后 GetDesktop() 仍只认系统注册表静态壁纸
+                // (DetectSystemOnly 路径,行为不变)。
+                WallpaperBackdrop.Invalidate();
+            }
         }
     }
 
@@ -413,6 +424,40 @@ public static class WallpaperSource
         }
     }
 
+    /// <summary>解码壁纸原图的目标宽度(像素)= 虚拟桌面宽。
+    ///
+    /// ponytail 2026-11-21(Phase 2 第 4 项): 旧 <see cref="TryLoad"/> 把壁纸原图**整张**解码 ——
+    /// 8K(7680×4320)一张就是 132MB,而我们拼背板最多只用到虚拟桌面那么大
+    /// (<see cref="ComposeDesktop"/> 的画布就是 vw×vh)。限定解码宽度后同尺寸 8K → 约 8MB。
+    /// 优先用 <see cref="LayoutRect"/>(Win32 物理像素,与壁纸布局同一口径);理论上它不会失败,
+    /// 真拿不到时用 WPF 的虚拟桌面 DIP 宽估算 —— 这里只求"别整张解码"的上限,不做 DPI 换算。
+    /// 返回 0 = 无法得知,调用方保持原始尺寸解码。</summary>
+    static int WallpaperDecodeWidth()
+    {
+        try
+        {
+            var (_, _, vw, _) = LayoutRect;
+            if (vw > 0) return Math.Max(16, vw);
+        }
+        catch { }
+        try { return Math.Max(16, (int)SystemParameters.VirtualScreenWidth); } catch { return 0; }
+    }
+
+    /// <summary>只读文件头拿原图宽度(**不解码像素**),用来判断原图是否真的比虚拟桌面更宽。
+    /// 只有"原图更大"时才设 DecodePixelWidth:对**小图**(比如 1280 宽的图放 4K 屏),WPF 会在
+    /// 解码时把它放大到目标宽,反而多占内存。读头失败返回 false,调用方按原尺寸解码(旧行为)。</summary>
+    static bool TryGetNaturalWidth(byte[] bytes, out int width)
+    {
+        try
+        {
+            using var ms = new MemoryStream(bytes, writable: false);
+            var decoder = BitmapDecoder.Create(ms, BitmapCreateOptions.IgnoreColorProfile, BitmapCacheOption.None);
+            width = decoder.Frames.Count > 0 ? decoder.Frames[0].PixelWidth : 0;
+            return width > 0;
+        }
+        catch { width = 0; return false; }
+    }
+
     /// <summary>读一张图(不铺、不缩放)。失败返回 null。</summary>
     static BitmapSource? TryLoad(string path)
     {
@@ -424,6 +469,11 @@ public static class WallpaperSource
             bi.StreamSource = new MemoryStream(bytes);
             bi.CacheOption = BitmapCacheOption.OnLoad;
             bi.CreateOptions = BitmapCreateOptions.IgnoreColorProfile;   // 与桌面观感一致
+            // ponytail 2026-11-21(Phase 2 第 4 项): 限制解码宽度,避免 8K 壁纸整张解码
+            // (7680×4320×4 ≈ 132MB)。确认原图更宽时才设,否则会放大解码小图。
+            int decodeW = WallpaperDecodeWidth();
+            if (decodeW > 0 && TryGetNaturalWidth(bytes, out int naturalW) && naturalW > decodeW)
+                bi.DecodePixelWidth = decodeW;
             bi.EndInit();
             bi.Freeze();
             if (bi.PixelWidth < 16 || bi.PixelHeight < 16) return null;

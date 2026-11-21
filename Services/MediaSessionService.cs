@@ -467,7 +467,10 @@ public sealed class MediaSessionService
         return null;
     }
 
-    // 跟随指定应用时的封面缓存（同一首歌每秒都会被读到，别重复解码）
+    // 跟随指定应用时的封面缓存（同一首歌每秒都会被读到，别重复解码）。
+    // Phase 2 第 6 项：上限 8 → 4。每张降为 256 宽后约 256KB，4 张 ≈ 1MB（旧 8 张 × 512 ≈ 8MB）。
+    // 超限仍是整块 Clear（保持最简单的现有语义：跟随单个应用时通常只有 1~2 首歌会来回切，
+    // 真到 5 条说明在频繁切歌，清掉重解一次比维护 LRU 更省事）。
     private readonly System.Collections.Generic.Dictionary<string, BitmapSource> _pinnedArt = new();
 
     private async Task<BitmapSource?> GetPinnedArtAsync(
@@ -476,7 +479,8 @@ public sealed class MediaSessionService
     {
         var key = $"{aumid}|{title}|{artist}|{album}";
         if (_pinnedArt.TryGetValue(key, out var cached)) return cached;
-        if (_pinnedArt.Count > 8) _pinnedArt.Clear();
+        // Phase 2 第 6 项：上限从 8 收紧到 4（见字段注释），超限整块清空。
+        if (_pinnedArt.Count > 4) _pinnedArt.Clear();
 
         var (bytes, _) = await ReadArtBytesAsync(props.Thumbnail!);
         if (bytes == null) return null;
@@ -720,7 +724,7 @@ public sealed class MediaSessionService
                     }
                     else
                     {
-                        // ponytail 2026-11-14(性能 P1-3): 512px 同步解码从 UI 线程挪到线程池；
+                        // ponytail 2026-11-14(性能 P1-3): 封面解码从 UI 线程挪到线程池；
                         // DecodeArt 内部已 Freeze()，可以跨线程交回 UI。
                         var art = await Task.Run(() => DecodeArt(bytes));
                         if (art != null)
@@ -1144,7 +1148,13 @@ public sealed class MediaSessionService
         }
     }
 
-    /// <summary>字节 → 冻结的 BitmapSource（可跨线程共享）。</summary>
+    /// <summary>字节 → 冻结的 BitmapSource（可跨线程共享）。
+    ///
+    /// Phase 2 第 6 项：解码宽度 512 → 256。唱片机（MediaPlayerWidget 的 Disc）封面显示
+    /// 最大约 260 DIP：512 宽在 100% DPI 下已是 2 倍冗余；256 在 100~150% DPI 下 1:1 够用，
+    /// 200% DPI 下会被放大一点点（封面是艺术图，观感差异可接受）。
+    /// 内存：512×512×4 ≈ 1MB/张 → 256×256×4 ≈ 256KB/张，配合 _pinnedArt 上限 4 条，
+    /// 常驻从最多约 8MB 降到 1MB 以内。</summary>
     private static BitmapSource? DecodeArt(byte[] bytes)
     {
         try
@@ -1153,7 +1163,7 @@ public sealed class MediaSessionService
             var bmp = new BitmapImage();
             bmp.BeginInit();
             bmp.CacheOption = BitmapCacheOption.OnLoad;
-            bmp.DecodePixelWidth = 512;
+            bmp.DecodePixelWidth = 256;
             bmp.StreamSource = ms;
             bmp.EndInit();
             bmp.Freeze();

@@ -156,14 +156,19 @@ public class SubfolderPreview : ContentControl
         Content = box;
     }
 
+    /// <summary>2×2 缩略图每格只有 9~12 DIP（见 <see cref="ThumbSize"/>），不需要按 256 解码。
+    /// 64 是 <see cref="ShellIconService.SnapDecodeSize"/> 档位里覆盖常见 100%~150% DPI 的一档，
+    /// 再大就是纯白占内存（宿主盒子最大也只有 28 DIP）。</summary>
+    const int DecodeSize = 64;
+
     /// <summary>图标解析与分区/面板的条目图标同一套口径（图片文件优先给内容缩略图）。</summary>
     static ImageSource? ResolveIcon(ZoneItem item)
     {
         var svc = Icons;
         if (svc == null) return null;
         if (ShellIconService.IsImageFile(item.TargetPath) && ShellIconService.ImagePreviewEnabled)
-            return svc.GetImageThumbnail(item.TargetPath)
-                ?? svc.GetIcon(item.TargetPath, item.Type, item.IconPath);
-        return svc.GetIcon(item.TargetPath, item.Type, item.IconPath);
+            return svc.GetImageThumbnail(item.TargetPath, DecodeSize)
+                ?? svc.GetIcon(item.TargetPath, item.Type, item.IconPath, DecodeSize);
+        return svc.GetIcon(item.TargetPath, item.Type, item.IconPath, DecodeSize);
     }
 }

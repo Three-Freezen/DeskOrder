@@ -92,9 +92,15 @@ public partial class PropertyWindow : Window
     {
         InitializeComponent();
         BuildCloseStoryboard();
-        Closed += (_, _) => { _isClosing = false; TabStrip.CancelDrag(); StopDragLoop(); };
-        // ponytail: header X closes the floating window itself (dock-back stays
-        // on the toggle button). Close() runs the standard fade+scale animation.
+        Closed += (_, _) =>
+        {
+            _isClosing = false; TabStrip.CancelDrag(); StopDragLoop();
+            // Phase 2（DPD 泄漏）：关窗时把面板目标清空 —— OnTargetChanged 会退掉整棵
+            // 字段树的 DependencyPropertyDescriptor 订阅并重建空树。浮动属性窗口是每次
+            // 打开 new 一个，不清目标的话 DPD 静态表会把 Body/窗口连同字段树永久 root 住，
+            // 表现为"每开关一次属性窗口内存涨 0.3~2MB 且永不回落"。
+            try { Body.Target = null; } catch { }
+        };
         // ponytail 2026-08-28: 开窗后 1s 内忽略 ✕ — 若窗口压着光标弹出,staged 残留
         // down 会命中 ✕ 并让按钮捕获鼠标,用户随后的任意物理点击(比如再点一次 ⚙)
         // 都会完成该 Click → 窗口开一下就被关掉(实测堆栈:CloseTabBtn_Click ←
@@ -127,7 +133,13 @@ public partial class PropertyWindow : Window
     {
         InitializeComponent();
         BuildCloseStoryboard();
-        Closed += (_, _) => { _isClosing = false; TabStrip.CancelDrag(); StopDragLoop(); };
+        Closed += (_, _) =>
+        {
+            _isClosing = false; TabStrip.CancelDrag(); StopDragLoop();
+            // Phase 2（DPD 泄漏）：同主构造函数 —— 关窗必须把面板目标清空，
+            // 否则字段树的 DP 订阅会把窗口永久 root 住（见上面长注释）。
+            try { Body.Target = null; } catch { }
+        };
         Body.CloseWindowRequested += (_, _) => Close();
     }
 
