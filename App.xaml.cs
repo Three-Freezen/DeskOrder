@@ -184,6 +184,18 @@ public partial class App : System.Windows.Application
 
     private void Application_Startup(object sender, StartupEventArgs e)
     {
+        // ponytail 2026-08-29: 数据落点定位必须先于一切 DataLocator.Root 消费者
+        // (Trace 监听器 / ConfigService / LocalizationService):建根目录 + 便携模式
+        // 首启接管 AppData 既有数据。
+        // 自测台：--data-root=<dir> 把配置/插件/日志全部指向隔离目录，不碰用户数据。
+        // Phase 3：把这段搬到第一条启动打点之前——原先 01/02 两条点在覆盖数据根之前写出，
+        // 落到默认落点，--data-root 的隔离目录里只能从 03 看起（启动耗时统计缺 01 基准）。
+        const string dataRootPrefix = "--data-root=";
+        var dataRootArg = e.Args.FirstOrDefault(a => a.StartsWith(dataRootPrefix, StringComparison.OrdinalIgnoreCase));
+        if (dataRootArg != null && dataRootArg.Length > dataRootPrefix.Length)
+            Services.DataLocator.OverrideRoot = dataRootArg[dataRootPrefix.Length..];
+        Services.DataLocator.Initialize();
+
         StartupTrace($"01 process-start ver={AppVersion.Current} packaged={Services.DataLocator.IsPackaged} portable={Services.DataLocator.IsPortable} os={Environment.OSVersion.Version} cmd={string.Join(' ', e.Args)}");
 
         // ponytail 2026-09-26: 全局未处理异常落盘,必须先于一切可能抛点的初始化。
@@ -194,15 +206,6 @@ public partial class App : System.Windows.Application
         RegisterGlobalCrashLogging();
         StartupTrace("02 crash-logging registered");
 
-        // ponytail 2026-08-29: 数据落点定位必须先于一切 DataLocator.Root 消费者
-        // (Trace 监听器 / ConfigService / LocalizationService):建根目录 + 便携模式
-        // 首启接管 AppData 既有数据。
-        // 自测台：--data-root=<dir> 把配置/插件/日志全部指向隔离目录，不碰用户数据。
-        const string dataRootPrefix = "--data-root=";
-        var dataRootArg = e.Args.FirstOrDefault(a => a.StartsWith(dataRootPrefix, StringComparison.OrdinalIgnoreCase));
-        if (dataRootArg != null && dataRootArg.Length > dataRootPrefix.Length)
-            Services.DataLocator.OverrideRoot = dataRootArg[dataRootPrefix.Length..];
-        Services.DataLocator.Initialize();
         StartupTrace("03 data-locator initialized");
         // ponytail 2026-08-30: 勾选"更新完成后自动删除安装包"时,新版首启在此消费
         // 待清理标记删掉下载文件夹里的安装包(必须先于更新检查,避免旧标记被新周期覆盖)。
@@ -351,11 +354,10 @@ public partial class App : System.Windows.Application
         var srcArg = e.Args.FirstOrDefault(a => a.StartsWith(srcPrefix, StringComparison.OrdinalIgnoreCase));
         if (srcArg != null) UpdateService.SourceOverride = srcArg[srcPrefix.Length..];
         ThemeService.Apply(ParseThemeMode(_configService.Load().ThemeMode));
-        ThemeService.StartListeningToSystem();
-        // 右键菜单调色板:跟随 Windows 系统主题(与应用主题无关,管理界面不受影响)。
-        MenuThemeService.Start();
-        // 全局菜单钩子:托盘菜单等代码创建的 ContextMenu 也套同一套 Win11 外观 + 毛玻璃。
-        AcrylicHelper.EnsureGlobalContextMenuHook();
+        // Phase 3（启动收尾）：系统主题/强调色的实时监听要建一个 WPF 隐藏消息窗口
+        // （EnsureAccentMessageWindow，实测 ~200ms），右键菜单的调色板/全局菜单钩子也
+        // 只在用户打开菜单那一刻才需要。三者都不是首帧必需，挪到 OnDeferredStartupWork
+        // 里启动（排在收尾工作最前面，只比这里晚一个消息泵空闲周期）。
         _zoneManager = new ZoneManager(_configService);
         _notesService = new NotesService(_configService);
         _widgetService = new WidgetService(_configService);
@@ -379,7 +381,16 @@ public partial class App : System.Windows.Application
             DzTrace.Always("[Plugin] --plugin-dev is ignored in release builds");
 #endif
         }
-        Services.PluginService.Instance.Initialize(_configService, pluginsSuppressed);
+        // Phase 3（启动收尾）：代码插件（ALC 创建 / 程序集加载 / 插件 Initialize）不再
+        // 占用启动关键路径，等「10 startup complete」之后由消息泵空闲时加载（见
+        // OnDeferredStartupWork）。Initialize 本身仍同步做目录/记录/禁用名单/声明式包
+        // 这些轻量准备：语言包插件必须在下面按语言偏好应用之前生效，设置页/托盘
+        // 安全模式提示也依赖 Records 立即可读。
+        var pluginInitSw = System.Diagnostics.Stopwatch.StartNew();
+        Services.PluginService.Instance.Initialize(_configService, pluginsSuppressed, deferCodePlugins: true);
+        pluginInitSw.Stop();
+        DzTrace.Always($"[Plugin] Initialize {pluginInitSw.ElapsedMilliseconds} ms (code plugin load deferred)");
+        StartupTrace("06b plugin service prepared");
 
         var appIcon = AppIcon;
 
@@ -424,9 +435,11 @@ public partial class App : System.Windows.Application
         StartupTrace("09 zone manager initialized");
 
         // 分区坞：在分区/插件都就绪后对账建窗；插件未装/未启用时什么都不做。
-        Services.ZoneBayService.Instance.Initialize(
-            Services.PluginService.Instance, _zoneManager, _configService);
-        StartupTrace("09b zone bay initialized");
+        // Phase 3：ZoneBay 桌面坞窗口不是首帧必需，且建坞要按「已加载插件」的 zone-bar
+        // 描述符找类型——插件加载延后后，这里同步建坞会因描述符缺失把已吸附分区放掉
+        // （ZoneBayService.CreateWindow 的 descriptor missing 分支）。所以整体挪到
+        // OnDeferredStartupWork：先加载插件 → 再初始化分区坞。
+        StartupTrace("09b zone bay init deferred");
 
         // 自动整理：注入 ZoneManager + 启动时挂载已启用分区；之后跟随 ZonesChanged
         // 自动同步 watcher 集合（规则/监听路径/启停即时生效，删除分区自动卸载）。
@@ -652,6 +665,12 @@ public partial class App : System.Windows.Application
             _reminderService.Start();
         }
         StartupTrace("10 startup complete");
+
+        // Phase 3（启动收尾）：插件代码加载 / 分区坞建窗 / 插件挂件恢复这些非首帧必需的
+        // 工作，挪到启动完成后由消息泵空闲时执行，缩短 process-start → 10 的耗时。
+        // 放在 --ui-shot 之前调度：两者同为 ApplicationIdle，先入队先执行，保证自测台
+        // 截图时插件已就绪（插件页/插件工具页内容完整）。
+        Dispatcher.BeginInvoke(new Action(OnDeferredStartupWork), DispatcherPriority.ApplicationIdle);
 
         // 自测用：--ui-shot=<目录> 逐个显示非分层窗口（管理窗口/属性窗/弹窗）并截图后退出。
         // --ui-hold=<name> --ui-hold-ms=<ms>：只显示一个窗口并保持，供外部采样内存/CPU。
@@ -1111,6 +1130,23 @@ public partial class App : System.Windows.Application
         return null;
     }
 
+    /// <summary>
+    /// <c>--名字=值</c> 形式的命令行参数取值，没有就返回 null。
+    /// 必须放在 <c>#if DEBUG</c> 之外：<c>--ui-shot</c> / <c>--ui-hold</c> 自测开关
+    /// （App.UiShot.cs）在 Release 构建里也编译，其调用点引用了本方法。之前本方法
+    /// 留在 DEBUG 区内、却被新增的 --ui-shot 调用点引用，导致 Release 构建 CS0103
+    /// （2026-11-21 Phase 3 启动收尾时发现，属既有构建破损）。
+    /// </summary>
+    private static string? ParseArgValue(string[] args, string prefix)
+    {
+        foreach (var a in args)
+        {
+            if (a.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                return a.Substring(prefix.Length);
+        }
+        return null;
+    }
+
 #if DEBUG
     private static string? ParseRenderMediaPreviewArg(string[] args)
         => ParseArgValue(args, "--render-media-preview=");
@@ -1517,17 +1553,6 @@ public partial class App : System.Windows.Application
         }
 
         System.IO.File.WriteAllText(System.IO.Path.Combine(dir, "dock-preview-dims.txt"), log.ToString());
-    }
-
-    /// <summary><c>--名字=值</c> 形式的命令行参数取值，没有就返回 null。</summary>
-    private static string? ParseArgValue(string[] args, string prefix)
-    {
-        foreach (var a in args)
-        {
-            if (a.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                return a.Substring(prefix.Length);
-        }
-        return null;
     }
 
     /// <summary>自测：把播放器两种形态各渲染成 PNG（离屏窗口 + RenderTargetBitmap），
@@ -2041,6 +2066,74 @@ public partial class App : System.Windows.Application
         _managementWindow = new ManagementWindow(_zoneManager!, _configService!, _notesService, _widgetService, _panelService);
         _managementWindow.Closed += (_, _) => _managementWindow = null;
         _managementWindow.Icon = AppIcon;
+    }
+
+    /// <summary>
+    /// Phase 3（启动收尾）：把插件代码加载、分区坞建窗、插件挂件恢复挪到「10 startup complete」
+    /// 之后执行（ApplicationIdle）。顺序有依赖：先加载插件（ZoneBay 建坞要按插件注册的
+    /// zone-bar 描述符找类型、插件挂件窗口要按插件注册的组件类型建窗）→ 再初始化分区坞 →
+    /// 最后恢复插件挂件窗口。每一步单独 try/catch：收尾失败只记日志，不影响已启动完成的主程序。
+    /// </summary>
+    void OnDeferredStartupWork()
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        // 1) 系统主题/强调色实时监听 + 右键菜单调色板/全局菜单钩子。
+        //    三者都不参与首帧渲染（Apply 已把当前主题落地），但监听要建隐藏消息窗口，
+        //    实测占启动关键路径 ~200ms，所以排到这里；排在收尾最前面，托盘/右键菜单
+        //    真正被用户打开时一定已就绪。
+        try
+        {
+            ThemeService.StartListeningToSystem();
+            // 右键菜单调色板:跟随 Windows 系统主题(与应用主题无关,管理界面不受影响)。
+            MenuThemeService.Start();
+            // 全局菜单钩子:托盘菜单等代码创建的 ContextMenu 也套同一套 Win11 外观 + 毛玻璃。
+            AcrylicHelper.EnsureGlobalContextMenuHook();
+        }
+        catch (Exception ex)
+        {
+            WriteCrashLog("DeferredThemeHooks", ex);
+            DzTrace.Always("[Theme] deferred theme/menu hooks failed: " + ex.Message);
+        }
+
+        // 2) 插件代码加载
+        bool codePluginsLoaded = false;
+        try
+        {
+            codePluginsLoaded = Services.PluginService.Instance.LoadCodePluginsDeferred();
+        }
+        catch (Exception ex)
+        {
+            WriteCrashLog("DeferredPluginLoad", ex);
+            DzTrace.Always("[Plugin] deferred load failed: " + ex.Message);
+        }
+        // 3) 分区坞建窗（要按已加载插件的 zone-bar 描述符找类型）
+        try
+        {
+            if (_zoneManager != null && _configService != null)
+                Services.ZoneBayService.Instance.Initialize(
+                    Services.PluginService.Instance, _zoneManager, _configService);
+        }
+        catch (Exception ex)
+        {
+            WriteCrashLog("DeferredZoneBayInit", ex);
+            DzTrace.Always("[ZoneBay] deferred init failed: " + ex.Message);
+        }
+        try
+        {
+            // 启动恢复挂件时插件还没加载，RestoreWidgets 会被跳过（避免开出不可用占位窗）；
+            // 代码插件加载完成后在这里补一次。安全模式/插件关闭时上面没跑加载，
+            // 启动路径已按原行为恢复过（占位窗），不重复。
+            if (codePluginsLoaded)
+                Services.PluginService.Instance.RestoreWidgets();
+        }
+        catch (Exception ex)
+        {
+            DzTrace.Always("[Plugin] deferred widget restore failed: " + ex.Message);
+        }
+        sw.Stop();
+        DzTrace.Always($"[Startup] deferred work done in {sw.ElapsedMilliseconds} ms (plugins/zonebay/widgets)");
+        StartupTrace("11 deferred startup work done");
     }
 
     /// <summary>Phase 2：启动恢复可见挂件 —— 不依赖 ManagementWindow。

@@ -52,6 +52,12 @@ public sealed class PluginService
     readonly DispatcherTimer _saveDebounce = new() { Interval = TimeSpan.FromMilliseconds(300) };
     bool _savePending;
 
+    // ── Phase 3（启动收尾）：代码插件加载延后到「10 startup complete」之后 ──
+    /// <summary>本次 Initialize 把代码插件加载排到了启动收尾（见 <see cref="LoadCodePluginsDeferred"/>）。</summary>
+    bool _codePluginsDeferred;
+    /// <summary>代码插件的加载循环是否已经跑过（含同步与延后两条路径，防重复加载）。</summary>
+    bool _codePluginsLoaded;
+
     public ObservableCollection<PluginRecord> Records { get; } = new();
     public ObservableCollection<PluginWidget> Widgets { get; } = new();
 
@@ -92,12 +98,19 @@ public sealed class PluginService
     public event Action? PluginsChanged;
     public event Action<PluginWidget>? WidgetsChanged;
 
-    public void Initialize(ConfigService configService, bool suppressLoading)
+    /// <summary>
+    /// 初始化插件系统。启动路径传 <paramref name="deferCodePlugins"/>=true：只做目录/记录/
+    /// 禁用名单/声明式包这些轻量准备，代码插件的加载留到「10 startup complete」之后
+    /// （见 <see cref="LoadCodePluginsDeferred"/>）。自测台 / 重载路径传 false，保持同步加载。
+    /// </summary>
+    public void Initialize(ConfigService configService, bool suppressLoading, bool deferCodePlugins = false)
     {
         if (_initialized) return;
         _initialized = true;
         _configService = configService;
         _suppressLoading = suppressLoading;
+        _codePluginsDeferred = deferCodePlugins;
+        _codePluginsLoaded = false;
         Installer = new PluginInstaller(configService);
         if (!_themeHooked)
         {
@@ -155,6 +168,35 @@ public sealed class PluginService
             DzTrace.Always("[Plugin] safe mode; skipping load");
             return;
         }
+
+        // Phase 3（启动收尾）：启动路径把代码插件加载排到「10 startup complete」之后，
+        // 见 App.OnDeferredStartupWork → LoadCodePluginsDeferred。
+        if (deferCodePlugins)
+        {
+            DzTrace.Always("[Plugin] code plugin loading deferred to idle");
+            return;
+        }
+        LoadCodePlugins();
+    }
+
+    /// <summary>
+    /// Phase 3（启动收尾）：在「10 startup complete」之后由 App 在 ApplicationIdle 调用，
+    /// 加载启动期被延后的代码插件。幂等；安全模式/总开关关闭/未初始化时是空操作。
+    /// </summary>
+    /// <returns>本次是否真的执行了加载循环（调用方据此决定要不要补恢复插件挂件窗口）。</returns>
+    public bool LoadCodePluginsDeferred()
+    {
+        if (!_initialized || !_codePluginsDeferred || _codePluginsLoaded) return false;
+        if (_suppressLoading || !PluginsEnabled) return false;
+        LoadCodePlugins();
+        return true;
+    }
+
+    /// <summary>代码插件加载循环（同步启动路径 / 延后启动收尾共用；异常处理与原启动期一致）。</summary>
+    void LoadCodePlugins()
+    {
+        if (_codePluginsLoaded) return;
+        _codePluginsLoaded = true;
 
         foreach (var record in Records.Where(r => r.KindValue.IsCode() && r.Enabled).ToList())
         {
@@ -615,7 +657,14 @@ public sealed class PluginService
         error = null;
         var record = GetRecord(pluginId);
         var loaded = GetLoaded(pluginId);
-        if (loaded != null) UnloadOne(loaded);
+        if (loaded != null)
+        {
+            UnloadOne(loaded);
+            // Phase 3：卸载/升级要立刻删插件目录，先等后台 ALC 回收把 DLL 句柄放掉
+            // （最多 ~2s；无插件加载/无后台回收时立即返回）。等不到就退化成
+            // PluginInstaller 的 pending-delete，下次启动再删。
+            WaitForBackgroundAlcCleanup(2000);
+        }
         foreach (var widget in Widgets.Where(w => w.PluginId == pluginId).ToList())
             CloseWindow(widget.Id);
 
@@ -667,11 +716,53 @@ public sealed class PluginService
         PluginIntegrationService.Instance.RemovePlugin(loaded.Record.Id);
         Loaded.Remove(loaded);
         try { loaded.Context.Unload(); } catch { }
-        // collectible ALC 的卸载是异步的；不强制回收时文件句柄仍在，
-        // 紧接着的「卸载插件」会因 DLL 被占用而删不掉目录。
-        GC.Collect();
-        GC.WaitForPendingFinalizers();
-        GC.Collect();
+        // Phase 3（启动收尾）：collectible ALC 的卸载是异步的。这里原先在 UI 线程上同步跑
+        // GC.Collect + WaitForPendingFinalizers + Collect（卸载/禁用/退出插件时界面要停一下，
+        // 停顿随托管堆大小增长）。现在只把回收排到线程池后台执行：UI 线程立即返回。
+        // 需要立刻删插件目录的路径（卸载/升级）会先等后台回收把 DLL 句柄放掉
+        // （见 WaitForBackgroundAlcCleanup）；极端情况下退化成 pending-delete 下次启动再删，
+        // PluginInstaller 本来就有这套机制。
+        ScheduleBackgroundAlcCleanup();
+    }
+
+    // ── Phase 3：后台 ALC 回收 ──
+    static readonly object _alcCleanupGate = new();
+    static Task _alcCleanupChain = Task.CompletedTask;
+
+    /// <summary>
+    /// 排队一次后台 full GC（链式：每次 Unload 之后都保证有一次回收 —— collectible ALC
+    /// 的卸载是异步的，早于本次 Unload 的 GC 覆盖不到它）。合并策略上，连续卸载多个插件
+    /// 会排几次回收，但全部在后台线程，不占用 UI。
+    /// </summary>
+    static void ScheduleBackgroundAlcCleanup()
+    {
+        // 退出路径上回收没有意义：进程马上结束，别让后台 GC 拖慢退出。
+        if (Helpers.AppLifetime.IsShuttingDown) return;
+        lock (_alcCleanupGate)
+        {
+            _alcCleanupChain = _alcCleanupChain.ContinueWith(
+                _ =>
+                {
+                    try
+                    {
+                        GC.Collect();
+                        GC.WaitForPendingFinalizers();
+                        GC.Collect();
+                    }
+                    catch { }
+                },
+                System.Threading.CancellationToken.None,
+                TaskContinuationOptions.None,
+                TaskScheduler.Default);
+        }
+    }
+
+    /// <summary>等待已排队的后台 ALC 回收完成（最多 <paramref name="timeoutMs"/> 毫秒）。</summary>
+    static void WaitForBackgroundAlcCleanup(int timeoutMs)
+    {
+        Task pending;
+        lock (_alcCleanupGate) pending = _alcCleanupChain;
+        try { pending.Wait(timeoutMs); } catch { }
     }
 
     public void ShutdownAll()
@@ -769,6 +860,10 @@ public sealed class PluginService
         // 插件系统被关掉时旧实例只是数据：恢复它们会开出「插件不可用」占位窗，
         // 用户看到一桌面残留却没处关。直接跳过，等用户重新打开插件再恢复。
         if (!PluginsEnabled) return;
+        // Phase 3（启动收尾）：启动恢复挂件时代码插件还没加载（延后到 10 之后），
+        // 此时建窗会开出「插件不可用」占位窗。跳过，等 OnDeferredStartupWork 里
+        // 插件加载完成后补一次 RestoreWidgets。
+        if (_codePluginsDeferred && !_codePluginsLoaded && !_suppressLoading) return;
         foreach (var widget in Widgets.Where(w => w.IsVisible).ToList())
         {
             try { ShowWidget(widget); }
