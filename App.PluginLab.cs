@@ -1773,6 +1773,170 @@ public partial class App
                     "the media player is removed after the check");
                 item.Check(integrations.MediaSources.Count == 0,
                     "clearing the integration service leaves no media source");
+
+                // ── 端到端：安装真实的 integration-demo 示例包，两个媒体源必须来自插件 DLL ──
+                // 包由 plugin-community\tools\build-labs.ps1 生成到 dist\，自测台启动时由 runner 复制进来。
+                const string integrationDemoId = "three-freezen.integration-demo";
+                const string integrationDemoKey = integrationDemoId + "/demo";
+                // demo 源每 10 秒切一首：断言只要求「渲染的是三首演示曲之一」，
+                // 否则「读到快照」和「播放器心跳」恰好跨过 10 秒边界时会偶发失败。
+                static bool IsDemoTrackTitle(string title)
+                    => title is "Neon Skyline" or "Paper Planes" or "Sunrise Loop";
+                var integrationPackage = Path.Combine(dir, "integration-demo-1.0.0.dopkg");
+                item.Check(File.Exists(integrationPackage),
+                    "the integration-demo package is present in the lab dir");
+                if (!File.Exists(integrationPackage))
+                {
+                    item.Check(false, "the integration-demo package is missing; run plugin-community\\tools\\build-labs.ps1");
+                    break;
+                }
+                var integrationInstall = await service.Installer!.InstallFromFileAsync(integrationPackage);
+                item.Check(integrationInstall.Success,
+                    "installing the integration-demo package succeeds"
+                    + (integrationInstall.Error == null ? "" : " (" + integrationInstall.Error + ")"));
+                if (!integrationInstall.Success)
+                {
+                    item.Check(false, "integration-demo install error: " + integrationInstall.Error);
+                    break;
+                }
+                service.RefreshRecords();
+                item.Check(service.GetRecord(integrationDemoId)?.KindValue == PluginKind.Integration,
+                    "the installed data source plugin is listed as an integration plugin");
+                item.Check(service.SetEnabled(integrationDemoId, true),
+                    "enabling the data source plugin succeeds");
+                service.ReloadForLab();
+                item.Check(service.GetLoaded(integrationDemoId) != null,
+                    "the data source plugin is loaded after reload");
+                item.Check(integrations.MediaSources.Count == 2,
+                    "the real plugin DLL registers exactly two media sources");
+
+                var demoEntry = integrations.Find(integrationDemoKey);
+                var staticEntry = integrations.Find(integrationDemoId + "/static");
+                item.Check(demoEntry != null && staticEntry != null,
+                    "the demo and the static media sources are found by their keys");
+                item.Check(demoEntry?.Source.DisplayName == "演示播放器",
+                    "the demo source carries its display name");
+                item.Check(staticEntry?.Source.DisplayName == "固定示例",
+                    "the static source carries its display name");
+
+                // demo 源：标题 / 来源 / 在播 / 时长都是真实 DLL 里算的，封面是可解码的 PNG。
+                var demoReading = demoEntry == null ? null : await integrations.ReadAsync(demoEntry);
+                var demoArtwork = demoReading?.Artwork;
+                var demoTrackTitle = demoReading?.Now.Title ?? "";
+                // 宿主的 Now 模型只带标题/歌手/专辑/来源/状态（播放器不渲染进度条），
+                // 所以时长/位置/封面原始尺寸直接读真实 DLL 的 Poll 快照来断言。
+                var demoRaw = demoEntry?.Source.Poll();
+                item.Check(demoReading != null, "reading the demo media source returns a snapshot");
+                item.Check(demoTrackTitle.Length > 0, "the demo snapshot has a non-empty title");
+                item.Check(demoReading?.Now.IsPlaying == true, "the demo snapshot reports playing");
+                item.Check(demoReading?.Now.SourceApp == "DeskOrder Demo",
+                    "the demo snapshot carries the source app");
+                item.Check(IsDemoTrackTitle(demoTrackTitle),
+                    "the demo snapshot title is one of the three built-in demo tracks");
+                item.Check(demoArtwork != null && demoArtwork.PixelWidth > 0,
+                    "the demo snapshot decodes to cover art");
+                // 宿主解码封面时按 DecodePixelWidth=512 统一尺寸（96px 源会被放大到 512），
+                // 所以「插件真的产出了 96×96 PNG」要按 PNG 头（IHDR 宽高）来验。
+                var demoPng = demoRaw?.Artwork;
+                bool demoIsPng = demoPng is { Length: > 24 }
+                                 && demoPng[0] == 0x89 && demoPng[1] == 0x50
+                                 && demoPng[2] == 0x4E && demoPng[3] == 0x47;
+                int demoPngWidth = demoIsPng
+                    ? (demoPng![16] << 24) | (demoPng[17] << 16) | (demoPng[18] << 8) | demoPng[19] : 0;
+                int demoPngHeight = demoIsPng
+                    ? (demoPng![20] << 24) | (demoPng[21] << 16) | (demoPng[22] << 8) | demoPng[23] : 0;
+                item.Check(demoIsPng && demoPngWidth == 96 && demoPngHeight == 96,
+                    "the demo source generates a 96x96 PNG cover");
+                item.Check(demoRaw != null && demoRaw.Duration > TimeSpan.Zero,
+                    "the demo poll returns a positive duration");
+                item.Check(demoRaw != null && demoRaw.Position >= TimeSpan.Zero
+                           && demoRaw.Position < demoRaw.Duration,
+                    "the demo poll keeps the position inside the track");
+
+                // static 源：固定一帧暂停画面，没有封面。
+                var staticReading = staticEntry == null ? null : await integrations.ReadAsync(staticEntry);
+                item.Check(staticReading?.Now.Title == "Demo Track",
+                    "the static snapshot keeps its fixed title");
+                item.Check(staticReading?.Now.IsPlaying == false,
+                    "the static snapshot reports paused");
+                item.Check(staticReading?.Artwork == null, "the static snapshot has no cover");
+
+                // 播放器：选中真实 demo 源 → 组件渲染该源 → 属性面板下拉 ≥ 3 项并截图。
+                var realPlayer = _widgetService!.CreateMediaPlayer(MediaDisplayMode.Bars);
+                MediaPlayerWidget? realPlayerWindow = null;
+                try
+                {
+                    realPlayer.DataSourceKey = integrationDemoKey;
+                    _widgetService.UpdateMediaPlayer(realPlayer);
+                    EnsureManagementWindow();
+                    ManagementWindow!.OpenMediaPlayerWindow(realPlayer);
+                    await Task.Delay(400);
+                    realPlayerWindow = _widgetService.GetMediaPlayerWindow(realPlayer.Id);
+                    item.Check(realPlayerWindow != null,
+                        "the media player window is created for the real plugin source");
+                    realPlayerWindow!.RefreshDataSource();
+                    await Task.Delay(1500);   // 等一次心跳读到插件源
+                    item.Check(realPlayerWindow.DebugCurrentNow().IsPlaying,
+                        "the player renders the playing state from the real plugin source");
+                    item.Check(IsDemoTrackTitle(realPlayerWindow.DebugCurrentNow().Title),
+                        "the player renders a demo track title from the real plugin source");
+
+                    DesktopZones.Helpers.PropertyWindowService.OpenOrFocus(realPlayer);
+                    await Task.Delay(900);
+                    var realFloating = DesktopZones.Views.Components.PropertyWindowManager.Instance
+                        .GetFloating(realPlayer);
+                    item.Check(realFloating != null,
+                        "the media player property panel opens for the real data source");
+                    if (realFloating != null)
+                    {
+                        item.Check(realFloating.Body.DebugHasMediaDataSourceRow(),
+                            "the property panel has a data source row for the real plugin");
+                        item.Check(realFloating.Body.DebugMediaDataSourceItemCount() >= 3,
+                            "the data source dropdown lists the system session and the two real plugin sources");
+                        item.Check(realFloating.Body.DebugMediaDataSourceSelectedKey() == integrationDemoKey,
+                            "the data source dropdown selects the real demo source");
+                        // 面板默认停在顶部，数据源行在「播放与显示」里 —— 先滚进可视区再截图。
+                        realFloating.Body.DebugBringDataSourceRowIntoView();
+                        await Task.Delay(500);
+                        SaveScreenshot(realFloating, Path.Combine(dir, "shot-media-data-source-real.png"));
+                        item.Check(File.Exists(Path.Combine(dir, "shot-media-data-source-real.png")),
+                            "real data source screenshot written");
+                        DesktopZones.Views.Components.PropertyWindowManager.Instance
+                            .CloseWindow(realPlayer);
+                    }
+
+                    // 禁用 → 插件卸载 → 源消失，播放器回退系统会话，不能卡在上一首。
+                    item.Check(service.SetEnabled(integrationDemoId, false),
+                        "disabling the real data source plugin succeeds");
+                    service.ReloadForLab();
+                    item.Check(service.GetLoaded(integrationDemoId) == null,
+                        "disabling the real data source plugin unloads it");
+                    item.Check(integrations.MediaSources.Count == 0,
+                        "disabling the real data source plugin removes both media sources");
+                    item.Check(integrations.Find(integrationDemoKey) == null,
+                        "the removed plugin's media source key no longer resolves");
+                    await Task.Delay(1400);
+                    item.Check(!IsDemoTrackTitle(realPlayerWindow.DebugCurrentNow().Title),
+                        "the player falls back once the real plugin data source disappears");
+                }
+                finally
+                {
+                    integrations.Clear();
+                    if (realPlayerWindow != null)
+                    {
+                        try { realPlayerWindow.Close(); } catch { }
+                    }
+                    _widgetService.DeleteMediaPlayer(realPlayer.Id);
+                }
+                await Task.Delay(300);
+                item.Check(_widgetService.GetMediaPlayerWindow(realPlayer.Id) == null,
+                    "the real data source player is removed after the check");
+
+                // 清理安装记录，别把示例插件留在隔离数据目录里。
+                service.Uninstall(integrationDemoId, deleteData: true, out _);
+                service.RefreshRecords();
+                item.Check(service.GetRecord(integrationDemoId) == null,
+                    "the integration-demo plugin is uninstalled again");
                 break;
             }
             default:
