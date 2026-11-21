@@ -230,6 +230,7 @@ public partial class ManagementWindow : Window
                 else if (page is ClockPage clkp) clkp.ApplyLoc();
                 else if (page is StickyNotePage snp) snp.ApplyLoc();
                 else if (page is PluginWidgetsPage pwp) pwp.ApplyLoc();
+                else if (page is PluginToolsPage ptp) ptp.RefreshList();
                 else if (page is SettingsPage sp) sp.ApplyLoc();
                 else if (page is AboutPage ap) ap.ApplyLoc();
             }
@@ -345,7 +346,7 @@ public partial class ManagementWindow : Window
         {
             "zones" or "merged" or "panel" or "docks" or "zonebays" => loc["Breadcrumb.GroupZones"],
             "calendar" or "clock" or "sticky" or "pluginwidgets" => loc["Breadcrumb.GroupWidgets"],
-            "plugins" => loc["Breadcrumb.GroupPlugins"],
+            "plugins" or "plugintools" => loc["Breadcrumb.GroupPlugins"],
             _ => "DeskOrder",
         };
     }
@@ -365,6 +366,7 @@ public partial class ManagementWindow : Window
             "sticky"   => loc["Breadcrumb.Sticky"],
             "pluginwidgets" => loc["PluginWidget.Nav"],
             "plugins"  => loc["Breadcrumb.Plugins"],
+            "plugintools" => loc["PluginTool.Nav"],
             "settings" => loc["Breadcrumb.Settings"],
             "about"    => loc["Breadcrumb.About"],
             _          => "",
@@ -2213,6 +2215,7 @@ public partial class ManagementWindow : Window
             "media"    => new MediaPlayerPage(this, _viewModel, _widgetService),
             "sticky"   => new StickyNotePage(this, _viewModel, _notesService),
             "pluginwidgets" => new PluginWidgetsPage(this),
+            "plugintools" => new PluginToolsPage(this, _configService),
             "plugins"  => new PluginsPage(),
             "about"    => new AboutPage(),
             "settings" => BuildSettingsPage(),
@@ -2285,6 +2288,7 @@ public partial class ManagementWindow : Window
             "sticky"   => _loc.Get("Manage.Sidebar.Notes", notes),
             "pluginwidgets" => _loc.Get("PluginWidget.Count", PluginService.Instance.Widgets.Count),
             "plugins"  => _loc.Get("Manage.Sidebar.Plugins", PluginService.Instance.Records.Count),
+            "plugintools" => _loc.Get("PluginTool.Count", PluginToolService.Instance.Commands.Count),
             "about"    => _loc["Manage.Sidebar.About"],
             "settings" => _loc["Manage.Sidebar.Settings"],
             _          => ""

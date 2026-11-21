@@ -1062,5 +1062,20 @@
   "Plugin.NotAvailable": "后续版本",
   "Plugin.UninstallDeleteDataPrompt": "同时删除这个插件的数据（设置、缓存）？选「否」会保留。",
   "PluginTool.Menu": "插件工具",
-  "PluginTool.RunFailed": "「{0}」执行失败"
+  "PluginTool.RunFailed": "「{0}」执行失败",
+  "PluginTool.Nav": "插件工具",
+  "PluginTool.PageTitle": "插件工具",
+  "PluginTool.Count": "{0} 项",
+  "PluginTool.Empty": "还没有插件工具",
+  "PluginTool.EmptyHint": "工具插件注册的命令会出现在这里",
+  "PluginTool.RestartHint": "工具插件装好或启用后需要重启 DeskOrder",
+  "PluginTool.Hotkey.Set": "设置热键",
+  "PluginTool.Hotkey.Recording": "按下组合键…",
+  "PluginTool.Hotkey.None": "未设置",
+  "PluginTool.Hotkey.Clear": "清除",
+  "PluginTool.Surface.Tray": "托盘",
+  "PluginTool.Surface.Panel": "面板",
+  "PluginTool.Surface.Zone": "分区",
+  "PluginTool.Surface.HotkeyOnly": "仅热键",
+  "PluginTool.Hotkey.Hint": "录制时按 Esc 取消"
 }

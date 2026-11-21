@@ -1,0 +1,53 @@
+<UserControl x:Class="DesktopZones.Views.Pages.PluginToolsPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="clr-namespace:DesktopZones.Helpers">
+    <!-- 「插件工具」页：列出工具插件注册的全部命令（= PluginToolService.Commands），
+         给任意一条命令分配/清除全局热键。行是自绘的：右侧热键按钮的文字随「已分配 /
+         录制中」实时变化，EditableListRow 里没有这种按钮位置。 -->
+    <DockPanel>
+        <Border DockPanel.Dock="Top" Padding="20,16,20,8">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Orientation="Horizontal">
+                    <TextBlock Text="{loc:Loc Key=PluginTool.PageTitle}" FontSize="16" FontWeight="SemiBold"
+                               Foreground="{DynamicResource Brush.Text.Primary}" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="CountLabel" Margin="8,0,0,0" FontSize="11"
+                               FontFamily="Cascadia Code, Consolas, monospace"
+                               Foreground="{DynamicResource Brush.Text.Tertiary}" VerticalAlignment="Center"/>
+                </StackPanel>
+                <!-- 录音提示常驻页头：Esc 取消是录制期唯一能退出的键，不能只靠用户猜。 -->
+                <TextBlock Grid.Column="2" Text="{loc:Loc Key=PluginTool.Hotkey.Hint}" FontSize="11"
+                           Margin="12,0,0,0" VerticalAlignment="Center"
+                           Foreground="{DynamicResource Brush.Text.Tertiary}"/>
+            </Grid>
+        </Border>
+
+        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                      Padding="8,0,8,0">
+            <Grid Margin="12,12,12,12">
+                <StackPanel x:Name="ListHost"/>
+                <StackPanel x:Name="EmptyHint" Visibility="Collapsed"
+                            HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,80,0,0">
+                    <TextBlock Text="{loc:Loc Key=PluginTool.Empty}" FontSize="14" FontWeight="SemiBold"
+                               Foreground="{DynamicResource Brush.Text.Secondary}"
+                               HorizontalAlignment="Center"/>
+                    <TextBlock Text="{loc:Loc Key=PluginTool.EmptyHint}" FontSize="11" Margin="0,8,0,0"
+                               TextWrapping="Wrap" TextAlignment="Center" MaxWidth="420"
+                               Foreground="{DynamicResource Brush.Text.Tertiary}"
+                               HorizontalAlignment="Center"/>
+                    <!-- 「装了/启用了 tool 插件但命令没注册」= 还没重启（或加载失败），
+                         不提示的话空态会让人以为插件没有工具命令。 -->
+                    <TextBlock x:Name="RestartHint" Text="{loc:Loc Key=PluginTool.RestartHint}"
+                               FontSize="11" Margin="0,12,0,0"
+                               Foreground="{DynamicResource Brush.Text.Tertiary}"
+                               HorizontalAlignment="Center" Visibility="Collapsed"/>
+                </StackPanel>
+            </Grid>
+        </ScrollViewer>
+    </DockPanel>
+</UserControl>

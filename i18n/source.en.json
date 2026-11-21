@@ -1062,5 +1062,20 @@
   "Plugin.NotAvailable": "Coming later",
   "Plugin.UninstallDeleteDataPrompt": "Also delete this plugin's data (settings and cache)? Choose No to keep it.",
   "PluginTool.Menu": "Plugin tools",
-  "PluginTool.RunFailed": "“{0}” failed to run"
+  "PluginTool.RunFailed": "“{0}” failed to run",
+  "PluginTool.Nav": "Plugin tools",
+  "PluginTool.PageTitle": "Plugin tools",
+  "PluginTool.Count": "{0} command(s)",
+  "PluginTool.Empty": "No plugin tools yet",
+  "PluginTool.EmptyHint": "Commands registered by tool plugins show up here",
+  "PluginTool.RestartHint": "Restart DeskOrder after installing or enabling a tool plugin",
+  "PluginTool.Hotkey.Set": "Set hotkey",
+  "PluginTool.Hotkey.Recording": "Press a combination…",
+  "PluginTool.Hotkey.None": "Not set",
+  "PluginTool.Hotkey.Clear": "Clear",
+  "PluginTool.Surface.Tray": "Tray",
+  "PluginTool.Surface.Panel": "Panel",
+  "PluginTool.Surface.Zone": "Zone",
+  "PluginTool.Surface.HotkeyOnly": "Hotkey only",
+  "PluginTool.Hotkey.Hint": "Press Esc to cancel"
 }

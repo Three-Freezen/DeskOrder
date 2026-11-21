@@ -63,7 +63,7 @@ public partial class App
         // 用例自己构造缓存与禁用名单；禁掉启动后台拉取，避免线上 registry 在用例跑到一半时覆盖它们。
         PluginService.SuppressBackgroundRefreshForLab = true;
         var cases = caseName == "all"
-            ? new[] { "install", "load", "restart", "disable", "enable", "hide", "uninstall", "offline", "bad", "crash", "cache", "signature", "signature-policy", "lang-install", "lang-switch", "lang-bad", "lang-override", "lang-uninstall", "appearance-install", "appearance-toggle", "appearance-render", "appearance-bad", "appearance-uninstall", "update", "blocked", "dialog", "ui", "dev", "widget-panel", "widgets-page", "security", "tool" }
+            ? new[] { "install", "load", "restart", "disable", "enable", "hide", "uninstall", "offline", "bad", "crash", "cache", "signature", "signature-policy", "lang-install", "lang-switch", "lang-bad", "lang-override", "lang-uninstall", "appearance-install", "appearance-toggle", "appearance-render", "appearance-bad", "appearance-uninstall", "update", "blocked", "dialog", "ui", "dev", "widget-panel", "widgets-page", "security", "tool", "tool-ui" }
             : new[] { caseName };
         var results = new List<LabCase>();
         foreach (var name in cases)
@@ -1299,6 +1299,156 @@ public partial class App
                 config.PluginToolHotkeys = hotkeyBackup;
                 _configService.Save(config);
                 RefreshPluginToolHotkeys();
+                break;
+            }
+            case "tool-ui":
+            {
+                // 「插件工具」页（UI 批次）：两条合成命令 → 侧栏入口进页 / 列表两行 / 截图 →
+                // 直接写配置分配热键（录制走 WH_KEYBOARD_LL，自测台里没法可靠模拟按键）→
+                // 清理配置与命令后空态必须出现。配置与合成命令无论断言成败都要还原。
+                var tools = PluginToolService.Instance;
+                tools.Clear();
+
+                var record = new PluginRecord
+                {
+                    Id = "lab.toolui",
+                    Version = "1.0.0",
+                    Kind = "tool",
+                    Enabled = true,
+                    Source = "lab",
+                    Signature = "unsigned"
+                };
+                var manifest = new PluginManifest
+                {
+                    SchemaVersion = 1,
+                    Id = "lab.toolui",
+                    Name = new LocalizedText { Zh = "自测工具界面", En = "Lab tool UI" },
+                    Summary = new LocalizedText { Zh = "自测工具界面", En = "lab tool ui" },
+                    Version = "1.0.0",
+                    Author = new PluginAuthor { Name = "Three-Freezen", Github = "Three-Freezen" },
+                    Repo = "Three-Freezen/DeskOrder-Plugin-Lab",
+                    License = "Apache-2.0",
+                    Kind = "tool",
+                    ApiVersion = 3,
+                    MinAppVersion = "1.0.0",
+                    Entry = new PluginEntry { Assembly = "lib/Lab.ToolUi.dll", Type = "Lab.ToolUi.Plugin" },
+                    Icon = "icon.png"
+                };
+                int commandRuns = 0;
+                PluginToolCommand MakeCommand(string id, string display) => new()
+                {
+                    Id = id,
+                    DisplayName = display,
+                    // 三条菜单入口全开：副标题要能拼出「托盘 / 面板 / 分区」。
+                    Menus = PluginToolSurface.Tray | PluginToolSurface.Panel | PluginToolSurface.Zone,
+                    Execute = _ => { commandRuns++; return Task.CompletedTask; }
+                };
+                tools.Publish(record, manifest, new[]
+                {
+                    MakeCommand("one", "Lab command one"),
+                    MakeCommand("two", "Lab command two")
+                });
+                item.Check(tools.Commands.Count == 2, "two synthetic tool commands are published");
+                item.Check(commandRuns == 0, "publishing a tool command does not run it");
+
+                var hotkeyBackup = _configService!.Load().PluginToolHotkeys;
+                PluginToolsPage? page = null;
+                ManagementWindow? window = null;
+                try
+                {
+                    EnsureManagementWindow();
+                    window = ManagementWindow;
+                    item.Check(window != null, "management window exists");
+                    if (window != null)
+                    {
+                        window.Show();
+                        window.ShowSection("plugintools");
+                        await Task.Delay(900);
+                        item.Check(window.MainContent.Content is PluginToolsPage,
+                            "the plugin tools page is shown");
+                        page = window.MainContent.Content as PluginToolsPage;
+                    }
+                    if (page != null)
+                    {
+                        item.Check(page.RowCount == 2, "the page lists both synthetic commands");
+                        SaveScreenshot(window!, Path.Combine(dir, "shot-plugin-tools.png"));
+                        item.Check(File.Exists(Path.Combine(dir, "shot-plugin-tools.png")),
+                            "plugin tools screenshot written");
+
+                        // Ctrl+Alt+Shift+F10（MOD_ALT|MOD_CONTROL|MOD_SHIFT = 0x0007，VK_F10 = 0x79），
+                        // 与 tool 用例的 F9 错开：两条用例可能会被连着跑。
+                        var config = _configService.Load();
+                        config.PluginToolHotkeys = new List<PluginToolHotkey>
+                        {
+                            new() { PluginId = "lab.toolui", CommandId = "one", Modifiers = 0x0007, Key = 0x79, Enabled = true }
+                        };
+                        _configService.Save(config);
+                        RefreshPluginToolHotkeys();
+                        page.RefreshList();
+                        item.Check(PluginToolHotkeyMapForLab.Count >= 1,
+                            "the assigned plugin tool hotkey is registered");
+                        SaveScreenshot(window!, Path.Combine(dir, "shot-plugin-tools-hotkey.png"));
+                        item.Check(File.Exists(Path.Combine(dir, "shot-plugin-tools-hotkey.png")),
+                            "assigned hotkey screenshot written");
+                    }
+                    else
+                    {
+                        item.Check(false, "the plugin tools page is available for the list checks");
+                    }
+                }
+                finally
+                {
+                    // 清理：还原配置 → 重新注册 → 撤销合成命令。断言失败/提前抛出也要走到这里，
+                    // 隔离 data-root 里同样不能留下自测热键。
+                    var config = _configService.Load();
+                    config.PluginToolHotkeys = hotkeyBackup;
+                    _configService.Save(config);
+                    RefreshPluginToolHotkeys();
+                    tools.RemovePlugin("lab.toolui");
+                }
+
+                if (page != null && window != null)
+                {
+                    page.RefreshList();
+                    await Task.Delay(300);
+                    item.Check(page.RowCount == 0, "the list is empty after removing the tool plugin");
+                    item.Check(page.EmptyStateVisibility == Visibility.Visible, "the empty state is visible");
+                    item.Check(PluginToolHotkeyMapForLab.Count == 0,
+                        "clearing the assignment drops the registered hotkey");
+                    item.Check(page.RestartHintVisibility == Visibility.Collapsed,
+                        "the restart hint stays hidden while no tool plugin is enabled");
+
+                    // 「已安装且启用的 tool 插件，但一条命令都没注册」= 装了/启用了还没重启：
+                    // 空态里要追加「重启后生效」。直接塞一条合成记录（隔离 data-root，且
+                    // PluginService.Records 没有任何 CollectionChanged 订阅者）。
+                    var pendingTool = new PluginRecord
+                    {
+                        Id = "lab.toolui.pending",
+                        Version = "1.0.0",
+                        Kind = "tool",
+                        Enabled = true,
+                        Source = "lab",
+                        Signature = "unsigned"
+                    };
+                    PluginService.Instance.Records.Add(pendingTool);
+                    try
+                    {
+                        page.RefreshList();
+                        item.Check(page.RestartHintVisibility == Visibility.Visible,
+                            "the restart hint appears when an enabled tool plugin has no commands");
+                    }
+                    finally
+                    {
+                        PluginService.Instance.Records.Remove(pendingTool);
+                        page.RefreshList();
+                        item.Check(page.RestartHintVisibility == Visibility.Collapsed,
+                            "the restart hint clears once the pending tool plugin is removed");
+                    }
+                }
+                else
+                {
+                    item.Check(false, "the plugin tools page survives cleanup for the empty state check");
+                }
                 break;
             }
             default:
