@@ -71,7 +71,7 @@ public partial class PluginWidgetsPage : UserControl
     public void RefreshList()
     {
         var widgets = _service.Widgets.ToList();
-        CountText.Text = _loc.Get("PluginWidget.Count", widgets.Count);
+        CountText.Text = _loc.Plural("PluginWidget.Count", widgets.Count);
         RefreshNewButton();
 
         _rows.ReplaceAll(widgets.Select(BuildRow));

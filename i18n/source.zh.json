@@ -834,6 +834,9 @@
   "MediaProp.FollowPlaying": "在播",
   "MediaProp.FollowMissing": "当前没有会话",
   "MediaProp.FollowHint": "每次展开下拉都会重新读取系统里的会话；选中某个应用后，这个播放器只跟它（另一个播放器可以跟别的），改完立即生效。自动模式仍按「谁在出声」判定。",
+  "MediaProp.DataSource": "数据源",
+  "MediaProp.DataSource.System": "系统媒体会话",
+  "MediaProp.DataSource.Hint": "插件提供的数据源（需先在插件市场安装并启用）。",
   "MediaProp.AccentFromCover": "封面取色",
   "MediaProp.AccentHint": "从当前专辑封面提取主色，用在律动条颜色、分割线和唱片机的中心标签上；封面取不到可用主色（纯灰白黑）时退回你手设的颜色。",
 
@@ -1077,5 +1080,18 @@
   "PluginTool.Surface.Panel": "面板",
   "PluginTool.Surface.Zone": "分区",
   "PluginTool.Surface.HotkeyOnly": "仅热键",
-  "PluginTool.Hotkey.Hint": "录制时按 Esc 取消"
+  "PluginTool.Hotkey.Hint": "录制时按 Esc 取消",
+
+  "_plural": {
+    "Manage.Sidebar.Zones": { "other": "{0} 分区" },
+    "Manage.Sidebar.Docks": { "other": "{0} 快捷栏" },
+    "Manage.Sidebar.Clocks": { "other": "{0} 个时钟" },
+    "Manage.Sidebar.Calendars": { "other": "{0} 个日历" },
+    "Manage.Sidebar.MediaPlayers": { "other": "{0} 个播放器" },
+    "Manage.Sidebar.Notes": { "other": "{0} 张便签" },
+    "PluginWidget.Count": { "other": "{0} 项" },
+    "PluginTool.Count": { "other": "{0} 项" },
+    "Plugin.WidgetCount": { "other": "{0} 个桌面组件" },
+    "ZoneBay.Count": { "other": "{0} 个分区坞" }
+  }
 }
