@@ -1,43 +1,43 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <!-- 2026-10-24 播放器组件：需要 Windows.Media.Control（SMTC）读系统"正在播放"，
-         故把 TFM 从 net10.0-windows 提到带 Windows SDK 投影的目标框架。
-         最低运行系统仍锁 10.0.17763（Win10 1809，与 MSIX 清单 / Inno 安装器一致），
-         SMTC 本身也是 1809 起可用。 -->
+    <!-- 2026-10-24 鎾斁鍣ㄧ粍浠讹細闇€瑕?Windows.Media.Control锛圫MTC锛夎绯荤粺"姝ｅ湪鎾斁"锛?
+         鏁呮妸 TFM 浠?net10.0-windows 鎻愬埌甯?Windows SDK 鎶曞奖鐨勭洰鏍囨鏋躲€?
+         鏈€浣庤繍琛岀郴缁熶粛閿?10.0.17763锛圵in10 1809锛屼笌 MSIX 娓呭崟 / Inno 瀹夎鍣ㄤ竴鑷达級锛?
+         SMTC 鏈韩涔熸槸 1809 璧峰彲鐢ㄣ€?-->
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <AssemblyName>DeskOrder</AssemblyName>
-    <Product>DeskOrder - 秩序桌面</Product>
-    <Description>轻量级 Windows 桌面图标管理和美化工具</Description>
+    <Product>DeskOrder - 绉╁簭妗岄潰</Product>
+    <Description>杞婚噺绾?Windows 妗岄潰鍥炬爣绠＄悊鍜岀編鍖栧伐鍏?/Description>
     <Company>Three-Freeze</Company>
     <Authors>Three-Freeze</Authors>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <!-- ponytail 2026-08-24: 把托管栏同款图标挂到 taskbar / Alt-Tab / EXE 文件属性。
-         DesktopZones.ico 是 16+32+48+256 多分辨率（Resources/Icons/RebuildMultiResIco 打包），
-         不带这个 tag 时 taskbar 走 Windows 默认空图标。 -->
+    <!-- ponytail 2026-08-24: 鎶婃墭绠℃爮鍚屾鍥炬爣鎸傚埌 taskbar / Alt-Tab / EXE 鏂囦欢灞炴€с€?
+         DesktopZones.ico 鏄?16+32+48+256 澶氬垎杈ㄧ巼锛圧esources/Icons/RebuildMultiResIco 鎵撳寘锛夛紝
+         涓嶅甫杩欎釜 tag 鏃?taskbar 璧?Windows 榛樿绌哄浘鏍囥€?-->
     <ApplicationIcon>Resources\Icons\DesktopZones.ico</ApplicationIcon>
-    <!-- 更新检测与 About 页的唯一版本来源。Directory.Build.props 关闭了
-         GenerateAssemblyInfo 及各版本属性生成（CA1416 修复的历史原因），
-         这里重新打开——注意 GenerateAssemblyInfo 是总开关，只开三个子开关
-         时属性根本不会生成（曾导致全程序集版本 0.0.0、更新检查永远误报新版）。
-         其余属性（Title/Company/Product 等）仍由 props 的 false 单独关闭。 -->
+    <!-- 鏇存柊妫€娴嬩笌 About 椤电殑鍞竴鐗堟湰鏉ユ簮銆侱irectory.Build.props 鍏抽棴浜?
+         GenerateAssemblyInfo 鍙婂悇鐗堟湰灞炴€х敓鎴愶紙CA1416 淇鐨勫巻鍙插師鍥狅級锛?
+         杩欓噷閲嶆柊鎵撳紑鈥斺€旀敞鎰?GenerateAssemblyInfo 鏄€诲紑鍏筹紝鍙紑涓変釜瀛愬紑鍏?
+         鏃跺睘鎬ф牴鏈笉浼氱敓鎴愶紙鏇惧鑷村叏绋嬪簭闆嗙増鏈?0.0.0銆佹洿鏂版鏌ユ案杩滆鎶ユ柊鐗堬級銆?
+         鍏朵綑灞炴€э紙Title/Company/Product 绛夛級浠嶇敱 props 鐨?false 鍗曠嫭鍏抽棴銆?-->
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
-    <Version>1.2.2</Version>
+    <Version>1.2.3</Version>
     <GenerateAssemblyVersionAttribute>true</GenerateAssemblyVersionAttribute>
     <GenerateAssemblyFileVersionAttribute>true</GenerateAssemblyFileVersionAttribute>
     <GenerateAssemblyInformationalVersionAttribute>true</GenerateAssemblyInformationalVersionAttribute>
-    <!-- 不要把 git 提交哈希拼进 InformationalVersion（否则关于页显示 0.9.1+hash） -->
+    <!-- 涓嶈鎶?git 鎻愪氦鍝堝笇鎷艰繘 InformationalVersion锛堝惁鍒欏叧浜庨〉鏄剧ず 0.9.1+hash锛?-->
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- 插件 SDK 是独立类库；主工程只引用它的输出，绝不把它的源码再编进来
-         （默认 glob 会把子目录里的 .cs 也包含进来 → 类型重复定义）。 -->
+    <!-- 鎻掍欢 SDK 鏄嫭绔嬬被搴擄紱涓诲伐绋嬪彧寮曠敤瀹冪殑杈撳嚭锛岀粷涓嶆妸瀹冪殑婧愮爜鍐嶇紪杩涙潵
+         锛堥粯璁?glob 浼氭妸瀛愮洰褰曢噷鐨?.cs 涔熷寘鍚繘鏉?鈫?绫诲瀷閲嶅瀹氫箟锛夈€?-->
     <Compile Remove="DeskOrder.PluginApi\**" />
     <None Remove="DeskOrder.PluginApi\**" />
     <Content Remove="DeskOrder.PluginApi\**" />
@@ -58,14 +58,14 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- ponytail 2026-09-26: 微软商店审核在 Surface 触屏机(Surface Go / Laptop 5,
-         OS 26200)上遇到"启动即崩、无错误消息"(Event 1000: coreclr.dll 0xc0000409
-         fail-fast,无 .NET Runtime 托管堆栈);本机同系统线+同运行时+全新配置、无触屏
-         正常。WPF 创建第一个窗口时会初始化笔/触控输入栈(默认 WISP 老栈),该栈在
-         部分 digitizer/服务状态下启动即致命失败(dotnet/wpf #1151 同形状,#11123/
-         #11486 是它 2025-2026 仍活跃的崩溃类)。本应用完全不用墨迹/触控笔势,
-         置位后启动彻底跳过栈初始化(HwndSource 不再挂 HwndStylusInputProvider),
-         触点由 Windows 原生模拟成普通鼠标输入,点按/拖动不受影响。 -->
+    <!-- ponytail 2026-09-26: 寰蒋鍟嗗簵瀹℃牳鍦?Surface 瑙﹀睆鏈?Surface Go / Laptop 5,
+         OS 26200)涓婇亣鍒?鍚姩鍗冲穿銆佹棤閿欒娑堟伅"(Event 1000: coreclr.dll 0xc0000409
+         fail-fast,鏃?.NET Runtime 鎵樼鍫嗘爤);鏈満鍚岀郴缁熺嚎+鍚岃繍琛屾椂+鍏ㄦ柊閰嶇疆銆佹棤瑙﹀睆
+         姝ｅ父銆俉PF 鍒涘缓绗竴涓獥鍙ｆ椂浼氬垵濮嬪寲绗?瑙︽帶杈撳叆鏍?榛樿 WISP 鑰佹爤),璇ユ爤鍦?
+         閮ㄥ垎 digitizer/鏈嶅姟鐘舵€佷笅鍚姩鍗宠嚧鍛藉け璐?dotnet/wpf #1151 鍚屽舰鐘?#11123/
+         #11486 鏄畠 2025-2026 浠嶆椿璺冪殑宕╂簝绫?銆傛湰搴旂敤瀹屽叏涓嶇敤澧ㄨ抗/瑙︽帶绗斿娍,
+         缃綅鍚庡惎鍔ㄥ交搴曡烦杩囨爤鍒濆鍖?HwndSource 涓嶅啀鎸?HwndStylusInputProvider),
+         瑙︾偣鐢?Windows 鍘熺敓妯℃嫙鎴愭櫘閫氶紶鏍囪緭鍏?鐐规寜/鎷栧姩涓嶅彈褰卞搷銆?-->
     <RuntimeHostConfigurationOption Include="Switch.System.Windows.Input.Stylus.DisableStylusAndTouchSupport" Value="true" />
   </ItemGroup>
 
@@ -80,30 +80,31 @@
     <EmbeddedResource Remove="Resources\Icons\RebuildMultiResIco\**\*" />
   </ItemGroup>
   <ItemGroup>
-    <!-- About 页大图标：XAML 的 /Resources/... pack URI 只认内嵌 Resource 构建
-         动作，之前该文件仅有 None(CopyToOutputDirectory)，运行时找不到资源，
-         Image 一直空白。保留 None 复制（托盘/文件路径加载方仍要用）。 -->
+    <!-- About 椤靛ぇ鍥炬爣锛歑AML 鐨?/Resources/... pack URI 鍙鍐呭祵 Resource 鏋勫缓
+         鍔ㄤ綔锛屼箣鍓嶈鏂囦欢浠呮湁 None(CopyToOutputDirectory)锛岃繍琛屾椂鎵句笉鍒拌祫婧愶紝
+         Image 涓€鐩寸┖鐧姐€備繚鐣?None 澶嶅埗锛堟墭鐩?鏂囦欢璺緞鍔犺浇鏂逛粛瑕佺敤锛夈€?-->
     <Resource Include="Resources\Icons\icon-256.png" />
   </ItemGroup>
 
-  <!-- Phase 3（启动收尾）：Release + win-x64 发布时做 ReadyToRun 预编译，把冷启动时
-       的 JIT 开销换成更小的程序集加载开销。只在 publish 时生效，普通 dotnet build
-       完全不受影响；Debug 构建保持原样（保留可调试的 IL）。
-       发布命令：dotnet publish DesktopZones.csproj -c Release -r win-x64（自包含）。 -->
+  <!-- Phase 3锛堝惎鍔ㄦ敹灏撅級锛歊elease + win-x64 鍙戝竷鏃跺仛 ReadyToRun 棰勭紪璇戯紝鎶婂喎鍚姩鏃?
+       鐨?JIT 寮€閿€鎹㈡垚鏇村皬鐨勭▼搴忛泦鍔犺浇寮€閿€銆傚彧鍦?publish 鏃剁敓鏁堬紝鏅€?dotnet build
+       瀹屽叏涓嶅彈褰卞搷锛汥ebug 鏋勫缓淇濇寔鍘熸牱锛堜繚鐣欏彲璋冭瘯鐨?IL锛夈€?
+       鍙戝竷鍛戒护锛歞otnet publish DesktopZones.csproj -c Release -r win-x64锛堣嚜鍖呭惈锛夈€?-->
   <PropertyGroup Condition="'$(Configuration)' == 'Release' and '$(RuntimeIdentifier)' == 'win-x64'">
     <PublishReadyToRun>true</PublishReadyToRun>
-    <!-- 分层 PGO：热点方法走动态优化；与 R2R 叠加时冷启动仍受益。显式写出来避免
-         将来 SDK 默认值变化把这里的行为带走。 -->
+    <!-- 鍒嗗眰 PGO锛氱儹鐐规柟娉曡蛋鍔ㄦ€佷紭鍖栵紱涓?R2R 鍙犲姞鏃跺喎鍚姩浠嶅彈鐩娿€傛樉寮忓啓鍑烘潵閬垮厤
+         灏嗘潵 SDK 榛樿鍊煎彉鍖栨妸杩欓噷鐨勮涓哄甫璧般€?-->
     <TieredPGO>true</TieredPGO>
   </PropertyGroup>
 
-  <!-- P1-8 实测定版（2026-11-21，报告：P1-R2R冷启动-评估-2026-11-21.md §6.1）：
-       排除 WinRT/SDK 投影程序集的 R2R。全量 R2R 的 +32.7MB 发布体积里 89% 来自
-       Microsoft.Windows.SDK.NET.dll（23.7MB → 52.8MB，+29MB），而它换来的启动收益
-       只有约 55ms（A vs C 干净配对 +54/+58ms）；排除后体积增量回落到 +3.7MB，
-       仍保留约 50–60ms 启动收益，且在 pack.ps1 / make-msix.ps1 的 publish 里自动生效。 -->
+  <!-- P1-8 瀹炴祴瀹氱増锛?026-11-21锛屾姤鍛婏細P1-R2R鍐峰惎鍔?璇勪及-2026-11-21.md 搂6.1锛夛細
+       鎺掗櫎 WinRT/SDK 鎶曞奖绋嬪簭闆嗙殑 R2R銆傚叏閲?R2R 鐨?+32.7MB 鍙戝竷浣撶Н閲?89% 鏉ヨ嚜
+       Microsoft.Windows.SDK.NET.dll锛?3.7MB 鈫?52.8MB锛?29MB锛夛紝鑰屽畠鎹㈡潵鐨勫惎鍔ㄦ敹鐩?
+       鍙湁绾?55ms锛圓 vs C 骞插噣閰嶅 +54/+58ms锛夛紱鎺掗櫎鍚庝綋绉閲忓洖钀藉埌 +3.7MB锛?
+       浠嶄繚鐣欑害 50鈥?0ms 鍚姩鏀剁泭锛屼笖鍦?pack.ps1 / make-msix.ps1 鐨?publish 閲岃嚜鍔ㄧ敓鏁堛€?-->
   <ItemGroup Condition="'$(Configuration)' == 'Release' and '$(RuntimeIdentifier)' == 'win-x64'">
     <PublishReadyToRunExclude Include="Microsoft.Windows.SDK.NET.dll" />
   </ItemGroup>
 
 </Project>
+
