@@ -29,9 +29,10 @@ internal static class FrameClock
 /// 渲染代码不用改。
 ///
 /// 性能约定：整个条区**画进一张 WriteableBitmap**（一次 DrawImage 贴图），
-/// 不建控件、不做逐条矢量重绘；帧回调按 30fps 限流，连续静音时降到 4fps，
-/// 只在「播放中且未被暂停」时挂 <see cref="CompositionTarget.Rendering"/>，
-/// 其余状态直接停帧并清空。
+/// 不建控件、不做逐条矢量重绘；帧回调按用户设定的 <see cref="TargetFps"/>（0–100，
+/// 默认 30）限流，连续静音时再降到 ≤4fps，只在「播放中且未被暂停」时挂
+/// <see cref="CompositionTarget.Rendering"/>，其余状态直接停帧并清空。
+/// 帧率设成 0 = 停止逐帧刷新（条子静止贴地，不占 CPU 绘制开销）。
 /// </summary>
 public sealed class SpectrumBars : FrameworkElement
 {
@@ -64,6 +65,15 @@ public sealed class SpectrumBars : FrameworkElement
 
     /// <summary>属性面板的「暂停」勾选项：冻结本组件的可视化。</summary>
     public bool Frozen { get; set; }
+
+    /// <summary>用户设定的渲染帧率上限（0–100，默认 30）。0 = 停止逐帧刷新，
+    /// 条子静止贴地（同时摘掉 CompositionTarget.Rendering，不空转）；上限 100，
+    /// 实际帧率仍受显示器刷新率限制。改完需要调用 <see cref="Apply"/> 生效。</summary>
+    public int TargetFps { get; set; } = 30;
+
+    /// <summary>自测计数：真正出帧（通过帧率门控、推进模拟并重绘）的次数。
+    /// 用来在 --ui-bars-fps 自测里量实际帧率。</summary>
+    public long PaintedFrames { get; private set; }
 
     private readonly Random _rnd = new(20261024);
     private float[] _levels = Array.Empty<float>();
@@ -105,11 +115,16 @@ public sealed class SpectrumBars : FrameworkElement
     private bool _colorsDirty = true;
     private double _colorHue = double.NaN;
 
-    /// <summary>当前目标帧率：有真实音频能量 30fps；连续静音 4fps。</summary>
+    /// <summary>当前生效的目标帧率（由 <see cref="ResolveTargetFps"/> 按用户设置 + 静音状态算出），
+    /// 仅作诊断/状态缓存；真正的上限是 <see cref="TargetFps"/>。</summary>
     private int _targetFps = 30;
 
-    /// <summary>上一次真正出帧的时间（FrameClock 秒）。</summary>
-    private double _lastPaint = double.MinValue;
+    /// <summary>下一次允许出帧的 FrameClock 时间（秒）；<see cref="double.MinValue"/> = 尚未排程。
+    /// 用「按目标间隔排程」而不是「距上次出帧 ≥ 1/帧率」的简单门控：
+    /// Rendering 事件间隔由显示器刷新率决定，未必能整除目标间隔（94Hz 屏要 60fps、
+    /// 60Hz 屏要 24fps…），简单门控会整档掉到 refresh/2 或 refresh/3；排程法允许
+    /// 「这次隔 1 帧、下次隔 2 帧」交替，长期平均等于用户设定值。</summary>
+    private double _nextPaint = double.MinValue;
 
     /// <summary>第一次判定为静音的时间；-1 = 当前有声音（或没有可用的采集源）。</summary>
     private double _silentSince = -1;
@@ -135,6 +150,16 @@ public sealed class SpectrumBars : FrameworkElement
             _scratch = new float[n];
         }
         _barSeed = _rnd.NextDouble() * 6.28;   // 每次应用参数换一个相位底子，观感不呆板
+        // 帧率设成 0：停止逐帧刷新，条子落在静息位置（全 0 → 贴地），
+        // 而不是定格在上一帧悬空的高度。改回 >0 后再 Apply 会重新挂帧。
+        if (TargetFps <= 0)
+        {
+            if (_levels.Length > 0) Array.Clear(_levels, 0, _levels.Length);
+            if (_targets.Length > 0) Array.Clear(_targets, 0, _targets.Length);
+            _silentSince = -1;
+        }
+        // 参数（含帧率）变了就重新排程：改完立刻出下一帧，不用等旧帧率的长间隔走完。
+        _nextPaint = double.MinValue;
         // 换色相模式 / 改间隔时从下一个完整间隔重新计时，避免刚 Apply 就跳一次色。
         _lastAutoShift = _elapsed;
         if (ColorMode != "Auto")
@@ -198,14 +223,15 @@ public sealed class SpectrumBars : FrameworkElement
 
     private void SyncHook()
     {
-        bool shouldRun = IsLoaded && IsPlaying && !Frozen && BarCount > 0 && IsVisible;
+        // TargetFps = 0：用户要求停止逐帧刷新 → 直接摘掉 Rendering 回调，不空转。
+        bool shouldRun = TargetFps > 0 && IsLoaded && IsPlaying && !Frozen && BarCount > 0 && IsVisible;
         if (shouldRun == _hooked) return;
         if (shouldRun)
         {
             _lastTick = -1;
-            _lastPaint = double.MinValue;
+            _nextPaint = double.MinValue;
             _silentSince = -1;
-            _targetFps = 30;
+            _targetFps = Math.Clamp(TargetFps, 0, 100);
             CompositionTarget.Rendering += OnFrame;
             _hooked = true;
         }
@@ -222,21 +248,25 @@ public sealed class SpectrumBars : FrameworkElement
         _hooked = false;
     }
 
-    /// <summary>目标帧率：真实音频有能量 → 30fps；连续静音 1.5s 以上 → 4fps（条子贴地，几乎不动）；
-    /// 采集不可用 / 模拟律动 → 保持 30fps，别把动画本身卡成幻灯片。</summary>
+    /// <summary>目标帧率：以用户设定的 <see cref="TargetFps"/>（0–100）为上限；
+    /// 0 = 不出帧；有信号时用用户帧率；连续静音 1.5s 以上降到 min(4, 用户帧率)
+    /// （省电逻辑保留，用户本来就设得比 4 小就听用户的）；采集不可用 / 模拟律动
+    /// 不降档。默认 <see cref="TargetFps"/> = 30 时与旧行为完全一致（静音 4fps）。</summary>
     private int ResolveTargetFps(double now)
     {
+        int fps = Math.Clamp(TargetFps, 0, 100);
+        if (fps <= 0) return 0;
         bool signal;
         try { signal = HasAudioSignal(); }
         catch { signal = true; }
         if (signal)
         {
             _silentSince = -1;
-            _targetFps = 30;
-            return _targetFps;
+            _targetFps = fps;
+            return fps;
         }
         if (_silentSince < 0) _silentSince = now;
-        _targetFps = now - _silentSince >= 1.5 ? 4 : 30;
+        _targetFps = now - _silentSince >= 1.5 ? Math.Min(4, fps) : fps;
         return _targetFps;
     }
 
@@ -264,17 +294,28 @@ public sealed class SpectrumBars : FrameworkElement
     {
         if (!IsPlaying || Frozen || !IsVisible) { SyncHook(); return; }
         double now = FrameClock.Now;
-        if (_lastTick < 0) { _lastTick = now; _lastPaint = now; return; }
+        if (_lastTick < 0) { _lastTick = now; _nextPaint = now; return; }
 
-        // 帧率门控：CompositionTarget.Rendering 跟随显示器刷新率（60–144Hz），
-        // 这里按目标帧率放行；被跳过的帧不做模拟也不重绘（每帧整窗提交是主要成本）。
-        if (now - _lastPaint < 1.0 / ResolveTargetFps(now)) return;
+        int fps = ResolveTargetFps(now);
+        if (fps <= 0) return;   // TargetFps=0：不出帧（正常情况下 SyncHook 已摘掉回调，这里兜底）
+
+        // 帧率门控：CompositionTarget.Rendering 跟随显示器刷新率（60–144Hz），这里按
+        // 「目标帧间隔排程」放行 —— 到点了才出帧，晚了就在下一帧补上（允许 1/2 帧交替），
+        // 长期平均 = 目标帧率，不会像「距上次出帧 ≥ 1/fps」那样被刷新率量化掉一档。
+        // 被跳过的帧不做模拟也不重绘（每帧整窗提交是主要成本）。
+        if (_nextPaint == double.MinValue) _nextPaint = now;
+        if (now < _nextPaint) return;
+
+        double interval = 1.0 / fps;
+        _nextPaint += interval;
+        // 长时间断流（窗口被最小化 / 系统卡顿）后重新对齐排程，避免恢复瞬间连续补帧。
+        if (_nextPaint < now - interval) _nextPaint = now + interval;
 
         double dt = Math.Clamp(now - _lastTick, 0.001, 0.1);
         _lastTick = now;
-        _lastPaint = now;
         _elapsed += dt;
 
+        PaintedFrames++;
         AdvanceSimulation(dt);
         InvalidateVisual();
     }

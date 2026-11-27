@@ -809,6 +809,8 @@
   "MediaProp.BarsWidth": "律动条宽度",
   "MediaProp.Amplitude": "跳动幅度",
   "MediaProp.Sensitivity": "灵敏度",
+  "MediaProp.BarsFps": "律动帧率",
+  "MediaProp.BarsFpsHint": "0 = 停止逐帧刷新（条子静止贴地）；上限 100，实际帧率受显示器刷新率限制。",
   "MediaProp.Reflection": "倒影",
   "MediaProp.Pause": "暂停（冻结本组件）",
   "MediaProp.ColorMode": "着色方式",

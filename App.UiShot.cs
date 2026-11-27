@@ -47,6 +47,15 @@ public partial class App
             return zone == null ? null : new PropertyWindow(zone, _configService!);
         });
 
+        // 播放器属性面板（律动条形态）：用于验证「律动条样式」段新增的「律动帧率」行。
+        // 字段树比窗口高，RunUiShotsAsync 会把 Name=BarsFpsRow 的行滚进可视区再截图。
+        yield return ("media-property", () => new PropertyWindow(
+            new DesktopMediaPlayer { Mode = MediaDisplayMode.Bars }, _configService!)
+        {
+            Width = 420,
+            Height = 820,
+        });
+
         // ---- 二级弹窗（简单构造的） ----
         yield return ("rename", () => new RenameDialog("测试名称"));
         yield return ("overwrite", () => new OverwriteConfirmDialog("测试预设"));
@@ -104,11 +113,39 @@ public partial class App
                 w.Activate();
                 await Task.Delay(700);     // 等主题资源 / 动画 / 内容生成
                 w.UpdateLayout();
+
+                // media-property：字段树比窗口高，要先把「律动帧率」行滚进可视区，
+                // 截图里才能同时看到标题、滑块与默认值 30、hint。找不到行时也照常截图，
+                // 并在 manifest 里标记（便于定位是布局问题还是命名问题）。
+                string extra = "";
+                if (name.Equals("media-property", StringComparison.OrdinalIgnoreCase))
+                {
+                    var row = FindElementByName(w, "BarsFpsRow");
+                    extra = row == null ? " barsFpsRow=MISSING" : " barsFpsRow=found";
+                    if (row != null)
+                    {
+                        row.BringIntoView();
+                        await Task.Delay(350);
+                        w.UpdateLayout();
+                        // BringIntoView 只保证行本身可见；行下面还有一行 hint 小字，
+                        // 再往下滚一点让它一起进画面（ScrollViewer 内还有更多字段，滚得动）。
+                        if (w is PropertyWindow pw && pw.Body.FieldScroller != null)
+                        {
+                            pw.Body.FieldScroller.ScrollToVerticalOffset(
+                                pw.Body.FieldScroller.VerticalOffset + 90);
+                            extra += " scrolledHint=+90";
+                        }
+                        await Task.Delay(250);
+                        w.UpdateLayout();
+                        await Task.Delay(200);
+                    }
+                }
+
                 await Task.Delay(120);
                 sw.Stop();
                 var path = Path.Combine(dir, name + ".png");
                 var rect = CaptureWindow(w, path, ShotMargin);
-                manifest.AppendLine($"{name}: {(rect == null ? "CAPTURE-FAILED" : rect)} openMs={sw.ElapsedMilliseconds}");
+                manifest.AppendLine($"{name}: {(rect == null ? "CAPTURE-FAILED" : rect)} openMs={sw.ElapsedMilliseconds}{extra}");
             }
             catch (Exception ex)
             {
@@ -249,6 +286,112 @@ public partial class App
         }
         try { File.WriteAllText(outFile, sb.ToString()); } catch { }
     }
+
+    /// <summary>按 <see cref="FrameworkElement.Name"/> 在视觉树里递归找元素
+    /// （--ui-shot 定位/滚动到字段行用；代码里 new 出来的行没有 NameScope，FindName 找不到）。</summary>
+    static FrameworkElement? FindElementByName(DependencyObject root, string name)
+    {
+        if (root is FrameworkElement fe && fe.Name == name) return fe;
+        int count = System.Windows.Media.VisualTreeHelper.GetChildrenCount(root);
+        for (int i = 0; i < count; i++)
+        {
+            var found = FindElementByName(System.Windows.Media.VisualTreeHelper.GetChild(root, i), name);
+            if (found != null) return found;
+        }
+        return null;
+    }
+
+#if DEBUG
+    /// <summary>
+    /// 自测：--ui-bars-fps=&lt;csv&gt; --ui-bars-out=&lt;文件&gt;
+    ///
+    /// 进程内建一个普通窗口（窗口内容就是 <see cref="SpectrumBars"/>），按 csv 里的帧率
+    /// 逐个设置 TargetFps + Apply（与属性面板 → ApplyBarsSettings 同一条路径），每档采样
+    /// 2 秒，记录 PaintedFrames 增量 / 实测 fps / 进程 CPU 时间增量；最后再做一次
+    /// live 变更（60fps 1s → 10fps 1s），验证「拖滑块实时生效」那条路径。
+    /// 结果写 <paramref name="outFile"/>（CSV）。
+    /// </summary>
+    async Task RunUiBarsFpsProbeAsync(string fpsCsv, string outFile)
+    {
+        var proc = System.Diagnostics.Process.GetCurrentProcess();
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"# ui-bars-fps {DateTime.Now:yyyy-MM-dd HH:mm:ss} " +
+                      $"screen={SystemParameters.PrimaryScreenWidth:0}x{SystemParameters.PrimaryScreenHeight:0}");
+        sb.AppendLine("step,targetFps,paintedFrames,seconds,actualFps,cpuMs");
+
+        var values = new List<int>();
+        foreach (var part in fpsCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            if (int.TryParse(part, out int v)) values.Add(v);
+        if (values.Count == 0) values.AddRange(new[] { 0, 5, 24, 30, 60, 100 });
+
+        Window? w = null;
+        SpectrumBars? bars = null;
+        try
+        {
+            bars = new SpectrumBars
+            {
+                BarCount = 32,
+                BarWidth = 4,
+                Source = "Simulated",     // 模拟律动：HasAudioSignal 恒 true，不会触发静音降帧
+                TargetFps = values[0],
+                ColorMode = "Gradient",
+            };
+            w = new Window
+            {
+                Title = "bars-fps-probe",
+                Width = 640,
+                Height = 240,
+                WindowStartupLocation = WindowStartupLocation.Manual,
+                Left = 120,
+                Top = 120,
+                ShowInTaskbar = false,
+                Topmost = true,
+                Background = System.Windows.Media.Brushes.Black,
+                Content = bars,
+            };
+            w.Show();
+            w.Activate();
+            await Task.Delay(800);        // 等窗口加载 / 首帧
+            w.UpdateLayout();
+            bars.SetPlaying(true, false); // 开始播放；出帧速率由 TargetFps 决定
+
+            // 单档采样：改 TargetFps + Apply → 200ms 让上一档尾部过去 → 采样 ms 毫秒。
+            async Task<string> SampleAsync(int target, int ms, string tag)
+            {
+                bars!.TargetFps = target;
+                bars.Apply();
+                await Task.Delay(200);
+                long f0 = bars.PaintedFrames;
+                proc.Refresh();
+                double cpu0 = proc.TotalProcessorTime.TotalMilliseconds;
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                await Task.Delay(ms);
+                sw.Stop();
+                long frames = bars.PaintedFrames - f0;
+                proc.Refresh();
+                double cpuMs = proc.TotalProcessorTime.TotalMilliseconds - cpu0;
+                double actual = frames / sw.Elapsed.TotalSeconds;
+                return $"{tag},{target},{frames},{sw.Elapsed.TotalSeconds:0.000},{actual:0.0},{cpuMs:0}";
+            }
+
+            foreach (int fps in values)
+                sb.AppendLine(await SampleAsync(fps, 2000, fps.ToString()));
+
+            // live 变更验证：不重建窗口，只改 TargetFps + Apply（滑块实时生效走的就是这条路径）。
+            sb.AppendLine(await SampleAsync(60, 1000, "live-60"));
+            sb.AppendLine(await SampleAsync(10, 1000, "live-10"));
+        }
+        catch (Exception ex)
+        {
+            sb.AppendLine($"ERROR,{ex.GetType().Name},{ex.Message.Replace(',', ';').Replace('\n', ' ').Replace('\r', ' ')}");
+        }
+        finally
+        {
+            try { w?.Close(); } catch { }
+            try { File.WriteAllText(outFile, sb.ToString()); } catch { }
+        }
+    }
+#endif
 
     static void FullGc()
     {

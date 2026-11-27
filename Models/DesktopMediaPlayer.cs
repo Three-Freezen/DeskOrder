@@ -72,6 +72,16 @@ public class DesktopMediaPlayer : AppearanceModel
     /// 50 = 1.0×，1 ≈ 0.26×，100 = 4.0×。</summary>
     public double BarsSensitivity { get; set; } = 50;
 
+    /// <summary>律动条渲染帧率上限 0–100。**可空是刻意的**：旧配置里没有这个字段，
+    /// 反序列化得到 null → 按默认 30fps 处理（<see cref="BarsFpsEffective"/>），
+    /// 不会变成 0 把条子冻住。0 的语义 = 停止逐帧刷新（条子静止贴地，省电）；
+    /// 上限 100 之外的值加载/读取时会被夹回 0–100，实际帧率仍受显示器刷新率限制。</summary>
+    public int? BarsFps { get; set; }
+
+    /// <summary>渲染侧实际使用的帧率：null（旧配置）/越界值都收敛到 0–100，缺省 30。</summary>
+    [JsonIgnore]
+    public int BarsFpsEffective => Math.Clamp(BarsFps ?? 30, 0, 100);
+
     /// <summary>幅度/灵敏度是否已迁到 1–100 档位刻度。旧配置里这两个字段存的是
     /// 0.2–2.0 / 0.5–4.0 的倍率，加载时由 <see cref="MigrateBarsScale"/> 换算。</summary>
     public bool BarsScaleV2 { get; set; }
@@ -187,6 +197,7 @@ public class DesktopMediaPlayer : AppearanceModel
             BackgroundImageOpacity = BackgroundImageOpacity,
             BarsCount = BarsCount, BarsBarWidth = BarsBarWidth, BarsRounded = BarsRounded,
             BarsAmplitude = BarsAmplitude, BarsSensitivity = BarsSensitivity,
+            BarsFps = BarsFps,
             BarsScaleV2 = BarsScaleV2,
             BarsSource = BarsSource,
             BarsReflection = BarsReflection, BarsColorMode = BarsColorMode,
