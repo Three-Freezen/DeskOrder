@@ -354,7 +354,17 @@
 
     <Grid>
         <!-- FULL ZONE -->
-        <Border x:Name="MainContent" Visibility="Visible" ClipToBounds="True" CornerRadius="8">
+        <!-- ponytail 2026-11-27: P1-6 试点 —— 内容层常驻位图缓存。
+             悬停展开/收起动画只动本元素的 RenderTransform（HoverExpandBehavior），
+             挂 CacheMode 后每帧只需缩放/合成一张已栅格化的位图，不再逐帧重栅格
+             整个内容层（20 个图标 + 名称 + 标题栏 + 描边 + 玻璃背板）。
+             只缓存分区窗口的内容层：根 Grid 上的 MarqueeLayer / RestoreButton /
+             子文件夹 Popup 都在 MainContent 之外，不受影响；挂件/面板/播放器不动。
+             风险：缓存失效粒度 = 整个内容层，内部高频重绘（悬停高光/滚动/标题编辑）
+             会整层重栅格，见 P1-ZoneWindow-CacheMode-试点-2026-11-27.md。
+             回退：删掉下面 CacheMode 这一行即可恢复原行为。 -->
+        <Border x:Name="MainContent" Visibility="Visible" ClipToBounds="True" CornerRadius="8"
+                CacheMode="BitmapCache">
             <Grid>
                 <!-- Fill layer + bg image -->
                 <!-- 快捷栏胶囊的玻璃宿主：和分区同一个 WallpaperBackdropLayer 挂进来，
