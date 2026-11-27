@@ -97,4 +97,13 @@
     <TieredPGO>true</TieredPGO>
   </PropertyGroup>
 
+  <!-- P1-8 实测定版（2026-11-21，报告：P1-R2R冷启动-评估-2026-11-21.md §6.1）：
+       排除 WinRT/SDK 投影程序集的 R2R。全量 R2R 的 +32.7MB 发布体积里 89% 来自
+       Microsoft.Windows.SDK.NET.dll（23.7MB → 52.8MB，+29MB），而它换来的启动收益
+       只有约 55ms（A vs C 干净配对 +54/+58ms）；排除后体积增量回落到 +3.7MB，
+       仍保留约 50–60ms 启动收益，且在 pack.ps1 / make-msix.ps1 的 publish 里自动生效。 -->
+  <ItemGroup Condition="'$(Configuration)' == 'Release' and '$(RuntimeIdentifier)' == 'win-x64'">
+    <PublishReadyToRunExclude Include="Microsoft.Windows.SDK.NET.dll" />
+  </ItemGroup>
+
 </Project>
