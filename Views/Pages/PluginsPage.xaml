@@ -37,7 +37,7 @@
       </Setter>
     </Style>
   </UserControl.Resources>
-  <DockPanel>
+  <DockPanel AllowDrop="True" DragOver="Page_DragOver" DragLeave="Page_DragLeave" Drop="Page_Drop">
     <Border DockPanel.Dock="Top" Padding="20,16,20,8">
       <StackPanel>
         <StackPanel Orientation="Horizontal">
@@ -140,6 +140,23 @@
                   Style="{DynamicResource OutlineBtn}" Click="ImportLocal_Click"/>
         </StackPanel>
       </StackPanel>
+
+      <!-- 拖拽 .dopkg 时的可见提示：只做视觉反馈，不拦鼠标（IsHitTestVisible=False，Drop 仍由页面接）。 -->
+      <Border x:Name="DropOverlay" Visibility="Collapsed" IsHitTestVisible="False"
+              Margin="8" CornerRadius="8" BorderThickness="2"
+              Background="{DynamicResource Brush.Accent.Wash}"
+              BorderBrush="{DynamicResource Brush.Accent}">
+        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+          <Path Width="34" Height="34" Stretch="Uniform" HorizontalAlignment="Center"
+                Data="{StaticResource Icon.Plugin}" Fill="{DynamicResource Brush.Accent}"/>
+          <TextBlock Text="{loc:Loc Key=Plugin.Drop.Hint}" Margin="0,12,0,0" FontSize="15"
+                     FontWeight="SemiBold" HorizontalAlignment="Center"
+                     Foreground="{DynamicResource Brush.Accent}"/>
+          <TextBlock Text="{loc:Loc Key=Plugin.Drop.Hint.Multi}" Margin="0,6,0,0" FontSize="11.5"
+                     HorizontalAlignment="Center"
+                     Foreground="{DynamicResource Brush.Text.Secondary}"/>
+        </StackPanel>
+      </Border>
     </Grid>
   </DockPanel>
 </UserControl>

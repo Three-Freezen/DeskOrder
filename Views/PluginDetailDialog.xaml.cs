@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -18,6 +19,14 @@ public partial class PluginDetailDialog : Window
 
     /// <summary>详情页最多轮播几张预览图：再多也没人翻，而且每张都要下载。</summary>
     const int MaxPreviewImages = 8;
+
+    /// <summary>外观包详情里材质 / 预设名称各最多列几个：超出用「…」收尾，避免详情页变成清单。</summary>
+    const int MaxListedAppearanceNames = 8;
+
+    /// <summary>从 Release 标签里抠出版本号的宽松匹配：<c>v1.2.3</c> / <c>plugin-1.2.3</c> / <c>release/v1.2.3-beta</c>。</summary>
+    static readonly Regex VersionInTagRe = new(
+        @"(?<![0-9A-Za-z])v?[0-9]+(?:\.[0-9]+){1,3}(?:-[0-9A-Za-z.-]+)?",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     public PluginCatalogEntry Entry { get; }
     public PluginRecord? Record { get; private set; }
@@ -63,6 +72,27 @@ public partial class PluginDetailDialog : Window
     /// <summary>自测台只读访问器：计数文本（形如 "1 / 3"）。</summary>
     internal string PreviewCounterForLab => PreviewCountText.Text;
 
+    /// <summary>自测台只读访问器：更新日志区块是否显示（无 changelog 时整块不占位）。</summary>
+    internal bool ChangelogVisibleForLab => ChangelogBlock.Visibility == Visibility.Visible;
+
+    /// <summary>自测台只读访问器：更新日志区块的最终文本。</summary>
+    internal string ChangelogTextForLab => ChangelogText.Text;
+
+    /// <summary>自测台只读访问器：更新日志标题（有更新时应点明新版本号）。</summary>
+    internal string ChangelogTitleForLab => ChangelogTitle.Text;
+
+    /// <summary>自测台只读访问器：「插件设置」按钮是否显示。</summary>
+    internal bool SettingsVisibleForLab => SettingsButton.Visibility == Visibility.Visible;
+
+    /// <summary>自测台只读访问器：「检查更新」按钮是否显示（仅 GitHub 直装的记录）。</summary>
+    internal bool CheckUpdateVisibleForLab => CheckUpdateButton.Visibility == Visibility.Visible;
+
+    /// <summary>自测台只读访问器：外观包详情里的材质 / 预设名称行（未显示时为空串）。</summary>
+    internal string AppearanceNamesForLab => AppearanceNamesText.Text;
+
+    /// <summary>自测台只读访问器：材质 / 预设名称行是否显示。</summary>
+    internal bool AppearanceNamesVisibleForLab => AppearanceNamesText.Visibility == Visibility.Visible;
+
     public void SetRecord(PluginRecord? record)
     {
         Record = record;
@@ -88,6 +118,7 @@ public partial class PluginDetailDialog : Window
         var description = Entry.Description?.Get(Loc.CurrentLanguage);
         DescriptionText.Text = string.IsNullOrWhiteSpace(description) ? "" : description;
         DescriptionText.Visibility = string.IsNullOrWhiteSpace(description) ? Visibility.Collapsed : Visibility.Visible;
+        ApplyChangelog();
 
         var permissions = Entry.Permissions;
         var described = PluginDisplay.DescribePermissions(permissions);
@@ -122,6 +153,11 @@ public partial class PluginDetailDialog : Window
             AppearanceText.Text = summary is { } counts
                 ? Loc.Get("Plugin.Contents.Appearance", counts.Materials, counts.Presets)
                 : Loc["Plugin.Appearance.Hint"];
+            // 已安装外观包：在数量下面列出具体材质 / 预设名称（读安装目录，纯本地）。
+            var names = Record == null ? "" : DescribeAppearanceContents(Record);
+            AppearanceNamesText.Text = names;
+            AppearanceNamesText.Visibility = string.IsNullOrWhiteSpace(names)
+                ? Visibility.Collapsed : Visibility.Visible;
         }
         else
         {
@@ -136,6 +172,8 @@ public partial class PluginDetailDialog : Window
             ToggleButton.Visibility = Visibility.Collapsed;
             UninstallButton.Visibility = Visibility.Collapsed;
             NewWidgetButton.Visibility = Visibility.Collapsed;
+            SettingsButton.Visibility = Visibility.Collapsed;
+            CheckUpdateButton.Visibility = Visibility.Collapsed;
             StateText.Text = "";
             // 六类插件（含数据源）都能安装；不再有「后续版本」的占位按钮。
             PrimaryButton.Content = Loc["Plugin.Install"];
@@ -158,6 +196,15 @@ public partial class PluginDetailDialog : Window
             ? Visibility.Visible : Visibility.Collapsed;
             UninstallButton.Visibility = Visibility.Visible;
             UpdateNewWidgetButton();
+            // 插件设置入口：只有「已启用 + 当前真的注册了 schema」才有可调的内容。
+            SettingsButton.Visibility =
+                Record.Enabled && PluginSettingsService.Instance.Find(Record.Id) != null
+                    ? Visibility.Visible : Visibility.Collapsed;
+            // 从 GitHub 直装的插件不在 registry 里，只能按仓库去查最新 Release。
+            CheckUpdateButton.Visibility =
+                string.Equals(Record.Source, "github", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(Record.Repo)
+                    ? Visibility.Visible : Visibility.Collapsed;
             var source = PluginDisplay.DescribeSource(Record.Source);
             var widgets = PluginService.Instance.CountWidgets(Record.Id);
             var state = $"v{Record.Version} · {source} · {Record.InstalledAtUtc.ToLocalTime():yyyy-MM-dd}";
@@ -182,6 +229,9 @@ public partial class PluginDetailDialog : Window
             }
         }
 
+        // 每次重算都把「检查更新」文案复位：忙的时候它被改成「检查中…」，失败/取消后不能一直停在忙态。
+        CheckUpdateButton.Content = Loc["Plugin.GitHub.CheckUpdate"];
+
         // 兼容性门禁：主按钮置灰 + 顶部说明原因。禁用名单 / 已下架的原因更严重也更具体，
         // 已经显示时不再让「需要更高版本」把它盖掉。
         if (incompatible != null && PrimaryButton.Visibility == Visibility.Visible
@@ -205,6 +255,73 @@ public partial class PluginDetailDialog : Window
     {
         NoticeText.Text = text;
         NoticeBar.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>
+    /// 更新日志区块：当前语言缺内容时 <see cref="LocalizedText.Get"/> 会回退另一语言；
+    /// 两语都空就整块收起，不留一块空标题占位。
+    /// </summary>
+    void ApplyChangelog()
+    {
+        var text = Entry.Changelog?.Get(Loc.CurrentLanguage);
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            ChangelogBlock.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var update = Record != null && IsUpdateAvailable(Record, Entry);
+        ChangelogTitle.Text = update
+            ? Loc.Get("Plugin.Detail.Changelog.UpdateTitle", Entry.Version)
+            : Loc["Plugin.Detail.Changelog"];
+        ChangelogText.Text = text!.Trim();
+        ChangelogBlock.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>
+    /// 已安装外观包的材质 / 预设名称：从安装目录读 manifest + payload 再解析一遍。
+    /// 纯本地、几毫秒；读不出来（包损坏 / 已卸载）返回空串，详情页不显示这一行。
+    /// </summary>
+    static string DescribeAppearanceContents(PluginRecord record)
+    {
+        try
+        {
+            var dir = PluginPaths.VersionDir(record.Id, record.Version);
+            var manifest = PluginPackages.ReadManifest(dir, out _);
+            if (manifest == null) return "";
+            var validation = AppearancePackService.Instance.Validate(dir, manifest);
+            if (!validation.Ok) return "";
+
+            var chinese = Loc.CurrentLanguage.StartsWith("zh", StringComparison.OrdinalIgnoreCase);
+            var materials = validation.Materials
+                .Select(recipe => chinese ? recipe.ZhName : recipe.EnName)
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Select(name => name!.Trim())
+                .Take(MaxListedAppearanceNames)
+                .ToList();
+            var presets = validation.Presets
+                .Select(preset =>
+                {
+                    try { return PresetService.For(preset.Kind).ValidateFile(preset.Path, out _)?.Name; }
+                    catch { return null; }
+                })
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Select(name => name!.Trim())
+                .Take(MaxListedAppearanceNames)
+                .ToList();
+
+            var lines = new List<string>(2);
+            if (materials.Count > 0)
+                lines.Add(Loc.Get("Plugin.Appearance.Materials", string.Join(" · ", materials)));
+            if (presets.Count > 0)
+                lines.Add(Loc.Get("Plugin.Appearance.Presets", string.Join(" · ", presets)));
+            return string.Join("\n", lines);
+        }
+        catch
+        {
+            // 详情页是只读展示：读包失败不能让它打不开，静默不显示名称即可。
+            return "";
+        }
     }
 
     /// <summary>
@@ -289,6 +406,141 @@ public partial class PluginDetailDialog : Window
 
     public static bool IsUpdateAvailable(PluginRecord record, PluginCatalogEntry entry)
         => PluginVersion.IsNewer(record.Version, entry.Version);
+
+    // ── GitHub 直装插件的更新检查（纯函数部分不联网，自测台直接断言）──
+
+    /// <summary>记录的 <c>Repo</c>（owner/repo）能否解析成 GitHub 仓库。复用直装时的同一套解析规则。</summary>
+    internal static bool TryParseGitHubRepo(string? repo, out string owner, out string repoName)
+        => GitHubReleaseClient.TryParseRepo(repo, out owner, out repoName, out _);
+
+    /// <summary>
+    /// 把 Release 标签规范成版本号：GitHub 的 tag 可能是 <c>v1.2.3</c>、<c>plugin-1.2.3</c>
+    /// 甚至 <c>releases/v1.2.3</c>，直接丢给版本比较会被当成「不认识的字符串」走序数比较。
+    /// 解析不出形如 SemVer 的片段时返回空串。
+    /// </summary>
+    internal static string NormalizeReleaseVersion(string? tag)
+    {
+        var text = tag?.Trim() ?? "";
+        if (text.Length == 0) return "";
+        // 先按路径取最后一段（有些仓库用 release/v1.2.3 这种 tag）。
+        var slash = text.LastIndexOf('/');
+        if (slash >= 0) text = text[(slash + 1)..];
+        for (var match = VersionInTagRe.Match(text); match.Success; match = match.NextMatch())
+        {
+            if (PluginVersion.Parse(match.Value) != null) return match.Value;
+        }
+        return "";
+    }
+
+    /// <summary>
+    /// Release 是否比已装版本新。标签解析不出数字版本（如滚动标签 <c>latest</c>）时一律视为
+    /// 「没有可确认的新版」—— 不能因为字符串比较把 <c>latest</c> 判成更新。
+    /// </summary>
+    internal static bool IsGitHubUpdateAvailable(string? installedVersion, string? releaseTag)
+    {
+        var latest = NormalizeReleaseVersion(releaseTag);
+        if (string.IsNullOrEmpty(latest) || PluginVersion.Parse(latest) == null) return false;
+        return PluginVersion.IsNewer(installedVersion, latest);
+    }
+
+    void Settings_Click(object sender, RoutedEventArgs e)
+    {
+        if (_busy || Record == null) return;
+        try
+        {
+            // Owner 用详情弹窗自己（详情是模态窗口），设置窗口关掉后回到详情页。
+            new PluginSettingsDialog(Record.Id) { Owner = this }.ShowDialog();
+        }
+        catch (Exception ex)
+        {
+            DzTrace.Always("[Plugin] cannot open the settings dialog from the detail page: " + ex.Message);
+        }
+    }
+
+    void CheckUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        if (_busy || Record == null) return;
+        _ = CheckGitHubUpdateAsync();
+    }
+
+    /// <summary>
+    /// 「检查更新」：只在用户点击时联网 —— 查仓库最新 Release → 比较版本 → 确认后用
+    /// <see cref="PluginInstaller.InstallFromGitHubAsync"/> 走与直装完全相同的下载/校验管线。
+    /// 无新版 / 限流 / 网络失败都用可读文案提示，不抛异常。
+    /// </summary>
+    async System.Threading.Tasks.Task CheckGitHubUpdateAsync()
+    {
+        var record = Record;
+        if (record == null) return;
+        if (!TryParseGitHubRepo(record.Repo, out var owner, out var repo))
+        {
+            ShowNotice(Loc["Plugin.GitHub.Error.InvalidInput"]);
+            return;
+        }
+
+        void Inform(string text, MessageBoxImage icon) =>
+            MessageBox.Show(this, text, Loc["Plugin.GitHub.CheckUpdate"], MessageBoxButton.OK, icon);
+
+        SetBusy(true);
+        var closeAfter = false;
+        try
+        {
+            ShowNotice(Loc["Plugin.GitHub.Checking"]);
+            using var client = new GitHubReleaseClient();
+            var lookup = await client.ResolvePackageAsync(owner, repo, null);
+            if (IsClosedForWrites()) return;
+            if (!lookup.Success)
+            {
+                Inform(lookup.Error ?? Loc["Plugin.GitHub.Error.NotFound"], MessageBoxImage.Warning);
+                return;
+            }
+
+            var tag = lookup.Tag;
+            // 滚动标签（latest / nightly）不是版本号：不能拿它做比较，也不能报「已是最新」误导用户。
+            if (NormalizeReleaseVersion(tag).Length == 0)
+            {
+                Inform(Loc.Get("Plugin.GitHub.RollingTag", tag), MessageBoxImage.Information);
+                return;
+            }
+            if (!IsGitHubUpdateAvailable(record.Version, tag))
+            {
+                Inform(Loc.Get("Plugin.GitHub.AlreadyLatest", record.Version), MessageBoxImage.Information);
+                return;
+            }
+
+            var confirm = MessageBox.Show(this,
+                Loc.Get("Plugin.GitHub.UpdateConfirm", tag, record.Version),
+                Loc["Plugin.GitHub.CheckUpdate"], MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (confirm != MessageBoxResult.Yes) return;
+
+            ShowNotice(Loc.Get("Plugin.GitHub.Updating", tag));
+            var result = await PluginService.Instance.Installer!.InstallFromGitHubAsync(owner, repo, tag);
+            PluginService.Instance.RefreshRecords();
+            if (IsClosedForWrites()) return;
+            if (!result.Success)
+            {
+                Inform(Loc.Get("Plugin.InstallFailed", result.Error ?? ""), MessageBoxImage.Warning);
+                return;
+            }
+
+            // 代码类插件要重启才加载新版本：详情页里的 Entry 还是旧版本快照，关掉弹窗让页面重绘。
+            Record = PluginService.Instance.GetRecord(record.Id) ?? record;
+            closeAfter = true;
+            MessageBox.Show(this, Loc.Get("Plugin.GitHub.UpdateDone", Record.Version),
+                Loc["Plugin.GitHub.CheckUpdate"], MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            ShowNotice(Loc.Get("Plugin.InstallFailed", ex.Message));
+            Inform(Loc.Get("Plugin.InstallFailed", ex.Message), MessageBoxImage.Warning);
+            DzTrace.Always($"[Plugin] GitHub update check failed: {ex}");
+        }
+        finally
+        {
+            SetBusy(false);
+            if (closeAfter && !_closed) Close();
+        }
+    }
 
     // ── 预览图轮播 ──
 
@@ -476,7 +728,15 @@ public partial class PluginDetailDialog : Window
         ToggleButton.IsEnabled = !busy;
         UninstallButton.IsEnabled = !busy;
         NewWidgetButton.IsEnabled = !busy;
-        if (busy) PrimaryButton.Content = Loc["Plugin.Installing"];
+        GithubButton.IsEnabled = !busy && !string.IsNullOrWhiteSpace(Entry.Repo);
+        ReportButton.IsEnabled = !busy && !string.IsNullOrWhiteSpace(Entry.Repo);
+        SettingsButton.IsEnabled = !busy;
+        CheckUpdateButton.IsEnabled = !busy;
+        if (busy)
+        {
+            PrimaryButton.Content = Loc["Plugin.Installing"];
+            CheckUpdateButton.Content = Loc["Plugin.GitHub.Checking"];
+        }
         // 安装失败/取消后重算一次：被禁用名单置灰的开关不能被 SetBusy(false) 重新点亮。
         else Apply();
     }

@@ -76,6 +76,15 @@
           <TextBlock x:Name="DescriptionText" Margin="0,10,0,0" FontSize="12" TextWrapping="Wrap"
                      Foreground="{DynamicResource Brush.Text.Secondary}"/>
 
+          <!-- 更新日志：registry 条目自带 changelog 才出现；已装旧版且有更新时标题点明版本。 -->
+          <StackPanel x:Name="ChangelogBlock" Visibility="Collapsed" Margin="0,16,0,0">
+            <TextBlock x:Name="ChangelogTitle" Text="{loc:Loc Key=Plugin.Detail.Changelog}"
+                       FontSize="11" FontWeight="SemiBold"
+                       Foreground="{DynamicResource Brush.Text.Tertiary}" Margin="0,0,0,6"/>
+            <TextBlock x:Name="ChangelogText" FontSize="12" TextWrapping="Wrap" LineHeight="19"
+                       Foreground="{DynamicResource Brush.Text.Secondary}"/>
+          </StackPanel>
+
           <StackPanel x:Name="LanguageBlock" Visibility="Collapsed" Margin="0,16,0,0">
             <TextBlock Text="{loc:Loc Key=Plugin.Type.Language}" FontSize="11" FontWeight="SemiBold"
                        Foreground="{DynamicResource Brush.Text.Tertiary}" Margin="0,0,0,6"/>
@@ -88,6 +97,10 @@
                        Foreground="{DynamicResource Brush.Text.Tertiary}" Margin="0,0,0,6"/>
             <TextBlock x:Name="AppearanceText" FontSize="12" TextWrapping="Wrap"
                        Foreground="{DynamicResource Brush.Text.Secondary}"/>
+            <!-- 已安装外观包：在「N 材质 + M 预设」下面列出具体名称（读包内 manifest/payload）。 -->
+            <TextBlock x:Name="AppearanceNamesText" Visibility="Collapsed" Margin="0,4,0,0"
+                       FontSize="11.5" TextWrapping="Wrap" LineHeight="18"
+                       Foreground="{DynamicResource Brush.Text.Tertiary}"/>
           </StackPanel>
 
           <!-- 一个包多类型：逐条列出这个包提供的能力（有运行时计数就带上数量）。 -->
@@ -151,8 +164,17 @@
                   Margin="8,0,0,0" FontSize="11.5" Cursor="Hand"
                   Style="{DynamicResource OutlineBtn}" Click="Report_Click"
                   ToolTip="{loc:Loc Key=Plugin.Report.Hint}"/>
+          <!-- 从 GitHub 直装的插件不在 registry 里，没有「市场更新」可等：只能点一下去查 Release。 -->
+          <Button x:Name="CheckUpdateButton" Content="{loc:Loc Key=Plugin.GitHub.CheckUpdate}"
+                  Height="30" Padding="12,0" Margin="8,0,0,0" FontSize="11.5" Cursor="Hand"
+                  Style="{DynamicResource OutlineBtn}" Click="CheckUpdate_Click"
+                  Visibility="Collapsed"/>
         </StackPanel>
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+          <!-- API v5：插件声明了设置 schema 时，详情页是「装完还想再调」的第一入口。 -->
+          <Button x:Name="SettingsButton" Content="{loc:Loc Key=Plugin.Settings.Title}" Height="32"
+                  Width="92" Margin="0,0,10,0" Cursor="Hand" FontSize="12"
+                  Style="{DynamicResource OutlineBtn}" Click="Settings_Click" Visibility="Collapsed"/>
           <!-- widget 插件启用后：已安装行的入口是压缩的「＋」图标，这里的文字按钮是主要入口。 -->
           <Button x:Name="NewWidgetButton" Content="{loc:Loc Key=PluginWidget.New}" Height="32" Width="104"
                   Margin="0,0,10,0" Cursor="Hand" FontSize="12"
