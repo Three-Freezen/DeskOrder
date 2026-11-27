@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Controls;
+using DesktopZones.Helpers;
+using DesktopZones.Services;
 
 namespace DesktopZones.Views.Components;
 
@@ -49,8 +51,59 @@ public partial class SidebarNav : UserControl
         _sectionKeys[NavPluginTools] = "plugintools";
         _sectionKeys[NavSettings] = "settings";
         _sectionKeys[NavAbout]    = "about";
-        Loaded += (_, _) => HighlightActive();
+        Loaded += OnLoaded;
+        Unloaded += OnUnloaded;
     }
+
+    private void OnLoaded(object sender, RoutedEventArgs e)
+    {
+        HighlightActive();
+        // 「可更新插件数」由 PluginService 启动后台刷新时算好：这里只订阅，窗口关闭/卸载时退订，
+        // 避免管理窗口反复开关（每次 new SidebarNav）后旧实例仍被事件表引用。
+        var service = PluginService.Instance;
+        service.AvailableUpdatesChanged -= OnAvailableUpdatesChanged;
+        service.AvailableUpdatesChanged += OnAvailableUpdatesChanged;
+        UpdateUpdateBadge(service.AvailableUpdateCount);
+    }
+
+    private void OnUnloaded(object sender, RoutedEventArgs e)
+        => PluginService.Instance.AvailableUpdatesChanged -= OnAvailableUpdatesChanged;
+
+    private void OnAvailableUpdatesChanged()
+    {
+        // 事件在 UI 线程发出（PluginService 后台刷新会切回 Dispatcher）；这里再兜底一次，
+        // 防止将来有别的调用方在后台线程直接写计数。
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (!IsLoaded || AppLifetime.IsShuttingDown) return;
+                UpdateUpdateBadge(PluginService.Instance.AvailableUpdateCount);
+            }));
+            return;
+        }
+        if (!IsLoaded || AppLifetime.IsShuttingDown) return;
+        UpdateUpdateBadge(PluginService.Instance.AvailableUpdateCount);
+    }
+
+    /// <summary>写角标：数字 &gt;0 才显示，&gt;99 显示 99+。</summary>
+    private void UpdateUpdateBadge(int count)
+    {
+        PluginsBadgeText.Text = FormatUpdateBadge(count);
+        PluginsBadge.Visibility = ShouldShowUpdateBadge(count) ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>角标文案（纯函数，自测台直接断言）：0 → 空串；1..99 → 数字；&gt;99 → "99+"。</summary>
+    internal static string FormatUpdateBadge(int count)
+        => count <= 0 ? "" : count > 99 ? "99+" : count.ToString();
+
+    internal static bool ShouldShowUpdateBadge(int count) => count > 0;
+
+    // ── 自测台只读访问 / 注入 ──
+
+    internal void SetUpdateBadgeForLab(int count) => UpdateUpdateBadge(count);
+    internal bool BadgeVisibleForLab => PluginsBadge.Visibility == Visibility.Visible;
+    internal string BadgeTextForLab => PluginsBadgeText.Text;
 
     private void HighlightActive()
     {

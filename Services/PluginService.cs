@@ -110,6 +110,96 @@ public sealed class PluginService
     public event Action? PluginsChanged;
     public event Action<PluginWidget>? WidgetsChanged;
 
+    // ── 更新角标（v1.2.3）──
+    // 启动后台刷新 registry 时顺手算「可更新插件数」，侧栏角标 / 更新 tab / 托盘提醒共用。
+    // 不为角标单独发网络请求：数据来自 RefreshBlocklistInBackground 已有的 LoadAsync。
+    PluginCatalogResult? _lastCatalog;
+    int _availableUpdateCount;
+    /// <summary>托盘「有插件可更新」气泡每进程只弹一次（0 → &gt;0 的第一次跳变）。</summary>
+    bool _availableUpdateToastShown;
+
+    /// <summary>可更新插件数（0 = 没有 / 还没拿到 registry / 离线）。</summary>
+    public int AvailableUpdateCount => _availableUpdateCount;
+
+    /// <summary>可更新插件数发生变化（角标订阅；只在数值真的变化时触发）。</summary>
+    public event Action? AvailableUpdatesChanged;
+
+    /// <summary>
+    /// 一条「已安装记录 + registry 条目」是否真的可以更新：比当前版本新、没被禁用名单
+    /// 命中（旧版本/新版本都不行）、并且新版本兼容当前宿主。
+    ///
+    /// 市场列表、更新 tab、侧栏角标、批量更新计划全部走这一个判定，避免四个入口各写一份
+    /// 规则后互相漂移（例如「tab 显示 3 条更新，点全部更新只处理 2 条」）。
+    /// </summary>
+    internal static bool IsUpdatable(PluginRecord record, PluginCatalogEntry entry)
+        => PluginBlocklist.Find(record.Id, record.Version) == null
+           && PluginBlocklist.Find(entry.Id, entry.Version) == null
+           && PluginDetailDialog.IsUpdateAvailable(record, entry)
+           && PluginDisplay.IncompatibilityReason(entry) == null;
+
+    /// <summary>按一组 registry 条目统计可更新数（纯函数，自测台直接断言口径）。</summary>
+    internal static int CountAvailableUpdatesInEntries(
+        IEnumerable<PluginRecord> records, IEnumerable<PluginCatalogEntry>? entries)
+    {
+        if (entries == null) return 0;
+        var byId = new Dictionary<string, PluginCatalogEntry>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in entries)
+        {
+            if (!string.IsNullOrEmpty(entry.Id)) byId.TryAdd(entry.Id, entry);
+        }
+        var count = 0;
+        foreach (var record in records)
+        {
+            if (byId.TryGetValue(record.Id, out var entry) && IsUpdatable(record, entry)) count++;
+        }
+        return count;
+    }
+
+    /// <summary>
+    /// 按一次 catalog 加载结果统计：离线 / 解析失败 / 没有缓存 → 0（角标不能拿旧数据吓人，
+    /// 这是「启动后台检查」的语义）。页面自己的 tab 计数另走
+    /// <see cref="CountAvailableUpdatesInEntries"/>（列表里有几条就显示几条）。
+    /// </summary>
+    internal static int CountAvailableUpdates(IEnumerable<PluginRecord> records, PluginCatalogResult? catalog)
+        => catalog is { Offline: false, Error: null }
+            ? CountAvailableUpdatesInEntries(records, catalog.Entries)
+            : 0;
+
+    /// <summary>页面自己拉到的 registry 回填给服务：角标、tab、批量计划共用同一份数据。</summary>
+    internal void PublishCatalogForUpdates(PluginCatalogResult? catalog)
+    {
+        _lastCatalog = catalog;
+        RecountAvailableUpdates();
+    }
+
+    /// <summary>记录/禁用名单变化后重算可更新数（不需要重新联网）。</summary>
+    void RecountAvailableUpdates() => PublishAvailableUpdateCount(CountAvailableUpdates(Records, _lastCatalog));
+
+    /// <summary>写入新的可更新数；数值变化才发事件，0 → &gt;0 的第一次顺带弹一次托盘气泡。</summary>
+    void PublishAvailableUpdateCount(int count)
+    {
+        if (count < 0) count = 0;
+        var previous = _availableUpdateCount;
+        if (previous == count) return;
+        _availableUpdateCount = count;
+        AvailableUpdatesChanged?.Invoke();
+        if (previous == 0 && count > 0 && !_availableUpdateToastShown && !SuppressBackgroundRefreshForLab)
+        {
+            // 自测台把后台刷新整个关掉了（SuppressBackgroundRefreshForLab），也不该在跑用例时
+            // 从托盘弹真实气泡抢焦点：同一个「lab 环境」判断用在两处即可。
+            _availableUpdateToastShown = true;
+            Notify(LocalizationService.Instance["Plugin.Toast.Updates.Title"],
+                LocalizationService.Instance.Get("Plugin.Toast.Updates.Body", count));
+        }
+    }
+
+    /// <summary>自测台专用：直接写入可更新数并走同一条事件广播（不弹托盘气泡）。</summary>
+    internal void SetAvailableUpdateCountForLab(int count)
+    {
+        _availableUpdateToastShown = true;
+        PublishAvailableUpdateCount(count);
+    }
+
     /// <summary>
     /// 初始化插件系统。启动路径传 <paramref name="deferCodePlugins"/>=true：只做目录/记录/
     /// 禁用名单/声明式包这些轻量准备，代码插件的加载留到「10 startup complete」之后
@@ -246,11 +336,15 @@ public sealed class PluginService
             try
             {
                 var result = await Catalog.LoadAsync(force: false).ConfigureAwait(false);
-                // 缓存/离线只读不写，也不需要再执行一次（启动时 ApplyBlocklist 已用过本地副本）。
-                if (result.FromCache || result.Offline) return;
+                // 缓存/离线只读不写，也不需要再执行一次（启动时 ApplyBlocklist 已用过本地副本）；
+                // 但可更新数要用这份结果算出来（缓存命中也算数），否则「6 小时内启动」永远没有角标。
                 var dispatcher = Application.Current?.Dispatcher;
                 if (dispatcher == null) return;
-                await dispatcher.InvokeAsync(ApplyBlocklist);
+                await dispatcher.InvokeAsync(() =>
+                {
+                    if (!result.FromCache && !result.Offline) ApplyBlocklist();
+                    PublishCatalogForUpdates(result);
+                });
             }
             catch (Exception ex)
             {
@@ -502,6 +596,8 @@ public sealed class PluginService
         ApplyBlocklist();
         SyncLanguagePacks(config.PluginsEnabled);
         SyncAppearancePacks(config.PluginsEnabled);
+        // 安装/卸载/启停可能改变「可更新数」（装上了最新版就少一条）：不用重新联网，按上次 catalog 重算。
+        RecountAvailableUpdates();
         PluginsChanged?.Invoke();
     }
 
@@ -552,6 +648,8 @@ public sealed class PluginService
         foreach (var pair in stillBlocked) _blockedMessages[pair.Key] = pair.Value;
 
         if (changed) PersistRecords();
+        // 被禁用名单命中的插件不该继续算「可更新」：名单生效后立刻重算角标。
+        if (_lastCatalog != null) RecountAvailableUpdates();
     }
 
     /// <summary>

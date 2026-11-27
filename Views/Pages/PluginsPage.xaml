@@ -89,7 +89,14 @@
 
     <Border DockPanel.Dock="Top" Margin="20,0,20,0">
       <StackPanel>
-        <components:Segmented x:Name="Tabs" HorizontalAlignment="Left" Width="360"/>
+        <DockPanel>
+          <!-- 「全部更新」只出现在更新 tab；没有可更新条目时置灰（见 Render）。 -->
+          <Button x:Name="UpdateAllButton" DockPanel.Dock="Right" Height="30" Padding="14,0"
+                  Cursor="Hand" FontWeight="SemiBold" Visibility="Collapsed"
+                  Style="{DynamicResource FillBtn}" Click="UpdateAll_Click"/>
+          <components:Segmented x:Name="Tabs" HorizontalAlignment="Left" Width="360"/>
+        </DockPanel>
+        <!-- 类型筛选：市场 / 已安装 / 更新 三个 tab 都显示。 -->
         <WrapPanel x:Name="Filters" Margin="0,10,0,0"/>
       </StackPanel>
     </Border>
@@ -105,7 +112,8 @@
     </Border>
 
     <Grid Margin="20,12,20,0">
-      <ScrollViewer x:Name="MarketScroll" VerticalScrollBarVisibility="Auto">
+      <ScrollViewer x:Name="MarketScroll" VerticalScrollBarVisibility="Auto"
+                    ScrollChanged="MarketScroll_ScrollChanged">
         <WrapPanel x:Name="CardsHost" Orientation="Horizontal"/>
       </ScrollViewer>
       <ScrollViewer x:Name="InstalledScroll" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">

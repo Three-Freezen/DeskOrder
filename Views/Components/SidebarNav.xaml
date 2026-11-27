@@ -242,6 +242,14 @@
                     StrokeThickness="1.5" StrokeLineJoin="Round"
                     Data="{StaticResource Icon.PluginMarket}"/>
               <TextBlock Text="{loc:Loc Key=Plugin.Nav}" VerticalAlignment="Center"/>
+              <!-- 可更新插件数角标：>0 才显示，>99 显示 99+（数值本身不需要翻译）。 -->
+              <Border x:Name="PluginsBadge" Margin="6,0,0,0" Height="16" MinWidth="16"
+                      Padding="4,0" CornerRadius="8" VerticalAlignment="Center"
+                      Background="{DynamicResource Brush.Accent}" Visibility="Collapsed">
+                <TextBlock x:Name="PluginsBadgeText" FontSize="10" FontWeight="SemiBold"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                           Foreground="{DynamicResource Brush.Accent.On}"/>
+              </Border>
             </StackPanel>
           </Button>
           <!-- 插件工具：工具插件注册的命令 + 全局热键分配（v1.1 API v3）。入口常驻，
