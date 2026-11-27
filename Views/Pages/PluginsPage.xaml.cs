@@ -37,6 +37,19 @@ public partial class PluginsPage : UserControl
     readonly Dictionary<string, PluginManifest?> _manifestCache = new();
     readonly HashSet<string> _installing = new();
 
+    // ── 列表窗口化（v1.2.3）──
+    // 市场/更新 tab 的卡片不再一次性全建（几百个 PluginCard 会卡住首次切页），而是首屏
+    // 建一页、用户滚动接近底部时再追加一页。筛选/搜索/tab 切换/刷新都会重置成第一页。
+    internal const int InitialCardPageSize = 24;
+    internal const int NextCardPageSize = 16;
+    /// <summary>距离底部多少像素内算「接近底部」并追加下一页。</summary>
+    internal const double NextCardPageDistance = 320;
+    List<PluginCatalogEntry> _cardEntries = new();
+    int _renderedCardCount;
+
+    // 安装进度条：每次安装拿一个自增 token，回调发现 token 过期/页面已卸载就不再回写 StatusBar。
+    int _progressToken;
+
     public PluginsPage()
     {
         InitializeComponent();
@@ -73,6 +86,20 @@ public partial class PluginsPage : UserControl
     internal bool EmptyRetryVisibleForLab => EmptyRetryButton.Visibility == Visibility.Visible;
     internal bool EmptyImportVisibleForLab => EmptyImportButton.Visibility == Visibility.Visible;
     internal string EmptyBodyForLab => EmptyBody.Text;
+
+    // 自测台只读访问器：「全部更新」按钮状态 / 更新 tab 计数（v1.2.3）。
+    internal bool UpdateAllVisibleForLab => UpdateAllButton.Visibility == Visibility.Visible;
+    internal bool UpdateAllEnabledForLab => UpdateAllButton.IsEnabled;
+    internal int UpdateCountForLab => CountUpdates();
+
+    /// <summary>自测台：直接切类型筛选（等价于点筛选芯片，会重置卡片窗口）。</summary>
+    internal void SetFilterForLab(PluginKind? filter)
+    {
+        _filter = filter;
+        foreach (var child in Filters.Children.OfType<ToggleButton>())
+            child.IsChecked = Equals(child.Tag, filter) || (filter == null && child.Tag == null);
+        Render();
+    }
 
     void OnPluginsChanged()
     {
@@ -179,6 +206,9 @@ public partial class PluginsPage : UserControl
         // 拉到新 registry = 拿到新禁用名单：必须立刻执行一次，否则「已启用但开关被置灰」。
         if (_catalog is { Offline: false, FromCache: false })
             _service.ApplyBlocklist();
+        // 页面自己刷新到的 registry 也回填给服务：侧栏角标/批量计划与列表共用同一份数据，
+        // 不必等启动后台检查（它 6 小时内直接命中缓存、不会重新走网络）。
+        _service.PublishCatalogForUpdates(_catalog);
         UpdateStatusBar();
         // tab 上的「更新 N」依赖 catalog；catalog 到货后不重建 tab 就会一直显示 0。
         BuildTabs();
@@ -232,7 +262,14 @@ public partial class PluginsPage : UserControl
         var marketTab = _tab != 1;
         MarketScroll.Visibility = marketTab ? Visibility.Visible : Visibility.Collapsed;
         InstalledScroll.Visibility = marketTab ? Visibility.Collapsed : Visibility.Visible;
-        Filters.Visibility = _tab == 0 ? Visibility.Visible : Visibility.Collapsed;
+        // 类型筛选三个 tab 都可用（市场过滤 registry 条目，已安装按记录的能力集合过滤）。
+        Filters.Visibility = Visibility.Visible;
+
+        var updatable = CountUpdates();
+        UpdateAllButton.Visibility = _tab == 2 ? Visibility.Visible : Visibility.Collapsed;
+        UpdateAllButton.IsEnabled = _tab == 2 && updatable > 0 && !_busy;
+        // 数量与更新 tab 计数同口径；新增联网权限的条目也算更新，批量计划里会单独标出并跳过。
+        UpdateAllButton.Content = Loc.Get("Plugin.Batch.Button", updatable);
 
         if (marketTab) RenderCards();
         else RenderInstalled();
@@ -250,7 +287,9 @@ public partial class PluginsPage : UserControl
             if (PluginBlocklist.Find(entry.Id, entry.Version) != null) continue;
             if (!MatchesFilter(entry, _filter)) continue;
             var record = _service.GetRecord(entry.Id);
-            if (_tab == 2 && (record == null || !PluginDetailDialog.IsUpdateAvailable(record, entry))) continue;
+            // 更新 tab 只列「真能装」的更新（与角标/批量计划同一判定）：已被禁用、或新版本
+            // 要求更高宿主时不在更新 tab 里出现，避免出现点了更新却只弹一句「需要新版」的条目。
+            if (_tab == 2 && (record == null || !PluginService.IsUpdatable(record, entry))) continue;
             if (query.Length > 0 && !Matches(entry, query)) continue;
             visible.Add(entry);
         }
@@ -305,11 +344,34 @@ public partial class PluginsPage : UserControl
                || (entry.Tags?.Any(Has) ?? false);
     }
 
+    /// <summary>
+    /// 市场 / 更新 tab 的重绘入口：先取当前筛选 + 排序后的完整列表（不建控件），
+    /// 再只渲染第一页。滚动到底部附近时由 <see cref="MarketScroll_ScrollChanged"/> 追加下一页。
+    ///
+    /// 之前这里是 foreach 全量 new PluginCard 塞进 WrapPanel：registry 几百条时切一次 tab
+    /// 就要建几百个控件 + 几百个预览图下载任务，首次打开会明显卡顿。窗口化只改变「建多少」，
+    /// 卡片自己的数据/预览图逻辑一行没动（<see cref="LoadCardPreviewAsync"/> 原样复用）。
+    /// </summary>
     void RenderCards()
     {
+        _cardEntries = FilteredEntries().ToList();
+        _renderedCardCount = 0;
         CardsHost.Children.Clear();
-        foreach (var entry in FilteredEntries())
+        AppendNextCardPage();
+    }
+
+    /// <summary>
+    /// 追加一页卡片；返回是否真的追加了。第一页 <see cref="InitialCardPageSize"/> 张，
+    /// 之后每页 <see cref="NextCardPageSize"/> 张。
+    /// </summary>
+    bool AppendNextCardPage()
+    {
+        if (_renderedCardCount >= _cardEntries.Count) return false;
+        var pageSize = _renderedCardCount == 0 ? InitialCardPageSize : NextCardPageSize;
+        var end = Math.Min(_cardEntries.Count, _renderedCardCount + pageSize);
+        for (var i = _renderedCardCount; i < end; i++)
         {
+            var entry = _cardEntries[i];
             var record = _service.GetRecord(entry.Id);
             var update = record != null && PluginDetailDialog.IsUpdateAvailable(record, entry);
             var card = new PluginCard();
@@ -319,6 +381,89 @@ public partial class PluginsPage : UserControl
             CardsHost.Children.Add(card);
             _ = LoadCardPreviewAsync(card, entry);
         }
+        _renderedCardCount = end;
+        return true;
+    }
+
+    /// <summary>
+    /// 是否该追加下一页的纯函数（自测台直接断言滚动语义）。必须真的往下滚过
+    /// （<paramref name="verticalOffset"/> &gt; 0）且离底部不足 <see cref="NextCardPageDistance"/>；
+    /// 内容还没铺满视口（没有滚动条）时返回 true，让大窗口也能把首屏补满。
+    /// </summary>
+    internal static bool ShouldLoadNextCardPage(double verticalOffset, double viewportHeight, double extentHeight)
+    {
+        if (extentHeight <= 0 || viewportHeight <= 0) return false;
+        // 没有滚动条：说明首屏卡片没铺满视口，继续追加直到出现滚动条或列表耗尽。
+        if (extentHeight <= viewportHeight + 1) return true;
+        if (verticalOffset <= 0) return false;
+        return verticalOffset + viewportHeight >= extentHeight - NextCardPageDistance;
+    }
+
+    void MarketScroll_ScrollChanged(object sender, ScrollChangedEventArgs e)
+    {
+        if (_tab == 1) return;
+        if (_renderedCardCount >= _cardEntries.Count) return;
+        if (!ShouldLoadNextCardPage(e.VerticalOffset, e.ViewportHeight, e.ExtentHeight)) return;
+        AppendNextCardPage();
+    }
+
+    // ── 窗口化自测访问器 ──
+
+    /// <summary>当前已建出的卡片数（首屏/追加断言用）。</summary>
+    internal int RenderedCardCountForLab => CardsHost.Children.Count;
+
+    /// <summary>窗口化背后的完整条目数（不建控件）。</summary>
+    internal int TotalCardCountForLab => _cardEntries.Count;
+
+    /// <summary>直接喂一份 catalog（不联网），让自测台断言首屏数量与追加行为。</summary>
+    internal void SetCatalogForLab(PluginCatalogResult catalog)
+    {
+        _catalog = catalog;
+        BuildTabs();
+        Render();
+    }
+
+    /// <summary>自测台：按当前语言重建 tab / 筛选文案（管理窗口缓存复用页面时可能残留旧语言）。</summary>
+    internal void RebuildTextsForLab()
+    {
+        BuildTabs();
+        BuildFilters();
+        UpdateSearchHint();
+        Render();
+    }
+
+    /// <summary>
+    /// 自测台：从本地 registry 缓存重新解析 catalog（不联网、强制跳过 TTL 判断），
+    /// 用来验证「已安装 tab / 更新 tab」在有更新数据时的真实渲染。
+    /// </summary>
+    internal void ReloadCatalogFromCacheForLab()
+    {
+        try
+        {
+            var path = PluginPaths.RegistryCachePath;
+            if (System.IO.File.Exists(path))
+            {
+                _catalog = _service.Catalog.ParseRegistry(System.IO.File.ReadAllBytes(path));
+                _catalog.FromCache = true;
+            }
+            else
+            {
+                _catalog = new PluginCatalogResult { Offline = true, Error = "no local registry cache" };
+            }
+        }
+        catch (Exception ex)
+        {
+            _catalog = new PluginCatalogResult { Offline = true, Error = ex.Message };
+        }
+        BuildTabs();
+        Render();
+    }
+
+    /// <summary>模拟「滚到底部」触发追加一页。</summary>
+    internal void LoadMoreCardsForLab()
+    {
+        if (!AppendNextCardPage()) return;
+        UpdateEmpty();
     }
 
     async System.Threading.Tasks.Task LoadCardPreviewAsync(PluginCard card, PluginCatalogEntry entry)
@@ -379,6 +524,8 @@ public partial class PluginsPage : UserControl
     async System.Threading.Tasks.Task<bool> InstallEntryAsync(PluginCatalogEntry entry, PluginCard? card = null)
     {
         if (_installing.Contains(entry.Id)) return false;
+        // 批量更新进行中不接受单条安装/更新，避免两个安装同时写配置、busy 状态互相覆盖。
+        if (_busy) return false;
         var existing = _service.GetRecord(entry.Id);
         var isUpdate = existing != null && PluginDetailDialog.IsUpdateAvailable(existing, entry);
 
@@ -411,7 +558,8 @@ public partial class PluginsPage : UserControl
         card?.SetBusy(true);
         try
         {
-            var result = await _service.Installer!.InstallFromCatalogAsync(entry);
+            // 下载进度写回顶部 StatusBar（「正在下载 <插件名> 42%」），完成后恢复/隐藏。
+            var result = await _service.Installer!.InstallFromCatalogAsync(entry, CreateDownloadProgress(name));
             _service.RefreshRecords();
             if (!result.Success)
             {
@@ -443,9 +591,48 @@ public partial class PluginsPage : UserControl
         }
         finally
         {
+            // 结束本轮的进度回写（token 自增后残留的 Progress 回调直接丢弃），恢复状态栏文案。
+            EndDownloadProgress();
             _installing.Remove(entry.Id);
             Render();
         }
+    }
+
+    // ── 安装下载进度 ──
+
+    /// <summary>
+    /// 下载进度 0..1 → 0..100（纯函数，自测台直接断言映射与越界钳制）。
+    /// 安装器按字节比例 Report；Content-Length 缺失时不会回调，界面保持「正在下载…」。
+    /// </summary>
+    internal static int ProgressPercent(double value)
+    {
+        if (double.IsNaN(value) || value <= 0) return 0;
+        if (value >= 1) return 100;
+        return (int)Math.Round(value * 100);
+    }
+
+    /// <summary>
+    /// 为一次安装创建进度接收器：写回 StatusBar。token 机制保证「上一个安装的排队回调」
+    /// 不会在下一个安装（或安装完成后）覆盖状态栏；页面卸载/进程关闭后也不再回写。
+    /// </summary>
+    IProgress<double> CreateDownloadProgress(string pluginName)
+    {
+        var token = ++_progressToken;
+        return new Progress<double>(value =>
+        {
+            if (token != _progressToken) return;
+            if (AppLifetime.IsShuttingDown || !IsLoaded) return;
+            ShowStatus(Loc.Get("Plugin.Progress.Downloading", pluginName, ProgressPercent(value)));
+        });
+    }
+
+    /// <summary>安装结束：让后续回调失效，并把 StatusBar 恢复到「缓存/离线」常规状态。</summary>
+    void EndDownloadProgress()
+    {
+        _progressToken++;
+        // 页面已卸载/进程关闭时不再回写（StatusText 已经是死控件）。
+        if (AppLifetime.IsShuttingDown || !IsLoaded) return;
+        UpdateStatusBar();
     }
 
     PluginInstallPrompt BuildPrompt(PluginCatalogEntry entry)
@@ -556,12 +743,18 @@ public partial class PluginsPage : UserControl
         var query = SearchBox.Text?.Trim() ?? "";
         foreach (var record in _service.Records.OrderByDescending(r => r.InstalledAtUtc))
         {
+            // 类型筛选与市场/更新 tab 一致：一个包多类型时命中任一能力即显示。
+            if (!MatchesInstalledFilter(record, _filter)) continue;
             if (query.Length > 0
                 && !MatchesInstalled(record, ReadManifest(record), FindCatalogEntry(record.Id), query))
                 continue;
             InstalledHost.Children.Add(BuildInstalledRow(record));
         }
     }
+
+    /// <summary>已安装 tab 的类型筛选：按记录的能力集合命中（纯函数，自测台直接断言）。</summary>
+    internal static bool MatchesInstalledFilter(PluginRecord record, PluginKind? filter)
+        => filter == null || record.KindValues.Contains(filter.Value);
 
     /// <summary>
     /// 已安装 tab 的搜索：id / 中英名 / 作者（name、github）/ registry 标签 / 插件类型本地化名，
@@ -810,7 +1003,7 @@ public partial class PluginsPage : UserControl
             {
                 updateButton.Click += async (_, _) =>
                 {
-                    if (_installing.Contains(record.Id)) return;
+                    if (_installing.Contains(record.Id) || _busy) return;
                     // 先禁用再 await：否则双击会弹第二个更新确认框。
                     updateButton.IsEnabled = false;
                     updateButton.Content = Loc["Plugin.Installing"];
@@ -1131,17 +1324,13 @@ public partial class PluginsPage : UserControl
     /// <summary>空态「重试」：强制刷新（绕过 6 小时缓存 TTL），离线时也能立刻再试一次。</summary>
     void EmptyRetry_Click(object sender, RoutedEventArgs e) => _ = RefreshAsync(force: true);
 
-    int CountUpdates()
-    {
-        if (_catalog == null) return 0;
-        return _service.Records.Count(record =>
-        {
-            // 与市场/更新列表同口径：被禁用或已下架的不算「可更新」。
-            if (PluginBlocklist.Find(record.Id, record.Version) != null) return false;
-            var entry = FindCatalogEntry(record.Id);
-            return entry != null && PluginDetailDialog.IsUpdateAvailable(record, entry);
-        });
-    }
+    /// <summary>
+    /// 更新 tab 计数 = 列表里能看到的条目数。判定复用 <see cref="PluginService.IsUpdatable"/>
+    /// （侧栏角标、批量更新计划同一口径）；这里用页面自己拉到的 catalog（离线缓存也照常显示），
+    /// 与「启动后台检查」的角标口径只差「离线时角标归零」这一条产品语义。
+    /// </summary>
+    int CountUpdates() => PluginService.CountAvailableUpdatesInEntries(
+        _service.Records, _catalog?.Entries);
 
     void UpdateEmpty()
     {
