@@ -83,6 +83,10 @@
   "Preset.SaveTitle.MediaPlayerVinyl": "Save vinyl preset",
   "Preset.LoadTitle.Dock": "Load dock preset",
   "Preset.SaveTitle.Dock": "Save dock preset",
+  "Preset.LoadTitle.PluginWidget": "Load plugin widget preset",
+  "Preset.SaveTitle.PluginWidget": "Save plugin widget preset",
+  "Preset.LoadTitle.PluginZoneBar": "Load zone bar preset",
+  "Preset.SaveTitle.PluginZoneBar": "Save zone bar preset",
 
   "ToolTip.Minimize": "Minimize",
   "ToolTip.Show": "Show",
@@ -468,6 +472,8 @@
   "Preset.DeleteFailedTitle": "Delete failed",
   "Preset.DeleteMenuItem": "Delete",
   "Preset.OverwritePrompt": "Preset \"{0}\" already exists. Overwrite?",
+  "Preset.Kind.PluginWidget": "Plugin widget",
+  "Preset.Kind.PluginZoneBar": "Zone bar",
 
   "Calendar.AddNote": "Add note",
   "Calendar.Delete": "Delete calendar",

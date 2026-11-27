@@ -158,6 +158,20 @@ public partial class PropertyPanel : UserControl
         }
     }
 
+#if DEBUG
+    /// <summary>自测台用：按当前 Target 走生产代码的 <see cref="BuildCurrentPayload"/>，
+    /// 断言「保存预设」按钮拿到的 (Kind, 载荷) 是对的（不真的开保存对话框）。</summary>
+    internal (PresetKind? kind, object? payload) DebugBuildCurrentPayload() => BuildCurrentPayload();
+
+    /// <summary>自测台用：等价于点预设卡 —— 走生产代码的 <see cref="ApplyCardPicked"/>，
+    /// 把预设写回当前 Target 并重建字段树（不真的开加载对话框）。</summary>
+    internal void DebugApplyCardPicked(PresetRecord record) => ApplyCardPicked(record);
+
+    /// <summary>自测台用：底部「加载预设 / 保存预设」按钮当前是否可点。</summary>
+    internal bool DebugPresetButtonsEnabled() =>
+        LoadPresetBtn?.IsEnabled == true && SavePresetBtn?.IsEnabled == true;
+#endif
+
     /// <summary>预设卡点击实时预览时抑制 OnTargetChanged 尾部的切换动画 —
     /// 每次点预设卡只重建字段树，不重放淡入+滑动。</summary>
     bool _suppressSwitchAnimation;
@@ -470,11 +484,10 @@ public partial class PropertyPanel : UserControl
     void UpdateButtonBarEnabled()
     {
         var enabled = _snapshot != null;
-        // 分区坞没有「预设卡」概念（外观字段集与分区不通用），只保留应用/取消。
-        // 插件组件同理：外观字段集是 SDK 的扁平结构，与分区预设卡不通用。
-        bool presets = enabled && Target is not PluginZoneBar and not PluginWidget;
-        if (LoadPresetBtn != null) LoadPresetBtn.IsEnabled = presets;
-        if (SavePresetBtn != null) SavePresetBtn.IsEnabled = presets;
+        // 每一种目标都有对应的预设种类（分区坞 / 插件组件在 v1.2.3 补上独立的
+        // PresetKind + 独立目录），所以四颗按钮统一按「有没有快照」启用。
+        if (LoadPresetBtn != null) LoadPresetBtn.IsEnabled = enabled;
+        if (SavePresetBtn != null) SavePresetBtn.IsEnabled = enabled;
         if (CancelBtn != null) CancelBtn.IsEnabled = enabled;
         if (ApplyBtn != null) ApplyBtn.IsEnabled = enabled;
     }
@@ -557,6 +570,10 @@ public partial class PropertyPanel : UserControl
             case StickyNote n when snapshot is StickyNote sn: CopyNoteFields(sn, n); break;
             case PanelConfig p when snapshot is PanelPresetConfig sp: CopyPanelConfigFields(sp, p); break;
             case ZoneItem sub when sub.Type == ItemType.SubFolder && snapshot is ZoneItem ssub: CopySubfolderFields(ssub, sub); break;
+            // 插件组件 / 分区坞：内层对话框取消时把打开前的「外观快照」写回目标
+            // （快照本身不含位置/身份/插件私有设置，回退不会碰它们）。
+            case PluginWidget w when snapshot is PluginWidgetAppearance wa: wa.ApplyTo(w); break;
+            case PluginZoneBar bar when snapshot is PluginZoneBarAppearance ba: ba.ApplyTo(bar); break;
         }
         if (Target != null) Save(Target);  // live-preview refresh back to pre-picker state
     }
@@ -589,6 +606,12 @@ public partial class PropertyPanel : UserControl
         // ponytail 2026-08-26: SubFolder preset — PresetKind.Subfolder 走 PresetService
         // 已有的 SubfolderPreset 序列化分支 (Models/SubfolderPreset.cs)。
         ZoneItem sub when sub.Type == ItemType.SubFolder => (PresetKind.Subfolder, (object?)sub.Clone()),
+        // 插件组件：组件宽高 + 外观/玻璃/材质/磁贴进预设；位置、显隐、锁定、实例身份和
+        // 插件私有 SettingsJson 不进（见 Models/PluginWidgetPreset.cs）。
+        PluginWidget widget => (PresetKind.PluginWidget, (object?)PluginWidgetAppearance.FromWidget(widget)),
+        // 分区坞：吸附边 + 行为 + 外观/玻璃进预设；名称、显隐、折叠态、ZoneIds、显示器归属
+        // 和插件私有设置不进（见 Models/PluginZoneBarPreset.cs）。
+        PluginZoneBar bar => (PresetKind.PluginZoneBar, (object?)PluginZoneBarAppearance.FromBar(bar)),
         _ => (null, null),
     };
 
@@ -682,11 +705,26 @@ public partial class PropertyPanel : UserControl
                     snw.RefreshAppearance(n);
                 break;
             }
+            // ponytail: real-time preset preview — repaint the live panel window
             case PanelConfig p when record is PanelPreset pp:
                 CopyPanelConfigFields(pp.Config, p);
                 // ponytail: repaint the live panel window from the mutated live
                 // config (no disk write; Apply commits later).
                 app?.PanelService?.RefreshAppearance();
+                break;
+            // 插件组件预设：只套宽高 + 外观/玻璃/材质/磁贴。位置、显隐、锁定、实例身份
+            // 和插件私有 SettingsJson 一个都不碰 —— 预设是外观卡，不是「克隆一个组件」。
+            case PluginWidget w when record is PluginWidgetPreset wp:
+                wp.Widget.ApplyTo(w);
+                // 实时预览：把新外观铺到插件组件窗口（不写盘；Apply 才落盘）。
+                PluginService.Instance.GetWindow(w.Id)?.RefreshAppearance();
+                break;
+            // 分区坞预设：只套吸附边/行为/外观。名称、显隐、折叠态、持有的分区 Id、
+            // 显示器归属和插件私有设置全部保留。
+            case PluginZoneBar bar when record is PluginZoneBarPreset bp:
+                bp.Bar.ApplyTo(bar);
+                // 实时预览：重排坞窗口（不写盘；Apply 才落盘）。
+                ZoneBayService.Instance.ApplySettings(bar);
                 break;
             // 播放器预设：整套外观（含该形态的尺寸）套用，但身份/位置/形态/显隐保持不动。
             case DesktopMediaPlayer mp when record is MediaPlayerPreset mpp:
@@ -3742,7 +3780,8 @@ public partial class PropertyPanel : UserControl
     // ── 分区坞（PluginZoneBar）──
     //
     // 分区坞是宿主侧组件，不是分区：字段集只有《组件插件-初步方案》§6 的
-    // 「基本 / 行为 / 外观 / 液态玻璃」四节，没有宽/高、磁贴、标题栏、图标、预设卡。
+    // 「基本 / 行为 / 外观 / 液态玻璃」四节，没有宽/高、磁贴、标题栏、图标。
+    // 预设卡在 v1.2.3 接入：独立 PresetKind.PluginZoneBar + Presets/PluginZoneBars。
     // 状态区（顶部绿色词条那一行）按 2026-11-07 修复要求只留「位置」「展开方式」两项。
 
     void BuildZoneBayFields(PluginZoneBar bar)
@@ -3856,7 +3895,8 @@ public partial class PropertyPanel : UserControl
     /// <summary>
     /// 插件组件的字段树。插件只负责内容，窗口外观全部由宿主负责，所以这里和内置组件
     /// 是同一套语义；字段集受 SDK 的 <see cref="PluginWidget"/> 限制（扁平结构）。
-    /// 与分区坞一样不提供「预设卡」：外观字段集跨类型不通用，存成卡再套到别处会失效。
+    /// 预设卡在 v1.2.3 接入：独立 PresetKind.PluginWidget + Presets/PluginWidgets，
+    /// 载荷只含宽高 + 外观 + 玻璃/材质 + 磁贴（位置/隐藏/锁定/插件私有设置不进预设）。
     /// </summary>
     void BuildPluginWidgetFields(PluginWidget widget)
     {

@@ -31,6 +31,12 @@ public class PresetCardTemplateSelector : DataTemplateSelector
     /// 和分区那种方块卡完全不同的观感。</summary>
     public DataTemplate? DockTemplate { get; set; }
 
+    /// <summary>v1.2.3 通用插件卡：插件组件（PluginWidget）与分区坞（PluginZoneBar）共用。
+    /// 卡面 = 填充/圆角/玻璃色块 + 名称 + 类型标签；两类载荷字段不同，但共有
+    /// FillColor / CornerRadius / GlassColorMode，卡片通过 <see cref="PresetCardItem"/>
+    /// 暴露的 PluginCard* 属性取值。</summary>
+    public DataTemplate? PluginTemplate { get; set; }
+
     public override DataTemplate? SelectTemplate(object item, DependencyObject container)
     {
         if (item is not PresetCardItem ci) return null;
@@ -48,6 +54,8 @@ public class PresetCardTemplateSelector : DataTemplateSelector
             PresetKind.MediaPlayerBars => MediaPlayerTemplate,
             PresetKind.MediaPlayerVinyl => MediaPlayerTemplate,
             PresetKind.Dock => DockTemplate,
+            // 插件组件 / 分区坞：通用插件卡（两类载荷字段集不同，但卡面只看共有的外观字段）。
+            PresetKind.PluginWidget or PresetKind.PluginZoneBar => PluginTemplate,
             _ => null
         };
     }

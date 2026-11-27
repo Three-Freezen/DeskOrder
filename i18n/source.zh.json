@@ -83,6 +83,10 @@
   "Preset.SaveTitle.MediaPlayerVinyl": "保存唱片机预设",
   "Preset.LoadTitle.Dock": "加载快捷栏预设",
   "Preset.SaveTitle.Dock": "保存快捷栏预设",
+  "Preset.LoadTitle.PluginWidget": "加载插件组件预设",
+  "Preset.SaveTitle.PluginWidget": "保存插件组件预设",
+  "Preset.LoadTitle.PluginZoneBar": "加载分区坞预设",
+  "Preset.SaveTitle.PluginZoneBar": "保存分区坞预设",
 
   "ToolTip.Minimize": "最小化",
   "ToolTip.Show": "显示",
@@ -468,6 +472,8 @@
   "Preset.DeleteFailedTitle": "删除失败",
   "Preset.DeleteMenuItem": "删除",
   "Preset.OverwritePrompt": "已存在同名预设「{0}」，是否覆盖？",
+  "Preset.Kind.PluginWidget": "插件组件",
+  "Preset.Kind.PluginZoneBar": "分区坞",
 
   "Calendar.AddNote": "添加备注",
   "Calendar.Delete": "删除日历",

@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using DeskOrder.PluginApi;
 using DesktopZones.Models;
 
 namespace DesktopZones.Services;
@@ -251,6 +252,10 @@ public class PresetService
                         PresetKind.Panel => JsonSerializer.Deserialize<PanelPreset>(text, Opts),
                         PresetKind.Subfolder => JsonSerializer.Deserialize<SubfolderPreset>(text, Opts),
                         PresetKind.Dock => JsonSerializer.Deserialize<DockPreset>(text, Opts),
+                        // 插件组件 / 分区坞：载荷是外观快照（PluginWidgetAppearance /
+                        // PluginZoneBarAppearance），落盘 JSON 里不含位置/身份/插件私有设置。
+                        PresetKind.PluginWidget => JsonSerializer.Deserialize<PluginWidgetPreset>(text, Opts),
+                        PresetKind.PluginZoneBar => JsonSerializer.Deserialize<PluginZoneBarPreset>(text, Opts),
                         PresetKind.MediaPlayerBars or PresetKind.MediaPlayerVinyl
                             => JsonSerializer.Deserialize<MediaPlayerPreset>(text, Opts),
                         _ => JsonSerializer.Deserialize<ZonePreset>(text, Opts)
@@ -416,6 +421,10 @@ public class PresetService
             // SaveSubfolderPreset convenience method already did this; the dispatch
             // here was cloning the payload with SubItems intact).
             PresetKind.Subfolder => BuildSubfolderPreset(id, trimmedName, createdAt, (ZoneItem)payload),
+            // 插件组件 / 分区坞：载荷是「外观快照」POCO（见 Models/PluginWidgetPreset.cs）；
+            // 也接受活的模型实例，直接抓快照 —— 调用方不必自己转换。
+            PresetKind.PluginWidget => BuildPluginWidgetPreset(id, trimmedName, createdAt, payload),
+            PresetKind.PluginZoneBar => BuildPluginZoneBarPreset(id, trimmedName, createdAt, payload),
             // 律动条 / 唱片机：整套外观（含当前形态的尺寸）都进预设，但形态本身不会被预设改掉。
             PresetKind.MediaPlayerBars or PresetKind.MediaPlayerVinyl
                 => new MediaPlayerPreset { Id = id, Name = trimmedName, CreatedAt = createdAt, Player = ((DesktopMediaPlayer)payload).Clone() },
@@ -439,6 +448,36 @@ public class PresetService
         var clone = zone.Clone();
         clone.DockMode = true;
         return clone;
+    }
+
+    /// <summary>
+    /// 插件组件预设：把载荷（外观快照或活的 <see cref="PluginWidget"/>）收成
+    /// <see cref="PluginWidgetAppearance"/>。位置/显隐/锁定/身份/SettingsJson 在抓快照时
+    /// 就已经被排除，预设文件天然不会带上它们。
+    /// </summary>
+    private static PluginWidgetPreset BuildPluginWidgetPreset(Guid id, string name, DateTime createdAt, object payload)
+    {
+        var appearance = payload switch
+        {
+            PluginWidgetAppearance a => a.Clone(),
+            PluginWidget w => PluginWidgetAppearance.FromWidget(w),
+            _ => throw new InvalidOperationException(
+                $"PluginWidget preset payload must be PluginWidgetAppearance or PluginWidget, got {payload?.GetType().Name ?? "null"}")
+        };
+        return new PluginWidgetPreset { Id = id, Name = name, CreatedAt = createdAt, Widget = appearance };
+    }
+
+    /// <summary>分区坞预设：载荷是外观/行为快照（或活的 <see cref="PluginZoneBar"/>）。</summary>
+    private static PluginZoneBarPreset BuildPluginZoneBarPreset(Guid id, string name, DateTime createdAt, object payload)
+    {
+        var appearance = payload switch
+        {
+            PluginZoneBarAppearance a => a.Clone(),
+            PluginZoneBar b => PluginZoneBarAppearance.FromBar(b),
+            _ => throw new InvalidOperationException(
+                $"PluginZoneBar preset payload must be PluginZoneBarAppearance or PluginZoneBar, got {payload?.GetType().Name ?? "null"}")
+        };
+        return new PluginZoneBarPreset { Id = id, Name = name, CreatedAt = createdAt, Bar = appearance };
     }
 
     /// <summary>
@@ -495,6 +534,9 @@ public class PresetService
         PanelPreset p => p.Config,
         SubfolderPreset s => s.Subfolder,
         MediaPlayerPreset m => m.Player,
+        // 插件组件 / 分区坞：载荷是外观快照（不是活模型），套用方自己写回目标。
+        PluginWidgetPreset w => w.Widget,
+        PluginZoneBarPreset b => b.Bar,
         _ => throw new InvalidOperationException($"Unknown preset type {record.GetType().Name}")
     };
 

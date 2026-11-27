@@ -430,6 +430,25 @@ public partial class LoadPresetDialog : Window, INotifyPropertyChanged
     public event PropertyChangedEventHandler? PropertyChanged;
     private void OnPropertyChanged([CallerMemberName] string? name = null)
         => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+
+#if DEBUG
+    /// <summary>自测台用：当前对话框里的卡片数（= 服务 LoadAll 的条数）。</summary>
+    internal int DebugCardCount => _items.Count;
+
+    /// <summary>自测台用：第 <paramref name="index"/> 张卡是不是走了「通用插件卡」模板。
+    /// 验证 <see cref="PresetCardTemplateSelector"/> 对 PluginWidget / PluginZoneBar 的分派。</summary>
+    internal bool DebugCardUsesPluginTemplate(int index = 0)
+    {
+        if (index < 0 || index >= _items.Count) return false;
+        if (FindResource("CardSelector") is not PresetCardTemplateSelector selector) return false;
+        var template = selector.SelectTemplate(_items[index], PresetList);
+        return template != null && ReferenceEquals(template, FindResource("PluginPresetCardTemplate"));
+    }
+
+    /// <summary>自测台用：第 <paramref name="index"/> 张卡的类型标签文本。</summary>
+    internal string DebugCardKindLabel(int index = 0)
+        => index >= 0 && index < _items.Count ? _items[index].KindLabel : "";
+#endif
 }
 
 /// <summary>Parses "#AARRGGBB"/"#RRGGBB" hex strings into <see cref="Color"/>.</summary>
