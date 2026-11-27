@@ -391,6 +391,9 @@ public partial class MediaPlayerWidget : Window
         Bars.Color1 = ParseColor(_player.BarsColor, Color.FromRgb(0x7C, 0xF5, 0xFF));
         Bars.Color2 = ParseColor(_player.BarsColor2, Color.FromRgb(0xB5, 0x8C, 0xFF));
         Bars.AutoColorIntervalSec = Math.Max(1, _player.BarsAutoIntervalSec);
+        // 律动帧率上限（0–100，0 = 停止逐帧刷新）。旧配置没有该字段 → 模型侧
+        // BarsFpsEffective 回落到默认 30fps，行为不变。必须在 Apply 之前铺好。
+        Bars.TargetFps = _player.BarsFpsEffective;
         Bars.Apply();
         UpdateResponsiveLayout();
         UpdateAudioGate();

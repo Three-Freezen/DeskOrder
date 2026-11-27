@@ -679,7 +679,8 @@ public partial class App : System.Windows.Application
         var uiHoldName = ParseArgValue(e.Args, "--ui-hold=");
         var uiCostName = ParseArgValue(e.Args, "--ui-cost=");
         var uiPagesOut = ParseArgValue(e.Args, "--ui-pages=");
-        if (uiShotDir != null || uiHoldName != null || uiCostName != null || uiPagesOut != null)
+        var uiBarsFps = ParseArgValue(e.Args, "--ui-bars-fps=");
+        if (uiShotDir != null || uiHoldName != null || uiCostName != null || uiPagesOut != null || uiBarsFps != null)
         {
             var only = ParseArgValue(e.Args, "--ui-shot-only=");
             var holdMsText = ParseArgValue(e.Args, "--ui-hold-ms=");
@@ -690,10 +691,14 @@ public partial class App : System.Windows.Application
             int costCycles = int.TryParse(costCyclesText, out var cc) ? cc : 5;
             var pagesRoundsText = ParseArgValue(e.Args, "--ui-pages-rounds=");
             int pagesRounds = int.TryParse(pagesRoundsText, out var pr) ? pr : 5;
+            // 律动条帧率自测：--ui-bars-fps=<csv> --ui-bars-out=<csv 文件>
+            var barsOut = ParseArgValue(e.Args, "--ui-bars-out=")
+                ?? System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ui-bars-fps.csv");
             Dispatcher.BeginInvoke(new Action(async () =>
             {
                 try
                 {
+                    if (uiBarsFps != null) await RunUiBarsFpsProbeAsync(uiBarsFps, barsOut);
                     if (uiPagesOut != null) await RunUiPagesAsync(pagesRounds, uiPagesOut);
                     if (uiCostName != null) await RunUiCostAsync(uiCostName, costCycles, costOut);
                     if (uiHoldName != null) await RunUiHoldAsync(uiHoldName, holdMs);

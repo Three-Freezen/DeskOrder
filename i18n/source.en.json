@@ -809,6 +809,8 @@
   "MediaProp.BarsWidth": "Bar width",
   "MediaProp.Amplitude": "Jump amplitude",
   "MediaProp.Sensitivity": "Sensitivity",
+  "MediaProp.BarsFps": "Frame rate",
+  "MediaProp.BarsFpsHint": "0 = stop per-frame refresh (bars stay still at rest); capped at 100 and also limited by the monitor refresh rate.",
   "MediaProp.Reflection": "Reflection",
   "MediaProp.Pause": "Pause (freeze this component)",
   "MediaProp.ColorMode": "Coloring",

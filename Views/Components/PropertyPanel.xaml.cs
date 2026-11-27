@@ -3218,6 +3218,22 @@ public partial class PropertyPanel : UserControl
                 media.BarsAmplitude, v => { media.BarsAmplitude = Math.Round(v); Save(media); }));
             barsSection.Children.Add(MakeSliderRow(_loc["MediaProp.Sensitivity"], 1, 100, 1,
                 media.BarsSensitivity, v => { media.BarsSensitivity = Math.Round(v); Save(media); }));
+            // 律动帧率：0–100 可任意调，0 = 停止逐帧刷新（条子静止贴地，省电）。
+            // 旧配置没有 BarsFps（null）→ BarsFpsEffective 按默认 30 展示；用户拖动后写成具体值。
+            // 行 Grid 起名 "BarsFpsRow"，供 --ui-shot 自测定位/滚动到该行截图。
+            var fpsRow = MakeSliderRow(_loc["MediaProp.BarsFps"], 0, 100, 1,
+                media.BarsFpsEffective,
+                v => { media.BarsFps = (int)Math.Round(v); Save(media); });
+            fpsRow.Name = "BarsFpsRow";
+            barsSection.Children.Add(fpsRow);
+            barsSection.Children.Add(new TextBlock
+            {
+                Text = _loc["MediaProp.BarsFpsHint"],
+                FontSize = 10,
+                Foreground = (Brush)FindResource("Brush.Text.Tertiary"),
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 4, 0, 0),
+            });
             barsSection.Children.Add(MakeCheckRow(_loc["MediaProp.Reflection"], media.BarsReflection,
                 v => { media.BarsReflection = v; Save(media); }));
 
@@ -4990,6 +5006,7 @@ public partial class PropertyPanel : UserControl
         dst.BarsRounded = src.BarsRounded;
         dst.BarsAmplitude = src.BarsAmplitude;
         dst.BarsSensitivity = src.BarsSensitivity;
+        dst.BarsFps = src.BarsFps;              // 取消回退 / 预设应用：帧率也要跟着还原
         dst.BarsScaleV2 = src.BarsScaleV2;      // 档位刻度标记也要跟着回退，否则下次加载会误迁移
         dst.BarsSource = src.BarsSource;
         dst.BarsReflection = src.BarsReflection;
