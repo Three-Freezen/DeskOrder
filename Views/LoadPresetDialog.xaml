@@ -973,6 +973,49 @@
             </Border>
         </DataTemplate>
 
+        <DataTemplate x:Key="PluginPresetCardTemplate">
+            <!-- v1.2.3 通用插件卡：插件组件（PluginWidget）/ 分区坞（PluginZoneBar）共用。
+                 两类载荷字段集不同（PluginWidgetAppearance / PluginZoneBarAppearance），
+                 但都有 FillColor / BorderColor / BorderThickness / CornerRadius /
+                 EnableLiquidGlass / GlassColorMode，所以卡面统一画成「外观色块 + 类型标签」，
+                 名称/日期放下方信息栏（与其它预设卡同一套版式）。 -->
+            <Border Style="{StaticResource CardFrameStyle}"
+                    MouseEnter="Card_MouseEnter"
+                    MouseLeave="Card_MouseLeave"
+                    MouseLeftButtonDown="Card_MouseLeftButtonDown"
+                    Loaded="Card_Loaded">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Border Margin="10,10,10,2" ClipToBounds="True"
+                            CornerRadius="{Binding PluginCardCornerRadius}"
+                            BorderThickness="{Binding PluginCardBorderThickness}"
+                            Background="{Binding PluginCardFillBrush}"
+                            BorderBrush="{Binding PluginCardBorderBrush}">
+                        <Grid>
+                            <!-- 液态玻璃色块（未开玻璃时 PluginCardGlassBrush 为 null → 不叠色） -->
+                            <Rectangle Fill="{Binding PluginCardGlassBrush}" IsHitTestVisible="False"/>
+                            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center"
+                                        Margin="8" Orientation="Vertical">
+                                <TextBlock Text="▣" FontSize="18" HorizontalAlignment="Center"
+                                           Foreground="{DynamicResource Brush.Text.Secondary}" Margin="0,0,0,4"/>
+                                <TextBlock Text="{Binding KindLabel}" FontSize="11" FontWeight="SemiBold"
+                                           HorizontalAlignment="Center" TextAlignment="Center"
+                                           TextWrapping="Wrap"
+                                           Foreground="{DynamicResource Brush.Text.Tertiary}"/>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                    <StackPanel Grid.Row="1" Margin="12,4,12,8" VerticalAlignment="Top">
+                        <TextBlock Text="{Binding Name}" Foreground="{DynamicResource Brush.Text.Tertiary}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Text="{Binding CreatedAt, StringFormat=yyyy-MM-dd}" Foreground="{DynamicResource Brush.Text.Tertiary}" FontSize="10" Margin="0,2,0,0"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </DataTemplate>
+
         <local:PresetCardTemplateSelector x:Key="CardSelector"
                 ZoneTemplate="{StaticResource ZoneCardTemplate}"
                 ClockAnalogTemplate="{StaticResource ClockAnalogCardTemplate}"
@@ -983,7 +1026,8 @@
                 PanelTemplate="{StaticResource PanelCardTemplate}"
                 SubfolderTemplate="{StaticResource SubfolderCardTemplate}"
                 MediaPlayerTemplate="{StaticResource MediaPlayerCardTemplate}"
-                DockTemplate="{StaticResource DockCardTemplate}"/>
+                DockTemplate="{StaticResource DockCardTemplate}"
+                PluginTemplate="{StaticResource PluginPresetCardTemplate}"/>
     </Window.Resources>
 
     <Border Background="{DynamicResource Brush.Bg.Chrome}" CornerRadius="12" BorderBrush="{DynamicResource Brush.Border.Subtle}" BorderThickness="1">
