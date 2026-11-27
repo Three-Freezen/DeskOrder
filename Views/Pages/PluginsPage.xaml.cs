@@ -448,7 +448,7 @@ public partial class PluginsPage : UserControl
         }
     }
 
-    PluginInstallPrompt BuildPrompt(PluginCatalogEntry entry)
+    internal PluginInstallPrompt BuildPrompt(PluginCatalogEntry entry)
     {
         var kind = PluginDisplay.DescribeKinds(entry.KindValues);
         var described = PluginDisplay.DescribePermissions(entry.Permissions);
@@ -466,15 +466,32 @@ public partial class PluginsPage : UserControl
             Size = entry.Size > 0 ? FormatSize(entry.Size) : "",
             Sha256 = entry.Sha256 ?? "",
             Permissions = permissions,
-            Contents = entry.KindValue switch
-            {
-                PluginKind.Language when entry.Language != null => Loc.Get("Plugin.Contents.Language",
-                    entry.Language.NativeName, (int)Math.Round(entry.Language.Coverage * 100),
-                    entry.Language.Base),
-                PluginKind.Appearance => Loc["Plugin.Appearance.Hint"],
-                _ => ""
-            },
+            Contents = DescribePromptContents(entry),
             Declarative = !entry.KindValue.IsCode()
+        };
+    }
+
+    /// <summary>
+    /// 安装确认里的「包含内容」：
+    /// 单类型保持原有文案（语言包 / 外观包 / 代码包留空），一个包多类型时列全部能力
+    ///（形如「桌面组件 · 工具插件」），用户才能在确认框里看出它会装进来什么。
+    /// registry 条目没有 widgets 数量，所以这里只写类型名。
+    /// </summary>
+    internal static string DescribePromptContents(PluginCatalogEntry entry)
+    {
+        if (entry.KindValues.Count > 1)
+        {
+            var capabilities = string.Join(" · ",
+                entry.KindValues.Select(capability => Loc[capability.I18nKey()]));
+            return Loc.Get("Plugin.Contents.CapabilityList", capabilities);
+        }
+        return entry.KindValue switch
+        {
+            PluginKind.Language when entry.Language != null => Loc.Get("Plugin.Contents.Language",
+                entry.Language.NativeName, (int)Math.Round(entry.Language.Coverage * 100),
+                entry.Language.Base),
+            PluginKind.Appearance => Loc["Plugin.Appearance.Hint"],
+            _ => ""
         };
     }
 
@@ -748,6 +765,36 @@ public partial class PluginsPage : UserControl
             actions.Children.Add(toggle);
         }
 
+        // 有设置 schema 的插件：行上直接给一个齿轮（与详情弹窗的「插件设置」打开同一个窗口，
+        // 并定位到该插件）。30×30 图标按钮，不挤占左侧信息列。
+        if (PluginSettingsService.Instance.Find(record.Id) != null)
+        {
+            var gear = new Button
+            {
+                Width = 30,
+                Height = 30,
+                Padding = new Thickness(0),
+                Margin = new Thickness(8, 0, 0, 0),
+                Cursor = Cursors.Hand,
+                Style = (Style)FindResource("OutlineBtn"),
+                ToolTip = Loc["Plugin.Settings.Title"]
+            };
+            gear.Content = new Path
+            {
+                Data = (Geometry)FindResource("Icon.Settings"),
+                Width = 13,
+                Height = 13,
+                Stretch = Stretch.Uniform,
+                Stroke = ThemeBrushes.TextSecondaryModern,
+                StrokeThickness = 1.2,
+                StrokeStartLineCap = PenLineCap.Round,
+                StrokeEndLineCap = PenLineCap.Round,
+                StrokeLineJoin = PenLineJoin.Round
+            };
+            gear.Click += (_, _) => OpenPluginSettings(record);
+            actions.Children.Add(gear);
+        }
+
         // widget 插件启用后，行上直接给「新建组件」入口（与「插件组件」页共用同一个菜单）；
         // 已启用但描述符还没加载（装了没重启/加载失败）时禁用并提示重启。
         // 行上已有 4 个按钮，这里只放一个「＋」图标按钮（文字入口在插件组件页与详情弹窗里），
@@ -873,6 +920,20 @@ public partial class PluginsPage : UserControl
     /// <summary>已安装行「新建组件」：打开与「插件组件」页共用的创建菜单，建完重绘本页。</summary>
     void CreateWidgetFromRow(FrameworkElement anchor)
         => PluginWidgetCreateMenu.Open(anchor, Window.GetWindow(this), _ => Render());
+
+    /// <summary>打开插件设置窗口并定位到该插件（已安装行齿轮的入口）。</summary>
+    void OpenPluginSettings(PluginRecord record)
+    {
+        try
+        {
+            new PluginSettingsDialog(record.Id) { Owner = Window.GetWindow(this) }.ShowDialog();
+        }
+        catch (Exception ex)
+        {
+            ShowStatus(Loc.Get("Plugin.InstallFailed", ex.Message));
+            DzTrace.Always($"[Plugin] cannot open the plugin settings dialog: {ex}");
+        }
+    }
 
     FrameworkElement BuildInstalledIcon(PluginRecord record)
     {
@@ -1047,13 +1108,33 @@ public partial class PluginsPage : UserControl
             CheckFileExists = true
         };
         if (open.ShowDialog(Window.GetWindow(this)) != true) return;
+        await ImportPackageAsync(open.FileName);
+    }
 
-        var preview = _service.Installer!.PreviewPackage(open.FileName, out var error);
+    /// <summary>
+    /// 导入一个本地 .dopkg —— 文件对话框与拖拽共用这一条路径：先 preview 做完整校验，
+    /// 用户确认后交给安装器落盘，失败提示与成功文案也和以前完全一致。
+    /// <paramref name="interactive"/> 为 false 仅供自测台：跳过模态确认框与结果 MessageBox，
+    /// 其余校验 / 安装行为不变。
+    /// </summary>
+    internal async System.Threading.Tasks.Task<bool> ImportPackageAsync(string path, bool interactive = true)
+    {
+        // 拖拽的路径是外部输入：再判一次（文件对话框已保证存在，拖拽可能指向目录 / 改过后缀）。
+        if (!IsDroppablePackage(path))
+        {
+            if (interactive)
+                MessageBox.Show(Window.GetWindow(this), Loc.Get("Plugin.ImportInvalid", path),
+                    Loc["Plugin.PageTitle"], MessageBoxButton.OK, MessageBoxImage.Warning);
+            return false;
+        }
+
+        var preview = _service.Installer!.PreviewPackage(path, out var error);
         if (preview == null)
         {
-            MessageBox.Show(Window.GetWindow(this), Loc.Get("Plugin.ImportInvalid", error ?? ""),
-                Loc["Plugin.PageTitle"], MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
+            if (interactive)
+                MessageBox.Show(Window.GetWindow(this), Loc.Get("Plugin.ImportInvalid", error ?? ""),
+                    Loc["Plugin.PageTitle"], MessageBoxButton.OK, MessageBoxImage.Warning);
+            return false;
         }
 
         var manifest = preview.Manifest;
@@ -1079,30 +1160,106 @@ public partial class PluginsPage : UserControl
             Contents = preview.Contents,
             Declarative = !kind.IsCode()
         };
-        var dialog = new PluginInstallDialog(prompt) { Owner = Window.GetWindow(this) };
-        if (dialog.ShowDialog() != true) return;
+        if (interactive)
+        {
+            var dialog = new PluginInstallDialog(prompt) { Owner = Window.GetWindow(this) };
+            if (dialog.ShowDialog() != true) return false;
+        }
 
-        var result = await _service.Installer.InstallFromFileAsync(open.FileName);
+        var result = await _service.Installer.InstallFromFileAsync(path);
         _service.RefreshRecords();
         if (!result.Success)
         {
-            MessageBox.Show(Window.GetWindow(this), Loc.Get("Plugin.InstallFailed", result.Error ?? ""),
-                Loc["Plugin.PageTitle"], MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
+            if (interactive)
+                MessageBox.Show(Window.GetWindow(this), Loc.Get("Plugin.InstallFailed", result.Error ?? ""),
+                    Loc["Plugin.PageTitle"], MessageBoxButton.OK, MessageBoxImage.Warning);
+            return false;
         }
-        MessageBox.Show(Window.GetWindow(this), (kind.IsCode()
-                    ? Loc.Get("Plugin.InstallDone", prompt.Name)
-                    : Loc["Plugin.Installed"] + " · " + prompt.Name)
-                + (kind switch
-                {
-                    PluginKind.Language => "\n\n" + Loc["Plugin.Language.Choose"],
-                    PluginKind.Appearance => "\n\n" + Loc["Plugin.Appearance.Hint"],
-                    _ => ""
-                }),
-            Loc["Plugin.PageTitle"], MessageBoxButton.OK, MessageBoxImage.Information);
+        if (interactive)
+        {
+            MessageBox.Show(Window.GetWindow(this), (kind.IsCode()
+                        ? Loc.Get("Plugin.InstallDone", prompt.Name)
+                        : Loc["Plugin.Installed"] + " · " + prompt.Name)
+                    + (kind switch
+                    {
+                        PluginKind.Language => "\n\n" + Loc["Plugin.Language.Choose"],
+                        PluginKind.Appearance => "\n\n" + Loc["Plugin.Appearance.Hint"],
+                        _ => ""
+                    }),
+                Loc["Plugin.PageTitle"], MessageBoxButton.OK, MessageBoxImage.Information);
+        }
         // 本地导入同版本覆盖时也要让已安装列表读到新 manifest。
         _manifestCache.Clear();
         Render();
+        return true;
+    }
+
+    /// <summary>
+    /// 拖拽 / 导入前的纯函数校验：扩展名 <c>.dopkg</c>（大小写不敏感）、文件存在且不是目录。
+    /// 抽成 static 方便自测台直接断言真值表，不用真的拖一次。
+    /// </summary>
+    internal static bool IsDroppablePackage(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        var full = path.Trim();
+        if (!full.EndsWith(".dopkg", StringComparison.OrdinalIgnoreCase)) return false;
+        if (System.IO.Directory.Exists(full)) return false;
+        return System.IO.File.Exists(full);
+    }
+
+    // ── 拖拽导入 ──
+
+    /// <summary>拖拽数据里挑出可导入的 .dopkg；没有合法文件时页面拒绝这次拖放。</summary>
+    static List<string> DroppablePackages(IDataObject? data)
+    {
+        var result = new List<string>();
+        if (data == null || !data.GetDataPresent(DataFormats.FileDrop)) return result;
+        if (data.GetData(DataFormats.FileDrop) is not string[] paths) return result;
+        foreach (var path in paths)
+        {
+            if (IsDroppablePackage(path)) result.Add(path.Trim());
+        }
+        return result;
+    }
+
+    void Page_DragOver(object sender, DragEventArgs e)
+    {
+        var packages = DroppablePackages(e.Data);
+        // 至少一个合法 .dopkg 才给「可放下」光标；多文件也接受，Drop 时依次导入。
+        var acceptable = packages.Count > 0 && !_busy;
+        e.Effects = acceptable ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+        DropOverlay.Visibility = acceptable ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    void Page_DragLeave(object sender, DragEventArgs e)
+    {
+        e.Handled = true;
+        // 拖拽在子元素之间移动时也会冒泡 DragLeave：只有指针真的离开页面范围才收起提示，
+        // 否则覆盖层会随着 DragOver / DragLeave 交替闪。
+        var position = e.GetPosition(this);
+        if (position.X < 0 || position.Y < 0
+            || position.X > ActualWidth || position.Y > ActualHeight)
+            DropOverlay.Visibility = Visibility.Collapsed;
+    }
+
+    async void Page_Drop(object sender, DragEventArgs e)
+    {
+        DropOverlay.Visibility = Visibility.Collapsed;
+        e.Handled = true;
+        if (_busy) return;
+        var packages = DroppablePackages(e.Data);
+        if (packages.Count == 0) return;
+        // 多个包按拖入顺序依次导入：每个包都有自己的确认框，不能并发弹出。
+        try
+        {
+            foreach (var path in packages) await ImportPackageAsync(path);
+        }
+        catch (Exception ex)
+        {
+            ShowStatus(Loc.Get("Plugin.InstallFailed", ex.Message));
+            DzTrace.Always($"[Plugin] drag-and-drop import failed: {ex}");
+        }
     }
 
     // ── 搜索 / 刷新 / 空态 ──

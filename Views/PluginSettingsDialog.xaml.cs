@@ -24,12 +24,14 @@ public partial class PluginSettingsDialog : Window
 {
     static readonly LocalizationService Loc = LocalizationService.Instance;
 
-    /// <summary>一个字段的控件 + 取值委托（保存时用它把控件值收回来）。</summary>
+    /// <summary>一个字段的控件 + 取值 / 回写委托（保存时取值，恢复默认时把控件刷成默认值）。</summary>
     sealed class FieldBinding
     {
         public required PluginSettingsEntry Entry { get; init; }
         public required PluginSettingField Field { get; init; }
         public required Func<string> Read { get; init; }
+        /// <summary>把控件显示值刷成给定值（恢复默认用；不负责校验，调用方传的是合法默认值）。</summary>
+        public required Action<string> Apply { get; init; }
         /// <summary>Int 失焦校验的错误行（其它 Kind 为 null）。</summary>
         public TextBlock? ErrorText { get; init; }
     }
@@ -38,15 +40,34 @@ public partial class PluginSettingsDialog : Window
     readonly List<string> _sectionHeaders = new();
     readonly List<string> _fieldLabels = new();
 
-    public PluginSettingsDialog()
+    /// <summary>打开时要定位 / 高亮的插件 id（可空 = 普通打开，所有区块平铺）。</summary>
+    readonly string? _focusPluginId;
+    readonly Dictionary<string, Border> _sectionBorders = new(StringComparer.OrdinalIgnoreCase);
+    readonly Dictionary<string, Button> _resetButtons = new(StringComparer.OrdinalIgnoreCase);
+    readonly Dictionary<string, string> _headersByPlugin = new(StringComparer.OrdinalIgnoreCase);
+    Border? _focusedBorder;
+    string _focusedHeader = "";
+
+    public PluginSettingsDialog() : this(null)
     {
+    }
+
+    /// <param name="pluginId">
+    /// 从插件详情 / 已安装行的齿轮进来时传插件 id：打开后滚动到该插件的设置块并高亮，
+    /// 其它插件的设置块仍可编辑（不是过滤视图，避免用户找不到刚刚调过的项）。
+    /// </param>
+    public PluginSettingsDialog(string? pluginId)
+    {
+        _focusPluginId = string.IsNullOrWhiteSpace(pluginId) ? null : pluginId.Trim();
         InitializeComponent();
         BuildSections();
         var hasAny = _bindings.Count > 0 || _sectionHeaders.Count > 0;
         EmptyText.Visibility = hasAny ? Visibility.Collapsed : Visibility.Visible;
         ScrollHost.Visibility = hasAny ? Visibility.Visible : Visibility.Collapsed;
         SaveButton.IsEnabled = hasAny;
+        FocusRequestedSection();
     }
+
 
     // ── 构建 ──
 
@@ -56,6 +77,11 @@ public partial class PluginSettingsDialog : Window
         _bindings.Clear();
         _sectionHeaders.Clear();
         _fieldLabels.Clear();
+        _sectionBorders.Clear();
+        _resetButtons.Clear();
+        _headersByPlugin.Clear();
+        _focusedBorder = null;
+        _focusedHeader = "";
 
         var language = Loc.CurrentLanguage;
         var entries = PluginSettingsService.Instance.Schemas;
@@ -80,19 +106,37 @@ public partial class PluginSettingsDialog : Window
 
         foreach (var entry in entries)
         {
-            var section = new StackPanel { Margin = new Thickness(0, 0, 0, 18) };
+            var section = new StackPanel();
 
             var header = entry.DisplayPluginName + " · " + entry.DisplayTitle;
-            section.Children.Add(new TextBlock
+            // 标题行：左边「插件名 · 设置标题」，右边「恢复默认」——只重置这一个插件的字段。
+            var headerRow = new DockPanel { Margin = new Thickness(0, 0, 0, 8) };
+            var resetButton = new Button
+            {
+                Content = Loc["Plugin.Settings.Reset"],
+                Height = 24,
+                Padding = new Thickness(10, 0, 10, 0),
+                FontSize = 10.5,
+                Cursor = Cursors.Hand,
+                Style = Application.Current?.TryFindResource("OutlineBtn") as Style,
+                ToolTip = Loc["Plugin.Settings.Reset.Hint"]
+            };
+            resetButton.Click += (_, _) => ResetEntry(entry);
+            DockPanel.SetDock(resetButton, Dock.Right);
+            headerRow.Children.Add(resetButton);
+            headerRow.Children.Add(new TextBlock
             {
                 Text = header,
                 FontSize = 13,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = ThemeBrushes.TextPrimaryModern,
                 TextWrapping = TextWrapping.Wrap,
-                Margin = new Thickness(0, 0, 0, 8)
+                VerticalAlignment = VerticalAlignment.Center
             });
+            section.Children.Add(headerRow);
             _sectionHeaders.Add(header);
+            _headersByPlugin[entry.PluginId] = header;
+            _resetButtons[entry.PluginId] = resetButton;
 
             var values = valuesCache[entry];
             foreach (var field in entry.Schema.Fields)
@@ -101,7 +145,91 @@ public partial class PluginSettingsDialog : Window
                 section.Children.Add(BuildField(entry, field, value, language));
             }
 
-            SectionsHost.Children.Add(section);
+            // 每个插件一块浅色卡片：定位时给这一块刷强调色背景 + 边框，滚动也以它为锚点。
+            var sectionBorder = new Border
+            {
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(10, 8, 10, 2),
+                Margin = new Thickness(0, 0, 0, 10),
+                BorderThickness = new Thickness(1),
+                BorderBrush = Brushes.Transparent,
+                Background = Brushes.Transparent,
+                Child = section
+            };
+            _sectionBorders[entry.PluginId] = sectionBorder;
+            SectionsHost.Children.Add(sectionBorder);
+        }
+    }
+
+    /// <summary>
+    /// 从详情 / 已安装行进来时：滚到目标插件块并高亮。构造期控件还没测量，BringIntoView 不生效，
+    /// 所以滚动作业挂到 Loaded；找不到目标 id（例如打开期间插件被禁用）就安静地按普通窗口显示。
+    /// </summary>
+    void FocusRequestedSection()
+    {
+        if (_focusPluginId == null) return;
+        if (!_sectionBorders.TryGetValue(_focusPluginId, out var border)) return;
+        _focusedBorder = border;
+        _focusedHeader = _headersByPlugin.TryGetValue(_focusPluginId, out var header) ? header : "";
+        border.Background = ThemeBrushes.AccentWashModern;
+        border.BorderBrush = ThemeBrushes.AccentModern;
+        Loaded += (_, _) => border.BringIntoView();
+    }
+
+    /// <summary>
+    /// 一个插件的「恢复默认」：把所有字段刷成 schema 默认值，再复用服务的保存管线
+    /// （校验 → 落盘 → Changed / SettingsChanged 回调），最后在状态栏提示。只在用户点击时执行。
+    /// </summary>
+    void ResetEntry(PluginSettingsEntry entry)
+    {
+        var defaults = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var field in entry.Schema.Fields) defaults[field.Key] = DefaultValueOf(field);
+
+        foreach (var binding in _bindings)
+        {
+            if (!ReferenceEquals(binding.Entry, entry)) continue;
+            binding.Apply(defaults.TryGetValue(binding.Field.Key, out var value) ? value : "");
+            if (binding.ErrorText != null) binding.ErrorText.Visibility = Visibility.Collapsed;
+        }
+
+        if (PluginSettingsService.Instance.Save(entry, defaults, out var error))
+        {
+            StatusText.Text = Loc.Get("Plugin.Settings.ResetDone", entry.DisplayPluginName);
+            StatusText.Foreground = ThemeBrushes.TextSecondaryModern;
+            StatusText.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            ShowStatus(error ?? Loc.Get("Plugin.Settings.SaveFailed", ""));
+        }
+    }
+
+    /// <summary>
+    /// 字段默认值，规则与 <see cref="PluginSettingsService"/> 的归一化保持一致：
+    /// 空 Int 用 Min（没有就 0），空 / 非法 Choice 用第一项，Toggle 缺省为 false。
+    /// </summary>
+    static string DefaultValueOf(PluginSettingField field)
+    {
+        var raw = field.DefaultValue ?? "";
+        switch (field.Kind)
+        {
+            case PluginSettingKind.Toggle:
+                if (string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase)) return "true";
+                if (string.Equals(raw, "false", StringComparison.OrdinalIgnoreCase)) return "false";
+                return "false";
+
+            case PluginSettingKind.Int:
+                if (int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var number))
+                    return number.ToString(CultureInfo.InvariantCulture);
+                return (field.Min ?? 0).ToString(CultureInfo.InvariantCulture);
+
+            case PluginSettingKind.Choice:
+                var choices = field.Choices ?? new List<PluginSettingChoice>();
+                if (choices.Any(choice => string.Equals(choice.Value, raw, StringComparison.Ordinal))) return raw;
+                return choices.Count > 0 ? choices[0].Value : "";
+
+            default:
+                return raw;
         }
     }
 
@@ -112,6 +240,7 @@ public partial class PluginSettingsDialog : Window
         _fieldLabels.Add(label);
 
         Func<string> read;
+        Action<string> apply;
 
         switch (field.Kind)
         {
@@ -127,6 +256,7 @@ public partial class PluginSettingsDialog : Window
                 };
                 host.Children.Add(check);
                 read = () => check.IsChecked == true ? "true" : "false";
+                apply = text => check.IsChecked = string.Equals(text, "true", StringComparison.OrdinalIgnoreCase);
                 break;
             }
 
@@ -153,7 +283,11 @@ public partial class PluginSettingsDialog : Window
                 host.Children.Add(box);
                 host.Children.Add(error);
                 read = () => box.Text;
-                _bindings.Add(new FieldBinding { Entry = entry, Field = field, Read = read, ErrorText = error });
+                apply = text => box.Text = text;
+                _bindings.Add(new FieldBinding
+                {
+                    Entry = entry, Field = field, Read = read, Apply = apply, ErrorText = error
+                });
                 AddOptionalHint(host, field, language);
                 return host;
             }
@@ -179,6 +313,18 @@ public partial class PluginSettingsDialog : Window
                 combo.SelectedIndex = choices.Count == 0 ? -1 : Math.Clamp(selected, 0, choices.Count - 1);
                 host.Children.Add(combo);
                 read = () => (combo.SelectedItem as ComboBoxItem)?.Tag as string ?? "";
+                apply = text =>
+                {
+                    for (var i = 0; i < combo.Items.Count; i++)
+                    {
+                        if (combo.Items[i] is ComboBoxItem item
+                            && string.Equals(item.Tag as string, text, StringComparison.Ordinal))
+                        {
+                            combo.SelectedIndex = i;
+                            return;
+                        }
+                    }
+                };
                 break;
             }
 
@@ -188,11 +334,12 @@ public partial class PluginSettingsDialog : Window
                 var box = BuildTextBox(value);
                 host.Children.Add(box);
                 read = () => box.Text;
+                apply = text => box.Text = text;
                 break;
             }
         }
 
-        _bindings.Add(new FieldBinding { Entry = entry, Field = field, Read = read });
+        _bindings.Add(new FieldBinding { Entry = entry, Field = field, Read = read, Apply = apply });
         AddOptionalHint(host, field, language);
         return host;
     }
@@ -317,6 +464,7 @@ public partial class PluginSettingsDialog : Window
         }
 
         StatusText.Text = Loc["Plugin.Settings.Saved"];
+        StatusText.Foreground = ThemeBrushes.TextSecondaryModern;
         StatusText.Visibility = Visibility.Visible;
         DialogResult = true;
         Close();
@@ -359,4 +507,26 @@ public partial class PluginSettingsDialog : Window
 
     /// <summary>保存按钮是否可用。</summary>
     internal bool SaveEnabled => SaveButton.IsEnabled;
+
+    /// <summary>自测台只读访问器：打开时请求定位的插件 id（未指定时为 null）。</summary>
+    internal string? FocusedPluginIdForLab => _focusPluginId;
+
+    /// <summary>自测台只读访问器：目标插件块是否被高亮（找不到 id 时为 false）。</summary>
+    internal bool FocusedSectionVisibleForLab => _focusedBorder != null;
+
+    /// <summary>自测台只读访问器：被高亮插件块的标题（插件名 · 设置标题）。</summary>
+    internal string FocusedSectionHeaderForLab => _focusedHeader;
+
+    /// <summary>自测台只读访问器：渲染出的「恢复默认」按钮数量（每个插件一个）。</summary>
+    internal int ResetButtonCountForLab => _resetButtons.Count;
+
+    /// <summary>自测台取某个插件的「恢复默认」按钮（找不到返回 null），用于模拟真实点击。</summary>
+    internal Button? ResetButtonForLab(string pluginId)
+        => _resetButtons.TryGetValue(pluginId, out var button) ? button : null;
+
+    /// <summary>自测台只读访问器：状态栏文本（恢复默认后的提示从这里断言）。</summary>
+    internal string StatusTextForLab => StatusText.Text;
+
+    /// <summary>自测台只读访问器：状态栏是否可见。</summary>
+    internal Visibility StatusVisibilityForLab => StatusText.Visibility;
 }
