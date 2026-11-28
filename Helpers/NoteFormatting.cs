@@ -12,14 +12,13 @@ namespace DesktopZones.Helpers;
 /// 单独抽成文件是为了能脱离窗口/服务直接测(见 _scratch/noteprobe9)。
 /// </summary>
 public sealed record TypingFormat(
-    FontFamily? Family,
     double? Size,
     FontWeight? Weight,
     FontStyle? Style,
     bool? Underline,
     SolidColorBrush? Color)
 {
-    public static readonly TypingFormat Empty = new(null, null, null, null, null, null);
+    public static readonly TypingFormat Empty = new(null, null, null, null, null);
 }
 
 public static class NoteFormatting
@@ -65,7 +64,6 @@ public static class NoteFormatting
         }
 
         return new TypingFormat(
-            Get(TextElement.FontFamilyProperty) as FontFamily,
             Get(TextElement.FontSizeProperty) as double?,
             Get(TextElement.FontWeightProperty) as FontWeight?,
             Get(TextElement.FontStyleProperty) as FontStyle?,
@@ -76,7 +74,6 @@ public static class NoteFormatting
     /// <summary>把「本次修改」并入笔触;其它项保持原样。</summary>
     public static TypingFormat Merge(TypingFormat f, DependencyProperty prop, object? value)
     {
-        if (prop == TextElement.FontFamilyProperty) return f with { Family = value as FontFamily };
         if (prop == TextElement.FontSizeProperty) return f with { Size = value is double d ? d : null };
         if (prop == TextElement.FontWeightProperty) return f with { Weight = value is FontWeight w ? w : null };
         if (prop == TextElement.FontStyleProperty) return f with { Style = value is FontStyle st ? st : null };
@@ -89,7 +86,6 @@ public static class NoteFormatting
     public static object? Read(TypingFormat? f, DependencyProperty prop)
     {
         if (f == null) return null;
-        if (prop == TextElement.FontFamilyProperty) return f.Family;
         if (prop == TextElement.FontSizeProperty) return f.Size;
         if (prop == TextElement.FontWeightProperty) return f.Weight;
         if (prop == TextElement.FontStyleProperty) return f.Style;
@@ -106,7 +102,6 @@ public static class NoteFormatting
     public static void ApplyToRange(TextRange range, TypingFormat fmt)
     {
         if (range == null || string.IsNullOrEmpty(range.Text)) return;
-        if (fmt.Family != null) TryApply(range, TextElement.FontFamilyProperty, fmt.Family);
         if (fmt.Size is double sz && sz > 0) TryApply(range, TextElement.FontSizeProperty, sz);
         if (fmt.Weight is FontWeight w) TryApply(range, TextElement.FontWeightProperty, w);
         if (fmt.Style is FontStyle st) TryApply(range, TextElement.FontStyleProperty, st);

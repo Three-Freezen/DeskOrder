@@ -6,8 +6,8 @@ namespace DesktopZones.Models;
 // ── 便签富文本内容持久化(独立 JSON 文件) ──
 // 每个便签一个 <id>.json,只存「与便签文档样式不同的覆盖值」。
 //
-// v2(2026-11-28)：「正文格式跟着内容走」修复 —— 字号/颜色/字体族改为可空:
-//   null = 继承 config.json 里 StickyNote 的 FontSize / TextColor / FontFamily。
+// v2(2026-11-28)：「正文格式跟着内容走」修复 —— 字号/颜色改为可空:
+//   null = 继承 config.json 里 StickyNote 的 FontSize / TextColor。
 //   这样设置面板里改一次字号,整张便签里没被单独设置过的文字全部跟随。
 //
 // v1(旧文件)是「每个 run 都写死格式」:加载时由 NormalizeLegacyFormat() 把
@@ -47,7 +47,6 @@ public class NoteFileData
                 if (run.Bold == false) run.Bold = null;
                 if (run.Italic == false) run.Italic = null;
                 if (run.Underline == false) run.Underline = null;
-                if (string.IsNullOrWhiteSpace(run.FontFamily)) run.FontFamily = null;
             }
         }
         return true;
@@ -78,6 +77,4 @@ public class NoteRunData
     public double? Size { get; set; }
     /// <summary>#AARRGGBB 或 #RRGGBB。</summary>
     public string? Color { get; set; }
-    /// <summary>字体族名(如 "Consolas")。null = 继承。</summary>
-    public string? FontFamily { get; set; }
 }

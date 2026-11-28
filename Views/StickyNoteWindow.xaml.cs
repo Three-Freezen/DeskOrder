@@ -61,10 +61,6 @@ public partial class StickyNoteWindow : Window
     private bool _loadingContent;
     // 字号下拉里临时插入的「非预设值」条目(反显 13.5 / 22 这类正文实际字号)。
     private ComboBoxItem? _customSizeItem;
-    // 字体族下拉:Tag(字体名) → 条目;避免每次反显都线性扫几百项。
-    private readonly Dictionary<string, ComboBoxItem> _fontFamilyItems = new(StringComparer.OrdinalIgnoreCase);
-    // 系统字体表只需枚举一次(每个便签窗口都建一次太慢)。
-    private static List<(string Source, FontFamily Family)>? _systemFonts;
 
     // ponytail: 位置防抖保存 — 拖拽移动后持久化 X/Y（与分区 ZoneWindow 一致）。
     private readonly DispatcherTimer _positionSaveDebounce = new() { Interval = TimeSpan.FromMilliseconds(500) };
@@ -149,7 +145,6 @@ public partial class StickyNoteWindow : Window
         };
         // ponytail: 字体字号下拉打开时同样对一遍系统调色板,避免 Popup 内 Menu.* 停在旧色。
         FontSizeCombo.DropDownOpened += (_, _) => MenuThemeService.Apply();
-        FontFamilyCombo.DropDownOpened += (_, _) => MenuThemeService.Apply();
 
         // 2026-11-28: 粘贴 / 拖入外部内容保留源格式(Word 默认),不套用当前笔触;
         // 键盘焦点离开正文也算「光标要走了」,笔触复位。
@@ -352,8 +347,7 @@ public partial class StickyNoteWindow : Window
                         Italic = TryLocalInlineValue(run, TextElement.FontStyleProperty) is FontStyle fs ? NoteFormatting.IsItalic(fs) : null,
                         Underline = TryLocalInlineValue(run, Inline.TextDecorationsProperty) is TextDecorationCollection td ? NoteFormatting.IsUnderlined(td) : null,
                         Size = TryLocalInlineValue(run, TextElement.FontSizeProperty) is double d ? d : null,
-                        Color = TryLocalInlineValue(run, TextElement.ForegroundProperty) is SolidColorBrush b ? NoteFormatting.ToHex(b.Color) : null,
-                        FontFamily = TryLocalInlineValue(run, TextElement.FontFamilyProperty) is FontFamily fam ? fam.Source : null
+                        Color = TryLocalInlineValue(run, TextElement.ForegroundProperty) is SolidColorBrush b ? NoteFormatting.ToHex(b.Color) : null
                     });
                     break;
                 case Span span:
@@ -400,10 +394,6 @@ public partial class StickyNoteWindow : Window
                 if (rd.Italic is bool i) run.FontStyle = i ? FontStyles.Italic : FontStyles.Normal;
                 if (rd.Underline == true) run.TextDecorations = TextDecorations.Underline;
                 if (rd.Size is double sz && sz > 0) run.FontSize = sz;
-                if (!string.IsNullOrWhiteSpace(rd.FontFamily))
-                {
-                    try { run.FontFamily = new FontFamily(rd.FontFamily); } catch { }
-                }
                 try
                 {
                     if (!string.IsNullOrWhiteSpace(rd.Color))
@@ -1105,20 +1095,17 @@ public partial class StickyNoteWindow : Window
     }
 
     /// <summary>
-    /// 便签正文的「文档样式」:字体族 / 字号 / 文字颜色(2026-11-28)。
+    /// 便签正文的「文档样式」:字号 / 文字颜色(2026-11-28)。
     ///
     /// 这是修复「字体设置跟着文本框内容走」的核心之一:只改 RichTextBox 的控件级属性,
-    /// **不碰任何 run 的本地值**。没有单独设置过格式的文字(JSON 里 Size/Color/FontFamily
-    /// 为 null)会自动继承这三个值 —— 所以设置面板改一次,整张便签立即跟随;而用户真的
+    /// **不碰任何 run 的本地值**。没有单独设置过格式的文字(JSON 里 Size/Color
+    /// 为 null)会自动继承这两个值 —— 所以设置面板改一次,整张便签立即跟随;而用户真的
     /// 手动改过格式的文字仍然保持自己的覆盖值。
     /// </summary>
     void ApplyTextStyle()
     {
         try
         {
-            ContentBox.FontFamily = string.IsNullOrWhiteSpace(_note.FontFamily)
-                ? System.Windows.SystemFonts.MessageFontFamily
-                : new FontFamily(_note.FontFamily);
             ContentBox.FontSize = _note.FontSize > 0 ? _note.FontSize : 14;
             var brush = FrozenBrush(ParseColor(_note.TextColor, Color.FromRgb(0xE0, 0xE0, 0xE0)));
             ContentBox.Foreground = brush;
@@ -1181,8 +1168,6 @@ public partial class StickyNoteWindow : Window
             // 字号/字体族数字跟随系统深浅色（Menu.Text.Primary），不再锁定白色。
             if (FontSizeCombo != null)
                 FontSizeCombo.SetResourceReference(Control.ForegroundProperty, "Menu.Text.Primary");
-            if (FontFamilyCombo != null)
-                FontFamilyCombo.SetResourceReference(Control.ForegroundProperty, "Menu.Text.Primary");
 
             // 按钮透明度 — 所有小按钮统一走 HoverHighlight 的那一个值（分区/组件/面板一致）。
             HoverHighlight.ApplyControlOpacity(_note.ControlOpacity,
@@ -1573,7 +1558,6 @@ public partial class StickyNoteWindow : Window
         BuildColorPresets();
         // 2026-11-28: 字体族下拉里「系统默认」的文案也跟语言走(重建会重置选中项,
         // 这里再按当前状态反显一次)。
-        if (FontFamilyCombo != null) BuildFontFamilyCombo();
         if (!_initializing) UpdateFormatButtons();
     }
 
@@ -1758,20 +1742,6 @@ public partial class StickyNoteWindow : Window
     //   无选区 → 只改「当前笔触」(纯内存),不碰文档;之后每次输入都按 TextChanged 的
     //            change 范围精确刷到新文字上,直到光标移动 / 点击正文 / 失焦 / 粘贴。
     //   工具条反显 = 笔触 > 选区值 > 光标处值 > 文档样式,只读,绝不写文档。
-
-    void FontFamilyCombo_SelectionChanged(object s, SelectionChangedEventArgs e)
-    {
-        if (_initializing || _updatingFormatButtons) return;
-        if (FontFamilyCombo.SelectedItem is ComboBoxItem item && item.Tag is string tag)
-        {
-            var family = string.IsNullOrEmpty(tag)
-                ? System.Windows.SystemFonts.MessageFontFamily
-                : new FontFamily(tag);
-            ApplyFormat(TextElement.FontFamilyProperty, family);
-            UpdateFormatButtons();
-            RefocusContentBox();
-        }
-    }
 
     void FontSizeCombo_SelectionChanged(object s, SelectionChangedEventArgs e)
     {
@@ -2034,7 +2004,6 @@ public partial class StickyNoteWindow : Window
         _writingFormat = true;
         try
         {
-            if (fmt.Family != null) TryApplyProperty(range, TextElement.FontFamilyProperty, fmt.Family);
             if (fmt.Size is double sz && sz > 0) TryApplyProperty(range, TextElement.FontSizeProperty, sz);
             if (fmt.Weight is FontWeight w) TryApplyProperty(range, TextElement.FontWeightProperty, w);
             if (fmt.Style is FontStyle st) TryApplyProperty(range, TextElement.FontStyleProperty, st);
@@ -2167,6 +2136,21 @@ public partial class StickyNoteWindow : Window
     // 优先级(Word 式):有选区看选区;无选区优先「当前笔触」,其次光标左侧字符,
     // 最后文档样式。只读,绝不写文档;混合选区显示混合态(不高亮 / 下拉置空)。
 
+    /// <summary>
+    /// B/I/U 的「激活」底块。必须走 <see cref="HoverHighlight.BaseBackground"/>:
+    /// 直接写 <c>Button.Background</c> 会被 HoverHighlight 的 MouseLeave 复位成透明 ——
+    /// 表现就是「点了按钮不亮」(鼠标一移开高光立刻消失)。
+    /// </summary>
+    static void SetToggleActive(Button? btn, bool active)
+    {
+        if (btn == null) return;
+        HoverHighlight.SetBaseBackground(btn, active ? FormatActiveBrush : null);
+        // 鼠标正悬停时保持悬停高光(与激活态同色),离开时由 HoverHighlight 按 BaseBackground 恢复。
+        btn.Background = btn.IsMouseOver
+            ? HoverHighlight.Brush
+            : (active ? FormatActiveBrush : Brushes.Transparent);
+    }
+
     void UpdateFormatButtons()
     {
         var sel = ContentBox.Selection;
@@ -2194,21 +2178,13 @@ public partial class StickyNoteWindow : Window
             hasSelection && sel!.GetPropertyValue(prop) == DependencyProperty.UnsetValue;
 
         // B / I / U 高亮
-        BoldBtn.Background = NoteFormatting.IsBold(Probe(TextElement.FontWeightProperty, ContentBox.FontWeight))
-            ? FormatActiveBrush : Brushes.Transparent;
-        ItalicBtn.Background = NoteFormatting.IsItalic(Probe(TextElement.FontStyleProperty, ContentBox.FontStyle))
-            ? FormatActiveBrush : Brushes.Transparent;
+        SetToggleActive(BoldBtn, NoteFormatting.IsBold(Probe(TextElement.FontWeightProperty, ContentBox.FontWeight)));
+        SetToggleActive(ItalicBtn, NoteFormatting.IsItalic(Probe(TextElement.FontStyleProperty, ContentBox.FontStyle)));
         // 下划线单独取:笔触里「明确关掉」不能落回左侧字符的旧状态(同 CurrentFormatValue)。
         var underlineCurrent = typing?.Underline is bool ul
             ? (ul ? TextDecorations.Underline : null)
             : Probe(Inline.TextDecorationsProperty, null);
-        UnderlineBtn.Background = NoteFormatting.IsUnderlined(underlineCurrent) ? FormatActiveBrush : Brushes.Transparent;
-
-        // 字体族:混合 → 不选任何项;否则反显当前值
-        if (IsMixed(TextElement.FontFamilyProperty))
-            SyncFontFamilyCombo(null, mixed: true);
-        else
-            SyncFontFamilyCombo(Probe(TextElement.FontFamilyProperty, ContentBox.FontFamily) as FontFamily, mixed: false);
+        SetToggleActive(UnderlineBtn, NoteFormatting.IsUnderlined(underlineCurrent));
 
         // 字号:混合 → 清空;非预设值 → 临时插一条,反显才是真的
         if (!IsMixed(TextElement.FontSizeProperty)
@@ -2270,63 +2246,6 @@ public partial class StickyNoteWindow : Window
                 FontSizeCombo.Items.Remove(_customSizeItem);
             }
             FontSizeCombo.SelectedItem = match;
-        }
-        finally { _updatingFormatButtons = false; }
-    }
-
-    /// <summary>一次性枚举系统字体(每个便签窗口都枚举一遍太慢),按当前区域语言排序。</summary>
-    static List<(string Source, FontFamily Family)> SystemFonts()
-    {
-        if (_systemFonts != null) return _systemFonts;
-        try
-        {
-            _systemFonts = Fonts.SystemFontFamilies
-                .Select(f => (Source: f.Source, Family: f))
-                .OrderBy(t => t.Source, StringComparer.CurrentCultureIgnoreCase)
-                .ToList();
-        }
-        catch { _systemFonts = new List<(string, FontFamily)>(); }
-        return _systemFonts;
-    }
-
-    void BuildFontFamilyCombo()
-    {
-        _updatingFormatButtons = true;
-        try
-        {
-            _fontFamilyItems.Clear();
-            FontFamilyCombo.Items.Clear();
-            var def = new ComboBoxItem { Content = _loc["NoteProp.SystemFont"], Tag = "" };
-            FontFamilyCombo.Items.Add(def);
-            _fontFamilyItems[""] = def;
-            foreach (var (source, family) in SystemFonts())
-            {
-                if (string.IsNullOrWhiteSpace(source) || _fontFamilyItems.ContainsKey(source)) continue;
-                var item = new ComboBoxItem { Content = source, Tag = source, FontFamily = family };
-                FontFamilyCombo.Items.Add(item);
-                _fontFamilyItems[source] = item;
-            }
-            FontFamilyCombo.SelectedItem = !string.IsNullOrWhiteSpace(_note.FontFamily)
-                                            && _fontFamilyItems.TryGetValue(_note.FontFamily, out var sel) ? sel : def;
-        }
-        finally { _updatingFormatButtons = false; }
-    }
-
-    /// <summary>反显字体族;内容里的字体不在系统字体表时临时插一条,不改变模型。</summary>
-    void SyncFontFamilyCombo(FontFamily? family, bool mixed)
-    {
-        _updatingFormatButtons = true;
-        try
-        {
-            if (mixed) { FontFamilyCombo.SelectedIndex = -1; return; }
-            var source = family?.Source ?? "";
-            if (!_fontFamilyItems.TryGetValue(source, out var item))
-            {
-                item = new ComboBoxItem { Content = source, Tag = source };
-                FontFamilyCombo.Items.Add(item);
-                _fontFamilyItems[source] = item;
-            }
-            FontFamilyCombo.SelectedItem = item;
         }
         finally { _updatingFormatButtons = false; }
     }
