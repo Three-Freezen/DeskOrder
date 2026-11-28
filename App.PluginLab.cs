@@ -424,8 +424,8 @@ public partial class App
                 item.Check(AcrylicHelper.GetMaterialDisplayName(key) == "极光·天青",
                     "display name follows the current language");
                 var summary = AppearancePackService.Instance.GetSummary(AppearancePackId);
-                item.Check(summary?.Materials == 3 && summary?.Presets == 2,
-                    "summary reports 3 materials and 2 presets");
+                item.Check(summary?.Materials == 3 && summary?.Presets == 2 && summary?.Faces == 0,
+                    "summary reports 3 materials, 2 presets and 0 faces");
                 item.Check(PresetService.For(PresetKind.Zone).LoadAll()
                         .Any(p => p.Name == "Aurora Zone" && p.SourcePackId == AppearancePackId),
                     "zone preset is imported");

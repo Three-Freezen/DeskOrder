@@ -115,6 +115,12 @@
                                Opacity="0" IsHitTestVisible="False"/>
                     </Canvas>
 
+                    <!-- 插件指针面盘（外观包 faces）；内置经纬元素由代码隐藏。
+                         220×220 与 Viewbox 同坐标系，背景图仍垫在它下面。 -->
+                    <ContentControl x:Name="PluginFaceHost" Width="220" Height="220"
+                                    HorizontalAlignment="Center" VerticalAlignment="Center"
+                                    IsHitTestVisible="False" Visibility="Collapsed"/>
+
                     <!-- Meridian inner hairline, r92 -->
                     <Ellipse x:Name="AnalogInnerRing" Width="184" Height="184"
                              Fill="Transparent" Stroke="#0EFFFFFF" StrokeThickness="0.6"

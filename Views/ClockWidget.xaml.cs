@@ -42,6 +42,9 @@ public partial class ClockWidget : Window
     private const double AnalogCardInset = 10.0;
     private const double TileHitMarginDip = 2.0;
 
+    ClockFaceVisual? _pluginFace;
+    string _pluginFaceKey = "";
+
 
     public ClockWidget(DesktopClock clock, WidgetService widgetService)
     {
@@ -90,6 +93,7 @@ public partial class ClockWidget : Window
         _langChanged = _ => UpdateContextMenuLabels();
         _loc.LanguageChanged += _langChanged;
         _widgetService.ClocksChanged += OnClocksChanged;
+        AppearancePackService.Instance.FacesChanged += OnFacesChanged;
         // ponytail: subscribe to LockChanged so management UI (or any other source) flipping
         // this widget's lock state immediately syncs the open window — without this the
         // open clock stays 🔓 while the model (and management card) shows 🔒.
@@ -606,6 +610,7 @@ public partial class ClockWidget : Window
             AnalogInnerRing.Stroke = new SolidColorBrush(Color.FromArgb(0x0E, c.R, c.G, c.B));
         if (CenterCap != null) CenterCap.Fill = content;
         if (CenterHole != null) CenterHole.Fill = new SolidColorBrush(Color.FromArgb(0xB0, 0x08, 0x0A, 0x0F));
+        _pluginFace?.ApplyPalette(content.Color, accent.Color, second.Color);
 
         // Buttons — 按钮颜色.
         if (HideBtn != null) HideBtn.Foreground = buttons;
@@ -846,6 +851,104 @@ public partial class ClockWidget : Window
         ApplyStyle();
         ApplyAcrylic();
         ApplyAnalogTileChrome();
+        RefreshAnalogFace();
+    }
+
+    // ── 插件指针面盘（外观包 faces） ──
+
+    void OnFacesChanged()
+    {
+        if (Dispatcher.HasShutdownStarted) return;
+        try
+        {
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (IsLoaded) RefreshAnalogFace(force: true);
+            }));
+        }
+        catch { }
+    }
+
+    /// <summary>按模型里的 AnalogFace 选择插件面盘；空/面盘不可用时回退内置经纬。
+    /// 面盘视觉只创建一次，时间/主题变化走它自己的 SetTime/ApplyPalette。</summary>
+    void RefreshAnalogFace(bool force = false)
+    {
+        if (_clock == null || PluginFaceHost == null) return;
+        if (_clock.Mode != ClockDisplayMode.Analog)
+        {
+            PluginFaceHost.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var key = _clock.AnalogFace ?? "";
+        var entry = key.Length == 0 ? null : AppearancePackService.Instance.FindFace(key);
+        if (entry == null)
+        {
+            if (key.Length > 0)
+                DzTrace.Log($"[ClockFace] key '{key}' not found; fallback Meridian");
+            PluginFaceHost.Content = null;
+            PluginFaceHost.Visibility = Visibility.Collapsed;
+            _pluginFace = null;
+            _pluginFaceKey = "";
+            ShowBuiltInFaceElements(true);
+            return;
+        }
+
+        if (!force && _pluginFace != null
+            && string.Equals(_pluginFaceKey, key, StringComparison.Ordinal)
+            && ReferenceEquals(_pluginFace.Spec, entry.Spec))
+        {
+            PluginFaceHost.Visibility = Visibility.Visible;
+            ShowBuiltInFaceElements(false);
+            ApplyPluginFacePalette();
+            _pluginFace.SetTime(DateTime.Now, _clock.ShowSeconds);
+            return;
+        }
+
+        try
+        {
+            var visual = new ClockFaceVisual(entry.Spec);
+            PluginFaceHost.Content = visual;
+            PluginFaceHost.Visibility = Visibility.Visible;
+            _pluginFace = visual;
+            _pluginFaceKey = key;
+            ShowBuiltInFaceElements(false);
+            ApplyPluginFacePalette();
+            visual.SetTime(DateTime.Now, _clock.ShowSeconds);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[ClockWidget] plugin face '{key}' failed: {ex}");
+            PluginFaceHost.Content = null;
+            PluginFaceHost.Visibility = Visibility.Collapsed;
+            _pluginFace = null;
+            _pluginFaceKey = "";
+            ShowBuiltInFaceElements(true);
+        }
+    }
+
+    void ApplyPluginFacePalette()
+    {
+        if (_pluginFace == null) return;
+        Color ink, accent, signal;
+        try { ink = (Color)ColorConverter.ConvertFromString(_clock.TextColor)!; } catch { ink = Colors.White; }
+        try { signal = (Color)ColorConverter.ConvertFromString(_clock.SecondHandColor)!; } catch { signal = Color.FromRgb(0xFF, 0x66, 0x66); }
+        accent = ResolveAccentColor();
+        _pluginFace.ApplyPalette(ink, accent, signal);
+    }
+
+    void ShowBuiltInFaceElements(bool show)
+    {
+        var visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        if (AnalogFaceEllipse != null) AnalogFaceEllipse.Visibility = visibility;
+        if (AnalogInnerRing != null) AnalogInnerRing.Visibility = visibility;
+        if (MarkerCanvas != null) MarkerCanvas.Visibility = visibility;
+        if (HourHandShape != null) HourHandShape.Visibility = visibility;
+        if (MinuteHandShape != null) MinuteHandShape.Visibility = visibility;
+        if (SecondHandGroup != null)
+            SecondHandGroup.Visibility = show && _vm.ShowSeconds ? Visibility.Visible : Visibility.Collapsed;
+        if (CenterCap != null) CenterCap.Visibility = visibility;
+        if (CenterHole != null) CenterHole.Visibility = visibility;
     }
 
     /// <summary>磁贴覆盖层。窗口尺寸不变，只把卡片收成圆并把命中裁圆；
@@ -1073,14 +1176,22 @@ public partial class ClockWidget : Window
                 DateText.Text = _vm.DateText;
             }
 
-            // Analog mode: only update hands when analog is visible
+            // Analog mode: only update hands when analog is visible. Plugin faces own their
+            // second hand; keep the built-in second group collapsed or Tick would re-show it.
             if (_clock.Mode == ClockDisplayMode.Analog)
             {
-                if (HourHandShape?.RenderTransform is RotateTransform hrt) hrt.Angle = _vm.HourAngle;
-                if (MinuteHandShape?.RenderTransform is RotateTransform mrt) mrt.Angle = _vm.MinuteAngle;
-                if (SecondHandGroup?.RenderTransform is RotateTransform srt) srt.Angle = _vm.SecondAngle;
-                if (SecondHandGroup != null)
-                    SecondHandGroup.Visibility = _vm.ShowSeconds ? Visibility.Visible : Visibility.Collapsed;
+                if (_pluginFace != null)
+                {
+                    _pluginFace.SetTime(now, _clock.ShowSeconds);
+                }
+                else
+                {
+                    if (HourHandShape?.RenderTransform is RotateTransform hrt) hrt.Angle = _vm.HourAngle;
+                    if (MinuteHandShape?.RenderTransform is RotateTransform mrt) mrt.Angle = _vm.MinuteAngle;
+                    if (SecondHandGroup?.RenderTransform is RotateTransform srt) srt.Angle = _vm.SecondAngle;
+                    if (SecondHandGroup != null)
+                        SecondHandGroup.Visibility = _vm.ShowSeconds ? Visibility.Visible : Visibility.Collapsed;
+                }
             }
         }
         catch { /* Ignore timer tick errors during window teardown */ }
@@ -1642,6 +1753,7 @@ public partial class ClockWidget : Window
         // 之前 OnClosed 漏退 → 每个关掉的时钟窗口被单例事件永久持有(窗口+可视树+图标位图)。
         _widgetService.ClocksChanged -= OnClocksChanged;
         _widgetService.LockChanged -= OnServiceLockChanged;
+        AppearancePackService.Instance.FacesChanged -= OnFacesChanged;
         _clock.HoverExpandSettingsChanged -= OnHoverExpandSettingsChanged;
         _snapDrag?.Detach();
         _snapResize?.Detach();

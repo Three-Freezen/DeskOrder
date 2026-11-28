@@ -152,6 +152,9 @@ public partial class PluginDetailDialog : Window
             var summary = Record == null ? null : AppearancePackService.Instance.GetSummary(Record.Id);
             AppearanceText.Text = summary is { } counts
                 ? Loc.Get("Plugin.Contents.Appearance", counts.Materials, counts.Presets)
+                  + (counts.Faces > 0
+                      ? "\n" + Loc.Get("Plugin.Contents.Appearance.Faces", counts.Faces)
+                      : "")
                 : Loc["Plugin.Appearance.Hint"];
             // 已安装外观包：在数量下面列出具体材质 / 预设名称（读安装目录，纯本地）。
             var names = Record == null ? "" : DescribeAppearanceContents(Record);
@@ -310,11 +313,20 @@ public partial class PluginDetailDialog : Window
                 .Take(MaxListedAppearanceNames)
                 .ToList();
 
-            var lines = new List<string>(2);
+            var faces = validation.Faces
+                .Select(face => face.Name == null ? null : chinese ? face.Name.Zh : face.Name.En)
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Select(name => name!.Trim())
+                .Take(MaxListedAppearanceNames)
+                .ToList();
+
+            var lines = new List<string>(3);
             if (materials.Count > 0)
                 lines.Add(Loc.Get("Plugin.Appearance.Materials", string.Join(" · ", materials)));
             if (presets.Count > 0)
                 lines.Add(Loc.Get("Plugin.Appearance.Presets", string.Join(" · ", presets)));
+            if (faces.Count > 0)
+                lines.Add(Loc.Get("Plugin.Appearance.Faces", string.Join(" · ", faces)));
             return string.Join("\n", lines);
         }
         catch

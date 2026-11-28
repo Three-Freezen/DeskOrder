@@ -16,9 +16,11 @@ public sealed class AppearancePackValidation
     public List<string> Errors { get; } = new();
     public List<AcrylicHelper.GlassMaterialRecipe> Materials { get; } = new();
     public List<AppearancePresetImport> Presets { get; } = new();
+    public List<AppearanceFaceImport> Faces { get; } = new();
 
     public int MaterialCount => Materials.Count;
     public int PresetCount => Presets.Count;
+    public int FaceCount => Faces.Count;
     public bool Ok => Errors.Count == 0;
 }
 
@@ -28,6 +30,35 @@ public sealed class AppearancePresetImport
     public PresetKind Kind { get; init; }
     public string Path { get; init; } = "";
     public string DeclaredKind { get; init; } = "";
+}
+
+/// <summary>校验通过的一条面盘声明；Refresh 时再补插件名。</summary>
+public sealed class AppearanceFaceImport
+{
+    public required string Key { get; init; }
+    public required string FaceId { get; init; }
+    public required LocalizedText Name { get; init; }
+    public required string Path { get; init; }
+    public required ClockFaceSpec Spec { get; init; }
+    public string? PreviewPath { get; init; }
+}
+
+/// <summary>已注册的插件面盘（下拉框/时钟窗口共用）。</summary>
+public sealed class ClockFacePackEntry
+{
+    public required string Key { get; init; }
+    public required string PluginId { get; init; }
+    public required string PluginName { get; init; }
+    public required string FaceId { get; init; }
+    public required string DisplayName { get; init; }
+    public required string SpecPath { get; init; }
+    public required ClockFaceSpec Spec { get; init; }
+    public string? PreviewPath { get; init; }
+    public DateTime Stamp { get; init; }
+
+    /// <summary>下拉框显示“面盘名 · 插件名”。</summary>
+    public string DropdownLabel => string.IsNullOrWhiteSpace(PluginName)
+        ? DisplayName : $"{DisplayName} · {PluginName}";
 }
 
 /// <summary>
@@ -45,6 +76,7 @@ public sealed class AppearancePackService
 
     public const int MaxMaterials = 32;
     public const int MaxPresets = 32;
+    public const int MaxFaces = 16;
     public const long MaxFileBytes = 2 * 1024 * 1024;
     const int MaxReportedErrors = 20;
 
@@ -58,7 +90,9 @@ public sealed class AppearancePackService
 
     readonly Dictionary<string, AcrylicHelper.GlassMaterialRecipe> _materials =
         new(StringComparer.OrdinalIgnoreCase);
-    readonly Dictionary<string, (int Materials, int Presets)> _summaries =
+    readonly Dictionary<string, ClockFacePackEntry> _faces =
+        new(StringComparer.OrdinalIgnoreCase);
+    readonly Dictionary<string, (int Materials, int Presets, int Faces)> _summaries =
         new(StringComparer.OrdinalIgnoreCase);
     readonly Dictionary<string, string> _errors = new(StringComparer.OrdinalIgnoreCase);
 
@@ -66,9 +100,22 @@ public sealed class AppearancePackService
     public IReadOnlyList<AcrylicHelper.GlassMaterialRecipe> Materials =>
         _materials.Values.OrderBy(m => m.Key, StringComparer.OrdinalIgnoreCase).ToList();
 
-    /// <summary>包 id →（材质数，预设数），用于已安装列表/详情。</summary>
-    public (int Materials, int Presets)? GetSummary(string pluginId)
+    /// <summary>已注册的插件面盘（key = <c>pack:&lt;pluginId&gt;:&lt;faceId&gt;</c>）。</summary>
+    public IReadOnlyList<ClockFacePackEntry> Faces =>
+        _faces.Values.OrderBy(f => f.Key, StringComparer.OrdinalIgnoreCase).ToList();
+
+    /// <summary>面盘目录变化（安装/停用/卸载）。时钟下拉框和已显示的时钟窗口按它刷新。</summary>
+    public event Action? FacesChanged;
+
+    /// <summary>包 id →（材质数，预设数，面盘数），用于已安装列表/详情。</summary>
+    public (int Materials, int Presets, int Faces)? GetSummary(string pluginId)
         => _summaries.TryGetValue(pluginId, out var summary) ? summary : null;
+
+    public ClockFacePackEntry? FindFace(string? key)
+    {
+        if (string.IsNullOrWhiteSpace(key)) return null;
+        return _faces.TryGetValue(key, out var face) ? face : null;
+    }
 
     /// <summary>包 id → 加载错误。</summary>
     public IReadOnlyDictionary<string, string> Errors => _errors;
@@ -81,11 +128,12 @@ public sealed class AppearancePackService
 
     // ── 刷新材质注册表 ──
 
-    /// <summary>按插件记录重建材质表（启动/安装/卸载/启停都走这里）。</summary>
+    /// <summary>按插件记录重建材质/面盘表（启动/安装/卸载/启停都走这里）。</summary>
     public bool Refresh(IEnumerable<PluginRecord> records, bool pluginsEnabled)
     {
         var next = new Dictionary<string, AcrylicHelper.GlassMaterialRecipe>(StringComparer.OrdinalIgnoreCase);
-        var summaries = new Dictionary<string, (int, int)>(StringComparer.OrdinalIgnoreCase);
+        var nextFaces = new Dictionary<string, ClockFacePackEntry>(StringComparer.OrdinalIgnoreCase);
+        var summaries = new Dictionary<string, (int, int, int)>(StringComparer.OrdinalIgnoreCase);
         var errors = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         if (pluginsEnabled)
@@ -105,25 +153,65 @@ public sealed class AppearancePackService
                     errors[record.Id] = manifestError ?? "plugin.json is not an appearance pack";
                     continue;
                 }
-                var validation = Validate(dir, manifest);
+                AppearancePackValidation validation;
+                try
+                {
+                    validation = Validate(dir, manifest);
+                }
+                catch (Exception ex)
+                {
+                    errors[record.Id] = "face validation failed: " + ex.Message;
+                    DzTrace.Always($"[ClockFace] pack '{record.Id}' validation threw: {ex.Message}");
+                    continue;
+                }
                 if (!validation.Ok)
                 {
                     errors[record.Id] = string.Join("; ", validation.Errors.Take(3));
+                    DzTrace.Always($"[ClockFace] pack '{record.Id}' invalid: {errors[record.Id]}");
                     continue;
                 }
                 foreach (var recipe in validation.Materials) next[recipe.Key] = recipe;
-                summaries[record.Id] = (validation.MaterialCount, validation.PresetCount);
+                var pluginName = manifest.Name?.Get(LocalizationService.Instance.CurrentLanguage);
+                if (string.IsNullOrWhiteSpace(pluginName)) pluginName = manifest.Id;
+                foreach (var face in validation.Faces)
+                {
+                    var display = face.Name.Get(LocalizationService.Instance.CurrentLanguage);
+                    if (string.IsNullOrWhiteSpace(display)) display = face.FaceId;
+                    DateTime stamp;
+                    try { stamp = File.GetLastWriteTimeUtc(face.Path); }
+                    catch { stamp = default; }
+                    nextFaces[face.Key] = new ClockFacePackEntry
+                    {
+                        Key = face.Key,
+                        PluginId = record.Id,
+                        PluginName = pluginName!,
+                        FaceId = face.FaceId,
+                        DisplayName = display,
+                        SpecPath = face.Path,
+                        Spec = face.Spec,
+                        PreviewPath = face.PreviewPath,
+                        Stamp = stamp,
+                    };
+                }
+                summaries[record.Id] = (validation.MaterialCount, validation.PresetCount,
+                    validation.FaceCount);
             }
         }
 
+        var facesChanged = !SameFaces(_faces, nextFaces);
         var changed = !SameRecipes(_materials, next) || !SameSummaries(_summaries, summaries)
-                      || !SameErrors(_errors, errors);
+                      || facesChanged || !SameErrors(_errors, errors);
         _materials.Clear();
         foreach (var pair in next) _materials[pair.Key] = pair.Value;
+        _faces.Clear();
+        foreach (var pair in nextFaces) _faces[pair.Key] = pair.Value;
         _summaries.Clear();
         foreach (var pair in summaries) _summaries[pair.Key] = pair.Value;
         _errors.Clear();
         foreach (var pair in errors) _errors[pair.Key] = pair.Value;
+        if (facesChanged) FacesChanged?.Invoke();
+        if (nextFaces.Count > 0 || errors.Count > 0)
+            DzTrace.Always($"[ClockFace] refresh enabled={pluginsEnabled} faces={nextFaces.Count} errors={errors.Count}");
         return changed;
     }
 
@@ -131,7 +219,14 @@ public sealed class AppearancePackService
         Dictionary<string, AcrylicHelper.GlassMaterialRecipe> b)
         => a.Count == b.Count && a.All(p => b.ContainsKey(p.Key));
 
-    static bool SameSummaries(Dictionary<string, (int, int)> a, Dictionary<string, (int, int)> b)
+    static bool SameFaces(Dictionary<string, ClockFacePackEntry> a,
+        Dictionary<string, ClockFacePackEntry> b)
+        => a.Count == b.Count && a.All(p => b.TryGetValue(p.Key, out var v)
+            && v.SpecPath == p.Value.SpecPath && v.DisplayName == p.Value.DisplayName
+            && v.Stamp == p.Value.Stamp);
+
+    static bool SameSummaries(Dictionary<string, (int, int, int)> a,
+        Dictionary<string, (int, int, int)> b)
         => a.Count == b.Count && a.All(p => b.TryGetValue(p.Key, out var v) && v == p.Value);
 
     static bool SameErrors(Dictionary<string, string> a, Dictionary<string, string> b)
@@ -218,12 +313,78 @@ public sealed class AppearancePackService
             {
                 Kind = validatedKind,
                 Path = full,
-                DeclaredKind = preset.Kind
+                DeclaredKind = preset.Kind ?? ""
             });
         }
 
-        if (result.Ok && result.MaterialCount == 0 && result.PresetCount == 0)
-            result.Errors.Add("payload contains no materials or presets");
+        foreach (var face in manifest.Payload?.Faces ?? new List<PluginFaceDeclaration>())
+        {
+            if (result.Errors.Count >= MaxReportedErrors) break;
+            if (face == null)
+            {
+                result.Errors.Add("faces[] entry must not be null");
+                continue;
+            }
+            if (result.Faces.Count >= MaxFaces)
+            {
+                result.Errors.Add($"too many faces (max {MaxFaces})");
+                break;
+            }
+            if (!ClockFaceSpecValidator.IsValidFaceId(face.Id))
+            {
+                result.Errors.Add($"face id is invalid: '{face.Id}'");
+                continue;
+            }
+            if (face.Name == null || !face.Name.HasAny)
+            {
+                result.Errors.Add($"face '{face.Id}': name.zh/en is required");
+                continue;
+            }
+            if (!PluginPaths.IsSafeRelativePath(face.File))
+            {
+                result.Errors.Add($"face '{face.Id}': file is unsafe");
+                continue;
+            }
+            if (!TryResolveFile(packageDir, face.File, out var full, out var error))
+            {
+                result.Errors.Add($"face '{face.Id}': {error}");
+                continue;
+            }
+            if (!ClockFaceSpecValidator.TryLoad(full, out var spec, out error) || spec == null)
+            {
+                result.Errors.Add($"face '{face.Id}': {error}");
+                continue;
+            }
+            string? preview = null;
+            if (!string.IsNullOrWhiteSpace(face.Preview))
+            {
+                if (!PluginPaths.IsSafeRelativePath(face.Preview))
+                {
+                    result.Errors.Add($"face '{face.Id}': preview is unsafe");
+                    continue;
+                }
+                if (TryResolveFile(packageDir, face.Preview!, out var previewFull, out _))
+                    preview = previewFull;
+            }
+            var key = FaceKey(manifest.Id, face.Id);
+            if (result.Faces.Any(f => string.Equals(f.Key, key, StringComparison.OrdinalIgnoreCase)))
+            {
+                result.Errors.Add($"face id is duplicated: {face.Id}");
+                continue;
+            }
+            result.Faces.Add(new AppearanceFaceImport
+            {
+                Key = key,
+                FaceId = face.Id,
+                Name = face.Name,
+                Path = full,
+                Spec = spec,
+                PreviewPath = preview,
+            });
+        }
+
+        if (result.Ok && result.MaterialCount == 0 && result.PresetCount == 0 && result.FaceCount == 0)
+            result.Errors.Add("payload contains no materials, presets or faces");
         return result;
     }
 
@@ -266,7 +427,7 @@ public sealed class AppearancePackService
             result.Errors.Add($"material '{definition.Id}': grain must be 0..0.3");
             return;
         }
-        var key = MaterialKey(manifest.Id, definition.Id);
+        var key = MaterialKey(manifest.Id, definition.Id ?? "");
         if (result.Materials.Any(m => string.Equals(m.Key, key, StringComparison.OrdinalIgnoreCase)))
         {
             result.Errors.Add($"material id is duplicated: {definition.Id}");
@@ -347,6 +508,9 @@ public sealed class AppearancePackService
 
     public static string MaterialKey(string pluginId, string materialId) => $"pack:{pluginId}:{materialId}";
 
+    /// <summary>面盘 key：<c>pack:&lt;pluginId&gt;:&lt;faceId&gt;</c>，与材质同一命名口径。</summary>
+    public static string FaceKey(string pluginId, string faceId) => $"pack:{pluginId}:{faceId}";
+
     public static bool IsPackMaterial(string? key)
         => !string.IsNullOrEmpty(key) && key.StartsWith("pack:", StringComparison.OrdinalIgnoreCase);
 
@@ -419,5 +583,11 @@ public sealed class AppearancePackService
             _materials.Remove(key);
         _summaries.Remove(pluginId);
         _errors.Remove(pluginId);
+        var facePrefix = FaceKey(pluginId, "");
+        var removedFaces = _faces.Keys
+            .Where(k => k.StartsWith(facePrefix, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        foreach (var key in removedFaces) _faces.Remove(key);
+        if (removedFaces.Count > 0) FacesChanged?.Invoke();
     }
 }

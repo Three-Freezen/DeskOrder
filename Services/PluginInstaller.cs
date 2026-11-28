@@ -523,8 +523,12 @@ public sealed class PluginInstaller
                     error = string.Join("; ", System.Linq.Enumerable.Take(validation.Errors, 3));
                     return null;
                 }
+                var faceNote = validation.FaceCount > 0
+                    ? LocalizationService.Instance.Get("Plugin.Contents.Appearance.Faces", validation.FaceCount)
+                    : "";
                 contents = LocalizationService.Instance.Get("Plugin.Contents.Appearance",
-                    validation.MaterialCount, validation.PresetCount);
+                               validation.MaterialCount, validation.PresetCount)
+                           + (faceNote.Length > 0 ? "\n" + faceNote : "");
             }
 
             return new PluginPackagePreview
