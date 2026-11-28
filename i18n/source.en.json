@@ -1013,6 +1013,7 @@
   "Plugin.LocalSource": "Imported from file",
   "Plugin.MarketSource": "Community marketplace",
   "Settings.Plugins": "Plugins",
+  "Settings.Plugins.Enabled": "Enable plugins",
   "Settings.Plugins.Hint": "Takes effect after restart; installed plugins are not deleted.",
   "Settings.Plugins.LoadAtStartup": "Load plugins at startup",
   "Settings.Plugins.LoadAtStartup.Hint": "Takes effect after restarting DeskOrder; language and appearance packs are unaffected.",

@@ -1013,6 +1013,7 @@
   "Plugin.LocalSource": "本地导入",
   "Plugin.MarketSource": "社区市场",
   "Settings.Plugins": "插件",
+  "Settings.Plugins.Enabled": "启用插件",
   "Settings.Plugins.Hint": "关闭后重启 DeskOrder 生效；已安装的插件不会被删除。",
   "Settings.Plugins.LoadAtStartup": "启动时加载插件",
   "Settings.Plugins.LoadAtStartup.Hint": "重启 DeskOrder 后生效；语言包与外观包不受影响。",

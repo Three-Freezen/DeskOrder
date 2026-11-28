@@ -169,6 +169,21 @@ public partial class App
                 return;
             }
 
+            // ponytail 2026-11-28: 插件相关设置从「常规」卡片里独立成一栏（用户要求「单独开一栏」）。
+            // 用视觉树祖先关系断言分区归属：比如开关跑回了常规卡片，这里就会亮红灯。
+            item.Check(settingsPage.PluginsSectionHeader.Text == LocalizationService.Instance["Settings.Plugins"],
+                "the plugin settings section has its own localized heading");
+            item.Check(IsInVisualSubtree(settingsPage.PluginsEnabledBox, settingsPage.PluginsSectionCard)
+                       && IsInVisualSubtree(settingsPage.LoadPluginsAtStartupBox, settingsPage.PluginsSectionCard)
+                       && IsInVisualSubtree(settingsPage.MirrorUrlBox, settingsPage.PluginsSectionCard)
+                       && IsInVisualSubtree(settingsPage.ClearImageCacheButton, settingsPage.PluginsSectionCard)
+                       && IsInVisualSubtree(settingsPage.PluginSettingsButton, settingsPage.PluginsSectionCard),
+                "all plugin settings controls live in the dedicated plugin section");
+            item.Check(!IsInVisualSubtree(settingsPage.PluginsEnabledBox, settingsPage.GeneralSectionCard)
+                       && !IsInVisualSubtree(settingsPage.MirrorUrlBox, settingsPage.GeneralSectionCard)
+                       && !IsInVisualSubtree(settingsPage.ClearImageCacheButton, settingsPage.GeneralSectionCard),
+                "the general settings card no longer contains plugin controls");
+
             item.Check(settingsPage.LoadPluginsAtStartupBox.IsChecked == config.LoadPluginsAtStartup,
                 "the load-at-startup checkbox reflects the config");
             item.Check(settingsPage.MirrorUrlBox.Text == originalRegistryUrl,
@@ -219,6 +234,17 @@ public partial class App
                 ? PluginCatalogService.DefaultRegistryUrl
                 : originalRegistryUrl.Trim();
         }
+    }
+
+    /// <summary>node 是否在 ancestor 的视觉子树里（设置页分区归属断言用）。</summary>
+    static bool IsInVisualSubtree(DependencyObject? node, DependencyObject ancestor)
+    {
+        while (node != null)
+        {
+            if (ReferenceEquals(node, ancestor)) return true;
+            node = System.Windows.Media.VisualTreeHelper.GetParent(node);
+        }
+        return false;
     }
 
     /// <summary>写一张指定大小、指定「最近使用时间」的假图片文件，返回绝对路径。</summary>
