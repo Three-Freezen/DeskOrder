@@ -691,6 +691,12 @@
   "NoteProp.Name": "便签名称",
   "NoteProp.NameColor": "便签名称颜色",
   "NoteProp.OpenAtFixedPosition": "固定位置打开",
+  "NoteProp.Section.Text": "文字",
+  "NoteProp.FontFamily": "字体",
+  "NoteProp.SystemFont": "系统默认",
+  "NoteProp.FontSize": "字号",
+  "NoteProp.TextColor": "文字颜色",
+  "NoteProp.TextOpacity": "文字透明度",
 
   "BgImage.Crop": "裁剪",
   "BgImage.Browse": "选图",

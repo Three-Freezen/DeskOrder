@@ -23,8 +23,9 @@ public class StickyNoteViewModel : INotifyPropertyChanged
     private string _noteColor = "#30FFF9C4";
     public string NoteColor { get => _noteColor; set { _noteColor = value; OnPropertyChanged(); } }
 
-    private double _fontSize = 14;
-    public double FontSize { get => _fontSize; set { _fontSize = value; OnPropertyChanged(); } }
+    // ponytail 2026-11-28: FontSize 已升格为「便签文档样式」,由 StickyNote 自己持有。
+    // 原来 VM 缓存一份构造时的值、关窗时 ApplyToModel 写回模型 —— 设置面板改了字号后
+    // 关窗会被旧值覆盖,所以这里彻底删掉。
 
     private bool _pinnedTop;
     public bool PinnedTop { get => _pinnedTop; set { _pinnedTop = value; OnPropertyChanged(); } }
@@ -51,7 +52,6 @@ public class StickyNoteViewModel : INotifyPropertyChanged
         Title = note.Title;
         Content = note.Content;
         NoteColor = note.NoteColor;
-        FontSize = note.FontSize;
         PinnedTop = note.PinnedTop;
     }
 
@@ -60,7 +60,6 @@ public class StickyNoteViewModel : INotifyPropertyChanged
         _note.Title = Title;
         _note.Content = Content;
         _note.NoteColor = NoteColor;
-        _note.FontSize = FontSize;
         _note.PinnedTop = PinnedTop;
         _note.IsLocked = IsLocked;
     }

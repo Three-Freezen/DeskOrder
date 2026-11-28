@@ -691,6 +691,12 @@
   "NoteProp.Name": "Note name",
   "NoteProp.NameColor": "Note name color",
   "NoteProp.OpenAtFixedPosition": "Open at fixed position",
+  "NoteProp.Section.Text": "Text",
+  "NoteProp.FontFamily": "Font",
+  "NoteProp.SystemFont": "System default",
+  "NoteProp.FontSize": "Font size",
+  "NoteProp.TextColor": "Text color",
+  "NoteProp.TextOpacity": "Text opacity",
 
   "BgImage.Crop": "Crop",
   "BgImage.Browse": "Browse",

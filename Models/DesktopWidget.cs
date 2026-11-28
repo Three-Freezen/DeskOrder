@@ -18,7 +18,13 @@ public class StickyNote : AppearanceModel
     public double Width { get; set; } = 260;
     public double Height { get; set; } = 200;
     public string NoteColor { get; set; } = "#30FFF9C4"; // yellow default (legacy, superseded by FillColor)
+    // ── 正文文档样式(2026-11-28) ──
+    // 未单独设置过格式的文字全部跟随这三个值；单独设置过的文字在 Notes/<id>.json 里存覆盖值。
     public double FontSize { get; set; } = 14;
+    /// <summary>正文字体族。空串 = 系统默认(SystemFonts.MessageFontFamily)。</summary>
+    public string FontFamily { get; set; } = "";
+    /// <summary>正文文字颜色(#AARRGGBB / #RRGGBB)。</summary>
+    public string TextColor { get; set; } = "#FFE0E0E0";
     public bool IsVisible { get; set; } = true;
     public bool IsLocked { get; set; } = false;
     public bool PinnedTop { get; set; } = false;
@@ -61,6 +67,7 @@ public class StickyNote : AppearanceModel
             Id = Id, Title = Title, Content = Content,
             X = X, Y = Y, Width = Width, Height = Height,
             NoteColor = NoteColor, FontSize = FontSize,
+            FontFamily = FontFamily, TextColor = TextColor,
             IsVisible = IsVisible, IsLocked = IsLocked, PinnedTop = PinnedTop,
             TileMode = TileMode,
             BorderThickness = BorderThickness,

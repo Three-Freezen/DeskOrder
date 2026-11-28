@@ -3610,6 +3610,29 @@ public partial class PropertyPanel : UserControl
         var heightBox = (TextBox)((Grid)sizeGrid.Children[1]).Children[1];
         root.Children.Add(basic);
 
+        // 文字(2026-11-28) — 便签正文的「文档样式」:字体 / 字号 / 文字颜色 / 透明度。
+        // 没被单独设置过格式的文字全部跟随这里;单独改过格式的文字保持自己的值。
+        var text = MakeSection(_loc["NoteProp.Section.Text"]);
+        text.Children.Add(MakeFontFamilyRow(_loc["NoteProp.FontFamily"], note.FontFamily,
+            v => { note.FontFamily = v; Save(note); }));
+        text.Children.Add(MakeTextRow(_loc["NoteProp.FontSize"],
+            note.FontSize.ToString("0.#", CultureInfo.InvariantCulture),
+            v =>
+            {
+                if (double.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out var d)
+                    && d >= 6 && d <= 200)
+                {
+                    note.FontSize = d;
+                    Save(note);
+                }
+            }));
+        text.Children.Add(MakeColorRow(_loc["NoteProp.TextColor"], note.TextColor,
+            v => { note.TextColor = v; Save(note); }));
+        text.Children.Add(MakeSliderRow(_loc["NoteProp.TextOpacity"], 0, 100, 5,
+            ParsePercent(note.TextColor, 100),
+            p => { note.TextColor = SetPercent(note.TextColor, p, "E0E0E0"); Save(note); }));
+        root.Children.Add(text);
+
         // 标题栏
         var tb = MakeSection(_loc["ZoneProp.Section.TitleBar"]);
         tb.Children.Add(MakeCheckRow(_loc["ZoneProp.TitleBarFillIndependent"], note.TitleBarFillIndependent,
@@ -4519,6 +4542,62 @@ public partial class PropertyPanel : UserControl
         return grid;
     }
 
+    /// <summary>
+    /// 字体族下拉(2026-11-28,便签正文用):「系统默认」+ 系统已安装字体。
+    /// 值 = 字体名;空串 = 系统默认(渲染时回退 SystemFonts.MessageFontFamily)。
+    /// 列表在字段树重建时重新枚举 —— 系统字体表只在启动后变化,开销可忽略。
+    /// </summary>
+    Grid MakeFontFamilyRow(string label, string value, Action<string> onChange)
+    {
+        var grid = new Grid { Margin = new Thickness(0, 4, 0, 0) };
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        grid.Children.Add(new TextBlock
+        {
+            Text = label,
+            FontSize = 11,
+            Foreground = (Brush)FindResource("Brush.Text.Secondary"),
+            Margin = new Thickness(0, 0, 0, 4),
+        });
+
+        var combo = ComboBoxHelper.Create(fontSize: 12);
+        combo.HorizontalAlignment = HorizontalAlignment.Stretch;
+        combo.MaxDropDownHeight = 320;
+
+        var def = new ComboBoxItem { Content = _loc["NoteProp.SystemFont"], Tag = "" };
+        combo.Items.Add(def);
+        // 目标字体名先解析一次:非法字体名不该让整张列表只建到一半。
+        string? wanted = null;
+        try { if (!string.IsNullOrWhiteSpace(value)) wanted = new FontFamily(value).Source; }
+        catch { }
+        ComboBoxItem? match = null;
+        try
+        {
+            foreach (var source in Fonts.SystemFontFamilies
+                         .Select(f => f.Source)
+                         .Where(s => !string.IsNullOrWhiteSpace(s))
+                         .Distinct(StringComparer.OrdinalIgnoreCase)
+                         .OrderBy(s => s, StringComparer.CurrentCultureIgnoreCase))
+            {
+                var item = new ComboBoxItem { Content = source, Tag = source };
+                combo.Items.Add(item);
+                if (wanted != null && string.Equals(source, wanted, StringComparison.OrdinalIgnoreCase))
+                    match = item;
+            }
+        }
+        catch { }
+
+        combo.SelectedItem = match ?? def;   // 先定选中项,再挂事件(避免初始化触发写模型)
+        combo.SelectionChanged += (_, _) =>
+        {
+            if (combo.SelectedItem is ComboBoxItem item && item.Tag is string tag)
+                onChange(tag);
+        };
+        Grid.SetRow(combo, 1);
+        grid.Children.Add(combo);
+        return grid;
+    }
+
     Grid MakeColorRow(string label, string value, Action<string> onChange)
     {
         // ponytail 2026-08-25: 小方框从第二行 → 与文字同行（横向）。
@@ -5086,7 +5165,8 @@ public partial class PropertyPanel : UserControl
             nameof(StickyNote.IsVisible),
             nameof(StickyNote.Title), nameof(StickyNote.Content),
             nameof(StickyNote.NoteColor),
-            nameof(StickyNote.FontSize),
+            // 2026-11-28: FontSize 已升格为便签「文档样式」的一部分,不再排除 ——
+            // 样式预设应用 / 取消回退都要带上正文字体。
             nameof(StickyNote.PinnedTop),
             nameof(StickyNote.LastSavePath),
             nameof(StickyNote.HotkeyEnabled),

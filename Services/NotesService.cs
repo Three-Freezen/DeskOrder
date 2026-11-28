@@ -124,10 +124,13 @@ public class NotesService
     // ponytail 2026-08-29: 落点随 DataLocator(安装器可选 AppData / 便携 Data)。
     private static string NotesDir => Path.Combine(DataLocator.Root, "Notes");
 
+    // 2026-11-28: v2 只存「与文档样式不同的覆盖值」,null 全部省略 —— 文件更小,
+    // 也不会出现一排 "Size": null 让人误以为是显式值。
     private static readonly JsonSerializerOptions NoteFileJsonOptions = new()
     {
         WriteIndented = true,
-        PropertyNameCaseInsensitive = true
+        PropertyNameCaseInsensitive = true,
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
     };
 
     public string NoteFilePath(Guid id) => Path.Combine(NotesDir, $"{id:N}.json");
