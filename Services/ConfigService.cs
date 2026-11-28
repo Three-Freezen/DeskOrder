@@ -195,7 +195,8 @@ public class ConfigService
     /// <summary>ponytail 2026-09-26(二期): 把「设置 → 外观」的全局渲染方案开关写进每个对象,
     /// 渲染侧只读对象自己的 <c>UseWallpaperRenderer</c> 快照。
     ///
-    /// 同时决定 <see cref="Helpers.WallpaperSource.Enabled"/> —— 关掉开关时不做任何壁纸检测/
+    /// 同时决定 <see cref="Helpers.WallpaperSource.Enabled"/> 与磁贴独立采样开关
+    /// (<see cref="Helpers.WallpaperSource.TileGlassEnabled"/>) —— 两个都关时才不做壁纸检测/
     /// 抓屏(这是"关掉后不该有额外开销"的唯一保证点)。
     ///
     /// 注意(<see cref="Helpers.AcrylicHelper.ShowLiquidGlassDialog"/> 的材质是另一回事):
