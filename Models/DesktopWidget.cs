@@ -152,6 +152,10 @@ public class DesktopClock : AppearanceModel
     public double Opacity { get; set; } = 1.0;
     public ClockDisplayMode Mode { get; set; } = ClockDisplayMode.Digital;
     public string AccentColor { get; set; } = "#4CC9F0";
+
+    /// <summary>指针面盘：空串 = 内置经纬；<c>pack:&lt;插件 id&gt;:&lt;face id&gt;</c> = 外观包面盘。
+    /// 插件被停用/卸载时保留 key，渲染回退内置经纬；重新启用后自动恢复。</summary>
+    public string AnalogFace { get; set; } = "";
     // ── Appearance (most fields inherited from AppearanceModel) ──
     public double BorderThickness { get; set; } = 1.0;
     // ponytail 2026-08-26: per-instance corner radius (圆角/尖角 switch).
@@ -183,6 +187,7 @@ public class DesktopClock : AppearanceModel
             TileMode = TileMode, ControlOpacity = ControlOpacity,
             FontSize = FontSize, FontFamily = FontFamily,
             Opacity = Opacity, Mode = Mode, AccentColor = AccentColor,
+            AnalogFace = AnalogFace,
             BorderThickness = BorderThickness,
             CornerRadius = CornerRadius,
             AnalogFillColor = AnalogFillColor, DigitalFillColor = DigitalFillColor,

@@ -2789,6 +2789,83 @@ public partial class PropertyPanel : UserControl
         }
     }
 
+    /// <summary>「指针样式」下拉：内置经纬 + 已启用外观包里的面盘。
+    /// 面盘 key 为空 = 内置；插件停用/卸载时下拉会显示“原面盘（插件已停用）”，
+    /// 模型里的 key 保留，重新启用后自动恢复。</summary>
+    FrameworkElement MakeClockFaceRow(DesktopClock c)
+    {
+        var stack = new StackPanel { Margin = new Thickness(0, 2, 0, 2) };
+        stack.Children.Add(new TextBlock
+        {
+            Text = _loc["ClockProp.AnalogFace"],
+            FontSize = 11,
+            Foreground = (Brush)FindResource("Brush.Text.Secondary"),
+            Margin = new Thickness(0, 0, 0, 4),
+        });
+
+        var combo = ComboBoxHelper.Create();
+        combo.HorizontalAlignment = HorizontalAlignment.Stretch;
+        combo.MinWidth = 140;
+        bool suppress = false;
+
+        void Rebuild()
+        {
+            string current = c.AnalogFace ?? "";
+            suppress = true;
+            try
+            {
+                combo.Items.Clear();
+                combo.Items.Add(new ComboBoxItem
+                {
+                    Content = _loc["ClockProp.AnalogFace.Builtin"],
+                    Tag = "",
+                });
+                int selected = 0;
+                foreach (var face in AppearancePackService.Instance.Faces)
+                {
+                    combo.Items.Add(new ComboBoxItem
+                    {
+                        Content = face.DropdownLabel,
+                        Tag = face.Key,
+                    });
+                    if (string.Equals(face.Key, current, StringComparison.Ordinal))
+                        selected = combo.Items.Count - 1;
+                }
+                if (selected == 0 && current.Length > 0)
+                {
+                    combo.Items.Add(new ComboBoxItem
+                    {
+                        Content = _loc["ClockProp.AnalogFace.Missing"],
+                        Tag = current,
+                    });
+                    selected = combo.Items.Count - 1;
+                }
+                combo.SelectedIndex = selected;
+            }
+            finally { suppress = false; }
+        }
+
+        combo.DropDownOpened += (_, _) => Rebuild();
+        combo.SelectionChanged += (_, _) =>
+        {
+            if (suppress || combo.SelectedItem is not ComboBoxItem item) return;
+            c.AnalogFace = item.Tag as string ?? "";
+            Save(c);
+        };
+        Rebuild();
+
+        stack.Children.Add(combo);
+        stack.Children.Add(new TextBlock
+        {
+            Text = _loc["ClockProp.AnalogFace.Hint"],
+            FontSize = 10,
+            Foreground = (Brush)FindResource("Brush.Text.Tertiary"),
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 4, 0, 0),
+        });
+        return stack;
+    }
+
     // ── Field tree for DesktopClock ──
     //
     // ponytail 2026-08-25: rebuilt to the 时钟设置 spec (属性字段分类新.txt).
@@ -2817,6 +2894,7 @@ public partial class PropertyPanel : UserControl
             v => { c.Use24Hour = v; Save(c); }));
         switches.Children.Add(MakeCheckRow(_loc["ClockProp.ShowSeconds"], c.ShowSeconds,
             v => { c.ShowSeconds = v; Save(c); }));
+        switches.Children.Add(MakeClockFaceRow(c));
         switches.Children.Add(MakeCornerStyleRow(c.CornerRadius > 0, rounded =>
         {
             c.CornerRadius = rounded ? (c.CornerRadius > 0 ? c.CornerRadius : 10) : 0;
@@ -5017,6 +5095,7 @@ public partial class PropertyPanel : UserControl
         dst.TextColor = src.TextColor;
         dst.ButtonColor = src.ButtonColor;
         dst.SecondHandColor = src.SecondHandColor;
+        dst.AnalogFace = src.AnalogFace;
         dst.TileMode = src.TileMode;
         dst.ControlOpacity = src.ControlOpacity;
         dst.Use24Hour = src.Use24Hour;

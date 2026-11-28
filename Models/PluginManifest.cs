@@ -229,10 +229,22 @@ public sealed class PluginPresetDeclaration
     public string File { get; set; } = "";
 }
 
+/// <summary>外观包里的指针面盘声明；文件是 220×220 的矢量面盘 JSON。</summary>
+public sealed class PluginFaceDeclaration
+{
+    public string Id { get; set; } = "";
+    public LocalizedText Name { get; set; } = new();
+    public string File { get; set; } = "";
+    public string? Preview { get; set; }
+}
+
 public sealed class PluginPayload
 {
     public List<string>? Materials { get; set; }
     public List<PluginPresetDeclaration>? Presets { get; set; }
+
+    /// <summary>外观包的指针面盘（<c>faces/*.json</c>）。</summary>
+    public List<PluginFaceDeclaration>? Faces { get; set; }
 
     /// <summary>声明式单文件载荷（语言包的 <c>i18n/ja.json</c>）。</summary>
     public string? File { get; set; }
@@ -297,7 +309,7 @@ public sealed class PluginManifest
         if (!SemVerRe.IsMatch(Version ?? "")) Err("version is not SemVer");
         // 版本号会成为安装目录名：尾随点/双点在 Win32 下会被规范化，
         // 目录名与记录里的版本对不上，更新时会把自己刚装好的目录删掉。
-        else if (Version.EndsWith('.') || Version.Contains(".."))
+        else if ((Version ?? "").EndsWith('.') || (Version ?? "").Contains(".."))
             Err("version must not end with a dot or contain '..'");
         if (string.IsNullOrWhiteSpace(Author?.Name)) Err("author.name is required");
         if (string.IsNullOrWhiteSpace(Author?.Github)) Err("author.github is required");
@@ -376,8 +388,21 @@ public sealed class PluginManifest
             }
             else if (parsedKind == PluginKind.Appearance)
             {
-                if ((Payload?.Materials?.Count ?? 0) == 0 && (Payload?.Presets?.Count ?? 0) == 0)
-                    Err("payload must contain materials or presets");
+                var faceCount = Payload?.Faces?.Count ?? 0;
+                if ((Payload?.Materials?.Count ?? 0) == 0 && (Payload?.Presets?.Count ?? 0) == 0 && faceCount == 0)
+                    Err("payload must contain materials, presets or faces");
+                if (faceCount > 16) Err("payload.faces may contain at most 16 faces");
+                var faceIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var face in Payload?.Faces ?? new List<PluginFaceDeclaration>())
+                {
+                    if (!ClockFaceSpecValidator.IsValidFaceId(face.Id)) Err($"faces[].id is invalid: '{face.Id}'");
+                    else if (!faceIds.Add(face.Id)) Err($"faces[].id is duplicated: '{face.Id}'");
+                    if (face.Name == null || !face.Name.HasAny) Err($"face '{face.Id}': name.zh/en is required");
+                    if (string.IsNullOrWhiteSpace(face.File) || !PluginPaths.IsSafeRelativePath(face.File))
+                        Err($"face '{face.Id}': file must be a relative path inside the package");
+                    if (!string.IsNullOrWhiteSpace(face.Preview) && !PluginPaths.IsSafeRelativePath(face.Preview))
+                        Err($"face '{face.Id}': preview must be a relative path inside the package");
+                }
             }
         }
 

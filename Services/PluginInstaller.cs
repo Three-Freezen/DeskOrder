@@ -524,7 +524,7 @@ public sealed class PluginInstaller
                     return null;
                 }
                 contents = LocalizationService.Instance.Get("Plugin.Contents.Appearance",
-                    validation.MaterialCount, validation.PresetCount);
+                    validation.MaterialCount, validation.PresetCount, validation.FaceCount);
             }
 
             return new PluginPackagePreview
