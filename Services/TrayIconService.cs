@@ -286,21 +286,40 @@ public class TrayIconService : IDisposable
         // ponytail 2026-08-27: 精简到 3 项 — 管理分区 / 语言 / 退出。ShowAll/HideAll/
         // NewZone/NewNote/NewClock/NewCalendar 已废弃。每次右键重新构建,所以语言
         // 切换后再开菜单自动拿新 i18n(吸取 XAML 静态绑定教训)。
+        //
+        // 2026-11-28 菜单图标（方案 B · 简笔 LESS）：托盘菜单在代码里现搭,图标也就
+        // 在这里挂。颜色/尺寸全部由 Resources/Icons.Menu.xaml 的 MenuItemIcon 样式给,
+        // 菜单跟系统主题,不跟应用主题 —— 别在这里写死颜色。
 
-        var manage = new MenuItem { Header = loc["Tray.Manage"] };
+        var manage = new MenuItem
+        {
+            Header = loc["Tray.Manage"],
+            Icon = Helpers.MenuIconFactory.Icon("Menu.Manage"),
+        };
         manage.Click += (_, _) => ManageZones?.Invoke();
         menu.Items.Add(manage);
 
         // Language submenu：内置 zh/en + 已安装语言包（动态列表，每次右键重建）。
-        var langMenu = new MenuItem { Header = loc["Menu.Language"] };
+        var langMenu = new MenuItem
+        {
+            Header = loc["Menu.Language"],
+            Icon = Helpers.MenuIconFactory.Icon("Menu.Language"),
+        };
         foreach (var code in loc.AvailableLanguages)
         {
             var name = loc.NativeLanguageNames.TryGetValue(code, out var native) ? native : code;
+            bool current = string.Equals(loc.CurrentLanguage, code, StringComparison.OrdinalIgnoreCase);
+            // 这排整体无图标，但勾选标记要占同一个 24px 图标列：勾选项放 ✓，
+            // 其余塞 16×16 透明占位，否则文字左边缘会左右跳。
+            object icon = current
+                ? CheckGlyph() ?? Helpers.MenuIconFactory.Blank()
+                : Helpers.MenuIconFactory.Blank();
             var item = new MenuItem
             {
                 Header = name,
-                IsChecked = string.Equals(loc.CurrentLanguage, code, StringComparison.OrdinalIgnoreCase),
-                Tag = code
+                IsChecked = current,
+                Tag = code,
+                Icon = icon,
             };
             var selected = code;
             item.Click += (_, _) => LanguageSelected?.Invoke(selected);
@@ -317,11 +336,25 @@ public class TrayIconService : IDisposable
             menu.Items.Add(toolsMenu);
         }
 
-        var exit = new MenuItem { Header = loc["Tray.Exit"] };
+        var exit = new MenuItem
+        {
+            Header = loc["Tray.Exit"],
+            Icon = Helpers.MenuIconFactory.Icon("Menu.Exit"),
+        };
         exit.Click += (_, _) => Exit?.Invoke();
         menu.Items.Add(exit);
 
         menu.IsOpen = true;
+    }
+
+    /// <summary>「语言」子菜单的当前项：勾选单独用正文色（图标默认是 Text.Secondary，
+    /// 勾选要更实一点才看得出来）。资源缺失时返回 null，调用方退回透明占位。</summary>
+    private static object? CheckGlyph()
+    {
+        if (Helpers.MenuIconFactory.Icon("Menu.Check") is not System.Windows.Shapes.Path path) return null;
+        if (Application.Current?.TryFindResource("Menu.Text.Primary") is System.Windows.Media.Brush brush)
+            path.Stroke = brush;
+        return path;
     }
 
     public void Dispose()

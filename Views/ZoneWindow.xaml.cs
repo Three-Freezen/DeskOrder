@@ -310,6 +310,13 @@ public partial class ZoneWindow : Window
         };
         _vm.Items.CollectionChanged += _vmItemsChangedHandler;
         Loaded += OnLoad;
+        // 2026-11-28 右键菜单图标（方案 B · 简笔）：项目 / 次级分区的菜单由
+        // ContextMenuService 按元素上挂的 ContextMenu 打开，这里截一次统一补图标；
+        // 分区自身的菜单是手动 IsOpen，由 ZoneMenu_Opened 兜。ApplyMenuIcons 幂等，
+        // 同一条菜单反复触发不会越叠越多。绝不能 e.Handled = true（会吞掉菜单）。
+        AddHandler(FrameworkElement.ContextMenuOpeningEvent,
+            new ContextMenuEventHandler((s, e) =>
+                ApplyMenuIcons(ContextMenuService.GetContextMenu(e.Source as DependencyObject))));
         LocationChanged += (_, _) => { if (_bayActive) return; _zone.X = Left; _zone.Y = Top; ScheduleSave(); };
         SizeChanged += OnSize;
         _saveDebounce.Tick += (_, _) => { _saveDebounce.Stop(); if (_savePending) { _savePending = false; _mgr.SaveConfig(); } };
@@ -2566,6 +2573,8 @@ public partial class ZoneWindow : Window
 
     void ImportBtn_Click(object s, MouseButtonEventArgs e)
     {
+        // 标题栏「＋」的菜单是手动打开的，不走 ContextMenuService 的 ContextMenuOpening，这里补图标。
+        ApplyMenuIcons(ImportBtn.ContextMenu);
         ImportBtn.ContextMenu.IsOpen = true;
         e.Handled = true;
     }
@@ -2951,12 +2960,20 @@ public partial class ZoneWindow : Window
     {
         if (_folderEntryMenu != null) return;
         _folderEntryMenu = new ContextMenu();
-        _fmMenuOpen = new MenuItem(); _fmMenuOpen.Click += FolderMapMenuOpen_Click;
-        _fmMenuOpenLocation = new MenuItem(); _fmMenuOpenLocation.Click += FolderMapMenuOpenLocation_Click;
-        _fmMenuOpenExplorer = new MenuItem(); _fmMenuOpenExplorer.Click += FolderMapMenuOpenInExplorer_Click;
-        _fmMenuRename = new MenuItem(); _fmMenuRename.Click += FolderMapMenuRename_Click;
+        _fmMenuOpen = new MenuItem { Icon = MenuIconFactory.Icon("Menu.Open") };
+        _fmMenuOpen.Click += FolderMapMenuOpen_Click;
+        _fmMenuOpenLocation = new MenuItem { Icon = MenuIconFactory.Icon("Menu.ShowInFolder") };
+        _fmMenuOpenLocation.Click += FolderMapMenuOpenLocation_Click;
+        _fmMenuOpenExplorer = new MenuItem { Icon = MenuIconFactory.Icon("Menu.ShowInFolder") };
+        _fmMenuOpenExplorer.Click += FolderMapMenuOpenInExplorer_Click;
+        _fmMenuRename = new MenuItem { Icon = MenuIconFactory.Icon("Menu.Rename") };
+        _fmMenuRename.Click += FolderMapMenuRename_Click;
         _fmMenuSep = new Separator();
-        _fmMenuDelete = new MenuItem { Foreground = new SolidColorBrush(Color.FromArgb(0xFF, 0xFF, 0x66, 0x66)) };
+        _fmMenuDelete = new MenuItem
+        {
+            Foreground = new SolidColorBrush(Color.FromArgb(0xFF, 0xFF, 0x66, 0x66)),
+            Icon = MenuIconFactory.Icon("Menu.Delete", "MenuItemIconDanger"),
+        };
         _fmMenuDelete.Click += FolderMapMenuDelete_Click;
         _folderEntryMenu.Items.Add(_fmMenuOpen);
         _folderEntryMenu.Items.Add(_fmMenuOpenLocation);
@@ -3383,6 +3400,7 @@ public partial class ZoneWindow : Window
         // 会反复触发，Attach 内部先清旧项，不会越叠越多。
         if (s is ContextMenu zoneMenu)
         {
+            ApplyMenuIcons(zoneMenu);
             var deleteIndex = zoneMenu.Items.IndexOf(CtxDelete);
             PluginToolService.Instance.Attach(zoneMenu, PluginToolSurface.Zone,
                 deleteIndex < 0 ? null : deleteIndex);
@@ -3460,6 +3478,94 @@ public partial class ZoneWindow : Window
         CtxFullHide.Visibility = Visibility.Collapsed;
         CtxReleaseFromBay.Visibility = Visibility.Collapsed;
         CtxMinimize.Visibility = Visibility.Visible;
+    }
+
+    // ══ 右键菜单图标（方案 B · 简笔 LESS）═══════════════════════════════════
+    // 设计稿与规范：UI重构/menu-icons/（svg/02-B.svg、DESIGN.md）
+    // 几何与样式：Resources/Icons.Menu.xaml（Menu.* 键 + MenuItemIcon 样式）
+    //
+    // 规矩：
+    //  · 同一个菜单里图标要么全给、要么全不给，否则文字左边缘会参差；
+    //  · 「设置」「锁定」不画几何 —— 直接用分区标题栏那两颗按钮的字符
+    //    （⚙ / 🔓 🔒），保证菜单和标题栏一眼是同一个东西；
+    //  · 删除项走 MenuItemIconDanger（#FF6666，与菜单里现有的 Foreground 一致）。
+
+    /// <summary>菜单项 x:Name → 图标几何键。键名取菜单项的 x:Name，是因为同一批
+    /// 菜单项会在多个 DataTemplate 里重复出现（分区 / 快捷栏 / 次级分区各一套），
+    /// 按名字查表正好一次覆盖全部实例，不必逐条改 XAML。</summary>
+    static readonly Dictionary<string, string> MenuIconKeys = new(StringComparer.Ordinal)
+    {
+        // 分区菜单
+        ["CtxDockAddApp"] = "Menu.AddApp",
+        ["CtxImport"] = "Menu.Import",
+        ["CtxImportFiles"] = "Menu.File",
+        ["CtxImportFolder"] = "Menu.Folder",
+        ["CtxImportShell"] = "Menu.Monitor",
+        ["CtxNewSubZone"] = "Menu.NewSubZone",
+        ["CtxNew"] = "Menu.New",
+        ["CtxNewFolder"] = "Menu.Folder",
+        ["CtxNewTxt"] = "Menu.NewTxt",
+        ["CtxNewDocx"] = "Menu.NewDocx",
+        ["CtxNewPptx"] = "Menu.NewPptx",
+        ["CtxNewXlsx"] = "Menu.NewXlsx",
+        ["CtxMapFolderNew"] = "Menu.MapFolder",
+        ["CtxReleaseFromBay"] = "Menu.Release",
+        ["CtxDisbandAll"] = "Menu.DisbandAll",
+        ["CtxDisbandThis"] = "Menu.DisbandSingle",
+        ["CtxMinimize"] = "Menu.Minimize",
+        ["CtxFullHide"] = "Menu.Hide",
+        ["CtxDelete"] = "Menu.Delete",
+        ["CtxPaste"] = "Menu.Paste",
+        // 项目菜单
+        ["CtxOpen"] = "Menu.Open",
+        ["CtxOpenLocation"] = "Menu.ShowInFolder",
+        ["CtxEmptyRecycle"] = "Menu.EmptyRecycle",
+        ["CtxRename"] = "Menu.Rename",
+        // 次级分区菜单
+        ["CtxSubOpen"] = "Menu.Open",
+        ["CtxSubRename"] = "Menu.Rename",
+        ["CtxSubDissolve"] = "Menu.Dissolve",
+        ["CtxSubDelete"] = "Menu.Delete",
+        // 标题栏「＋」弹出的同款菜单（多一套 *2 的名字）
+        ["CtxImport2"] = "Menu.Import",
+        ["CtxImportFiles2"] = "Menu.File",
+        ["CtxImportFolder2"] = "Menu.Folder",
+        ["CtxImportShell2"] = "Menu.Monitor",
+        ["CtxNewSubZone2"] = "Menu.NewSubZone",
+        ["CtxNew2"] = "Menu.New",
+        ["CtxNewFolder2"] = "Menu.Folder",
+        ["CtxNewTxt2"] = "Menu.NewTxt",
+        ["CtxNewDocx2"] = "Menu.NewDocx",
+        ["CtxNewPptx2"] = "Menu.NewPptx",
+        ["CtxNewXlsx2"] = "Menu.NewXlsx",
+        ["CtxMapFolder2"] = "Menu.MapFolder",
+    };
+
+    /// <summary>给一条右键菜单（含子菜单）补齐图标。幂等：已经有图标的项不动，
+    /// 所以菜单反复打开、或被多条路径同时触发，都不会越叠越多。
+    /// 分区菜单在 <see cref="ZoneMenu_Opened"/> 调，项目 / 次级分区菜单在
+    /// ContextMenuOpening 里调，「＋」菜单与文件夹条目菜单在各自的打开点调。</summary>
+    void ApplyMenuIcons(ContextMenu? cm)
+    {
+        if (cm == null) return;
+        foreach (var entry in cm.Items) ApplyMenuIcon(entry);
+    }
+
+    void ApplyMenuIcon(object? entry)
+    {
+        if (entry is not MenuItem mi) return;
+        if (mi.Icon == null)
+        {
+            if (mi.Name == "CtxSettings")
+                mi.Icon = MenuIconFactory.Glyph("⚙");          // 与标题栏 EditBtnText 同字符
+            else if (mi.Name == "CtxLock")
+                mi.Icon = MenuIconFactory.Glyph(LockBtnText.Text);  // 与标题栏 LockBtnText 同字符
+            else if (MenuIconKeys.TryGetValue(mi.Name, out var key))
+                mi.Icon = MenuIconFactory.Icon(key,
+                    mi.Name.EndsWith("Delete", StringComparison.Ordinal)
+                        ? "MenuItemIconDanger" : "MenuItemIcon");
+        }
+        foreach (var child in mi.Items) ApplyMenuIcon(child);
     }
 
     /// <summary>收拾右键菜单里的空段：开头/结尾的分隔线与相邻重复的分隔线都藏起来。
@@ -3757,6 +3863,9 @@ public partial class ZoneWindow : Window
             (vm.IsLocked || IsDock) ? Visibility.Collapsed : Visibility.Visible;
         // ponytail 2026-08-27: 锁定态变化时同步右键菜单 Header,切语言后下次打开也会刷新。
         CtxLock.Header = vm.IsLocked ? _loc["Common.Unlock"] : _loc["Common.Lock"];
+        // 2026-11-28 菜单图标：「锁定」那枚图标复用标题栏同一个字符（🔓/🔒），跟着状态一起换。
+        // 菜单项第一次打开时由 ApplyMenuIcons 建出来；之后这里负责保持同步。
+        if (CtxLock.Icon is TextBlock lockGlyph) lockGlyph.Text = LockBtnText.Text;
         if (vm.IsLocked) NativeMethods.PinBelowProgman(this);
     }
 
@@ -5006,6 +5115,7 @@ public partial class ZoneWindow : Window
     {
         if (s is not ContextMenu cm || cm.PlacementTarget is not FrameworkElement fe
             || fe.DataContext is not ZoneItemViewModel vm) return;
+        ApplyMenuIcons(cm);
         bool isRecycle = vm.Type == ItemType.ShellLocation && ShellIconService.IsRecycleBin(vm.TargetPath);
         // Multi-selection menu: only 删除 + 重命名 (single-item items are hidden).
         bool isMulti = vm.IsSelected && _vm.Items.Count(i => i.IsSelected) > 1;

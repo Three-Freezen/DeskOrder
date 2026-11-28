@@ -98,14 +98,17 @@
                 </Grid.ColumnDefinitions>
 
                 <!-- 可选图标(有 Icon 时显示) -->
+                <!-- 2026-11-28 菜单图标（方案 B · 简笔）：图标区 24 = 16 图标 + 8 间隔。
+                     原来是 20×20 + 8 间隔 = 28 > 24，图标会向右压 4px 到文字上。 -->
                 <ContentPresenter x:Name="Icon"
                                   Grid.Column="0"
-                                  Width="20" Height="20"
+                                  Width="16" Height="16"
                                   Margin="0,0,8,0"
                                   VerticalAlignment="Center"
                                   HorizontalAlignment="Left"
                                   ContentSource="Icon"
-                                  SnapsToDevicePixels="True"/>
+                                  SnapsToDevicePixels="True"
+                                  UseLayoutRounding="True"/>
 
                 <!-- 标题文字 -->
                 <ContentPresenter x:Name="HeaderPart"

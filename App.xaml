@@ -15,6 +15,9 @@
                 <ResourceDictionary Source="Resources/Theme.Colors.Dark.xaml"/>
                 <ResourceDictionary Source="Resources/Theme.Brushes.xaml"/>
                 <ResourceDictionary Source="Resources/Icons.xaml"/>
+                <!-- 右键菜单图标（方案 B · 简笔）：Menu.* 前缀，与 Icons.xaml 并存不覆盖。
+                     见 UI重构/menu-icons/DESIGN.md。 -->
+                <ResourceDictionary Source="Resources/Icons.Menu.xaml"/>
                 <ResourceDictionary Source="Resources/Controls/CheckBox.xaml"/>
                 <ResourceDictionary Source="Resources/Controls/RadioButton.xaml"/>
                 <ResourceDictionary Source="Resources/Controls/ToggleSwitch.xaml"/>
