@@ -99,7 +99,13 @@
                       FocusVisualStyle="{x:Null}"/>
 
       <!-- PropertyPanel (docked) -->
-      <Grid Grid.Row="1" Grid.Column="2" x:Name="RightPane" Visibility="Collapsed">
+      <!-- 关闭动画：内容淡出 + 向外轻滑 160ms 再收栏（见 SetPropertyPanelVisible）。
+           RightPaneSlide 就是这条位移，收起态会复位到 0。 -->
+      <Grid Grid.Row="1" Grid.Column="2" x:Name="RightPane" Visibility="Collapsed"
+            RenderTransformOrigin="0.5,0.5">
+        <Grid.RenderTransform>
+          <TranslateTransform x:Name="RightPaneSlide"/>
+        </Grid.RenderTransform>
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto"/>
           <RowDefinition Height="*"/>

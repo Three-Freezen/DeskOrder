@@ -1,5 +1,6 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:helpers="clr-namespace:DesktopZones.Helpers">
 
   <!-- ═══════════════════════════════════════════════════════════
        ComboBox (Menu 调色板) — 跟随系统深浅色，不跟随管理界面主题。
@@ -19,6 +20,8 @@
     <Setter Property="HorizontalContentAlignment" Value="Left"/>
     <Setter Property="VerticalContentAlignment" Value="Center"/>
     <Setter Property="Cursor" Value="Hand"/>
+    <!-- 与 ComboBox.xaml 同一套「收回动画播完再关层」，见 ComboBoxDropMotion。 -->
+    <Setter Property="helpers:ComboBoxDropMotion.Enable" Value="True"/>
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="ComboBox">
@@ -74,9 +77,12 @@
               </Grid>
             </Border>
 
+            <!-- 与 ComboBox.xaml 同款：IsOpen 走 ComboBoxDropMotion 中转，
+                 Mirror 用来同步拿「逻辑已关」的回调。 -->
             <Popup x:Name="PART_Popup"
                    Placement="Bottom"
-                   IsOpen="{TemplateBinding IsDropDownOpen}"
+                   helpers:ComboBoxDropMotion.IsDropDownOpenMirror="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}}"
+                   IsOpen="{Binding Path=(helpers:ComboBoxDropMotion.IsPopupOpen), RelativeSource={RelativeSource TemplatedParent}}"
                    AllowsTransparency="True"
                    Focusable="False"
                    PopupAnimation="None"
@@ -139,6 +145,10 @@
                   </Storyboard>
                 </BeginStoryboard>
               </Trigger.ExitActions>
+            </Trigger>
+            <!-- 收回动画期间弹层仍在屏上但逻辑上已关闭：别让它吃点击。 -->
+            <Trigger Property="IsDropDownOpen" Value="False">
+              <Setter TargetName="DropDownRoot" Property="IsHitTestVisible" Value="False"/>
             </Trigger>
             <Trigger Property="IsEnabled" Value="False">
               <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Menu.Bg.Surface}"/>
