@@ -35,6 +35,8 @@ public partial class CalendarWidget : Window
     public CalendarWidget(DesktopCalendar calendar, WidgetService widgetService)
     {
         InitializeComponent();
+        // 右键菜单图标（方案 B · 简笔）：锁定图标复用标题栏那颗按钮的字符。
+        MenuIconBinder.Hook(this, () => LockBtn.Content as string);
         // 桌面层策略:失去焦点后回落到壁纸上方(与锁定态一致),不再浮在应用窗口之上。
         // IsVisible 守卫防关窗 teardown 期间 EnsureHandle 抛异常(时钟同款)。
         Deactivated += (_, _) => { if (IsVisible) NativeMethods.PinBelowProgman(this); };
