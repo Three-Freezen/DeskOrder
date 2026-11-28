@@ -15,9 +15,9 @@ namespace DesktopZones.Helpers;
 public sealed class ClockFaceVisual : FrameworkElement
 {
     readonly ClockFaceSpec _spec;
-    readonly Dictionary<ClockFaceLayer, Geometry> _geometryCache = new();
+    readonly Dictionary<ClockFaceLayer, Geometry?> _geometryCache = new();
     readonly Dictionary<string, ClockFaceGradient> _gradients = new(StringComparer.OrdinalIgnoreCase);
-    readonly Dictionary<string, Brush> _brushCache = new(StringComparer.Ordinal);
+    readonly Dictionary<string, Brush?> _brushCache = new(StringComparer.Ordinal);
     readonly Dictionary<string, Pen> _penCache = new(StringComparer.Ordinal);
 
     Color _ink = Color.FromRgb(0xEE, 0xF4, 0xFF);
@@ -25,6 +25,8 @@ public sealed class ClockFaceVisual : FrameworkElement
     Color _signal = Color.FromRgb(0xFF, 0x66, 0x66);
     DateTime _now = DateTime.Now;
     bool _showSeconds = true;
+    DrawingGroup? _staticDrawing;
+    DrawingGroup? _overlayDrawing;
 
     public ClockFaceVisual(ClockFaceSpec spec)
     {
@@ -35,8 +37,9 @@ public sealed class ClockFaceVisual : FrameworkElement
         var clip = new RectangleGeometry(new Rect(0, 0, spec.Size, spec.Size));
         clip.Freeze();
         Clip = clip;
-        foreach (var gradient in spec.Gradients)
+        foreach (var gradient in spec.Gradients ?? new List<ClockFaceGradient>())
             _gradients[gradient.Id] = gradient;
+        RebuildStaticDrawings();
     }
 
     public ClockFaceSpec Spec => _spec;
@@ -56,6 +59,7 @@ public sealed class ClockFaceVisual : FrameworkElement
         _signal = signal;
         _brushCache.Clear();
         _penCache.Clear();
+        RebuildStaticDrawings();
         InvalidateVisual();
     }
 
@@ -78,14 +82,29 @@ public sealed class ClockFaceVisual : FrameworkElement
             dc.PushTransform(new TranslateTransform(_spec.OffsetX, _spec.OffsetY));
         try
         {
-            DrawLayers(dc, _spec.Layers);
+            if (_staticDrawing != null) dc.DrawDrawing(_staticDrawing);
             DrawHands(dc);
-            DrawLayers(dc, _spec.Overlays);
+            if (_overlayDrawing != null) dc.DrawDrawing(_overlayDrawing);
         }
         finally
         {
             if (translated) dc.Pop();
         }
+    }
+
+    void RebuildStaticDrawings()
+    {
+        _staticDrawing = BuildDrawing(_spec.Layers);
+        _overlayDrawing = BuildDrawing(_spec.Overlays);
+    }
+
+    DrawingGroup BuildDrawing(List<ClockFaceLayer>? layers)
+    {
+        var group = new DrawingGroup();
+        using (var dc = group.Open())
+            DrawLayers(dc, layers);
+        try { group.Freeze(); } catch { }
+        return group;
     }
 
     void DrawLayers(DrawingContext dc, List<ClockFaceLayer>? layers)
@@ -158,8 +177,8 @@ public sealed class ClockFaceVisual : FrameworkElement
         {
             TextAlignment = TextAlignment.Left,
         };
-        var x = layer.X1 ?? 0;
-        var y = (layer.Y1 ?? 0) - size * 0.82;
+        var x = layer.X ?? 0;
+        var y = (layer.Y ?? 0) - size * 0.82;
         var anchor = (layer.TextAnchor ?? "start").Trim().ToLowerInvariant();
         if (anchor == "middle") x -= formatted.Width / 2;
         else if (anchor == "end") x -= formatted.Width;
@@ -273,11 +292,12 @@ public sealed class ClockFaceVisual : FrameworkElement
             if (fill != null && opacity > 0)
             {
                 const int steps = 7;
+                var trailBase = Math.Max(0.4, (second.TrailWidth ?? 1.5) * 0.45);
                 for (var i = steps; i >= 1; i--)
                 {
                     var a = angle - trail * i / steps;
                     var p = PointOnCircle(radius, a);
-                    var r = dotR * (0.25 + 0.55 * (steps - i) / steps);
+                    var r = trailBase * (0.35 + 0.65 * (steps - i) / steps);
                     var g = new EllipseGeometry(p, r, r);
                     g.Freeze();
                     dc.PushOpacity(opacity * (steps - i + 1) / steps);
@@ -328,7 +348,7 @@ public sealed class ClockFaceVisual : FrameworkElement
         {
             geometry = null;
         }
-        _geometryCache[layer] = geometry!;
+        _geometryCache[layer] = geometry;
         return geometry;
     }
 
@@ -376,7 +396,7 @@ public sealed class ClockFaceVisual : FrameworkElement
             }
         }
         catch { brush = null; }
-        _brushCache[key] = brush!;
+        _brushCache[key] = brush;
         return brush;
     }
 
@@ -384,6 +404,7 @@ public sealed class ClockFaceVisual : FrameworkElement
     {
         if (string.IsNullOrWhiteSpace(stroke)) return null;
         if (stroke.Trim().Equals("none", StringComparison.OrdinalIgnoreCase)) return null;
+        if (width.HasValue && width.Value <= 0) return null;
         var w = width is > 0 ? width.Value : 1.0;
         var cap = (lineCap ?? "butt").Trim().ToLowerInvariant() switch
         {

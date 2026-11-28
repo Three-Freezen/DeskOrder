@@ -885,7 +885,7 @@ public partial class ClockWidget : Window
         if (entry == null)
         {
             if (key.Length > 0)
-                DzTrace.Always($"[ClockFace] key '{key}' not found; fallback Meridian");
+                DzTrace.Log($"[ClockFace] key '{key}' not found; fallback Meridian");
             PluginFaceHost.Content = null;
             PluginFaceHost.Visibility = Visibility.Collapsed;
             _pluginFace = null;

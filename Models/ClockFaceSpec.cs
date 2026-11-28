@@ -90,6 +90,8 @@ public sealed class ClockFaceLayer
 
     // text
     public string? Text { get; set; }
+    public double? X { get; set; }
+    public double? Y { get; set; }
     public double? FontSize { get; set; }
     public string? FontFamily { get; set; }
     /// <summary>Light / Normal / SemiBold / Bold。</summary>
@@ -198,7 +200,7 @@ public static class ClockFaceSpecValidator
             }
             return true;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or NotSupportedException)
+        catch (Exception ex)
         {
             error = ex.Message;
             spec = null;
@@ -218,18 +220,22 @@ public static class ClockFaceSpecValidator
             errors.Add("offset must be -100..100");
 
         var gradientIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (spec.Gradients.Count > MaxGradients) errors.Add($"too many gradients (max {MaxGradients})");
-        foreach (var g in spec.Gradients.Take(MaxGradients))
+        var gradients = spec.Gradients ?? new List<ClockFaceGradient>();
+        if (gradients.Count > MaxGradients) errors.Add($"too many gradients (max {MaxGradients})");
+        foreach (var g in gradients.Take(MaxGradients))
         {
+            if (g == null) { errors.Add("gradient entry must not be null"); continue; }
             if (string.IsNullOrWhiteSpace(g.Id) || !GradientIdRe.IsMatch(g.Id))
                 errors.Add($"gradient id is invalid: '{g.Id}'");
             else if (!gradientIds.Add(g.Id))
                 errors.Add($"duplicate gradient id: '{g.Id}'");
             var type = (g.Type ?? "").Trim().ToLowerInvariant();
             if (type is not ("linear" or "radial")) errors.Add($"gradient '{g.Id}': type must be linear or radial");
-            if (g.Stops.Count is < 2 or > 8) errors.Add($"gradient '{g.Id}': needs 2..8 stops");
-            foreach (var stop in g.Stops)
+            var stops = g.Stops ?? new List<ClockFaceGradientStop>();
+            if (stops.Count is < 2 or > 8) errors.Add($"gradient '{g.Id}': needs 2..8 stops");
+            foreach (var stop in stops)
             {
+                if (stop == null) { errors.Add($"gradient '{g.Id}': stop must not be null"); continue; }
                 if (!InRange(stop.Offset, 0, 1)) errors.Add($"gradient '{g.Id}': stop offset must be 0..1");
                 if (!IsColorRef(stop.Color, null)) errors.Add($"gradient '{g.Id}': stop color is invalid");
                 if (!InRange(stop.Opacity, 0, 1)) errors.Add($"gradient '{g.Id}': stop opacity must be 0..1");
@@ -257,6 +263,7 @@ public static class ClockFaceSpecValidator
         var index = 0;
         foreach (var layer in layers.Take(max))
         {
+            if (layer == null) { errors.Add($"{path}: layer must not be null"); index++; continue; }
             var at = $"{path}[{index++}]";
             var type = (layer.Type ?? "").Trim().ToLowerInvariant();
             switch (type)
@@ -276,6 +283,7 @@ public static class ClockFaceSpecValidator
                 case "text":
                     if (string.IsNullOrWhiteSpace(layer.Text)) errors.Add($"{at}: text is required");
                     else if (layer.Text!.Length > MaxTextChars) errors.Add($"{at}: text is too long");
+                    if (!layer.X.HasValue || !layer.Y.HasValue) errors.Add($"{at}: x/y are required");
                     if (!layer.FontSize.HasValue || !InRange(layer.FontSize.Value, 1, 80))
                         errors.Add($"{at}: fontSize must be 1..80");
                     if (!string.IsNullOrWhiteSpace(layer.FontFamily)
@@ -326,7 +334,12 @@ public static class ClockFaceSpecValidator
             errors.Add("hands.second.mode must be none/rotate/orbitArc/dot");
             return;
         }
-        if (mode == "rotate") ValidateHand(second.Hand, "hands.second.hand", gradientIds, errors);
+        if (mode == "rotate")
+        {
+            if (second.Hand == null || string.IsNullOrWhiteSpace(second.Hand.Data))
+                errors.Add("hands.second.hand.data is required for rotate");
+            else ValidateHand(second.Hand, "hands.second.hand", gradientIds, errors);
+        }
         if (mode is "rotate" or "orbitarc" or "dot")
         {
             if (second.Radius is { } r && !InRange(r, 1, 120)) errors.Add("hands.second.radius must be 1..120");
@@ -335,6 +348,7 @@ public static class ClockFaceSpecValidator
             ValidatePaint(second.Stroke, gradientIds, "hands.second.stroke", errors);
             if (second.StrokeWidth is { } sw && !InRange(sw, 0, 20)) errors.Add("hands.second.strokeWidth must be 0..20");
             if (second.TrailDegrees is { } td && !InRange(td, 0, 60)) errors.Add("hands.second.trailDegrees must be 0..60");
+            if (second.TrailWidth is { } tw && !InRange(tw, 0, 20)) errors.Add("hands.second.trailWidth must be 0..20");
             if (second.TrailOpacity is { } to && !InRange(to, 0, 1)) errors.Add("hands.second.trailOpacity must be 0..1");
             ValidatePaint(second.TrailStroke, gradientIds, "hands.second.trailStroke", errors);
         }

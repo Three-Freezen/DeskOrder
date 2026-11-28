@@ -395,6 +395,7 @@ public sealed class PluginManifest
                 var faceIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var face in Payload?.Faces ?? new List<PluginFaceDeclaration>())
                 {
+                    if (face == null) { Err("faces[] entry must not be null"); continue; }
                     if (!ClockFaceSpecValidator.IsValidFaceId(face.Id)) Err($"faces[].id is invalid: '{face.Id}'");
                     else if (!faceIds.Add(face.Id)) Err($"faces[].id is duplicated: '{face.Id}'");
                     if (face.Name == null || !face.Name.HasAny) Err($"face '{face.Id}': name.zh/en is required");

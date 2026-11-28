@@ -153,14 +153,23 @@ public sealed class AppearancePackService
                     errors[record.Id] = manifestError ?? "plugin.json is not an appearance pack";
                     continue;
                 }
-                var validation = Validate(dir, manifest);
+                AppearancePackValidation validation;
+                try
+                {
+                    validation = Validate(dir, manifest);
+                }
+                catch (Exception ex)
+                {
+                    errors[record.Id] = "face validation failed: " + ex.Message;
+                    DzTrace.Always($"[ClockFace] pack '{record.Id}' validation threw: {ex.Message}");
+                    continue;
+                }
                 if (!validation.Ok)
                 {
                     errors[record.Id] = string.Join("; ", validation.Errors.Take(3));
                     DzTrace.Always($"[ClockFace] pack '{record.Id}' invalid: {errors[record.Id]}");
                     continue;
-                }
-                foreach (var recipe in validation.Materials) next[recipe.Key] = recipe;
+                }                foreach (var recipe in validation.Materials) next[recipe.Key] = recipe;
                 var pluginName = manifest.Name?.Get(LocalizationService.Instance.CurrentLanguage);
                 if (string.IsNullOrWhiteSpace(pluginName)) pluginName = manifest.Id;
                 foreach (var face in validation.Faces)
@@ -310,6 +319,11 @@ public sealed class AppearancePackService
         foreach (var face in manifest.Payload?.Faces ?? new List<PluginFaceDeclaration>())
         {
             if (result.Errors.Count >= MaxReportedErrors) break;
+            if (face == null)
+            {
+                result.Errors.Add("faces[] entry must not be null");
+                continue;
+            }
             if (result.Faces.Count >= MaxFaces)
             {
                 result.Errors.Add($"too many faces (max {MaxFaces})");
@@ -568,5 +582,11 @@ public sealed class AppearancePackService
             _materials.Remove(key);
         _summaries.Remove(pluginId);
         _errors.Remove(pluginId);
+        var facePrefix = FaceKey(pluginId, "");
+        var removedFaces = _faces.Keys
+            .Where(k => k.StartsWith(facePrefix, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        foreach (var key in removedFaces) _faces.Remove(key);
+        if (removedFaces.Count > 0) FacesChanged?.Invoke();
     }
 }

@@ -888,7 +888,10 @@ public partial class PluginsPage : UserControl
         {
             var summary = AppearancePackService.Instance.GetSummary(record.Id);
             if (summary is { } counts)
-                status = Loc.Get("Plugin.Appearance.Status", counts.Materials, counts.Presets, counts.Faces);
+                status = Loc.Get("Plugin.Appearance.Status", counts.Materials, counts.Presets)
+                         + (counts.Faces > 0
+                             ? " · " + Loc.Get("Plugin.Appearance.Status.Faces", counts.Faces)
+                             : "");
         }
         if (!record.Enabled && widgets > 0)
         {
