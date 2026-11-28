@@ -169,7 +169,8 @@ public sealed class AppearancePackService
                     errors[record.Id] = string.Join("; ", validation.Errors.Take(3));
                     DzTrace.Always($"[ClockFace] pack '{record.Id}' invalid: {errors[record.Id]}");
                     continue;
-                }                foreach (var recipe in validation.Materials) next[recipe.Key] = recipe;
+                }
+                foreach (var recipe in validation.Materials) next[recipe.Key] = recipe;
                 var pluginName = manifest.Name?.Get(LocalizationService.Instance.CurrentLanguage);
                 if (string.IsNullOrWhiteSpace(pluginName)) pluginName = manifest.Id;
                 foreach (var face in validation.Faces)
