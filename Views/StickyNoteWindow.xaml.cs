@@ -204,7 +204,14 @@ public partial class StickyNoteWindow : Window
         // ponytail: 自适应对齐 — 替换 DragMove 的手动拖拽循环。
         _snapDrag = new SnapDrag(this);
         _snapResize = new SnapResize(this);
+
+
     }
+    /// <summary>右键菜单图标（方案 B · 简笔）：Opened 兜底 —— 不管菜单是
+    /// ContextMenuService 自动弹的还是代码里手动 IsOpen 的，这里都会补一次。
+    /// 与 MenuIconBinder.Hook 是两条路，Apply 幂等，重复调用无副作用。</summary>
+    void WidgetMenu_Opened(object s, RoutedEventArgs e) =>
+        MenuIconBinder.Apply(s as ContextMenu, LockBtn.Content as string);
 
     void OnHoverExpandSettingsChanged()
     {

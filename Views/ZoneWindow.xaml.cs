@@ -3484,6 +3484,10 @@ public partial class ZoneWindow : Window
     // 映射表、字形（⚙ / 🔓）与挂载逻辑统一在 Helpers/MenuIconBinder，分区与各小组件共用一份。
     // 设计稿与规范：UI重构/menu-icons/（svg/02-B.svg、svg/06-widgets.svg、DESIGN.md）
 
+    /// <summary>次级分区菜单：Opened 兜底（这条菜单是 ContextMenuService 打开、
+    /// 没有自己的 Opened，靠窗口级 ContextMenuOpening 不一定稳）。</summary>
+    void SubMenu_Opened(object s, RoutedEventArgs e) => ApplyMenuIcons(s as ContextMenu);
+
     /// <summary>给一条右键菜单（含子菜单）补齐图标。幂等，可反复调用。</summary>
     void ApplyMenuIcons(ContextMenu? cm) => MenuIconBinder.Apply(cm, LockBtnText?.Text);
 

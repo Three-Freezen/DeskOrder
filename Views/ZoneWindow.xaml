@@ -175,7 +175,7 @@
                         <ToolTip Content="{Binding Name}" Placement="Top"/>
                     </Grid.ToolTip>
                     <Grid.ContextMenu>
-                        <ContextMenu>
+                        <ContextMenu Opened="SubMenu_Opened">
                             <MenuItem x:Name="CtxSubOpen" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.Open]}" Click="SubfolderOpen_Click"/>
                             <MenuItem x:Name="CtxSubRename" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.Rename]}" Click="SubfolderRename_Click"/>
                             <MenuItem x:Name="CtxSubDissolve" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Subfolder.Dissolve]}" Click="SubfolderDissolve_Click"/>
@@ -211,7 +211,7 @@
                     <Grid.ContextMenu>
                         <!-- ponytail: 次级文件夹右键菜单 — 打开/重命名/解散/删除。
                              与普通图标同款重命名弹窗;解散=图标散入分区(自动排列),删除=连同内部图标一起删。 -->
-                        <ContextMenu>
+                        <ContextMenu Opened="SubMenu_Opened">
                             <MenuItem x:Name="CtxSubOpen" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.Open]}" Click="SubfolderOpen_Click"/>
                             <MenuItem x:Name="CtxSubRename" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.Rename]}" Click="SubfolderRename_Click"/>
                             <MenuItem x:Name="CtxSubDissolve" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Subfolder.Dissolve]}" Click="SubfolderDissolve_Click"/>
@@ -300,7 +300,7 @@
                       MouseLeftButtonDown="ListRow_MouseDown"
                       MouseEnter="ListRow_Enter" MouseLeave="ListRow_Leave">
                     <Grid.ContextMenu>
-                        <ContextMenu>
+                        <ContextMenu Opened="SubMenu_Opened">
                             <MenuItem x:Name="CtxSubOpen" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.Open]}" Click="SubfolderOpen_Click"/>
                             <MenuItem x:Name="CtxSubRename" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Item.Rename]}" Click="SubfolderRename_Click"/>
                             <MenuItem x:Name="CtxSubDissolve" Header="{Binding Source={x:Static l:LocalizationService.Instance}, Path=[Subfolder.Dissolve]}" Click="SubfolderDissolve_Click"/>

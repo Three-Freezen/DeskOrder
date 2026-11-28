@@ -19,7 +19,7 @@
                 <Border x:Name="NoteBorder" CornerRadius="10"
                         BorderBrush="#40FFFFFF" BorderThickness="1">
             <Border.ContextMenu>
-                <ContextMenu>
+                <ContextMenu Opened="WidgetMenu_Opened">
                     <!-- ponytail 2026-08-28: 6 段结构 — 置顶 / 保存·另存为·打开文件 /
                          设置 / 最小化 / 删除便签。保存组直接绑定 💾 按钮同款功能。
                          关闭/开启可恢复按钮选项已删除;设置走 PropertyWindowService

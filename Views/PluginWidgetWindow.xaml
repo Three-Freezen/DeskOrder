@@ -16,7 +16,7 @@
       <Grid x:Name="DragSurface" Background="Transparent"
             PreviewMouseLeftButtonDown="DragSurface_PreviewMouseLeftButtonDown">
         <Grid.ContextMenu>
-          <ContextMenu>
+          <ContextMenu Opened="WidgetMenu_Opened">
             <MenuItem x:Name="CtxSettings" Header="{loc:Loc Key=ZoneMenu.Settings}" Click="Settings_Click"/>
             <MenuItem x:Name="CtxLock" Header="{loc:Loc Key=Common.Lock}" Click="Lock_Click"/>
             <MenuItem x:Name="CtxHide" Header="{loc:Loc Key=Clock.Minimize}" Click="Hide_Click"/>

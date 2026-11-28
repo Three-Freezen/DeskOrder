@@ -151,7 +151,14 @@ public partial class PanelWindow : Window
         // Recycle-bin icon state watcher
         _recycleTimer.Tick += RecycleTimer_Tick;
         _recycleTimer.Start();
+
+
     }
+    /// <summary>右键菜单图标（方案 B · 简笔）：Opened 兜底 —— 不管菜单是
+    /// ContextMenuService 自动弹的还是代码里手动 IsOpen 的，这里都会补一次。
+    /// 与 MenuIconBinder.Hook 是两条路，Apply 幂等，重复调用无副作用。</summary>
+    void WidgetMenu_Opened(object s, RoutedEventArgs e) =>
+        MenuIconBinder.Apply(s as ContextMenu, null);
 
     void ApplyLoc()
     {
@@ -1656,16 +1663,16 @@ public partial class PanelWindow : Window
         newFolderItem.Click += NewFolder_Click;
         newItem.Items.Add(newFolderItem);
         newItem.Items.Add(new Separator());
-        var newTxtItem = new MenuItem { Header = _loc["Panel.NewTxt"] };
+        var newTxtItem = new MenuItem { Icon = MenuIconFactory.Icon("Menu.NewTxt"), Header = _loc["Panel.NewTxt"] };
         newTxtItem.Click += NewTextFile_Click;
         newItem.Items.Add(newTxtItem);
-        var newDocxItem = new MenuItem { Header = _loc["Panel.NewDocx"] };
+        var newDocxItem = new MenuItem { Icon = MenuIconFactory.Icon("Menu.NewDocx"), Header = _loc["Panel.NewDocx"] };
         newDocxItem.Click += NewWordFile_Click;
         newItem.Items.Add(newDocxItem);
-        var newPptxItem = new MenuItem { Header = _loc["Panel.NewPptx"] };
+        var newPptxItem = new MenuItem { Icon = MenuIconFactory.Icon("Menu.NewPptx"), Header = _loc["Panel.NewPptx"] };
         newPptxItem.Click += NewPptFile_Click;
         newItem.Items.Add(newPptxItem);
-        var newXlsxItem = new MenuItem { Header = _loc["Panel.NewXlsx"] };
+        var newXlsxItem = new MenuItem { Icon = MenuIconFactory.Icon("Menu.NewXlsx"), Header = _loc["Panel.NewXlsx"] };
         newXlsxItem.Click += NewExcelFile_Click;
         newItem.Items.Add(newXlsxItem);
         contextMenu.Items.Add(newItem);
@@ -1673,12 +1680,12 @@ public partial class PanelWindow : Window
         contextMenu.Items.Add(new Separator());
 
         // 设置 — 与分区端"设置"对齐(无"面板"前缀)。
-        var settingsItem = new MenuItem { Header = _loc["Panel.Settings"] };
+        var settingsItem = new MenuItem { Icon = MenuIconFactory.Icon("Menu.Settings"), Header = _loc["Panel.Settings"] };
         settingsItem.Click += (_, _) => SettingsBtn_Click(null!, null!);
         contextMenu.Items.Add(settingsItem);
 
         // 隐藏面板 — 与分区端"最小化"对齐。
-        var hideItem = new MenuItem { Header = _loc["Panel.Hide"] };
+        var hideItem = new MenuItem { Icon = MenuIconFactory.Icon("Menu.Hide"), Header = _loc["Panel.Hide"] };
         hideItem.Click += (_, _) => HideButton_Click(null!, null!);
         contextMenu.Items.Add(hideItem);
 

@@ -18,7 +18,7 @@
                   PreviewMouseRightButtonDown="Window_PreviewMouseRightButtonDown">
                 <!-- Context menu on root Grid for full-area right-click -->
         <Grid.ContextMenu>
-            <ContextMenu>
+            <ContextMenu Opened="WidgetMenu_Opened">
                 <!-- ponytail 2026-08-27: 5 段结构 — 前 3 项(切换模式/秒/12-24h) /
                      设置 / 最小化 / 删除时钟。设置走 PropertyWindowService 与齿轮
                      入口对齐。删除时钟加二级确认。 -->

@@ -20,7 +20,7 @@
                 Background="Transparent" BorderBrush="#30FFFFFF"
                 BorderThickness="1">
             <Border.ContextMenu>
-                <ContextMenu>
+                <ContextMenu Opened="WidgetMenu_Opened">
                     <!-- ponytail 2026-08-27: 5 段结构 — 周一开头 / 设置 / 最小化 / 删除日历。
                          关闭/开启可恢复按钮选项已删除;设置走 PropertyWindowService 与齿轮
                          入口对齐。删除日历加二级确认。 -->

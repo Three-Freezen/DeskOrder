@@ -17,7 +17,7 @@
         <Border x:Name="MainContent" ClipToBounds="True" CornerRadius="12">
             <Grid>
                 <Grid.ContextMenu>
-                    <ContextMenu>
+                    <ContextMenu Opened="WidgetMenu_Opened">
                         <MenuItem x:Name="CtxSettings" Header="{loc:Loc Key=Media.Settings}" Click="Settings_Click"/>
                         <Separator/>
                         <MenuItem x:Name="CtxLock" Header="{loc:Loc Key=Common.Lock}" Click="LockBtn_Click"/>
