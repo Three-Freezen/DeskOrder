@@ -98,66 +98,80 @@
 
                 <!-- Analog mode — Viewbox scales the face proportionally with the window. -->
                 <Viewbox x:Name="AnalogViewbox" Stretch="Uniform" Visibility="Collapsed">
-                    <Grid x:Name="AnalogPanel" Width="200" Height="200">
-                    <!-- Clock face background -->
-                    <Ellipse x:Name="AnalogFaceEllipse" Width="200" Height="200" Fill="#18000000"
-                             Stroke="#40FFFFFF" StrokeThickness="2"/>
+                    <Grid x:Name="AnalogPanel" Width="220" Height="220">
+                    <!-- Clock face background (Meridian: R110, 1px rim) -->
+                    <Ellipse x:Name="AnalogFaceEllipse" Width="220" Height="220" Fill="#18000000"
+                             Stroke="#2EFFFFFF" StrokeThickness="1"/>
 
                     <!-- Custom background image (clipped to clock circle) -->
-                    <Canvas x:Name="AnalogBgClip" Width="200" Height="200" IsHitTestVisible="False"
+                    <Canvas x:Name="AnalogBgClip" Width="220" Height="220" IsHitTestVisible="False"
                             ClipToBounds="True"
                             HorizontalAlignment="Center" VerticalAlignment="Center">
                         <Canvas.Clip>
-                            <EllipseGeometry x:Name="AnalogBgClipGeo" Center="100,100" RadiusX="100" RadiusY="100"/>
+                            <EllipseGeometry x:Name="AnalogBgClipGeo" Center="110,110" RadiusX="110" RadiusY="110"/>
                         </Canvas.Clip>
-                        <Image x:Name="ClockBgImage" Width="200" Height="200" Stretch="UniformToFill"
+                        <Image x:Name="ClockBgImage" Width="220" Height="220" Stretch="UniformToFill"
                                RenderOptions.BitmapScalingMode="HighQuality"
                                Opacity="0" IsHitTestVisible="False"/>
                     </Canvas>
 
-                    <!-- Markers generated programmatically -->
-                    <Canvas x:Name="MarkerCanvas" Width="200" Height="200"/>
-
-                    <!-- Hour hand (rotates around clock center 100,100) -->
-                    <Line x:Name="HourHand" X1="100" Y1="100" X2="100" Y2="55"
-                          Stroke="#FFFFFFFF" StrokeThickness="4" StrokeEndLineCap="Round"
-                          StrokeStartLineCap="Round">
-                        <Line.RenderTransform>
-                            <RotateTransform Angle="0" CenterX="100" CenterY="100"/>
-                        </Line.RenderTransform>
-                    </Line>
-
-                    <!-- Minute hand (rotates around clock center 100,100) -->
-                    <Line x:Name="MinuteHand" X1="100" Y1="100" X2="100" Y2="30"
-                          Stroke="#CCFFFFFF" StrokeThickness="2.5" StrokeEndLineCap="Round">
-                        <Line.RenderTransform>
-                            <RotateTransform Angle="0" CenterX="100" CenterY="100"/>
-                        </Line.RenderTransform>
-                    </Line>
-
-                    <!-- Second hand (rotates around clock center 100,100) -->
-                    <Line x:Name="SecondHand" X1="100" Y1="110" X2="100" Y2="22"
-                          Stroke="#FFFF6666" StrokeThickness="1">
-                        <Line.RenderTransform>
-                            <RotateTransform Angle="0" CenterX="100" CenterY="100"/>
-                        </Line.RenderTransform>
-                    </Line>
-
-                    <!-- Center dot -->
-                    <Ellipse Width="10" Height="10" Fill="#FFFFFFFF"
+                    <!-- Meridian inner hairline, r92 -->
+                    <Ellipse x:Name="AnalogInnerRing" Width="184" Height="184"
+                             Fill="Transparent" Stroke="#0EFFFFFF" StrokeThickness="0.6"
                              HorizontalAlignment="Center" VerticalAlignment="Center"
-                             Margin="0,0,0,0" RenderTransformOrigin="0.5,0.5"/>
+                             IsHitTestVisible="False"/>
 
-                    <!-- Date window -->
-                    <Border x:Name="DateWindowBorder" Width="36" Height="20" CornerRadius="4"
-                            Background="#20FFFFFF" BorderBrush="#40FFFFFF"
-                            BorderThickness="0.5"
-                            HorizontalAlignment="Right" VerticalAlignment="Center"
-                            Margin="0,0,30,0">
-                        <TextBlock x:Name="AnalogDateText" Text="10"
-                                   FontSize="11" Foreground="#AAFFFFFF"
-                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                    </Border>
+                    <!-- Meridian markers generated into 3 frozen paths (minute / hour / cardinal) -->
+                    <Canvas x:Name="MarkerCanvas" Width="220" Height="220" IsHitTestVisible="False">
+                        <Path x:Name="MinuteTickPath" Stroke="#F2F7FF" StrokeThickness="0.55" Opacity="0.34"
+                              StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                        <Path x:Name="HourTickPath" Stroke="#F2F7FF" StrokeThickness="1.55" Opacity="0.88"
+                              StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                        <Path x:Name="CardinalTickPath" Stroke="#F2F7FF" StrokeThickness="2.15" Opacity="0.95"
+                              StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                        <Path x:Name="NorthIndexPath" Stroke="#4CC9F0" StrokeThickness="0.9" Opacity="0.85"
+                              StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                    </Canvas>
+
+                    <!-- Hour hand: tapered, points to 12 at rest; rotate around (110,110). -->
+                    <Polygon x:Name="HourHandShape" Fill="#FFFFFFFF"
+                             Stroke="#FFFFFFFF" StrokeThickness="0.35" StrokeLineJoin="Round"
+                             Points="110,56 112.3,110 110.5,119 109.5,119 107.7,110"
+                             IsHitTestVisible="False">
+                        <Polygon.RenderTransform>
+                            <RotateTransform Angle="0" CenterX="110" CenterY="110"/>
+                        </Polygon.RenderTransform>
+                    </Polygon>
+
+                    <!-- Minute hand: tapered, points to 12 at rest. -->
+                    <Polygon x:Name="MinuteHandShape" Fill="#FFFFFFFF"
+                             Stroke="#FFFFFFFF" StrokeThickness="0.35" StrokeLineJoin="Round"
+                             Points="110,30 111.35,110 110.35,121 109.65,121 108.65,110"
+                             IsHitTestVisible="False">
+                        <Polygon.RenderTransform>
+                            <RotateTransform Angle="0" CenterX="110" CenterY="110"/>
+                        </Polygon.RenderTransform>
+                    </Polygon>
+
+                    <!-- Second hand + r72 signal dot rotate as one group. -->
+                    <Canvas x:Name="SecondHandGroup" Width="220" Height="220" IsHitTestVisible="False">
+                        <Canvas.RenderTransform>
+                            <RotateTransform Angle="0" CenterX="110" CenterY="110"/>
+                        </Canvas.RenderTransform>
+                        <Line x:Name="SecondHand" X1="110" Y1="126" X2="110" Y2="20"
+                              Stroke="#FFFF6666" StrokeThickness="0.9" StrokeStartLineCap="Round"
+                              StrokeEndLineCap="Round"/>
+                        <Ellipse x:Name="SecondHandDot" Width="2.5" Height="2.5" Fill="#FFFF6666"
+                                 Canvas.Left="108.75" Canvas.Top="36.75"/>
+                    </Canvas>
+
+                    <!-- Center cap -->
+                    <Ellipse x:Name="CenterCap" Width="6.8" Height="6.8" Fill="#FFFFFFFF"
+                             HorizontalAlignment="Center" VerticalAlignment="Center"
+                             IsHitTestVisible="False"/>
+                    <Ellipse x:Name="CenterHole" Width="2.5" Height="2.5" Fill="#B0080A0F"
+                             HorizontalAlignment="Center" VerticalAlignment="Center"
+                             IsHitTestVisible="False"/>
                 </Grid>
                 </Viewbox>
                 </Grid>

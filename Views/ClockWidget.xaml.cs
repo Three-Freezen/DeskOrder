@@ -30,6 +30,18 @@ public partial class ClockWidget : Window
     private bool _restoreDragging;
     private Point _restoreDown;
 
+    // ── 指针磁贴纯圆 ─────────────────────────────────────────────────────
+    // 窗口仍是 240×260，圆外像素透明；SetWindowRgn 负责系统级命中裁剪，
+    // WM_NCHITTEST 作为跨进程穿透的兜底（部分系统上分层窗口的 region 只影响画面）。
+    private HwndSource? _hwndSource;
+    private bool _windowRegionActive;
+    private Rect _lastRegionBounds = Rect.Empty;
+    private const int WM_NCHITTEST = 0x0084;
+    private const int WM_DPICHANGED = 0x02E0;
+    private const int HTTRANSPARENT = -1;
+    private const double AnalogCardInset = 10.0;
+    private const double TileHitMarginDip = 2.0;
+
 
     public ClockWidget(DesktopClock clock, WidgetService widgetService)
     {
@@ -65,7 +77,9 @@ public partial class ClockWidget : Window
         Tick(null, EventArgs.Empty);
 
         Loaded += OnLoad;
+        SourceInitialized += (_, _) => AttachHitTestHook();
         SizeChanged += OnSizeChanged;
+        DpiChanged += (_, _) => { _lastRegionBounds = Rect.Empty; UpdateAnalogFaceGeometry(); UpdateInputRegion(); };
         LocationChanged += (_, _) => { _clock.X = Left; _clock.Y = Top; ScheduleSave(); };
         _saveDebounce.Tick += (_, _) => { _saveDebounce.Stop(); if (_savePending) { _savePending = false; _widgetService.Save(); } };
         _langChanged = _ => UpdateContextMenuLabels();
@@ -137,12 +151,9 @@ public partial class ClockWidget : Window
         // ponytail: always sync FillRect, even when hidden — closes the
         // "model blue, screen yellow" desync that ShowClock used to reveal.
         // Acrylic blur stays gated on visibility (needs valid HWND).
-        SyncFillRect();
-        if (MainContent.Visibility == Visibility.Visible)
-            ApplyAcrylic();
         ApplyBackgroundImage();
         ApplyDigitalBackgroundImage();
-        ApplyStyle();
+        ApplyChromeState();
     }
 
     void OnLoad(object s, RoutedEventArgs e)
@@ -157,15 +168,13 @@ public partial class ClockWidget : Window
         NativeMethods.RemoveWindowBorder(this);
         if (_clock.Mode == ClockDisplayMode.Digital)
             NativeMethods.RemoveThickFrame(this);
-        ApplyAcrylic();
         GenerateMarkers();
         // ponytail: 用当前模式的持久化尺寸（而非硬编码默认），保证跨重启/模式切换尺寸不缩回。
         var (w, h) = ResolveModeSize();
         Width = w; Height = h;
         ApplyBackgroundImage();
         ApplyDigitalBackgroundImage();
-        // Set rounded corners LAST after all sizing is complete
-        NativeMethods.SetRoundedCorners(this, _clock.CornerRadius);
+        ApplyChromeState();
         ApplyLockState();
         if (!_clock.IsVisible) ApplyHidden();
     }
@@ -177,7 +186,18 @@ public partial class ClockWidget : Window
         _clock.Width = Width; _clock.Height = Height;
         SaveCurrentSizeForMode(_clock.Mode);
         UpdateDigitalBgClip();
-        NativeMethods.UpdateRoundedCorners(this, _clock.CornerRadius);
+        if (IsAnalogTileActive())
+        {
+            // 磁贴下不能用 UpdateRoundedCorners：它会 SetWindowRgn(IntPtr.Zero) 把圆清掉。
+            UpdateAnalogFaceGeometry();
+        }
+        else
+        {
+            NativeMethods.UpdateRoundedCorners(this, _clock.CornerRadius);
+            _windowRegionActive = false;
+            _lastRegionBounds = Rect.Empty;
+            UpdateAnalogFaceGeometry();
+        }
     }
 
     // ── Background image (analog clock face) ──
@@ -201,7 +221,7 @@ public partial class ClockWidget : Window
                 // UniformToFill — fill target area maintaining aspect ratio
                 double imgW = bi.PixelWidth;
                 double imgH = bi.PixelHeight;
-                double targetSize = 200;
+                double targetSize = 220;
                 double utfScale = Math.Max((targetSize * _clock.BgImageZoom) / imgW, (targetSize * _clock.BgImageZoom) / imgH);
                 double displayedW = imgW * utfScale;
                 double displayedH = imgH * utfScale;
@@ -223,18 +243,18 @@ public partial class ClockWidget : Window
                 AnalogBgClip.Width = displayedW;
                 AnalogBgClip.Height = displayedH;
                 AnalogBgClipGeo.Center = new System.Windows.Point(displayedW / 2, displayedH / 2);
-                AnalogBgClipGeo.RadiusX = 100;
-                AnalogBgClipGeo.RadiusY = 100;
+                AnalogBgClipGeo.RadiusX = 110;
+                AnalogBgClipGeo.RadiusY = 110;
             }
             else
             {
                 ClockBgImage.Source = null;
                 ClockBgImage.Opacity = 0;
-                AnalogBgClip.Width = 200;
-                AnalogBgClip.Height = 200;
-                AnalogBgClipGeo.Center = new System.Windows.Point(100, 100);
-                AnalogBgClipGeo.RadiusX = 100;
-                AnalogBgClipGeo.RadiusY = 100;
+                AnalogBgClip.Width = 220;
+                AnalogBgClip.Height = 220;
+                AnalogBgClipGeo.Center = new System.Windows.Point(110, 110);
+                AnalogBgClipGeo.RadiusX = 110;
+                AnalogBgClipGeo.RadiusY = 110;
             }
         }
         catch { if (ClockBgImage != null) { ClockBgImage.Source = null; ClockBgImage.Opacity = 0; } }
@@ -300,41 +320,51 @@ public partial class ClockWidget : Window
         DigitalBgBorder.Clip = new RectangleGeometry(new Rect(0, 0, Width, Height), r, r);
     }
 
-    // ── Generate proper clock tick marks using trigonometry ──
+    // ── Meridian dial (01 经纬) ───────────────────────────────────────────
+
+    static Point OnCircle(Point center, double radius, double deg)
+    {
+        double a = deg * Math.PI / 180.0;
+        return new Point(center.X + radius * Math.Sin(a), center.Y - radius * Math.Cos(a));
+    }
+
+    static StreamGeometry RadialTicks(Point center, double inner, double outer, int count,
+        int step = 1, Func<int, bool>? include = null)
+    {
+        var geo = new StreamGeometry();
+        using (var ctx = geo.Open())
+        {
+            for (int i = 0; i < count; i += step)
+            {
+                if (include != null && !include(i)) continue;
+                double deg = i * (360.0 / count);
+                ctx.BeginFigure(OnCircle(center, inner, deg), false, false);
+                ctx.LineTo(OnCircle(center, outer, deg), true, false);
+            }
+        }
+        geo.Freeze();
+        return geo;
+    }
 
     void GenerateMarkers()
     {
-        MarkerCanvas.Children.Clear();
-        double cx = 100, cy = 100; // center of 200×200 face
+        if (MarkerCanvas == null) return;
+        var c = new Point(110, 110);
 
-        for (int i = 0; i < 60; i++)
+        // 60 minute ticks (all positions), 12 hour ticks, 4 cardinal ticks.
+        MinuteTickPath.Data = RadialTicks(c, 101.6, 106.2, 60);
+        HourTickPath.Data = RadialTicks(c, 96.4, 106.6, 12);
+        CardinalTickPath.Data = RadialTicks(c, 94.2, 106.6, 4);
+
+        // The only accent on the dial: a 2px north index just outside the rim.
+        var north = new StreamGeometry();
+        using (var ctx = north.Open())
         {
-            double angleDeg = i * 6.0; // degrees clockwise from 12 o'clock
-            double rad = angleDeg * Math.PI / 180.0;
-
-            bool isHour = i % 5 == 0;
-            bool isMajor = i % 15 == 0;
-
-            double innerR = isHour ? 84 : 92;
-            double outerR = 98;
-
-            double x1 = cx + innerR * Math.Sin(rad);
-            double y1 = cy - innerR * Math.Cos(rad);
-            double x2 = cx + outerR * Math.Sin(rad);
-            double y2 = cy - outerR * Math.Cos(rad);
-
-            var line = new Line
-            {
-                X1 = x1, Y1 = y1, X2 = x2, Y2 = y2,
-                Stroke = new SolidColorBrush(Color.FromArgb(
-                    (byte)(isMajor ? 0xCC : (isHour ? 0x90 : 0x40)),
-                    0xFF, 0xFF, 0xFF)),
-                StrokeThickness = isMajor ? 3.5 : (isHour ? 2.5 : 1.2),
-                StrokeStartLineCap = PenLineCap.Round,
-                StrokeEndLineCap = PenLineCap.Round
-            };
-            MarkerCanvas.Children.Add(line);
+            ctx.BeginFigure(OnCircle(c, 108.0, 0), false, false);
+            ctx.LineTo(OnCircle(c, 110.0, 0), true, false);
         }
+        north.Freeze();
+        NorthIndexPath.Data = north;
     }
 
     // ── Acrylic / frosted glass ──
@@ -345,6 +375,48 @@ public partial class ClockWidget : Window
     void SyncFillRect()
     {
         string fillColorStr = ResolveEffectiveFill();
+
+        // 指针磁贴：只留圆内填充。DWM 玻璃不能裁圆，这里用同一套 tint 作为圆底，
+        // 不做模糊；FillRect 会被 Clip 成圆，因此四个角不会再出现。
+        if (IsAnalogTileActive())
+        {
+            Brush tileFill;
+            try
+            {
+                var fill = (Color)ColorConverter.ConvertFromString(fillColorStr)!;
+                // 圆底最低 60% 不透明：DWM 不能再提供模糊，默认 3% 黑底在浅色/亮壁纸上
+                // 会让白刻度完全消失（本机实测）。保留用户色相，只抬 alpha。
+                byte floor = 0x99;
+                if (fill.A < floor) fill.A = floor;
+
+                var tint = _clock.EnableLiquidGlass
+                    ? AcrylicHelper.ResolveWpfGlassTintBrush(_clock.GlassMaterial, fillColorStr,
+                        1.0, _clock.GlassColorMode, _clock.GlassTintOpacity, _clock.GlassTintLuminosity)
+                    : null;
+
+                if (tint is SolidColorBrush scb)
+                {
+                    var c = scb.Color;
+                    if (c.A < floor) c.A = floor;
+                    tileFill = new SolidColorBrush(c);
+                }
+                else if (tint != null)
+                {
+                    tileFill = tint;
+                }
+                else
+                {
+                    tileFill = new SolidColorBrush(fill);
+                }
+            }
+            catch { tileFill = new SolidColorBrush(Color.FromArgb(0x99, 0x08, 0x0B, 0x11)); }
+            FillRect.Fill = tileFill;
+            UpdateFaceFillClip();
+            FillRect.InvalidateVisual();
+            ApplyDefaultTextColors();
+            return;
+        }
+
         // ponytail 2026-08-30: 一体化 — 玻璃开时填充并入玻璃 tint,FillRect 透明;
         // 玻璃关/收起时 FillRect 保持纯填充。
         bool glassCarriesFill = _clock.EnableLiquidGlass && (_hover?.IsExpanded ?? false);
@@ -360,6 +432,8 @@ public partial class ClockWidget : Window
                 : new SolidColorBrush((Color)ColorConverter.ConvertFromString(fillColorStr)!));
         }
         catch { }
+        // 普通模式不能残留磁贴圆裁剪（切回卡片时这里是唯一兜底）。
+        FillRect.Clip = null;
         // ponytail: force re-render — FillRect as a child paints more reliably than
         // Border.Background inside a transparent window with AllowsTransparency=True.
         FillRect.InvalidateVisual();
@@ -411,53 +485,55 @@ public partial class ClockWidget : Window
         ApplyDefaultTextColors();
     }
 
+    /// <summary>Resolve the dial accent. The model's legacy default is #FFFFFFFF
+    /// (AccentColor existed but was never consumed); treat pure white as "unset"
+    /// so existing clocks get the Meridian cyan instead of a dead white accent.</summary>
+    Color ResolveAccentColor()
+    {
+        string s = _clock.AccentColor;
+        if (string.IsNullOrWhiteSpace(s) || string.Equals(s, "#FFFFFFFF", StringComparison.OrdinalIgnoreCase))
+            return Color.FromRgb(0x4C, 0xC9, 0xF0);
+        try { return (Color)ColorConverter.ConvertFromString(s)!; }
+        catch { return Color.FromRgb(0x4C, 0xC9, 0xF0); }
+    }
+
     /// <summary>Apply the fixed foregrounds split:
-    /// 主体内容颜色 → 时间/日期/指针/表盘；按钮颜色 → 锁/隐藏/恢复按钮；
-    /// 秒针颜色 → 仅秒针。</summary>
+    /// 主体内容颜色 → 时间/指针/刻度/表面；按钮颜色 → 锁/隐藏/恢复按钮；
+    /// 秒针颜色 → 仅秒针；强调色 → 12 点索引。</summary>
     void ApplyDefaultTextColors()
     {
         SolidColorBrush content, buttons, second;
         try { content = new SolidColorBrush((Color)ColorConverter.ConvertFromString(_clock.TextColor)!); } catch { content = Brushes.White; }
         try { buttons = new SolidColorBrush((Color)ColorConverter.ConvertFromString(_clock.ButtonColor)!); } catch { buttons = Brushes.White; }
         try { second = new SolidColorBrush((Color)ColorConverter.ConvertFromString(_clock.SecondHandColor)!); } catch { second = new SolidColorBrush(Color.FromRgb(0xFF, 0x66, 0x66)); }
+        var accent = new SolidColorBrush(ResolveAccentColor());
 
-        // Digital + analog date — 主体内容颜色.
+        // Digital — 主体内容颜色.
         if (TimeText != null) TimeText.Foreground = content;
         if (DateText != null) DateText.Foreground = content;
-        if (AnalogDateText != null) AnalogDateText.Foreground = content;
 
-        // Hands — 主体内容颜色（秒针除外）.
-        if (HourHand != null) HourHand.Stroke = content;
-        if (MinuteHand != null) MinuteHand.Stroke = content;
+        // Meridian hands.
+        if (HourHandShape != null) { HourHandShape.Fill = content; HourHandShape.Stroke = content; }
+        if (MinuteHandShape != null) { MinuteHandShape.Fill = content; MinuteHandShape.Stroke = content; }
         if (SecondHand != null) SecondHand.Stroke = second;
+        if (SecondHandDot != null) SecondHandDot.Fill = second;
 
-        // Ticks — 主体内容颜色.
-        if (MarkerCanvas != null)
-            foreach (var child in MarkerCanvas.Children)
-                if (child is Line ln) ln.Stroke = content;
+        // Meridian ticks + north accent.
+        if (MinuteTickPath != null) MinuteTickPath.Stroke = content;
+        if (HourTickPath != null) HourTickPath.Stroke = content;
+        if (CardinalTickPath != null) CardinalTickPath.Stroke = content;
+        if (NorthIndexPath != null) NorthIndexPath.Stroke = accent;
 
-        // Dial ellipse stroke + center dot — 主体内容颜色.
-        if (AnalogPanel != null)
-        {
-            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(AnalogPanel); i++)
-            {
-                var ch = VisualTreeHelper.GetChild(AnalogPanel, i);
-                if (ch is Ellipse el)
-                {
-                    if (el.Width == 200 && el.Height == 200) el.Stroke = content;
-                    else if (el.Width == 10 && el.Height == 10) el.Fill = content;
-                }
-            }
-        }
-        // Face fill + date window tinted to the content color (keeps alpha structure).
         var c = content.Color;
         if (AnalogFaceEllipse != null)
-            AnalogFaceEllipse.Fill = new SolidColorBrush(Color.FromArgb(0x18, c.R, c.G, c.B));
-        if (DateWindowBorder != null)
         {
-            DateWindowBorder.Background = new SolidColorBrush(Color.FromArgb(0x20, c.R, c.G, c.B));
-            DateWindowBorder.BorderBrush = new SolidColorBrush(Color.FromArgb(0x40, c.R, c.G, c.B));
+            AnalogFaceEllipse.Fill = new SolidColorBrush(Color.FromArgb(0x18, c.R, c.G, c.B));
+            AnalogFaceEllipse.Stroke = new SolidColorBrush(Color.FromArgb(0x2E, c.R, c.G, c.B));
         }
+        if (AnalogInnerRing != null)
+            AnalogInnerRing.Stroke = new SolidColorBrush(Color.FromArgb(0x0E, c.R, c.G, c.B));
+        if (CenterCap != null) CenterCap.Fill = content;
+        if (CenterHole != null) CenterHole.Fill = new SolidColorBrush(Color.FromArgb(0xB0, 0x08, 0x0A, 0x0F));
 
         // Buttons — 按钮颜色.
         if (HideBtn != null) HideBtn.Foreground = buttons;
@@ -478,6 +554,20 @@ public partial class ClockWidget : Window
 
     public void ApplyAcrylic()
     {
+        // 指针磁贴：DWM 只能整窗模糊，必须完全关掉；圆底由 SyncFillRect 的 tint 承担。
+        if (IsAnalogTileActive())
+        {
+            SyncFillRect();
+            AcrylicHelper.DisableBlur(this);
+            _wallpaperBackdrop?.SetVisible(false);
+            if (ClockGlassBorder != null)
+            {
+                ClockGlassBorder.Visibility = Visibility.Collapsed;
+                ClockGlassBorder.BorderThickness = new Thickness(0);
+            }
+            return;
+        }
+
         SyncFillRect();
 
         // ponytail: ghost-glass fix — acrylic follows the expand state: a collapsed clock
@@ -503,7 +593,10 @@ public partial class ClockWidget : Window
             // 边框跟随分区：不再叠那条彩色渐变（AcrylicHelper.CreateChromaticBorder 是液态
             // 玻璃的旧装饰）。玻璃开着时可见边框就是 ApplyStyle 里设的「边框颜色 / 线宽」。
             if (ClockGlassBorder != null)
+            {
+                ClockGlassBorder.Visibility = Visibility.Visible;
                 ClockGlassBorder.BorderThickness = new Thickness(0);
+            }
         }
         else
         {
@@ -511,18 +604,25 @@ public partial class ClockWidget : Window
             _wallpaperBackdrop?.SetVisible(false);
             // ponytail: additive overlay — clear the glass border when the effect is off.
             if (ClockGlassBorder != null)
+            {
+                ClockGlassBorder.Visibility = Visibility.Visible;
                 ClockGlassBorder.BorderThickness = new Thickness(0);
+            }
         }
     }
 
     /// <summary>
     /// ponytail 2026-08-28 边框残影修复 — 展开(悬停/点击恢复按钮)时把 Win11 圆角
     /// 偏好一并恢复(收起时 OnHoverCollapsed 关掉了它),再走 ApplyAcrylic 恢复玻璃。
+    /// 2026-11-28: 展开后也要把磁贴圆与命中区重新对齐。
     /// </summary>
     void ReapplyAcrylic()
     {
+        if (!IsAnalogTileActive()) ClearTileWindowRegion();
         NativeMethods.SetRoundedCorners(this, _clock.CornerRadius);
+        ApplyStyle();
         ApplyAcrylic();
+        ApplyAnalogTileChrome();
     }
 
     /// <summary>
@@ -535,6 +635,7 @@ public partial class ClockWidget : Window
         AcrylicHelper.DisableBlur(this);
         NativeMethods.DisableRoundedCorners(this);
         NativeMethods.DisableDwmFrameShadow(this);
+        UpdateInputRegion();
     }
 
     // ── Style (border / fill) ──
@@ -574,10 +675,9 @@ public partial class ClockWidget : Window
         // ClockBorder.Background is a managed property — safe to run regardless of
         // MainContent visibility. Live preview must reach the widget even when hidden,
         // so when the user later Show()s it the latest colors are already set.
-        ApplyAcrylic();
         ApplyBackgroundImage();
         ApplyDigitalBackgroundImage();
-        ApplyStyle();
+        ApplyChromeState();
         // ponytail 2026-08-28: 只在开关真正变化时才 SetEnabled，避免外观实时预览
         // 打断正在播放的缩放动画。
         if (_hover != null && _hover.IsEnabled != _clock.EnableRestoreButton)
@@ -626,6 +726,237 @@ public partial class ClockWidget : Window
         ApplyQuickBar();
     }
 
+    // ── 指针磁贴：纯圆外观 / 圆形命中区 ─────────────────────────────────
+
+    bool IsAnalogTileActive() =>
+        _clock != null && _clock.Mode == ClockDisplayMode.Analog && _clock.TileMode;
+
+    (Point Center, double Radius) AnalogFaceGeometryDip()
+    {
+        double w = ActualWidth > 0 ? ActualWidth : (double.IsNaN(Width) ? 240 : Width);
+        double h = ActualHeight > 0 ? ActualHeight : (double.IsNaN(Height) ? 260 : Height);
+        if (w <= 0) w = 240;
+        if (h <= 0) h = 260;
+        double diameter = Math.Max(0, Math.Min(w - AnalogCardInset * 2, h - AnalogCardInset * 2));
+        return (new Point(w / 2, h / 2), diameter / 2);
+    }
+
+    void UpdateFaceFillClip()
+    {
+        if (FillRect == null) return;
+        if (!IsAnalogTileActive())
+        {
+            FillRect.Clip = null;
+            return;
+        }
+        var (center, radius) = AnalogFaceGeometryDip();
+        var clip = new EllipseGeometry(center, radius, radius);
+        clip.Freeze();
+        FillRect.Clip = clip;
+    }
+
+    /// <summary>统一入口：普通样式 → 玻璃/填充 → 磁贴覆盖 → 命中区。
+    /// 不做反向调用，避免 ApplyStyle/ApplyAcrylic 互相递归。</summary>
+    void ApplyChromeState()
+    {
+        if (_clock == null) return;
+        // 退出磁贴先撤命中区，再开 DWM 玻璃；否则玻璃会被旧圆区域裁一帧。
+        if (!IsAnalogTileActive()) ClearTileWindowRegion();
+        ApplyStyle();
+        ApplyAcrylic();
+        ApplyAnalogTileChrome();
+    }
+
+    /// <summary>磁贴覆盖层。窗口尺寸不变，只把卡片收成圆并把命中裁圆；
+    /// 关磁贴时把填充裁剪/手柄/圆角/玻璃恢复。</summary>
+    void ApplyAnalogTileChrome()
+    {
+        if (_clock == null) return;
+
+        if (IsAnalogTileActive())
+        {
+            var (center, radius) = AnalogFaceGeometryDip();
+            var clip = new EllipseGeometry(center, radius, radius);
+            clip.Freeze();
+            FillRect.Clip = clip;
+            FillRect.RadiusX = FillRect.RadiusY = 0;
+
+            ClockBorder.BorderThickness = new Thickness(0);
+            ClockBorder.BorderBrush = Brushes.Transparent;
+            ClockBorder.CornerRadius = new CornerRadius(0);
+            MainContent.CornerRadius = new CornerRadius(0);
+
+            if (ClockGlassBorder != null)
+            {
+                ClockGlassBorder.Visibility = Visibility.Collapsed;
+                ClockGlassBorder.BorderThickness = new Thickness(0);
+            }
+
+            NativeMethods.DisableRoundedCorners(this);
+            NativeMethods.DisableDwmFrameShadow(this);
+            ResizeMode = ResizeMode.NoResize;
+            foreach (var grip in FindResizeGrips(this))
+                grip.Visibility = Visibility.Collapsed;
+        }
+        else
+        {
+            ClearTileWindowRegion();
+            if (FillRect != null) FillRect.Clip = null;
+
+            int rv = NativeMethods.VisibleCornerRadius(_clock.CornerRadius,
+                _clock.EnableLiquidGlass && !AcrylicHelper.ResolveSelfDrawn());
+            try
+            {
+                ClockBorder.BorderBrush = new SolidColorBrush(
+                    (Color)ColorConverter.ConvertFromString(_clock.BorderColor)!);
+            }
+            catch { }
+            ClockBorder.BorderThickness = new Thickness(_clock.BorderThickness);
+            ClockBorder.CornerRadius = new CornerRadius(rv);
+            MainContent.CornerRadius = new CornerRadius(rv);
+            if (FillRect != null) FillRect.RadiusX = FillRect.RadiusY = rv;
+            if (ClockGlassBorder != null)
+            {
+                ClockGlassBorder.Visibility = Visibility.Visible;
+                ClockGlassBorder.CornerRadius = new CornerRadius(rv);
+            }
+
+            ResizeMode = ResizeMode.CanResize;
+            foreach (var grip in FindResizeGrips(this))
+                grip.Visibility = Visibility.Visible;
+
+            bool collapsed = RestoreButton.Visibility == Visibility.Visible
+                             || _hover is { IsExpanded: false };
+            if (System.Windows.PresentationSource.FromVisual(this) != null && !collapsed)
+                NativeMethods.SetRoundedCorners(this, _clock.CornerRadius);
+        }
+
+        UpdateFaceFillClip();
+        UpdateInputRegion();
+    }
+
+    void UpdateAnalogFaceGeometry()
+    {
+        UpdateFaceFillClip();
+        UpdateInputRegion();
+    }
+
+    void ClearTileWindowRegion()
+    {
+        if (!_windowRegionActive) return;
+        NativeMethods.ClearWindowRegion(this);
+        _windowRegionActive = false;
+        _lastRegionBounds = Rect.Empty;
+    }
+
+    void SetTileWindowRegion(Rect boundsDip)
+    {
+        // OnMouseWheel/主题色这类高频 ClocksChanged 不改变圆尺寸；避免反复 SetWindowRgn。
+        if (_windowRegionActive && _lastRegionBounds == boundsDip) return;
+        if (NativeMethods.SetEllipticalWindowRegion(this, boundsDip, TileHitMarginDip))
+        {
+            _windowRegionActive = true;
+            _lastRegionBounds = boundsDip;
+        }
+        else
+        {
+            _windowRegionActive = false;
+            _lastRegionBounds = Rect.Empty;
+        }
+    }
+
+    void UpdateInputRegion()
+    {
+        if (_clock == null) return;
+        if (!IsAnalogTileActive() || !IsVisible)
+        {
+            ClearTileWindowRegion();
+            return;
+        }
+
+        if (MainContent.Visibility == Visibility.Visible)
+        {
+            var (center, radius) = AnalogFaceGeometryDip();
+            SetTileWindowRegion(new Rect(center.X - radius, center.Y - radius, radius * 2, radius * 2));
+            return;
+        }
+
+        if (RestoreButton.Visibility == Visibility.Visible)
+        {
+            double w = RestoreButton.ActualWidth > 0 ? RestoreButton.ActualWidth : RestoreButton.Width;
+            double h = RestoreButton.ActualHeight > 0 ? RestoreButton.ActualHeight : RestoreButton.Height;
+            var bounds = RestoreButton.TransformToAncestor(this)
+                .TransformBounds(new Rect(0, 0, w, h));
+            SetTileWindowRegion(bounds);
+            return;
+        }
+
+        ClearTileWindowRegion();
+    }
+
+    bool IsPointInsideTileInput(Point p)
+    {
+        if (MainContent.Visibility == Visibility.Visible)
+        {
+            var (center, radius) = AnalogFaceGeometryDip();
+            double dx = p.X - center.X;
+            double dy = p.Y - center.Y;
+            double r = radius + TileHitMarginDip;
+            return dx * dx + dy * dy <= r * r;
+        }
+
+        if (RestoreButton.Visibility == Visibility.Visible)
+        {
+            double w = RestoreButton.ActualWidth > 0 ? RestoreButton.ActualWidth : RestoreButton.Width;
+            double h = RestoreButton.ActualHeight > 0 ? RestoreButton.ActualHeight : RestoreButton.Height;
+            var bounds = RestoreButton.TransformToAncestor(this)
+                .TransformBounds(new Rect(0, 0, w, h));
+            bounds.Inflate(TileHitMarginDip, TileHitMarginDip);
+            return bounds.Contains(p);
+        }
+        return false;
+    }
+
+    void AttachHitTestHook()
+    {
+        if (_hwndSource != null) return;
+        try
+        {
+            var helper = new WindowInteropHelper(this);
+            var hwnd = helper.EnsureHandle();
+            _hwndSource = HwndSource.FromHwnd(hwnd);
+            _hwndSource?.AddHook(WndProc);
+        }
+        catch { }
+    }
+
+    IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (msg == WM_DPICHANGED)
+        {
+            // DIP 尺寸不变但物理 region 必须重设；清掉 bounds 缓存让 UpdateInputRegion 重新 SetWindowRgn。
+            _lastRegionBounds = Rect.Empty;
+            Dispatcher.BeginInvoke(new Action(UpdateAnalogFaceGeometry), DispatcherPriority.Loaded);
+        }
+        else if (msg == WM_NCHITTEST && IsAnalogTileActive() && IsVisible)
+        {
+            long lp = lParam.ToInt64();
+            int sx = unchecked((short)(lp & 0xFFFF));
+            int sy = unchecked((short)((lp >> 16) & 0xFFFF));
+            try
+            {
+                var p = PointFromScreen(new Point(sx, sy));
+                if (!IsPointInsideTileInput(p))
+                {
+                    handled = true;
+                    return new IntPtr(HTTRANSPARENT);
+                }
+            }
+            catch { }
+        }
+        return IntPtr.Zero;
+    }
+
     // ponytail 2026-08-25: 磁贴模式 + 按钮透明度 (时钟设置 spec). Applies in BOTH
     // digital and analog modes — the lock/hide buttons live on the outer grid
     // shared by both mode panels. Zone-style: TileMode collapses the
@@ -662,11 +993,11 @@ public partial class ClockWidget : Window
             // Analog mode: only update hands when analog is visible
             if (_clock.Mode == ClockDisplayMode.Analog)
             {
-                if (AnalogDateText != null) AnalogDateText.Text = now.Day.ToString();
-                if (HourHand?.RenderTransform is RotateTransform hrt) hrt.Angle = _vm.HourAngle;
-                if (MinuteHand?.RenderTransform is RotateTransform mrt) mrt.Angle = _vm.MinuteAngle;
-                if (SecondHand?.RenderTransform is RotateTransform srt) srt.Angle = _vm.SecondAngle;
-                if (SecondHand != null) SecondHand.Visibility = _vm.ShowSeconds ? Visibility.Visible : Visibility.Collapsed;
+                if (HourHandShape?.RenderTransform is RotateTransform hrt) hrt.Angle = _vm.HourAngle;
+                if (MinuteHandShape?.RenderTransform is RotateTransform mrt) mrt.Angle = _vm.MinuteAngle;
+                if (SecondHandGroup?.RenderTransform is RotateTransform srt) srt.Angle = _vm.SecondAngle;
+                if (SecondHandGroup != null)
+                    SecondHandGroup.Visibility = _vm.ShowSeconds ? Visibility.Visible : Visibility.Collapsed;
             }
         }
         catch { /* Ignore timer tick errors during window teardown */ }
@@ -838,6 +1169,7 @@ public partial class ClockWidget : Window
 
     void ResizeGrip_Down(object s, MouseButtonEventArgs e)
     {
+        if (IsAnalogTileActive()) { e.Handled = true; return; }
         if (s is not Border g || g.Tag is not string tag) return;
         if (_vm?.IsLocked == true) { e.Handled = true; return; }
         bool left = tag == "TL" || tag == "BL";
@@ -868,6 +1200,7 @@ public partial class ClockWidget : Window
         // OnClocksChanged already calls SyncFillRect → ApplyDefaultTextColors, but doing it
         // here as well makes the refresh deterministic regardless of WidgetService ordering.
         RefreshTextColorAdaptive();
+        ApplyChromeState();
     }
 
     void ToggleSeconds_Click(object s, RoutedEventArgs e)
@@ -981,12 +1314,12 @@ public partial class ClockWidget : Window
     /// <summary>Snapshot the currently-displayed fill brush so the style dialog can restore it
     /// after any path that might have re-synced FillRect to model (e.g. OnLoad's ApplyAcrylic
     /// on first show, or PushToWidget during live preview that user later cancels).</summary>
-    public System.Windows.Media.Brush? CaptureFillBrush() => FillRect?.Fill;
+    public System.Windows.Media.Brush? CaptureFillBrush() => IsAnalogTileActive() ? null : FillRect?.Fill;
 
     /// <summary>Restore a previously captured FillRect brush and force a redraw.</summary>
     public void RestoreFillBrush(System.Windows.Media.Brush? brush)
     {
-        if (brush == null || FillRect == null) return;
+        if (brush == null || FillRect == null || IsAnalogTileActive()) return;
         FillRect.Fill = brush;
         FillRect.InvalidateVisual();
     }
@@ -1033,11 +1366,15 @@ public partial class ClockWidget : Window
         // ponytail: ghost-glass fix — re-apply acrylic AFTER SnapToExpanded so the
         // expanded-state gate sees IsExpanded == true and re-enables liquid glass when
         // showing from the collapsed button.
+        if (!IsAnalogTileActive()) ClearTileWindowRegion();
         if (!skipResync)
             ApplyAcrylic();
         // 尺寸已在本方法开头(动画之前)设好 —— 这里不再重复设置,保持「先定尺寸再动画」。
         DesktopLayer.BringToFront(this);
-        NativeMethods.SetRoundedCorners(this, 10);
+        ApplyStyle();
+        ApplyAnalogTileChrome();
+        if (!IsAnalogTileActive())
+            NativeMethods.SetRoundedCorners(this, _clock.CornerRadius);
         // ponytail: 2026-08-23 — persist LAST so a failure in the model/event path can
         // no longer abort the visual expansion (which used to leave the clock stuck as
         // a RestoreButton while the model already said visible — "Show All needs an
@@ -1053,6 +1390,7 @@ public partial class ClockWidget : Window
             // or the dialog's Apply path will save the new state if user commits.
             _clock.IsVisible = true;
         }
+        UpdateInputRegion();
         System.Diagnostics.Debug.WriteLine(
             $"[ShowClock] done: winVisible={IsVisible} content={MainContent.Visibility} restore={RestoreButton.Visibility}");
         Activate();
@@ -1067,6 +1405,7 @@ public partial class ClockWidget : Window
         if (waveDelayMs <= 0) return;
         _hover?.SnapToCollapsed();
         RestoreButton.Visibility = Visibility.Collapsed;
+        UpdateInputRegion();
         _hover?.ShowAfterDelay(waveDelayMs);
     }
 
@@ -1080,6 +1419,8 @@ public partial class ClockWidget : Window
 #endif
         _clock.X = Left; _clock.Y = Top; _clock.Width = Width; _clock.Height = Height;
         NativeMethods.DisableRoundedCorners(this);
+        if (!_clock.EnableRestoreButton)
+            ClearTileWindowRegion();
         if (!_clock.EnableRestoreButton)
         {
             if (waveDelayMs > 0)
@@ -1121,6 +1462,7 @@ public partial class ClockWidget : Window
                 _hover?.CollapseAnimated();
         }
         _clock.IsVisible = false;
+        if (!_clock.EnableRestoreButton) ClearTileWindowRegion(); else UpdateInputRegion();
         // Update AFTER Hide() to ensure correct state when event fires
         _widgetService.UpdateClock(_clock);
 #if DEBUG
@@ -1132,6 +1474,10 @@ public partial class ClockWidget : Window
     {
         AcrylicHelper.DisableBlur(this);
         NativeMethods.DisableRoundedCorners(this);
+        if (!_clock.EnableRestoreButton)
+        {
+            ClearTileWindowRegion();
+        }
         if (!_clock.EnableRestoreButton)
         {
             // ponytail: 2026-08-23 — see HideClock for the SnapToFullHidden rationale.
@@ -1153,6 +1499,7 @@ public partial class ClockWidget : Window
             // ponytail: minimized — window stays at full size, content collapses with animation
             _hover?.SnapToCollapsed();
         }
+        UpdateInputRegion();
     }
 
     void Restore_MouseDown(object s, MouseButtonEventArgs e)
@@ -1192,6 +1539,7 @@ public partial class ClockWidget : Window
             // agree with the window before any change event can observe it.
             _clock.IsVisible = true;
             _hover?.ExpandAnimated(permanent: true);
+            UpdateInputRegion();
             _widgetService.UpdateClock(_clock);
         }
     }
@@ -1214,6 +1562,12 @@ public partial class ClockWidget : Window
         _clock.HoverExpandSettingsChanged -= OnHoverExpandSettingsChanged;
         _snapDrag?.Detach();
         _snapResize?.Detach();
+        ClearTileWindowRegion();
+        if (_hwndSource != null)
+        {
+            try { _hwndSource.RemoveHook(WndProc); } catch { }
+            _hwndSource = null;
+        }
         _hover?.Dispose();
         base.OnClosed(e);
     }

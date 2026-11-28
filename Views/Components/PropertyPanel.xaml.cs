@@ -2913,7 +2913,7 @@ public partial class PropertyPanel : UserControl
             SetOffsetX = v => c.BgImageOffsetX = v,
             GetOffsetY = () => c.BgImageOffsetY,
             SetOffsetY = v => c.BgImageOffsetY = v,
-            GetWidth = () => 200, GetHeight = () => 200,
+            GetWidth = () => 220, GetHeight = () => 220,
             CropShape = "Circle",
             OnSave = () => Save(c),
         }));
