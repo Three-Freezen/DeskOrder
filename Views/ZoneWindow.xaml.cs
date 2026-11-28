@@ -3481,92 +3481,11 @@ public partial class ZoneWindow : Window
     }
 
     // ══ 右键菜单图标（方案 B · 简笔 LESS）═══════════════════════════════════
-    // 设计稿与规范：UI重构/menu-icons/（svg/02-B.svg、DESIGN.md）
-    // 几何与样式：Resources/Icons.Menu.xaml（Menu.* 键 + MenuItemIcon 样式）
-    //
-    // 规矩：
-    //  · 同一个菜单里图标要么全给、要么全不给，否则文字左边缘会参差；
-    //  · 「设置」「锁定」不画几何 —— 直接用分区标题栏那两颗按钮的字符
-    //    （⚙ / 🔓 🔒），保证菜单和标题栏一眼是同一个东西；
-    //  · 删除项走 MenuItemIconDanger（#FF6666，与菜单里现有的 Foreground 一致）。
+    // 映射表、字形（⚙ / 🔓）与挂载逻辑统一在 Helpers/MenuIconBinder，分区与各小组件共用一份。
+    // 设计稿与规范：UI重构/menu-icons/（svg/02-B.svg、svg/06-widgets.svg、DESIGN.md）
 
-    /// <summary>菜单项 x:Name → 图标几何键。键名取菜单项的 x:Name，是因为同一批
-    /// 菜单项会在多个 DataTemplate 里重复出现（分区 / 快捷栏 / 次级分区各一套），
-    /// 按名字查表正好一次覆盖全部实例，不必逐条改 XAML。</summary>
-    static readonly Dictionary<string, string> MenuIconKeys = new(StringComparer.Ordinal)
-    {
-        // 分区菜单
-        ["CtxDockAddApp"] = "Menu.AddApp",
-        ["CtxImport"] = "Menu.Import",
-        ["CtxImportFiles"] = "Menu.File",
-        ["CtxImportFolder"] = "Menu.Folder",
-        ["CtxImportShell"] = "Menu.Monitor",
-        ["CtxNewSubZone"] = "Menu.NewSubZone",
-        ["CtxNew"] = "Menu.New",
-        ["CtxNewFolder"] = "Menu.Folder",
-        ["CtxNewTxt"] = "Menu.NewTxt",
-        ["CtxNewDocx"] = "Menu.NewDocx",
-        ["CtxNewPptx"] = "Menu.NewPptx",
-        ["CtxNewXlsx"] = "Menu.NewXlsx",
-        ["CtxMapFolderNew"] = "Menu.MapFolder",
-        ["CtxReleaseFromBay"] = "Menu.Release",
-        ["CtxDisbandAll"] = "Menu.DisbandAll",
-        ["CtxDisbandThis"] = "Menu.DisbandSingle",
-        ["CtxMinimize"] = "Menu.Minimize",
-        ["CtxFullHide"] = "Menu.Hide",
-        ["CtxDelete"] = "Menu.Delete",
-        ["CtxPaste"] = "Menu.Paste",
-        // 项目菜单
-        ["CtxOpen"] = "Menu.Open",
-        ["CtxOpenLocation"] = "Menu.ShowInFolder",
-        ["CtxEmptyRecycle"] = "Menu.EmptyRecycle",
-        ["CtxRename"] = "Menu.Rename",
-        // 次级分区菜单
-        ["CtxSubOpen"] = "Menu.Open",
-        ["CtxSubRename"] = "Menu.Rename",
-        ["CtxSubDissolve"] = "Menu.Dissolve",
-        ["CtxSubDelete"] = "Menu.Delete",
-        // 标题栏「＋」弹出的同款菜单（多一套 *2 的名字）
-        ["CtxImport2"] = "Menu.Import",
-        ["CtxImportFiles2"] = "Menu.File",
-        ["CtxImportFolder2"] = "Menu.Folder",
-        ["CtxImportShell2"] = "Menu.Monitor",
-        ["CtxNewSubZone2"] = "Menu.NewSubZone",
-        ["CtxNew2"] = "Menu.New",
-        ["CtxNewFolder2"] = "Menu.Folder",
-        ["CtxNewTxt2"] = "Menu.NewTxt",
-        ["CtxNewDocx2"] = "Menu.NewDocx",
-        ["CtxNewPptx2"] = "Menu.NewPptx",
-        ["CtxNewXlsx2"] = "Menu.NewXlsx",
-        ["CtxMapFolder2"] = "Menu.MapFolder",
-    };
-
-    /// <summary>给一条右键菜单（含子菜单）补齐图标。幂等：已经有图标的项不动，
-    /// 所以菜单反复打开、或被多条路径同时触发，都不会越叠越多。
-    /// 分区菜单在 <see cref="ZoneMenu_Opened"/> 调，项目 / 次级分区菜单在
-    /// ContextMenuOpening 里调，「＋」菜单与文件夹条目菜单在各自的打开点调。</summary>
-    void ApplyMenuIcons(ContextMenu? cm)
-    {
-        if (cm == null) return;
-        foreach (var entry in cm.Items) ApplyMenuIcon(entry);
-    }
-
-    void ApplyMenuIcon(object? entry)
-    {
-        if (entry is not MenuItem mi) return;
-        if (mi.Icon == null)
-        {
-            if (mi.Name == "CtxSettings")
-                mi.Icon = MenuIconFactory.Glyph("⚙");          // 与标题栏 EditBtnText 同字符
-            else if (mi.Name == "CtxLock")
-                mi.Icon = MenuIconFactory.Glyph(LockBtnText.Text);  // 与标题栏 LockBtnText 同字符
-            else if (MenuIconKeys.TryGetValue(mi.Name, out var key))
-                mi.Icon = MenuIconFactory.Icon(key,
-                    mi.Name.EndsWith("Delete", StringComparison.Ordinal)
-                        ? "MenuItemIconDanger" : "MenuItemIcon");
-        }
-        foreach (var child in mi.Items) ApplyMenuIcon(child);
-    }
+    /// <summary>给一条右键菜单（含子菜单）补齐图标。幂等，可反复调用。</summary>
+    void ApplyMenuIcons(ContextMenu? cm) => MenuIconBinder.Apply(cm, LockBtnText?.Text);
 
     /// <summary>收拾右键菜单里的空段：开头/结尾的分隔线与相邻重复的分隔线都藏起来。
     /// 快捷栏隐藏掉一半菜单项之后，不收拾会看到「菜单第一项就是一条横线」。</summary>
@@ -3863,8 +3782,9 @@ public partial class ZoneWindow : Window
             (vm.IsLocked || IsDock) ? Visibility.Collapsed : Visibility.Visible;
         // ponytail 2026-08-27: 锁定态变化时同步右键菜单 Header,切语言后下次打开也会刷新。
         CtxLock.Header = vm.IsLocked ? _loc["Common.Unlock"] : _loc["Common.Lock"];
-        // 2026-11-28 菜单图标：「锁定」那枚图标复用标题栏同一个字符（🔓/🔒），跟着状态一起换。
-        // 菜单项第一次打开时由 ApplyMenuIcons 建出来；之后这里负责保持同步。
+        // 2026-11-28 菜单图标：「锁定」那枚复用标题栏同一个字符（🔓/🔒）。
+        // 菜单打开时 MenuIconBinder 会按当前状态刷新；这里再兜一次，覆盖「菜单开着时
+        // 从别处改了锁定态」的情况。
         if (CtxLock.Icon is TextBlock lockGlyph) lockGlyph.Text = LockBtnText.Text;
         if (vm.IsLocked) NativeMethods.PinBelowProgman(this);
     }

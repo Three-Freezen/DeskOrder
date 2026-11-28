@@ -103,6 +103,8 @@ public partial class PanelWindow : Window
     public PanelWindow(ZoneManager zoneManager, ConfigService configService)
     {
         InitializeComponent();
+        // 右键菜单图标（方案 B · 简笔）：面板的菜单要么手动 IsOpen、要么在代码里现搭，
+        // 都不会走 ContextMenuOpening，所以在各自的打开点直接调 MenuIconBinder.Apply。
         _zoneManager = zoneManager;
         _configService = configService;
 
@@ -1003,6 +1005,7 @@ public partial class PanelWindow : Window
         }
         if (b.ContextMenu != null)
         {
+            MenuIconBinder.Apply(b.ContextMenu);
             b.ContextMenu.IsOpen = true;
             e.Handled = true;
         }
@@ -1630,26 +1633,26 @@ public partial class PanelWindow : Window
         // 父项 Import/New 不挂 Click,防双触发(同分区修复)。
         var contextMenu = new ContextMenu();
 
-        var importItem = new MenuItem { Header = _loc["Panel.Import"] };
-        var importFilesItem = new MenuItem { Header = _loc["Panel.ImportFiles"] };
+        var importItem = new MenuItem { Icon = MenuIconFactory.Icon("Menu.Import"), Header = _loc["Panel.Import"] };
+        var importFilesItem = new MenuItem { Icon = MenuIconFactory.Icon("Menu.File"), Header = _loc["Panel.ImportFiles"] };
         importFilesItem.Click += ImportFile_Click;
         importItem.Items.Add(importFilesItem);
-        var importFolderItem = new MenuItem { Header = _loc["Panel.ImportFolder"] };
+        var importFolderItem = new MenuItem { Icon = MenuIconFactory.Icon("Menu.Folder"), Header = _loc["Panel.ImportFolder"] };
         importFolderItem.Click += ImportFolder_Click;
         importItem.Items.Add(importFolderItem);
-        var importShellItem = new MenuItem { Header = _loc["Panel.ImportShellItems"] };
+        var importShellItem = new MenuItem { Icon = MenuIconFactory.Icon("Menu.Monitor"), Header = _loc["Panel.ImportShellItems"] };
         importShellItem.Click += ImportShellItems_Click;
         importItem.Items.Add(importShellItem);
         contextMenu.Items.Add(importItem);
 
         contextMenu.Items.Add(new Separator());
 
-        var newSubZoneItem = new MenuItem { Header = _loc["SubZone.New"] };
+        var newSubZoneItem = new MenuItem { Icon = MenuIconFactory.Icon("Menu.NewSubZone"), Header = _loc["SubZone.New"] };
         newSubZoneItem.Click += NewSubfolder_Click;
         contextMenu.Items.Add(newSubZoneItem);
 
-        var newItem = new MenuItem { Header = _loc["Panel.New"] };
-        var newFolderItem = new MenuItem { Header = _loc["Panel.NewFolder"] };
+        var newItem = new MenuItem { Icon = MenuIconFactory.Icon("Menu.New"), Header = _loc["Panel.New"] };
+        var newFolderItem = new MenuItem { Icon = MenuIconFactory.Icon("Menu.Folder"), Header = _loc["Panel.NewFolder"] };
         newFolderItem.Click += NewFolder_Click;
         newItem.Items.Add(newFolderItem);
         newItem.Items.Add(new Separator());
@@ -1718,6 +1721,7 @@ public partial class PanelWindow : Window
     {
         if (s is Border b)
         {
+            MenuIconBinder.Apply(b.ContextMenu);
             b.ContextMenu.IsOpen = true;
             e.Handled = true;
         }
