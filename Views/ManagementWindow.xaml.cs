@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Effects;
 using DesktopZones.Helpers;
 using DesktopZones.Models;
@@ -36,6 +37,14 @@ public partial class ManagementWindow : Window
     // Guard flag to prevent re-entrant batch widget operations
     private bool _isBatchWidgetOperation;
     private bool _propertyPanelVisible;
+
+    // ── 右侧样式设置面板的关闭动画 ──
+    // 打开保持现状（右栏立现 + PropertyPanel 自己的内容入场动画）；
+    // 关闭：内容淡出 + 向外轻滑 Motion.Exit(160ms)，播完再收栏（RightCol 0 + Collapsed）。
+    // _panelCloseAfter 只给「✕ 关掉最后一个标签」用：内容要保留到动画播完再清。
+    private bool _panelCloseAnimating;
+    private Action? _panelCloseAfter;
+    private const double PanelCloseSlide = 16;
 
     // Hotkey presets for notes
     private static readonly (string Label, int Modifiers, int Key, bool Enabled)[] HotkeyPresets = new[]
@@ -103,7 +112,13 @@ public partial class ManagementWindow : Window
         // 面板自己的 IsVisibleChanged → FlushPendingRebuild 重建（用户无感）。
         IsVisibleChanged += (_, e) =>
         {
-            if (e.NewValue is false) { try { DockedPanel?.TrimFieldTree(); } catch { } }
+            if (e.NewValue is false)
+            {
+                // 窗口隐藏时收回动画没有渲染帧可播：直接落地并跑收尾，
+                // 免得下次显示时右栏停在半透明/没收完的状态。
+                try { if (_panelCloseAnimating) FinishPropertyPanelClose(); } catch { }
+                try { DockedPanel?.TrimFieldTree(); } catch { }
+            }
         };
 
         Helpers.PropertyWindowService.Init(this);
@@ -161,6 +176,20 @@ public partial class ManagementWindow : Window
         // last tab goes, fold the right column so the list takes the room.
         DockedPanel.CloseTabRequested += (_, _) =>
         {
+            var wasLastTab = DockedTabs.Tabs.Count <= 1;
+            if (wasLastTab)
+            {
+                // 最后一个标签：先把右栏收回动画播完（内容保持原样，不会闪一下
+                // 「未选择」占位再淡出），动画结束后才真正关标签 / 清目标。
+                // 收回途中又被重新打开（点了别的分区行）→ 收尾作废，用户等于取消了 ✕。
+                SetPropertyPanelVisible(false, persist: true, afterCollapse: () =>
+                {
+                    DockedTabs.CloseActiveTab();
+                    DockedPanel.Target = null;
+                });
+                return;
+            }
+
             var closed = DockedTabs.CloseActiveTab();
             if (closed && DockedTabs.Tabs.Count == 0)
             {
@@ -1503,11 +1532,20 @@ public partial class ManagementWindow : Window
 
     void TogglePropertyPanel() => SetPropertyPanelVisible(!_propertyPanelVisible, persist: true);
 
-    void SetPropertyPanelVisible(bool visible, bool persist)
+    /// <summary>
+    /// 显示 / 收起右侧停靠样式设置面板。
+    /// <para>显示：保持原来的「右栏立现 + 面板内容淡入右滑」——内容入场动画在
+    /// <see cref="Components.PropertyPanel.OnTargetChanged"/> 的 AnimateSwitch 里。</para>
+    /// <para>收起：先播内容淡出 + 向外轻滑（Motion.Exit 160ms，与打开方向镜像），
+    /// 播完再收栏。这样关的时候不再是一帧消失。</para>
+    /// <paramref name="afterCollapse"/>：动画播完才执行的收尾（✕ 关最后一个标签时
+    /// 用来延迟关标签，让收回动画期间还看得见原内容）；收起途中又被重新打开则作废。
+    /// </summary>
+    void SetPropertyPanelVisible(bool visible, bool persist, Action? afterCollapse = null)
     {
-        _propertyPanelVisible = visible;
-        RightCol.Width = new GridLength(visible ? 360 : 0);
-        RightPane.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        if (visible) ShowPropertyPanel();
+        else HidePropertyPanel(afterCollapse);
+
         if (!persist) return;
         try
         {
@@ -1516,6 +1554,117 @@ public partial class ManagementWindow : Window
             _configService.Save(config);
         }
         catch { }
+    }
+
+    void ShowPropertyPanel()
+    {
+        _propertyPanelVisible = true;
+
+        // 收回动画进行中又被叫出来（用户点了别的分区行）：取消收尾、从当前进度滑回来，
+        // 不要闪一帧全透明。
+        bool reversing = _panelCloseAnimating;
+        _panelCloseAnimating = false;
+        _panelCloseAfter = null;
+
+        RightCol.Width = new GridLength(360);
+        RightPane.Visibility = Visibility.Visible;
+        if (!reversing) return;   // 正常打开：内容入场动画由 PropertyPanel.AnimateSwitch 负责
+
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+        var duration = (Duration)FindResource("Motion.Fast");
+        AnimatePanelDouble(RightPane, UIElement.OpacityProperty, 1, duration, ease, null);
+        AnimatePanelDouble(RightPaneSlide, TranslateTransform.XProperty, 0, duration, ease, null);
+    }
+
+    void HidePropertyPanel(Action? afterCollapse)
+    {
+        if (!_propertyPanelVisible)
+        {
+            // 已经在收：收尾挂到正在跑的动画上，别立刻执行（否则内容会中途被清掉）。
+            if (_panelCloseAnimating) return;
+            // 本来就是收起的：没有动画可播，收尾直接跑。
+            afterCollapse?.Invoke();
+            return;
+        }
+
+        _propertyPanelVisible = false;
+
+        // 窗口没显示 / 系统关了动画：直接收栏，别让面板挂在半路。
+        if (!IsLoaded || !IsVisible || Motion.IsReducedMotion())
+        {
+            CollapsePropertyPanelNow();
+            afterCollapse?.Invoke();
+            return;
+        }
+
+        _panelCloseAnimating = true;
+        _panelCloseAfter = afterCollapse;
+
+        var ease = new CubicEase { EasingMode = EasingMode.EaseIn };
+        var duration = (Duration)FindResource("Motion.Exit");
+        // 往外滑：LTR 右栏在右边 → +X；RTL 整窗镜像 → -X。
+        double direction = FlowDirection == FlowDirection.RightToLeft ? -1 : 1;
+        var fireOnce = Once(2, FinishPropertyPanelClose);
+
+        AnimatePanelDouble(RightPane, UIElement.OpacityProperty, 0, duration, ease, fireOnce);
+        AnimatePanelDouble(RightPaneSlide, TranslateTransform.XProperty,
+            direction * PanelCloseSlide, duration, ease, fireOnce);
+    }
+
+    void FinishPropertyPanelClose()
+    {
+        if (!_panelCloseAnimating) return;
+        _panelCloseAnimating = false;
+        CollapsePropertyPanelNow();
+
+        var after = _panelCloseAfter;
+        _panelCloseAfter = null;
+        after?.Invoke();
+    }
+
+    void CollapsePropertyPanelNow()
+    {
+        RightPane.BeginAnimation(UIElement.OpacityProperty, null);
+        RightPaneSlide.BeginAnimation(TranslateTransform.XProperty, null);
+        // 复位到展开态的值：下次打开右栏立即可见（面板内容自己会播入场动画）。
+        RightPane.Opacity = 1;
+        RightPaneSlide.X = 0;
+        RightPane.Visibility = Visibility.Collapsed;
+        RightCol.Width = new GridLength(0);
+    }
+
+    /// <summary>把 UIElement 的某个 double 属性从当前值补间到目标值（收起/回退用）。</summary>
+    static void AnimatePanelDouble(UIElement target, DependencyProperty property, double to,
+        Duration duration, IEasingFunction ease, Action? completed)
+    {
+        var from = (double)target.GetValue(property);
+        var animation = new DoubleAnimation(from, to, duration) { EasingFunction = ease };
+        if (completed != null) animation.Completed += (_, _) => completed();
+        target.BeginAnimation(property, animation);
+    }
+
+    /// <summary>同上，对象是 <see cref="TranslateTransform"/> 这类可动画对象。</summary>
+    static void AnimatePanelDouble(Animatable target, DependencyProperty property, double to,
+        Duration duration, IEasingFunction ease, Action? completed)
+    {
+        var from = (double)target.GetValue(property);
+        var animation = new DoubleAnimation(from, to, duration) { EasingFunction = ease };
+        if (completed != null) animation.Completed += (_, _) => completed();
+        target.BeginAnimation(property, animation);
+    }
+
+    /// <summary>把 N 个子动画的完成信号收敛成一次回调。</summary>
+    static Action Once(int count, Action done)
+    {
+        int remaining = count;
+        bool fired = false;
+        return () =>
+        {
+            if (fired) return;
+            if (--remaining > 0) return;
+            fired = true;
+            done();
+        };
     }
 
     // ── 快捷键预设菜单（便签/面板共用）──

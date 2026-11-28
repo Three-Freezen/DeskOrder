@@ -1,5 +1,6 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:helpers="clr-namespace:DesktopZones.Helpers">
 
   <!-- ═══════════════════════════════════════════
        ComboBox — spec §5.2
@@ -20,6 +21,9 @@
              (RenderTransformOrigin 0.5,0 top) so opening plays a "expand down"
              storyboard — Opacity 0→1 + ScaleY 0.92→1, Motion.Fast + StandardSpline.
              Closing reverses via ExitActions.
+         (4) 收回动画以前根本看不到：Popup.IsOpen 直接绑定 IsDropDownOpen，关下拉的
+             同一帧弹层就没了，ExitActions 播在一块已经不可见的画布上。现在 IsOpen
+             走 ComboBoxDropMotion 中转，关闭时等 Motion.Fast 播完再真正关层。
        ═══════════════════════════════════════════ -->
 
   <Style TargetType="ComboBox">
@@ -33,6 +37,9 @@
     <Setter Property="HorizontalContentAlignment" Value="Left"/>
     <Setter Property="VerticalContentAlignment" Value="Center"/>
     <Setter Property="Cursor" Value="Hand"/>
+    <!-- 弹层延迟关闭：IsDropDownOpen 翻 false 后先让 ExitActions 的收回动画播完
+         （失焦/选中一项/按 Esc 都走这条），再真正关层。见 ComboBoxDropMotion。 -->
+    <Setter Property="helpers:ComboBoxDropMotion.Enable" Value="True"/>
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="ComboBox">
@@ -95,10 +102,14 @@
               </Grid>
             </Border>
 
-            <!-- Drop-down popup -->
+            <!-- IsOpen 不再直接 TemplateBind 到 IsDropDownOpen：改由 ComboBoxDropMotion
+                 中转，关闭时先把收回动画播完再置 false（否则弹层同一帧就没了）。
+                 Mirror 绑 IsDropDownOpen 只为拿「逻辑已关」的同步回调 ——
+                 ComboBox 的 DropDownClosed 要等 Popup 真关才抛，这里等不到。 -->
             <Popup x:Name="PART_Popup"
                    Placement="Bottom"
-                   IsOpen="{TemplateBinding IsDropDownOpen}"
+                   helpers:ComboBoxDropMotion.IsDropDownOpenMirror="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}}"
+                   IsOpen="{Binding Path=(helpers:ComboBoxDropMotion.IsPopupOpen), RelativeSource={RelativeSource TemplatedParent}}"
                    AllowsTransparency="True"
                    Focusable="False"
                    PopupAnimation="None"
@@ -170,6 +181,11 @@
                   </Storyboard>
                 </BeginStoryboard>
               </Trigger.ExitActions>
+            </Trigger>
+            <!-- 收回动画期间弹层仍留在屏上（已在淡出），但逻辑上已经关闭 ——
+                 这段时间不让它吃点击，避免「点中收回中的一项」这种鬼命中。 -->
+            <Trigger Property="IsDropDownOpen" Value="False">
+              <Setter TargetName="DropDownRoot" Property="IsHitTestVisible" Value="False"/>
             </Trigger>
             <Trigger Property="IsEnabled" Value="False">
               <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Bg.Base}"/>

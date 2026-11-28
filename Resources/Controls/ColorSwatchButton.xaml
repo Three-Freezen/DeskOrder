@@ -16,25 +16,38 @@
         <Style TargetType="Border"><Setter Property="CornerRadius" Value="4"/></Style>
       </Button.Resources>
     </Button>
-    <Popup x:Name="PART_Popup" Placement="Bottom" StaysOpen="False"
+    <!-- 色板弹层：与 ComboBox 下拉同一套展开/收回动效（透明度 0↔1 + ScaleY 0.92↔1，
+         Motion.Fast）。StaysOpen=True —— 点外关闭由 code-behind 自己接管，这样才能
+         先播收回动画再真正关层（StaysOpen=False 时 WPF 会在点外的那一帧直接关掉）。
+         收起态 Opacity=0 / ScaleY=0.92，动画由 code-behind 驱动。 -->
+    <Popup x:Name="PART_Popup" Placement="Bottom" StaysOpen="True"
            AllowsTransparency="True" PopupAnimation="None"
-           HorizontalOffset="-100">
-      <Border Background="{DynamicResource Brush.Bg.Surface}"
-              BorderBrush="{DynamicResource Brush.Border.Default}" BorderThickness="1"
-              CornerRadius="6" Padding="6" MinWidth="220">
-        <StackPanel>
-          <TextBlock Text="{loc:Loc Key=Common.Preset}" FontSize="11" FontWeight="SemiBold"
-                     Foreground="{DynamicResource Brush.Text.Tertiary}" Margin="4,2,0,4"/>
-          <UniformGrid x:Name="Swatches" Columns="6" Rows="2"/>
-          <Separator Margin="0,4" Background="{DynamicResource Brush.Border.Subtle}"/>
-          <Button Content="{loc:Loc Key=Common.Custom}" Click="Custom_Click"
-                  Background="{DynamicResource Brush.Bg.Input}"
-                  Foreground="{DynamicResource Brush.Text.Primary}"
-                  BorderBrush="{DynamicResource Brush.Border.Default}"
-                  BorderThickness="1"
-                  HorizontalAlignment="Stretch" Padding="8,6" Cursor="Hand"/>
-        </StackPanel>
-      </Border>
+           HorizontalOffset="-100"
+           Closed="PART_Popup_Closed">
+      <Grid x:Name="PopupRoot"
+            RenderTransformOrigin="0.5,0"
+            Opacity="0"
+            PreviewKeyDown="PopupRoot_PreviewKeyDown">
+        <Grid.RenderTransform>
+          <ScaleTransform x:Name="PopupScale" ScaleX="1" ScaleY="0.92"/>
+        </Grid.RenderTransform>
+        <Border Background="{DynamicResource Brush.Bg.Surface}"
+                BorderBrush="{DynamicResource Brush.Border.Default}" BorderThickness="1"
+                CornerRadius="6" Padding="6" MinWidth="220">
+          <StackPanel>
+            <TextBlock Text="{loc:Loc Key=Common.Preset}" FontSize="11" FontWeight="SemiBold"
+                       Foreground="{DynamicResource Brush.Text.Tertiary}" Margin="4,2,0,4"/>
+            <UniformGrid x:Name="Swatches" Columns="6" Rows="2"/>
+            <Separator Margin="0,4" Background="{DynamicResource Brush.Border.Subtle}"/>
+            <Button Content="{loc:Loc Key=Common.Custom}" Click="Custom_Click"
+                    Background="{DynamicResource Brush.Bg.Input}"
+                    Foreground="{DynamicResource Brush.Text.Primary}"
+                    BorderBrush="{DynamicResource Brush.Border.Default}"
+                    BorderThickness="1"
+                    HorizontalAlignment="Stretch" Padding="8,6" Cursor="Hand"/>
+          </StackPanel>
+        </Border>
+      </Grid>
     </Popup>
   </Grid>
 </UserControl>
