@@ -117,14 +117,6 @@
                 <!-- Formatting toolbar -->
                 <Border x:Name="ToolbarBorder" Grid.Row="1" Background="#10000000" Padding="4,2">
                     <StackPanel Orientation="Horizontal">
-                        <!-- Font Family — 条目由代码填充(系统字体 + 「系统默认」)。
-                             与字号同属「当前笔触」:无选区改它 → 下一次输入生效;有选区 → 只改选区。 -->
-                        <ComboBox x:Name="FontFamilyCombo" Width="84" Height="22"
-                                   FontSize="11"
-                                   Style="{DynamicResource Menu.ComboBox}"
-                                   ItemContainerStyle="{DynamicResource Menu.ComboBoxItem}"
-                                   Padding="2,0"
-                                   SelectionChanged="FontFamilyCombo_SelectionChanged"/>
                         <!-- Font Size — 跟随系统深浅色(Menu.* 调色板)，与管理界面主题解耦。 -->
                         <ComboBox x:Name="FontSizeCombo" Width="50" Height="22"
                                    FontSize="11"
@@ -253,8 +245,8 @@
                 </Border>
 
                 <!-- Content area (RichTextBox for per-character formatting) -->
-                <!-- 字号/颜色/字体族不再写死 —— 由 ApplyTextStyle() 从便签的文档样式
-                     (StickyNote.FontSize / TextColor / FontFamily) 写到控件上,无本地值的
+                <!-- 字号/颜色不再写死 —— 由 ApplyTextStyle() 从便签的文档样式
+                     (StickyNote.FontSize / TextColor) 写到控件上,无本地值的
                      run 自动继承(2026-11-28 修复「格式跟着内容走」)。 -->
                 <RichTextBox x:Name="ContentBox" Grid.Row="2"
                              Background="Transparent" BorderThickness="0"
