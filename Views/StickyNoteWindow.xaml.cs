@@ -79,6 +79,8 @@ public partial class StickyNoteWindow : Window
     public StickyNoteWindow(StickyNote note, NotesService notesService)
     {
         InitializeComponent();
+        // 右键菜单图标（方案 B · 简笔）：锁定图标复用标题栏那颗按钮的字符。
+        MenuIconBinder.Hook(this, () => LockBtn.Content as string);
         _note = note;
         _notesService = notesService;
         _vm = new StickyNoteViewModel(note);
@@ -414,14 +416,14 @@ public partial class StickyNoteWindow : Window
     void SaveBtn_Click(object s, RoutedEventArgs e)
     {
         var menu = new ContextMenu();
-        var saveItem = new MenuItem { Header = _loc["Note.Save"] };
+        var saveItem = new MenuItem { Header = _loc["Note.Save"], Icon = MenuIconFactory.Icon("Menu.Save") };
         saveItem.Click += (_, _) => SaveToFile();
-        var saveAsItem = new MenuItem { Header = _loc["Note.SaveAs"] };
+        var saveAsItem = new MenuItem { Header = _loc["Note.SaveAs"], Icon = MenuIconFactory.Icon("Menu.SaveAs") };
         saveAsItem.Click += (_, _) => SaveAsToFile();
         menu.Items.Add(saveItem);
         menu.Items.Add(saveAsItem);
         menu.Items.Add(new Separator());
-        var openItem = new MenuItem { Header = _loc["Note.OpenFile"] };
+        var openItem = new MenuItem { Header = _loc["Note.OpenFile"], Icon = MenuIconFactory.Icon("Menu.Open") };
         openItem.Click += (_, _) => OpenFile();
         menu.Items.Add(openItem);
         SaveBtn.ContextMenu = menu;
@@ -1420,6 +1422,7 @@ public partial class StickyNoteWindow : Window
         if (MainContent.Visibility != Visibility.Visible) return;
         FontColorPopup.IsOpen = false; // 右键开窗口菜单时,顺带关掉颜色菜单
         if (IsWithinContentBox(e.OriginalSource)) return; // 正文保留编辑右键菜单
+        MenuIconBinder.Apply(NoteBorder.ContextMenu, LockBtn.Content as string);
         NoteBorder.ContextMenu.IsOpen = true;
         e.Handled = true;
     }

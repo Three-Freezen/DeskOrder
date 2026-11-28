@@ -99,10 +99,13 @@
 
                 <!-- 可选图标(有 Icon 时显示) -->
                 <!-- 2026-11-28 菜单图标（方案 B · 简笔）：图标区 24 = 16 图标 + 8 间隔。
-                     原来是 20×20 + 8 间隔 = 28 > 24，图标会向右压 4px 到文字上。 -->
+                     原来是 20×20 + 8 间隔 = 28 > 24，图标会向右压 4px 到文字上，先修成 16。
+                     再修一次「⚙ / 🔓 / 📌 显示不完全」：这三个是字形图标，行高和字宽
+                     都比 16 大。钉死 Width/Height 会把它们裁掉一块 —— 改成只给最小值，
+                     让字形按自己的自然尺寸排，矢量图标仍然是 16×16（Path 自己带尺寸）。 -->
                 <ContentPresenter x:Name="Icon"
                                   Grid.Column="0"
-                                  Width="16" Height="16"
+                                  MinWidth="16" MinHeight="16" MaxWidth="24"
                                   Margin="0,0,8,0"
                                   VerticalAlignment="Center"
                                   HorizontalAlignment="Left"

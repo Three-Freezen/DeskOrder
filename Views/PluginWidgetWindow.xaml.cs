@@ -40,6 +40,8 @@ public partial class PluginWidgetWindow : Window
     public PluginWidgetWindow(PluginWidget widget, PluginService service)
     {
         InitializeComponent();
+        // 右键菜单图标（方案 B · 简笔）：这颗组件没有标题栏锁定按钮，直接读模型状态。
+        MenuIconBinder.Hook(this, () => _widget?.IsLocked == true ? "🔒" : "🔓");
         _widget = widget;
         _service = service;
 

@@ -77,6 +77,8 @@ public partial class MediaPlayerWidget : Window
     public MediaPlayerWidget(DesktopMediaPlayer player, WidgetService widgetService)
     {
         InitializeComponent();
+        // 右键菜单图标（方案 B · 简笔）：锁定图标复用标题栏那颗按钮的字符。
+        MenuIconBinder.Hook(this, () => LockBtn.Content as string);
         Deactivated += (_, _) => { if (IsVisible) NativeMethods.PinBelowProgman(this); };
 
         _player = player;

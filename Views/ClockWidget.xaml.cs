@@ -46,6 +46,11 @@ public partial class ClockWidget : Window
     public ClockWidget(DesktopClock clock, WidgetService widgetService)
     {
         InitializeComponent();
+        // 右键菜单图标（方案 B · 简笔）：菜单由 ContextMenuService 打开，这里统一截一次。
+        // 锁定图标复用标题栏那颗按钮的字符；「12/24 制」跟着当前制式换几何。
+        MenuIconBinder.Hook(this,
+            () => LockBtn.Content as string,
+            () => _clock?.Use24Hour == true ? "Menu.ClockFormat12" : "Menu.ClockFormat24");
         // 桌面层策略:失去焦点后回落到壁纸上方(与锁定态一致),不再浮在应用窗口之上。
         // IsVisible 守卫防关窗 teardown 期间 EnsureHandle 抛异常(日历同款)。
         Deactivated += (_, _) => { if (IsVisible) NativeMethods.PinBelowProgman(this); };
