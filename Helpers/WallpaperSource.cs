@@ -103,7 +103,10 @@ public static class WallpaperSource
     /// (不检测第三方宿主、不抓屏)—— 关掉开关的用户不该被偷偷抓一次屏。
     ///
     /// Phase 1：关开关时**顺手停掉换壁纸指纹监视**（旧实现只在 App 退出才 Dispose，
-    /// 用户开过一次再关掉，5s 定时器会一直空转）。</summary>
+    /// 用户开过一次再关掉，5s 定时器会一直空转）。
+    ///
+    /// 2026-11-28：磁贴独立采样（<see cref="TileGlassEnabled"/>）打开时，即使本开关为
+    /// false 也保留下面的来源检测/缓存/监视，供磁贴圆内采样使用；两个开关都关才真正收口。</summary>
     public static bool Enabled
     {
         get => _enabled;
@@ -111,7 +114,7 @@ public static class WallpaperSource
         {
             if (_enabled == value) return;
             _enabled = value;
-            if (!value)
+            if (!value && !_tileGlassEnabled)
             {
                 StopWatch();
                 // ponytail 2026-11-21(Phase 2 第 4 项): 关掉自绘方案时**立刻**丢掉常驻位图 ——
@@ -126,6 +129,28 @@ public static class WallpaperSource
     }
 
     static volatile bool _enabled;
+
+    /// <summary>设置页的「指针磁贴独立采样」开关。true 时即使主渲染方案是 DWM，磁贴
+    /// 也允许读取壁纸采样；来源检测/抓屏/换壁纸监视与主方案共用（任一开关打开就保活）。</summary>
+    public static bool TileGlassEnabled
+    {
+        get => _tileGlassEnabled;
+        set
+        {
+            if (_tileGlassEnabled == value) return;
+            _tileGlassEnabled = value;
+            if (!value && !_enabled)   // 两个采样通道都关了才收口
+            {
+                StopWatch();
+                WallpaperBackdrop.Invalidate();
+            }
+        }
+    }
+
+    static volatile bool _tileGlassEnabled;
+
+    /// <summary>任一采样通道是否开启（主方案 / 磁贴独立）。来源检测、缓存和换壁纸监视按它判断。</summary>
+    public static bool SamplingActive => _enabled || _tileGlassEnabled;
 
     /// <summary>停掉换壁纸指纹监视（关开关 / 退出共用）。</summary>
     static void StopWatch()
@@ -173,7 +198,7 @@ public static class WallpaperSource
                 genAtDetect = _generation;
             }
 
-            var now = Enabled ? Detect() : DetectSystemOnly();
+            var now = SamplingActive ? Detect() : DetectSystemOnly();
             // ponytail 2026-09-26(审计修订): **一律记「刚刚验过的那串签名」**,不再用
             // Detect 自己拼的 Origin。两者的口径必须完全一致,而回退路径天生对不上:
             //   • ①b 抓屏(Origin=hostscreen:进程)时签名可能是 hostfile:进程:0=…(3 屏以上
@@ -216,7 +241,7 @@ public static class WallpaperSource
 
     static string ComputeSignature()
     {
-        if (!Enabled) return "sys:" + SystemSignature();
+        if (!SamplingActive) return "sys:" + SystemSignature();
         var host = HostLocator.Find();
         if (host == null) return "sys:" + SystemSignature();
         var files = HostLocator.ResolveFiles(host);
@@ -270,11 +295,11 @@ public static class WallpaperSource
     /// 就一直 5s 空转，哪怕渲染方案是 DWM）。</summary>
     static void EnsureWatch()
     {
-        if (!_enabled) return;
+        if (!SamplingActive) return;
         if (_watch != null) return;
         lock (_watchLock)
         {
-            if (_watch != null || !_enabled) return;
+            if (_watch != null || !SamplingActive) return;
             _watchSig = ComputeSignature();
             const int intervalMs = 20_000;
             _watch = new System.Threading.Timer(_ => PollSignature(), null, intervalMs, intervalMs);
@@ -285,7 +310,7 @@ public static class WallpaperSource
     {
         try
         {
-            if (!Enabled) return;
+            if (!SamplingActive) return;
             var sig = ComputeSignature();
             if (sig == _watchSig) return;
             DzTrace.Log($"[WallpaperSource] 指纹变化 → 壁纸重采 ({_watchSig} → {sig})");

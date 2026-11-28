@@ -198,6 +198,11 @@
                     Checked="WallpaperRenderer_Changed" Unchecked="WallpaperRenderer_Changed"/>
           <TextBlock Text="{loc:Loc Key=Settings.Renderer.Wallpaper.Hint}" FontSize="11" Margin="24,0,0,8"
                      Foreground="{DynamicResource Brush.Text.Tertiary}" TextWrapping="Wrap"/>
+          <CheckBox x:Name="TileSamplingBox" Content="{loc:Loc Key=Settings.Renderer.TileSampling}"
+                    Margin="24,0,0,2" Foreground="{DynamicResource Brush.Text.Primary}"
+                    Checked="TileSampling_Changed" Unchecked="TileSampling_Changed"/>
+          <TextBlock Text="{loc:Loc Key=Settings.Renderer.TileSampling.Hint}" FontSize="11" Margin="48,0,0,8"
+                     Foreground="{DynamicResource Brush.Text.Tertiary}" TextWrapping="Wrap"/>
           <Grid Margin="24,0,0,8">
             <Grid.ColumnDefinitions>
               <ColumnDefinition Width="*"/>

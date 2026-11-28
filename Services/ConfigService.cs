@@ -207,6 +207,9 @@ public class ConfigService
     /// 逐对象字段只为老配置兼容与将来可能的"按对象覆盖"保留 —— 别再拿它做判据。</summary>
     public static void ApplyRendererSwitch(AppConfig config)
     {
+        // 先设磁贴独立开关，再设主方案：两者都关时才真正停监视/清缓存；
+        // 顺序反过来的话，切换主方案会把磁贴独立采样还在用的缓存一起清掉。
+        Helpers.WallpaperSource.TileGlassEnabled = config.UseTileGlassSampling;
         Helpers.WallpaperSource.Enabled = config.UseWallpaperRenderer;
         foreach (var z in config.Zones)
         {
