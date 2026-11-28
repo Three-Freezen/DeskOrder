@@ -287,9 +287,9 @@ public static class WallpaperSource
     /// 系统静态壁纸：`SystemEvents.UserPreferenceChanged(Desktop)` 能收到；但
     /// **Wallpaper Engine 换壁纸不发任何系统通知**，只能靠比对指纹。所以这里每 20 秒比一次
     /// (实测一次 4~5ms，纯读注册表/进程表/文件时间，不碰位图)。
-    /// 只在「渲染方案 = 壁纸采样」开着时才有意义 —— DWM 方案下采样根本不用。
-    /// 指纹一变就 <see cref="WallpaperBackdrop.Invalidate"/>：缓存作废 + 世代号 +1 +
-    /// 抛 `Changed`，已挂载的图层（分区/时钟/日历/便签/面板/快捷栏）一起自己重取。
+    /// 只在「主方案 = 壁纸采样」或「磁贴独立采样」任一开着时才有意义 —— 两个都关时
+    /// 采样根本不用。指纹一变就 <see cref="WallpaperBackdrop.Invalidate"/>：缓存作废 +
+    /// 世代号 +1 + 抛 `Changed`，已挂载的图层（分区/时钟/日历/便签/面板/快捷栏）一起自己重取。
     ///
     /// Phase 1：5s → 20s，且开关关闭时**根本不起表**（旧实现只要调过一次 GetDesktop
     /// 就一直 5s 空转，哪怕渲染方案是 DWM）。</summary>
