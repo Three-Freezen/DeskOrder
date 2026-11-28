@@ -636,6 +636,15 @@ public sealed class WallpaperBackdropLayer
     public void SetVisible(bool visible)
         => _root.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
 
+    /// <summary>只显示图层的一块(宿主局部坐标,DIP);null = 恢复整窗。
+    /// 磁贴圆形用:壁纸 Viewbox 仍按整窗裁剪,所以圆内纹理对齐不受影响,只是矩形角被裁掉。</summary>
+    public void SetClip(Geometry? clip)
+    {
+        if (clip != null && clip.CanFreeze && !clip.IsFrozen) clip.Freeze();
+        if (ReferenceEquals(_root.Clip, clip)) return;
+        _root.Clip = clip;
+    }
+
     public void Detach()
     {
         _host?.Children.Remove(_root);

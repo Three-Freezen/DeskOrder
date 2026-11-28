@@ -376,15 +376,15 @@ public partial class ClockWidget : Window
     {
         string fillColorStr = ResolveEffectiveFill();
 
-        // 指针磁贴：只留圆内填充。DWM 玻璃不能裁圆，这里用同一套 tint 作为圆底，
-        // 不做模糊；FillRect 会被 Clip 成圆，因此四个角不会再出现。
+        // 指针磁贴：只留圆内填充。DWM 只能整窗模糊且不认窗口 region，圆内真实玻璃
+        // 只能走壁纸采样背板（TryApplyTileBackdrop）；采样不可用时用同一套 tint 兜底。
         if (IsAnalogTileActive())
         {
             Brush tileFill;
             try
             {
                 var fill = (Color)ColorConverter.ConvertFromString(fillColorStr)!;
-                // 圆底最低 60% 不透明：DWM 不能再提供模糊，默认 3% 黑底在浅色/亮壁纸上
+                // 兜底圆底最低 60% 不透明：没有模糊时默认 3% 黑底在浅色/亮壁纸上
                 // 会让白刻度完全消失（本机实测）。保留用户色相，只抬 alpha。
                 byte floor = 0x99;
                 if (fill.A < floor) fill.A = floor;
@@ -410,7 +410,9 @@ public partial class ClockWidget : Window
                 }
             }
             catch { tileFill = new SolidColorBrush(Color.FromArgb(0x99, 0x08, 0x0B, 0x11)); }
-            FillRect.Fill = tileFill;
+            // 采样层自己带 tint；FillRect 只留命中用的近透明层，否则 60% 实色会把
+            // 背板盖死（视觉上又退回实心圆）。
+            FillRect.Fill = _tileBackdropActive ? AcrylicHelper.HitTestFill : tileFill;
             UpdateFaceFillClip();
             FillRect.InvalidateVisual();
             ApplyDefaultTextColors();
@@ -434,6 +436,7 @@ public partial class ClockWidget : Window
         catch { }
         // 普通模式不能残留磁贴圆裁剪（切回卡片时这里是唯一兜底）。
         FillRect.Clip = null;
+        _wallpaperBackdrop?.SetClip(null);
         // ponytail: force re-render — FillRect as a child paints more reliably than
         // Border.Background inside a transparent window with AllowsTransparency=True.
         FillRect.InvalidateVisual();
@@ -443,6 +446,9 @@ public partial class ClockWidget : Window
     // ── 自绘背板(方案①:壁纸采样 + 可变半径模糊) ──
 
     WallpaperBackdropLayer? _wallpaperBackdrop;
+
+    /// <summary>本次 ApplyAcrylic 里磁贴是否由采样背板接管（决定 FillRect 用近透明还是实色兜底）。</summary>
+    bool _tileBackdropActive;
 
     /// <summary>材质 = 「自绘背板」通道时,把壁纸采样层插到填充层之下并关掉 DWM 玻璃。
     /// 返回 true = 背板已接管;壁纸不可用/材质=自定义/开关关闭 → false(回退 DWM)。</summary>
@@ -468,6 +474,57 @@ public partial class ClockWidget : Window
             AcrylicHelper.ResolveNoiseOpacity(_clock.GlassMaterial));
         AcrylicHelper.DisableBlur(this);
         return true;
+    }
+
+    /// <summary>磁贴圆形采样背板。DWM 的 accent 背板完全不认窗口 region（改圆角/半窗
+    /// region 逐像素不变，见 AcrylicHelper.DwmWindowCornerRadiusDip），所以圆内真实玻璃
+    /// 只能自己画：与普通卡片共用 WallpaperBackdropLayer / 预模糊缓存，只把图层 Clip 到
+    /// 表盘圆。返回 false = 无采样可用，调用方回退实色圆底。</summary>
+    bool TryApplyTileBackdrop(string fillColorStr)
+    {
+        if (!_clock.EnableLiquidGlass || !AcrylicHelper.ResolveSelfDrawn())
+        {
+            _wallpaperBackdrop?.SetVisible(false);
+            return false;
+        }
+        _wallpaperBackdrop ??= WallpaperBackdropLayer.TryCreate();
+        if (_wallpaperBackdrop == null) return false;
+
+        _wallpaperBackdrop.Attach(MainContent, FillRect);
+        _wallpaperBackdrop.BindWindow(this);
+        _wallpaperBackdrop.SetVisible(true);
+        // 先裁圆再取图：SetAppearance 首帧若直接铺整窗，会闪一下矩形角。
+        ApplyTileBackdropClip();
+
+        // 磁贴比普通卡片更需要刻度可读性：Default 色板在 DWM 下由系统补一层
+        // 着色，采样通道里它是全透明的，亮壁纸上的白刻度会消失。保留用户色相，
+        // 只给合成 tint 抬一个最低暗底（35%）。
+        var tint = AcrylicHelper.ResolveBackdropTint(fillColorStr, 1.0, _clock.GlassColorMode,
+            _clock.GlassTintOpacity, _clock.GlassTintLuminosity);
+        const byte TileTintFloor = 0x5A;
+        if (tint.A < TileTintFloor) tint.A = TileTintFloor;
+
+        _wallpaperBackdrop.SetAppearance(this,
+            AcrylicHelper.ResolveSelfDrawnRadiusPx(_clock.GlassBlurAmount),
+            tint,
+            AcrylicHelper.ResolveNoiseOpacity(_clock.GlassMaterial));
+        AcrylicHelper.DisableBlur(this);
+        return true;
+    }
+
+    /// <summary>采样层只显示表盘圆；非磁贴/离磁贴时清掉，避免普通卡片被圆裁。</summary>
+    void ApplyTileBackdropClip()
+    {
+        if (_wallpaperBackdrop == null) return;
+        if (!IsAnalogTileActive())
+        {
+            _wallpaperBackdrop.SetClip(null);
+            return;
+        }
+        var (center, radius) = AnalogFaceGeometryDip();
+        var clip = new EllipseGeometry(center, radius, radius);
+        clip.Freeze();
+        _wallpaperBackdrop.SetClip(clip);
     }
 
     /// <summary>Pick the fill color for the active widget.
@@ -554,12 +611,17 @@ public partial class ClockWidget : Window
 
     public void ApplyAcrylic()
     {
-        // 指针磁贴：DWM 只能整窗模糊，必须完全关掉；圆底由 SyncFillRect 的 tint 承担。
+        // 指针磁贴：DWM 只能整窗模糊且不认 region，玻璃只能走壁纸采样背板（裁成圆）；
+        // 采样不可用时回退 SyncFillRect 的实色 tint 圆底。
         if (IsAnalogTileActive())
         {
+            _tileBackdropActive = TryApplyTileBackdrop(ResolveEffectiveFill());
+            if (!_tileBackdropActive)
+            {
+                AcrylicHelper.DisableBlur(this);
+                _wallpaperBackdrop?.SetVisible(false);
+            }
             SyncFillRect();
-            AcrylicHelper.DisableBlur(this);
-            _wallpaperBackdrop?.SetVisible(false);
             if (ClockGlassBorder != null)
             {
                 ClockGlassBorder.Visibility = Visibility.Collapsed;
@@ -568,6 +630,7 @@ public partial class ClockWidget : Window
             return;
         }
 
+        _tileBackdropActive = false;
         SyncFillRect();
 
         // ponytail: ghost-glass fix — acrylic follows the expand state: a collapsed clock
@@ -747,12 +810,15 @@ public partial class ClockWidget : Window
         if (!IsAnalogTileActive())
         {
             FillRect.Clip = null;
+            _wallpaperBackdrop?.SetClip(null);
             return;
         }
         var (center, radius) = AnalogFaceGeometryDip();
         var clip = new EllipseGeometry(center, radius, radius);
         clip.Freeze();
         FillRect.Clip = clip;
+        // 磁贴采样层跟表盘圆同一几何（同一局部坐标系：壁纸层挂在 MainContent 根面板）。
+        _wallpaperBackdrop?.SetClip(clip);
     }
 
     /// <summary>统一入口：普通样式 → 玻璃/填充 → 磁贴覆盖 → 命中区。
@@ -839,6 +905,8 @@ public partial class ClockWidget : Window
     {
         UpdateFaceFillClip();
         UpdateInputRegion();
+        // 尺寸/DPI 变了：采样层仍按整窗物理矩形裁壁纸，只刷 Viewbox，不重取图。
+        _wallpaperBackdrop?.RefreshViewbox();
     }
 
     void ClearTileWindowRegion()
