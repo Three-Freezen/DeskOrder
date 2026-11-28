@@ -495,7 +495,9 @@ public partial class ClockWidget : Window
     /// 表盘圆。返回 false = 无采样可用，调用方回退实色圆底。</summary>
     bool TryApplyTileBackdrop(string fillColorStr)
     {
-        if (!_clock.EnableLiquidGlass || !AcrylicHelper.ResolveSelfDrawn())
+        // 主方案 = DWM 时也要认「磁贴独立采样」开关；这个开关只影响磁贴，
+        // 普通卡片仍走 ResolveSelfDrawn() 的 DWM 分流。
+        if (!_clock.EnableLiquidGlass || !AcrylicHelper.ResolveTileSamplingRequested())
         {
             _wallpaperBackdrop?.SetVisible(false);
             return false;

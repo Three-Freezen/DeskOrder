@@ -78,6 +78,11 @@ public class AppConfig
     /// 本开关同时决定是否做壁纸检测/抓屏:关掉时零开销。</summary>
     public bool UseWallpaperRenderer { get; set; } = false;
 
+    /// <summary>磁贴独立采样：true = 即使主渲染方案是 DWM，指针磁贴圆内也使用壁纸采样玻璃。
+    /// 会启用壁纸来源检测/采样（与主方案共用缓存与换壁纸监视）；默认 false，保持旧磁贴
+    /// 的 60% 实色圆底。只在指针 + 磁贴模式下生效。</summary>
+    public bool UseTileGlassSampling { get; set; } = false;
+
     // ── Panel (POCOs, was 19 inline fields) ──
     public PanelConfig Panel { get; set; } = new();
     public PanelHotkeyConfig PanelHotkey { get; set; } = new();

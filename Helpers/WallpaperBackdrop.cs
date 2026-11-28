@@ -525,12 +525,13 @@ public sealed class WallpaperBackdropLayer
         {
             dispatcher.BeginInvoke(new Action(() =>
             {
-                // ponytail 2026-11-21(Phase 2 第 4 项): 自绘方案已切回 DWM 时**不要再重采样**。
-                // 关开关时窗口只是 SetVisible(false) 把图层藏起来、仍然订阅着 Changed;不挡的话
-                // 刚被 Enabled=false 清掉的采集/模糊缓存会被这些"看不见的图层"立刻重新填满
-                // (整块桌面图 + 一档模糊图,几十 MB),关开关等于没关。重新打开方案时窗口会自己
-                // ApplyStyle → SetAppearance 主动取图,不需要这里保活。
-                if (!WallpaperSource.Enabled) return;
+                // ponytail 2026-11-21(Phase 2 第 4 项): 自绘方案已切回 DWM、且没有磁贴
+                // 独立采样时**不要再重采样**。关开关时窗口只是 SetVisible(false) 把图层
+                // 藏起来、仍然订阅着 Changed;不挡的话刚被清掉的采集/模糊缓存会被这些
+                // "看不见的图层"立刻重新填满(整块桌面图 + 一档模糊图,几十 MB),关开关
+                // 等于没关。磁贴独立采样打开时采样通道仍然有效，可见图层要继续刷新。
+                if (!WallpaperSource.SamplingActive) return;
+                if (_root.Visibility != Visibility.Visible) return;
                 if (_host == null || _bound == null || _attachedRadius < 0) return;
                 SetAppearance(_bound, _attachedRadius, _attachedTint, Math.Max(0, _attachedNoise));
             }));
@@ -548,7 +549,8 @@ public sealed class WallpaperBackdropLayer
         {
             dispatcher.BeginInvoke(new Action(() =>
             {
-                if (!WallpaperSource.Enabled) return;   // 同 OnWallpaperChanged:关掉方案后不再回填缓存
+                if (!WallpaperSource.SamplingActive) return;   // 同 OnWallpaperChanged:关掉采样通道后不再回填缓存
+                if (_root.Visibility != Visibility.Visible) return;
                 if (_host == null || _bound == null || _wantedRadius < 0) return;
                 SetAppearance(_bound, _wantedRadius, _attachedTint, Math.Max(0, _attachedNoise));
             }));

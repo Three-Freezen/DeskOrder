@@ -269,6 +269,14 @@ public static class AcrylicHelper
     public static bool ResolveSelfDrawn()
         => WallpaperSource.Enabled && SelfDrawnAvailable;
 
+    /// <summary>磁贴圆内是否请求采样玻璃：主方案开，或设置页的「指针磁贴独立采样」开。
+    /// 与 <see cref="ResolveSelfDrawn"/> 分开是为了不把其他窗口从 DWM 切到采样；这里
+    /// **不检查** <see cref="SelfDrawnAvailable"/>，让调用方每次都能尝试建层，壁纸从
+    /// 不可用恢复时无需重启/重开面板。
+    /// ponytail 2026-11-28 磁贴独立采样。</summary>
+    public static bool ResolveTileSamplingRequested()
+        => WallpaperSource.Enabled || WallpaperSource.TileGlassEnabled;
+
     /// <summary>全局:壁纸来源当前是否可用(由 WallpaperBackdrop 在取图失败时置 false)。
     /// 默认 true —— 让「还没试过」不阻塞渲染;真正不可用时第一次取图就会把它压下去。</summary>
     public static bool SelfDrawnAvailable { get; set; } = true;

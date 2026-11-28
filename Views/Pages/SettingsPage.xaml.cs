@@ -257,6 +257,7 @@ public partial class SettingsPage : UserControl
             UpdateMirrorHint();
             UpdateImageCacheUi();
             WallpaperRendererBox.IsChecked = cfg.UseWallpaperRenderer;
+            TileSamplingBox.IsChecked = cfg.UseTileGlassSampling;
             SyncRendererUi();
             SyncThemeRadios(cfg.ThemeMode switch
             {
@@ -407,11 +408,26 @@ public partial class SettingsPage : UserControl
         SyncRendererUi();
     }
 
-    /// <summary>「重新采样」—— 让壁纸背板丢掉缓存重新采集一次。仅新方案下可用。
+    /// <summary>「指针磁贴独立采样」—— 主方案保持 DWM 时，只让磁贴圆内走壁纸采样。
+    /// 和主方案共用来源检测/缓存/换壁纸监视；切换后刷新所有玻璃窗口，磁贴会按新开关
+    /// 重建或隐藏采样层。</summary>
+    void TileSampling_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_suppress) return;
+        var cfg = _configService.Load();
+        cfg.UseTileGlassSampling = TileSamplingBox.IsChecked == true;
+        ConfigService.ApplyRendererSwitch(cfg);
+        _configService.Save(cfg);
+        WallpaperBackdrop.Invalidate();
+        RefreshGlassWindows();
+        SyncRendererUi();
+    }
+
+    /// <summary>「重新采样」—— 让壁纸背板丢掉缓存重新采集一次。任一采样通道打开都可用。
     /// 采集前会先把本应用窗口隐藏一会儿(见 WallpaperSource),避免把应用自己的窗口采进背板。</summary>
     void Resample_Click(object sender, RoutedEventArgs e)
     {
-        if (WallpaperRendererBox.IsChecked != true) return;
+        if (!SamplingOn()) return;
         var loc = LocalizationService.Instance;
         ResampleButton.IsEnabled = false;
         ResampleHintText.Text = loc["Settings.Renderer.Resampling"];
@@ -454,10 +470,14 @@ public partial class SettingsPage : UserControl
         => System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(
             () => { }, System.Windows.Threading.DispatcherPriority.Render);
 
+    /// <summary>任一采样通道（主方案 / 磁贴独立）是否开启。</summary>
+    bool SamplingOn()
+        => WallpaperRendererBox.IsChecked == true || TileSamplingBox.IsChecked == true;
+
     /// <summary>按当前开关状态刷新这一块的可用性/文字(采样来源、按钮可用性)。</summary>
     void SyncRendererUi()
     {
-        bool on = WallpaperRendererBox.IsChecked == true;
+        bool on = SamplingOn();
         ResampleButton.IsEnabled = on;
         if (!on)
         {

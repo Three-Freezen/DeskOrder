@@ -219,6 +219,8 @@
   "Settings.Renderer": "Glass Rendering",
   "Settings.Renderer.Wallpaper": "Use wallpaper-sampled rendering (new)",
   "Settings.Renderer.Wallpaper.Hint": "When on, liquid glass draws its own backdrop from the current wallpaper instead of asking DWM, so the blur-radius slider becomes real pixels (DWM blur is fixed-strength on Windows 11, which is why the slider used to do nothing). The backdrop is sampled at 1:1 screen resolution and laid out per monitor, so each glass window keeps its own bitmap (about 29 MB per radius on a full desktop, up to 6 cached). When off, the original DWM path is used and the look matches older versions exactly: colour, opacity and luminosity still apply, but materials and blur radius take no part in rendering.",
+  "Settings.Renderer.TileSampling": "Analog tile sampling",
+  "Settings.Renderer.TileSampling.Hint": "Analog tiles only: the circular tile uses wallpaper-sampled glass even when the main renderer stays on DWM. This enables wallpaper detection/sampling. Not needed when wallpaper-sampled rendering is already on.",
   "Settings.Renderer.Source": "Current wallpaper source",
   "Settings.Renderer.Source.Off": "Disabled (using the DWM path)",
   "Settings.Renderer.Source.System": "System static wallpaper",
