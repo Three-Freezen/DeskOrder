@@ -39,15 +39,28 @@
     <Setter Property="Stroke" Value="#FF6666"/>
   </Style>
 
-  <!-- 文字字形图标：⚙ / 🔓 / 🔒 —— 与分区标题栏 EditBtnText / LockBtnText 同字符，
-       字号按 16px 图标列放大（标题栏是 10px 小按钮）。15 是实测值：13 明显比其他
-       图标轻一档，17 会从 16px 的图标列里溢出来，15 与 16px 矢量图标视觉等大。 -->
+  <!-- 文字字形图标：⚙ / 🔓 / 🔒 / 📌 —— 与各组件标题栏上那几颗按钮同字符，
+       字号按 16px 图标列放大（标题栏是 10px 小按钮）。
+
+       三个必须的约束，少一个就会「显示不完全」：
+       1. **不要写死 FontFamily**。留空让 WPF 自己做字形回退 —— 这几个字符会落到
+          Segoe UI Emoji 的**单色线框**层，粗细正好和 1.15 描边的矢量图标一档；
+          写死 "Segoe UI Symbol" 会拿到实心字形（齿轮、锁、图钉都是实心块），
+          在菜单里比旁边的线稿重一大截。
+       2. 图标列的 ContentPresenter 高度必须是 Auto（见 ContextMenu.xaml），不能钉死 16 ——
+          这几个字形的行高比 16 大，钉死会把上下裁掉。
+       3. FontSize 15 是实测值：13 比旁边的矢量图标明显轻一档，17 会溢出图标列。 -->
   <Style x:Key="MenuItemGlyph" TargetType="TextBlock">
     <Setter Property="FontSize" Value="15"/>
     <Setter Property="Foreground" Value="{DynamicResource Menu.Text.Secondary}"/>
     <Setter Property="HorizontalAlignment" Value="Center"/>
     <Setter Property="VerticalAlignment" Value="Center"/>
     <Setter Property="TextAlignment" Value="Center"/>
+    <Setter Property="TextWrapping" Value="NoWrap"/>
+    <Setter Property="Padding" Value="0"/>
+    <Setter Property="Margin" Value="0"/>
+    <Setter Property="LineStackingStrategy" Value="BlockLineHeight"/>
+    <Setter Property="LineHeight" Value="20"/>
     <Setter Property="TextOptions.TextFormattingMode" Value="Ideal"/>
   </Style>
 
