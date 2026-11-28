@@ -3,6 +3,7 @@ using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
+using System.Windows.Media;
 
 namespace DesktopZones.Helpers;
 
@@ -145,8 +146,59 @@ public static class NativeMethods
     [DllImport("gdi32.dll")]
     public static extern IntPtr CreateRoundRectRgn(int x1, int y1, int x2, int y2, int w, int h);
 
+    [DllImport("gdi32.dll")]
+    public static extern IntPtr CreateEllipticRgn(int x1, int y1, int x2, int y2);
+
     [DllImport("user32.dll")]
     public static extern int SetWindowRgn(IntPtr hWnd, IntPtr hRgn, bool bRedraw);
+
+    /// <summary>把窗口的**系统命中区**裁成椭圆。用于指针磁贴的纯圆挂件：
+    /// 视觉由 WPF 自己画（圆外 alpha=0），这里只决定圆外是否还能点到窗口。
+    /// 坐标用 DIP 传入，内部按当前 DPI 转物理像素；marginDip 给描边/AA 留余量。
+    /// 成功时 SetWindowRgn 接管 HRGN 所有权，失败时自己 DeleteObject。</summary>
+    public static bool SetEllipticalWindowRegion(Window window, Rect boundsDip, double marginDip = 0)
+    {
+        var helper = new WindowInteropHelper(window);
+        var hwnd = helper.EnsureHandle();
+        if (hwnd == IntPtr.Zero) return false;
+
+        double sx = 1.0, sy = 1.0;
+        try
+        {
+            var dpi = VisualTreeHelper.GetDpi(window);
+            sx = dpi.DpiScaleX;
+            sy = dpi.DpiScaleY;
+        }
+        catch { }
+
+        int left = (int)Math.Floor((boundsDip.Left - marginDip) * sx);
+        int top = (int)Math.Floor((boundsDip.Top - marginDip) * sy);
+        int right = (int)Math.Ceiling((boundsDip.Right + marginDip) * sx);
+        int bottom = (int)Math.Ceiling((boundsDip.Bottom + marginDip) * sy);
+        if (right <= left) right = left + 1;
+        if (bottom <= top) bottom = top + 1;
+
+        var rgn = CreateEllipticRgn(left, top, right, bottom);
+        if (rgn == IntPtr.Zero) return false;
+        if (SetWindowRgn(hwnd, rgn, true) == 0)
+        {
+            DeleteObject(rgn);
+            return false;
+        }
+        return true;
+    }
+
+    /// <summary>清除 SetEllipticalWindowRegion 设置的窗口区域。</summary>
+    public static void ClearWindowRegion(Window window)
+    {
+        try
+        {
+            var helper = new WindowInteropHelper(window);
+            if (helper.Handle != IntPtr.Zero)
+                SetWindowRgn(helper.Handle, IntPtr.Zero, true);
+        }
+        catch { }
+    }
 
     // ── Win11 native rounded corners ──
     public const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;

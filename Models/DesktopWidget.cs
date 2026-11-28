@@ -108,7 +108,7 @@ public class DesktopClock : AppearanceModel
     public bool ShowSeconds { get; set; } = true;
     public bool ShowDate { get; set; } = true;
     public bool Use24Hour { get; set; } = true;
-    /// <summary>磁贴模式 — hides the minimize + lock buttons in BOTH digital and analog modes.</summary>
+    /// <summary>磁贴模式 — 数字模式隐藏锁/收起按钮；指针模式只保留圆形表盘（无卡片/边框/整窗玻璃）。</summary>
     public bool TileMode { get; set; } = false;
 
     /// <summary>配置兼容 — 旧 config/预设用 "QuickBarMode" 字段名，回填到 TileMode。</summary>
@@ -151,7 +151,7 @@ public class DesktopClock : AppearanceModel
     public string FontFamily { get; set; } = "Segoe UI";
     public double Opacity { get; set; } = 1.0;
     public ClockDisplayMode Mode { get; set; } = ClockDisplayMode.Digital;
-    public string AccentColor { get; set; } = "#FFFFFFFF";
+    public string AccentColor { get; set; } = "#4CC9F0";
     // ── Appearance (most fields inherited from AppearanceModel) ──
     public double BorderThickness { get; set; } = 1.0;
     // ponytail 2026-08-26: per-instance corner radius (圆角/尖角 switch).
