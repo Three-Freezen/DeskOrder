@@ -1,0 +1,149 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <!-- ══════════════════════════════════════════════════════════════════
+       DeskOrder 右键菜单图标 · 方案 B · 简笔 LESS
+       16×16 网格 · 描边 1.15 · 字形盒 10.6 · 全无填充
+       ─────────────────────────────────────────────────────────────────
+       设计稿与生成器：UI重构/menu-icons/
+         · svg/02-B.svg          方案板（1:1 菜单 + 图标族）
+         · DESIGN.md            规范、WPF 映射、验收清单
+
+       规矩（改之前先读一遍）：
+       1. 只描边、不填色。颜色一律 {DynamicResource Menu.Text.Secondary}，
+          菜单跟系统主题（Helpers/MenuThemeService）走，不跟应用主题。
+       2. 尺寸固定 16×16，配 ContextMenu.xaml 里 24px 的图标列（16 图标 + 8 间隔）。
+          不要为「看起来大一点」改 Width —— 会顶到文字。
+       3. 删除项用 MenuItemIconDanger（#FF6666，与现有 Foreground 一致）。
+       4. 「设置」「锁定」两枚不走几何：直接用分区标题栏那两个字符
+          （⚙ / 🔓 🔒），保证菜单和标题栏是同一个东西。见 MenuItemGlyph。
+       ══════════════════════════════════════════════════════════════════ -->
+
+  <!-- ── 菜单项图标样式 ──────────────────────────────────────────── -->
+  <Style x:Key="MenuItemIcon" TargetType="Path">
+    <Setter Property="Width" Value="16"/>
+    <Setter Property="Height" Value="16"/>
+    <Setter Property="Stretch" Value="Uniform"/>
+    <Setter Property="Stroke" Value="{DynamicResource Menu.Text.Secondary}"/>
+    <Setter Property="StrokeThickness" Value="1.15"/>
+    <Setter Property="StrokeStartLineCap" Value="Round"/>
+    <Setter Property="StrokeEndLineCap" Value="Round"/>
+    <Setter Property="StrokeLineJoin" Value="Round"/>
+    <Setter Property="HorizontalAlignment" Value="Left"/>
+    <Setter Property="VerticalAlignment" Value="Center"/>
+    <Setter Property="SnapsToDevicePixels" Value="True"/>
+    <Setter Property="UseLayoutRounding" Value="True"/>
+  </Style>
+
+  <Style x:Key="MenuItemIconDanger" TargetType="Path" BasedOn="{StaticResource MenuItemIcon}">
+    <Setter Property="Stroke" Value="#FF6666"/>
+  </Style>
+
+  <!-- 文字字形图标：⚙ / 🔓 / 🔒 —— 与分区标题栏 EditBtnText / LockBtnText 同字符，
+       字号按 16px 图标列放大（标题栏是 10px 小按钮）。15 是实测值：13 明显比其他
+       图标轻一档，17 会从 16px 的图标列里溢出来，15 与 16px 矢量图标视觉等大。 -->
+  <Style x:Key="MenuItemGlyph" TargetType="TextBlock">
+    <Setter Property="FontSize" Value="15"/>
+    <Setter Property="Foreground" Value="{DynamicResource Menu.Text.Secondary}"/>
+    <Setter Property="HorizontalAlignment" Value="Center"/>
+    <Setter Property="VerticalAlignment" Value="Center"/>
+    <Setter Property="TextAlignment" Value="Center"/>
+    <Setter Property="TextOptions.TextFormattingMode" Value="Ideal"/>
+  </Style>
+
+  <!-- 「语言」子菜单的当前项：勾选占图标列，非勾选项用 16×16 透明 Border 撑住列宽 -->
+  <Geometry x:Key="Menu.Check">M 3.8,8.1 L 6.7,11 L 12.2,4.7</Geometry>
+
+  <!-- ── 30 枚：导入 / 分区结构 / 项目 / 托盘 / 新建 ────────────────── -->
+
+  <!-- 导入 / Import -->
+  <Geometry x:Key="Menu.Import">M 3.23 9.41 V 12.77 H 12.77 V 9.41 M 8 3.23 V 9.06 M 5.7 7.21 L 8 9.5 L 10.3 7.21</Geometry>
+
+  <!-- 文件 / File -->
+  <Geometry x:Key="Menu.File">M 3.94 3.14 H 9.06 L 12.06 6.15 V 12.86 H 3.94 Z M 9.06 3.14 V 6.15 H 12.06</Geometry>
+
+  <!-- 文件夹 / Folder -->
+  <Geometry x:Key="Menu.Folder">M 3.05 5 H 6.32 L 7.38 6.06 H 12.95 V 11.97 H 3.05 Z</Geometry>
+
+  <!-- 系统项目 / System items -->
+  <Geometry x:Key="Menu.Monitor">M 12.95,8.66 L 12.95,3.94 L 3.05,3.94 L 3.05,10.21 L 11.4,10.21 M 6.23 12.77 H 9.77 M 8 10.21 V 12.77</Geometry>
+
+  <!-- 新建次级分区 / New sub-zone -->
+  <Geometry x:Key="Menu.NewSubZone">M 12.95,10.52 L 12.95,3.94 L 3.05,3.94 L 3.05,12.06 L 11.4,12.06 M 6.59 3.94 V 12.06 M 9.77 6.85 V 9.32 M 8.53 8.09 H 11</Geometry>
+
+  <!-- 新建 / New -->
+  <Geometry x:Key="Menu.New">M 8 3.76 V 12.24 M 3.76 8 H 12.24</Geometry>
+
+  <!-- 映射文件夹 / Map folder -->
+  <Geometry x:Key="Menu.MapFolder">M 3.05 4.38 H 6.15 L 7.03 5.44 H 11.45 V 8.71 H 3.05 Z M 10.3 9.06 L 10.96 10.03 M 11.58 9.63 A 1.59 1.59 0 1 0 11.58 12.81 A 1.59 1.59 0 1 0 11.58 9.63 Z</Geometry>
+
+  <!-- 设置 / Settings -->
+  <Geometry x:Key="Menu.Settings">M 8 2.79 L 8.97 3.76 L 10.3 3.41 L 10.65 4.73 L 11.97 5.17 L 11.45 6.41 L 12.33 7.47 L 11.45 8.53 L 11.97 9.86 L 10.65 10.3 L 10.21 11.62 L 8.88 11.27 L 8 12.24 L 7.03 11.27 L 5.7 11.62 L 5.35 10.3 L 4.03 9.86 L 4.55 8.53 L 3.67 7.47 L 4.55 6.41 L 4.03 5.17 L 5.35 4.73 L 5.7 3.41 L 7.03 3.76 Z M 8 5.79 A 1.72 1.72 0 1 0 8 9.24 A 1.72 1.72 0 1 0 8 5.79 Z</Geometry>
+
+  <!-- 从分区坞移出 / Release -->
+  <Geometry x:Key="Menu.Release">M 3.23 8.79 V 12.77 H 12.77 V 8.79 M 8 10.12 V 6.41 M 5.7 5.97 L 8 3.67 L 10.3 5.97</Geometry>
+
+  <!-- 解散组合分区 / Disband group -->
+  <Geometry x:Key="Menu.DisbandAll">M 7.65,6.37 L 7.65,3.5 L 3.23,3.5 L 3.23,7.91 L 6.1,7.91 M 12.77,10.96 L 12.77,8.09 L 8.35,8.09 L 8.35,12.5 L 11.22,12.5</Geometry>
+
+  <!-- 分离单个分区 / Disband one -->
+  <Geometry x:Key="Menu.DisbandSingle">M 9.06,8.93 L 9.06,4.64 L 3.23,4.64 L 3.23,10.47 L 7.51,10.47 M 9.59 7.56 H 11.71 M 11.18 6.15 L 12.77 7.56 L 11.18 8.97</Geometry>
+
+  <!-- 锁定 / Lock -->
+  <Geometry x:Key="Menu.Lock">M 11.36,11.22 L 11.36,7.56 L 4.64,7.56 L 4.64,12.77 L 9.81,12.77 M 6.23 7.56 V 5.79 A 1.77 1.77 0 0 1 9.77 5.79 V 7.56 M 8 9.24 V 11.18</Geometry>
+
+  <!-- 解锁 / Unlock -->
+  <Geometry x:Key="Menu.Unlock">M 11.36,11.22 L 11.36,7.56 L 4.64,7.56 L 4.64,12.77 L 9.81,12.77 M 9.59 7.56 V 5.79 A 1.77 1.77 0 0 0 6.41 4.82 M 8 9.24 V 11.18</Geometry>
+
+  <!-- 最小化 / Minimize -->
+  <Geometry x:Key="Menu.Minimize">M 4.82 5.7 L 8 8.88 L 11.18 5.7 M 3.94 12.33 H 12.06</Geometry>
+
+  <!-- 完全隐藏 / Hide -->
+  <Geometry x:Key="Menu.Hide">M 3.67 3.76 L 12.33 12.42 M 3.05 8.09 C 4.64 5.88 6.23 4.82 8 4.82 C 9.77 4.82 11.36 5.88 12.95 8.09 C 11.36 10.3 9.77 11.36 8 11.36 C 6.23 11.36 4.64 10.3 3.05 8.09 Z</Geometry>
+
+  <!-- 删除 / Delete -->
+  <Geometry x:Key="Menu.Delete">M 3.67 5.09 H 12.33 M 4.91 5.09 L 5.62 12.77 H 10.38 L 11.09 5.09</Geometry>
+
+  <!-- 粘贴 / Paste -->
+  <Geometry x:Key="Menu.Paste">M 11.53,11.22 L 11.53,4.11 L 4.47,4.11 L 4.47,12.77 L 9.99,12.77 M 9.41,3.19 L 9.41,2.61 L 6.59,2.61 L 6.59,4.73 L 7.87,4.73</Geometry>
+
+  <!-- 添加应用 / Add app -->
+  <Geometry x:Key="Menu.AddApp">M 6.59,5.04 L 6.59,3.23 L 3.23,3.23 L 3.23,6.59 L 5.04,6.59 M 12.77,5.04 L 12.77,3.23 L 9.41,3.23 L 9.41,6.59 L 11.22,6.59 M 6.59,11.22 L 6.59,9.41 L 3.23,9.41 L 3.23,12.77 L 5.04,12.77 M 11.09 8.88 V 13.12 M 8.97 11 H 13.21</Geometry>
+
+  <!-- 打开 / Open -->
+  <Geometry x:Key="Menu.Open">M 8.97,10.78 L 8.97,4.73 L 3.41,4.73 L 3.41,12.33 L 7.43,12.33 M 8.09 7.56 L 11.18 4.47 M 12.59 3.23 H 9.5 M 12.59 3.23 V 6.32</Geometry>
+
+  <!-- 打开所在位置 / Show in folder -->
+  <Geometry x:Key="Menu.ShowInFolder">M 3.05 5.53 H 5.97 L 6.85 6.59 H 10.3 V 12.06 H 3.05 Z M 8.53 7.47 L 11.09 4.91 M 12.77 3.23 H 9.94 M 12.77 3.23 V 6.06</Geometry>
+
+  <!-- 清空回收站 / Empty recycle bin -->
+  <Geometry x:Key="Menu.EmptyRecycle">M 3.67 4.82 H 12.33 M 6.41 4.82 V 3.5 H 9.59 V 4.82 M 4.91 4.82 L 5.62 12.95 H 10.38 L 11.09 4.82 M 6.5 8.27 L 8 9.86 L 9.5 8.27</Geometry>
+
+  <!-- 重命名 / Rename -->
+  <Geometry x:Key="Menu.Rename">M 3.76 12.24 L 4.11 9.94 L 10.21 3.85 L 12.15 5.79 L 6.06 11.89 Z</Geometry>
+
+  <!-- 解散次级分区 / Dissolve subfolder -->
+  <Geometry x:Key="Menu.Dissolve">M 7.12,10.16 L 7.12,4.29 L 2.88,4.29 L 2.88,11.71 L 5.57,11.71 M 12.06,5.22 L 12.06,3.41 L 8.71,3.41 L 8.71,6.76 L 10.52,6.76 M 12.06,10.34 L 12.06,8.53 L 8.71,8.53 L 8.71,11.89 L 10.52,11.89</Geometry>
+
+  <!-- 管理分区 / Manage zones -->
+  <Geometry x:Key="Menu.Manage">M 7.65,6.1 L 7.65,3.41 L 3.41,3.41 L 3.41,7.65 L 6.1,7.65 M 12.59,6.1 L 12.59,3.41 L 8.35,3.41 L 8.35,7.65 L 11.05,7.65 M 7.65,11.05 L 7.65,8.35 L 3.41,8.35 L 3.41,12.59 L 6.1,12.59 M 12.59,11.05 L 12.59,8.35 L 8.35,8.35 L 8.35,12.59 L 11.05,12.59</Geometry>
+
+  <!-- 语言 / Language -->
+  <Geometry x:Key="Menu.Language">M 8 3.05 A 4.95 4.95 0 1 0 8 12.95 A 4.95 4.95 0 1 0 8 3.05 Z M 3.23 8 H 12.77 M 8 3.05 C 10.3 4.82 10.3 11.18 8 12.95 C 5.7 11.18 5.7 4.82 8 3.05 Z</Geometry>
+
+  <!-- 退出 / Exit -->
+  <Geometry x:Key="Menu.Exit">M 8 3.23 V 8.27 M 11.27 4.55 A 4.86 4.86 0 1 1 4.73 4.55</Geometry>
+
+  <!-- 文本文档 .txt / Text .txt -->
+  <Geometry x:Key="Menu.NewTxt">M 11.62,11.22 L 11.62,3.23 L 4.38,3.23 L 4.38,12.77 L 10.08,12.77 M 6.15 6.23 H 9.86 M 6.15 8.35 H 9.86 M 6.15 10.47 H 8.53</Geometry>
+
+  <!-- Word 文档 .docx / Word .docx -->
+  <Geometry x:Key="Menu.NewDocx">M 3.94 3.14 H 9.06 L 12.06 6.15 V 12.86 H 3.94 Z M 9.06 3.14 V 6.15 H 12.06 M 5.88 8.09 H 10.12</Geometry>
+
+  <!-- PowerPoint .pptx / PowerPoint .pptx -->
+  <Geometry x:Key="Menu.NewPptx">M 12.86,9.72 L 12.86,4.73 L 3.14,4.73 L 3.14,11.27 L 11.31,11.27 M 5.62 7.03 H 10.38 M 5.62 8.97 H 8.35</Geometry>
+
+  <!-- Excel 工作表 .xlsx / Excel .xlsx -->
+  <Geometry x:Key="Menu.NewXlsx">M 12.77,10.43 L 12.77,4.03 L 3.23,4.03 L 3.23,11.97 L 11.22,11.97 M 6.41 4.03 V 11.97 M 3.23 8 H 12.77</Geometry>
+
+</ResourceDictionary>
