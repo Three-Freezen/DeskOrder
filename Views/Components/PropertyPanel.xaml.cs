@@ -2855,14 +2855,6 @@ public partial class PropertyPanel : UserControl
         Rebuild();
 
         stack.Children.Add(combo);
-        stack.Children.Add(new TextBlock
-        {
-            Text = _loc["ClockProp.AnalogFace.Hint"],
-            FontSize = 10,
-            Foreground = (Brush)FindResource("Brush.Text.Tertiary"),
-            TextWrapping = TextWrapping.Wrap,
-            Margin = new Thickness(0, 4, 0, 0),
-        });
         return stack;
     }
 
@@ -2894,7 +2886,6 @@ public partial class PropertyPanel : UserControl
             v => { c.Use24Hour = v; Save(c); }));
         switches.Children.Add(MakeCheckRow(_loc["ClockProp.ShowSeconds"], c.ShowSeconds,
             v => { c.ShowSeconds = v; Save(c); }));
-        switches.Children.Add(MakeClockFaceRow(c));
         switches.Children.Add(MakeCornerStyleRow(c.CornerRadius > 0, rounded =>
         {
             c.CornerRadius = rounded ? (c.CornerRadius > 0 ? c.CornerRadius : 10) : 0;
@@ -2913,6 +2904,7 @@ public partial class PropertyPanel : UserControl
             c.Width, v => { c.Width = v; Save(c); },
             c.Height, v => { c.Height = v; Save(c); });
         basic.Children.Add(sizeGrid);
+        basic.Children.Add(MakeClockFaceRow(c));
         var widthBox = (TextBox)((Grid)sizeGrid.Children[0]).Children[1];
         var heightBox = (TextBox)((Grid)sizeGrid.Children[1]).Children[1];
         root.Children.Add(basic);
